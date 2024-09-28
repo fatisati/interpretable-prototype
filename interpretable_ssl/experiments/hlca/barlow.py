@@ -13,3 +13,9 @@ def train_hlca_scpoli_prot_barlow_bs(bs):
     trainer = get_hlca_immune_trainer()
     trainer.batch_size = bs
     trainer.train(100)
+    
+def train_cv_barlow_hlca_twice_label_prot():
+    trainer = get_hlca_immune_trainer()
+    trainer.batch_size = 512
+    trainer.num_prototypes = trainer.num_classes * 2
+    trainer.train_custom_cross_val(100)
