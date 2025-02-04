@@ -56,11 +56,15 @@ class TrainerBase:
         )
 
     def create_dump_path(self):
+        if self.wandb_sweep == 1:
+            return
         self.dump_path = self.get_dump_path()
         if not os.path.exists(self.dump_path):
             os.makedirs(self.dump_path)
 
     def create_temp_res_path(self):
+        if self.wandb_sweep == 1:
+            return
         temp_res_path = self.get_temp_res_path()
         if self.save_temp_res == 1 and not os.path.exists(temp_res_path):
             os.makedirs(temp_res_path)

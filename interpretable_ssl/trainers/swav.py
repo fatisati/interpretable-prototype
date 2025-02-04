@@ -64,7 +64,8 @@ class SwAV(AdoptiveTrainer):
         fix_random_seeds(self.seed)
         self.dump_path = self.get_dump_path()
         # self.create_dump_path()
-        logger, self.training_stats = initialize_exp(self, "epoch", "loss")
+        if self.wandb_sweep == 0:
+            logger, self.training_stats = initialize_exp(self, "epoch", "loss", dump_params=self.wandb_sweep==0)
         # self.init_scpoli()
         self.build_model()
 
@@ -268,7 +269,7 @@ class SwAV(AdoptiveTrainer):
         return checkpoint_file
 
     def save_checkpoint(self, epoch):
-        if self.debug:
+        if self.debug or self.wandb_sweep == 1:
             return
         save_dict = {
             "epoch": epoch + 1,
@@ -352,7 +353,7 @@ class SwAV(AdoptiveTrainer):
         for epoch in range(self.start_epoch, epochs):
             logger.info(f"============ Starting epoch {epoch}============")
 
-            if epoch % self.umap_checkpoint_freq == 0:
+            if (epoch % self.umap_checkpoint_freq == 0) and (self.wandb_sweep == 0):
                 # self.plot_ref_umap(name_postfix=f'e{epoch}', model=self.model)
                 self.plot_umap(self.model, self.original_ref.adata, f"ref-e{epoch}")
 
@@ -370,7 +371,7 @@ class SwAV(AdoptiveTrainer):
             scores, self.queue = self.train_one_epoch(epoch)
             metrics = None
             if (epoch % self.scib_freq == 0) and (self.save_scib == 1):
-                metrics = self.save_metrics(True, False)
+                metrics = self.save_metrics(self.wandb_sweep == 0, False)
             # self.scpoli_.model = self.model.scpoli_model
             # self.training_stats.update(scores)
             self.log_wandb_loss(scores, epoch, metrics)
@@ -381,7 +382,7 @@ class SwAV(AdoptiveTrainer):
         # self.plot_umap(self.model, self.original_ref.adata, "ref")
         # self.plot_query_umap()
         try:
-            self.save_metrics()
+            self.save_metrics(self.wandb_sweep == 0)
         except Exception as e:
             # Log other general exceptions
             logging.error("Unexpected error occurred: %s", e)
@@ -392,6 +393,8 @@ class SwAV(AdoptiveTrainer):
         return p.calculate_summary()
 
     def calculate_other_metrics(self):
+        if self.wand_sweep==1:
+            return None
         ref_emb = self.encode_adata(self.original_ref.adata, self.model)
         query_emb = self.encode_query(self.model)
         return {"propagation loss": self.model.propagation(ref_emb).cpu().item()}, {

@@ -28,17 +28,13 @@ class MetricGenerator:
 
     def load_metrics(self, split='query'):
         # Get the dump folder path from the trainer
-        dump_folder = self.trainer.get_dump_path()
-
-        # Loop through all files in the specified folder
-        for file in os.listdir(dump_folder):
-            # Check if the file is a CSV and contains both 'semi' and 'query'
-            if file.endswith(".csv") and "semi" in file and split in file:
-                file_path = os.path.join(dump_folder, file)
-                print(f"Loading file: {file_path}")
-                # Load the CSV file into a DataFrame
-                df = pd.read_csv(file_path)
-                return self.clean_scib_df(df)
+        # dump_folder = self.trainer.get_dump_path()
+        file_path = self.trainer.get_metric_file_path(split)
+        
+        if os.path.exists(file_path):
+            print('loading metrics from ', file_path)
+            return pd.read_csv(file_path)
+        print('no metrics found in ', file_path)
         return None
 
     def encode_query(self):
@@ -88,9 +84,11 @@ class MetricGenerator:
     def load_all_metrics(self, split, retrain_epochs=0):
         path = self.get_metric_path(split, retrain_epochs)
         if os.path.exists(path):
+            print('loading final metrics from ', path)
             df = pd.read_csv(path, index_col=0)
             df.index = [self.trainer.name]
             return df
+        print('no final metrics found in ', path)
         return None
 
     def get_adata(self, split):
@@ -105,10 +103,12 @@ class MetricGenerator:
             raise ValueError('split should be query, ref or all')
         
         return ds.adata
-    def generate_metrics(self, split='query', retrain_epochs=0):
-        all_metrics = self.load_all_metrics(split, retrain_epochs)
-        if all_metrics is not None:
-            return all_metrics
+    def generate_metrics(self, split='query', retrain_epochs=0, recalculate=False):
+        print('generating metrics for ', self.trainer.name)
+        if not recalculate:
+            all_metrics = self.load_all_metrics(split, retrain_epochs)
+            if all_metrics is not None:
+                return all_metrics
 
         metrics = self.load_metrics(split)
 

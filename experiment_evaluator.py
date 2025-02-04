@@ -39,26 +39,6 @@ class ExperimentEvaluator(ExperimentRunner):
             trainer = SwAV(**params)
         elif model_type == "scpoli":
             trainer = OriginalTrainer(**params)
-            #     latent_dims=params.get(
-            #         "latent_dims", self.original_defaults["latent_dims"]
-            #     ),
-            #     batch_size=params.get(
-            #         "batch_size", self.original_defaults["batch_size"]
-            #     ),
-            #     debug=params.get("debug", True),  # Assuming debug=True is a default
-            #     experiment_name=params.get(
-            #         "experiment_name", self.original_defaults["experiment_name"]
-            #     ),
-            #     dataset_id=params.get(
-            #         "dataset_id", self.original_defaults["dataset_id"]
-            #     ),
-            #     dataset=self.dataset,
-            #     ref_query=self.ref_query,
-            #     # no_data='True',
-            #     model_name_version=params.get(
-            #         "model_name_version", self.original_defaults["model_name_version"]
-            #     ),
-            # )
         else:
             raise ValueError("Unsupported model type: {}".format(model_type))
 
@@ -112,14 +92,11 @@ class ExperimentEvaluator(ExperimentRunner):
 
         return all_trainers
 
-    def evaluate_results(self, item_list, semi_supervised=True):
+    def evaluate_results(self, item_list, semi_supervised=True, sort_col = "scib total", split='query', retrain_epochs=0, recalculate=False):
         
         trainers = self.generate_trainers(item_list)
         for t in trainers:
             print(t.name)
-        # for trainer in trainers:
-        #     if trainer.name[-4:] == "scpo":
-        #         trainer.name = trainer.name[-4:] + trainer.experiment_name
 
         def filter_trainers(inp_trainers):
             def model_exist(trainer):
@@ -132,8 +109,8 @@ class ExperimentEvaluator(ExperimentRunner):
         def get_results(finetuned=True):
             if semi_supervised:
                 for trainer in trainers:
-                    if "scpoli" in trainer.name:
-                        continue
+                    # if "scpoli" in trainer.name:
+                    #     continue
                     if trainer.fine_tuning_epochs != 0:
                         trainer.finetuning = finetuned
                     if not finetuned:
@@ -152,7 +129,7 @@ class ExperimentEvaluator(ExperimentRunner):
             # invalid_trainers = set(trainers) - set(valid_trainers)
             # for trainer in invalid_trainers:
             #     print
-            dfs = [MetricGenerator(t).generate_metrics() for t in valid_trainers]
+            dfs = [MetricGenerator(t).generate_metrics(split, retrain_epochs, recalculate) for t in valid_trainers]
             print("dfs size:", len(dfs))
             return dfs
 
@@ -179,23 +156,31 @@ class ExperimentEvaluator(ExperimentRunner):
         df = res.round(5).drop_duplicates()
         # df.index = [idx.replace('_aug_comm', '') if 'scpoli' in idx else idx for idx in df.index]
 
-        scpoli_df = df[df.index.str.contains("scpoli")]
-        threshold = scpoli_df["scib total"].max()
+        # scpoli_df = df[df.index.str.contains("scpoli")]
+        # # threshold = scpoli_df[sort_col].max()
 
-        # df = df[df["scib total"] >= threshold]
+        # # df = df[df["scib total"] >= threshold]
 
-        def highlight_greater(s):
-            maxidx = scpoli_df["scib total"].idxmax()
-            row_to_compare = df.loc[maxidx]
-            return [
-                "font-weight: bold" if val > row_to_compare[i] else ""
-                for i, val in enumerate(s)
-            ]
-
-        df_styled = df.sort_values(["scib total"], ascending=False).style.apply(
-            highlight_greater, axis=1
+        # def highlight_greater(s):
+        #     maxidx = scpoli_df[sort_col].idxmax()
+        #     row_to_compare = df.loc[maxidx]
+        #     return [
+        #         "font-weight: bold" if val > row_to_compare[i] else ""
+        #         for i, val in enumerate(s)
+        #     ]
+        # # Custom function to apply bold formatting
+        def highlight_best(s):
+            is_best = s == s.max()
+            return ['font-weight: bold' if v else '' for v in is_best]
+        
+        # if only_pivot_col:
+        #     df = df[[sort_col]]
+            
+        df_styled = df.sort_values([sort_col], ascending=False).style.apply(
+            highlight_best, axis=0
         )
         return df_styled.format("{:.3f}")
+       
 
 
 if __name__ == "__main__":

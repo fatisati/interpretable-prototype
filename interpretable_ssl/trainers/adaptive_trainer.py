@@ -135,6 +135,7 @@ class AdoptiveTrainer(ScpoliTrainer):
         elif self.training_type == "pretrain_encoder":
             self.train_pretrain_encoder()
         else:
+            print(f'training type: {self.training_type}')
             self.train()
 
         self.ref = self.original_ref
@@ -143,9 +144,9 @@ class AdoptiveTrainer(ScpoliTrainer):
         # self.plot_ref_umap(name_postfix="load-adopt_all", model=self.load_adopt())
         # self.plot_ref_umap(name_postfix="all", model=self.model)
         # model = self.adapt_ref_model(self.model, self.dataset.adata)
-        model = self.prepare_model(self.model, self.dataset.adata)
-        self.plot_umap(model, self.dataset.adata, 'all', True)
-        self.plot_umap(model, self.query.adata, 'query', True)
+        # model = self.prepare_model(self.model, self.dataset.adata)
+        self.plot_umap(self.model, self.dataset.adata, 'all', True)
+        self.plot_umap(self.model, self.query.adata, 'query', True)
         # self.plot_query_umap()
         self.additional_plots()
         # moved to the end of train function so we have scib metrics for both pretrain and finetuned version
