@@ -66,4 +66,6 @@ ABBREVIATIONS = {
     "knn_similarity": 'knnsim',
     "recon_loss": 'recon',
     "no_sinkhorn": 'nosink',
+    "mask_probability": 'mask-prob',
+    "default_dispertion": 'disp',
 }
