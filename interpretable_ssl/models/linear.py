@@ -37,7 +37,6 @@ class LinearClassifier:
             epochs (int): Number of training epochs.
             X_train, X_test, y_train, y_test: Optional pre-split training and testing data.
         """
-        print("new")
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.batch_size = batch_size
         self.test_size = test_size

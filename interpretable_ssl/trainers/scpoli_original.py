@@ -55,7 +55,7 @@ class OriginalTrainer(AdoptiveTrainer):
             recon_loss=self.recon_loss,
         )
 
-    def train(self, pretrain=True, finetune=True):
+    def train(self, pretrain=True, finetune=False):
 
         if pretrain and finetune:
             epochs = self.fine_tuning_epochs + self.pretraining_epochs
@@ -67,7 +67,8 @@ class OriginalTrainer(AdoptiveTrainer):
         if finetune and not (pretrain):
             epochs = self.fine_tuning_epochs
             pretraining_epochs = 0
-
+            
+        print(f'training for {epochs} epochs, pretraining for {pretraining_epochs} epochs')
         self.model.train(
             n_epochs=epochs,
             pretraining_epochs=pretraining_epochs,

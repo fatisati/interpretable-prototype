@@ -98,7 +98,7 @@ class ScpoliTrainer(Trainer):
             scpoli_query.train(n_epochs=retrain_epochs, 
                               pretraining_epochs=retrain_epochs)
             
-        query_model.set_scpoli_encoder(scpoli_query.model)
+        query_model.set_scpoli_encoder(scpoli_query)
         query_model.to(self.device)
         return query_model
 
@@ -144,6 +144,7 @@ class ScpoliTrainer(Trainer):
             data_values = adata.obs[key].unique()
             is_subset = set(data_values).issubset(values)
             if not is_subset:
+                print(data_values, 'is not subset of ', values)
                 return False
         return True
     
@@ -176,6 +177,8 @@ class ScpoliTrainer(Trainer):
         pass
 
     def plot_umap(self, model, adata, split, save_plot=True):
+        if self.wandb_sweep == 1:
+            return
         latent = self.encode_adata(adata, model)
         prototypes = self.get_model_prototypes(model)
         latent_umap, prototype_umap = calculate_umap(latent, prototypes)
