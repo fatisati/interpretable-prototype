@@ -48,8 +48,9 @@ class ExperimentRunner:
         }
         self.original_defaults = self.defaults.copy()
         self.qos_dict = {
-            "gpu_normal": 15,
             "gpu_long": 8,
+            # "gpu_power": 25,
+            "gpu_normal": 15,
             # "gpu_short": 2,
             # "gpu_priority": 5,
         }
@@ -291,6 +292,10 @@ def get_qos_resources(qos):
         "gpu_short": {"CPU": 10, "Memory": "80G"},
         "gpu_normal": {"CPU": 20, "Memory": "160G"},
         "gpu_long": {"CPU": 28, "Memory": "240G"},
+        "gpu_power": {
+            "CPU": 28,
+            "Memory": "240G",
+        },  # gpu_max cpu=120,gres/gpu=8,mem=640G
         "gpu_priority": {"CPU": 28, "Memory": "500G"},
         "interactive_gpu": {"CPU": 8, "Memory": "20G"},
         "interactive_gpu_short": {"CPU": 8, "Memory": "32G"},
@@ -303,27 +308,40 @@ def get_qos_resources(qos):
 if __name__ == "__main__":
     print("runner started...")
     runner = ExperimentRunner("swav_template.sbatch")
-    seacell = [
-        # {"propagation_reg": [1], 'prot_emb_sim_reg':[1]},
-        # {"propagation_reg": [1, 5, 10]},
-        # {"num_prototypes": [16, 20, 30]},
-        # {"propagation_reg": [1], "weighted_batch": [0, 1]},
+    experiments = [
         {
-            "dataset_id": ["hlca", 'pancreas'],
-            "model": ['scpoli'],
-            "training_type": ['fully_supervised', 'pretrain'],
-            "batch_size": [256, 512, 2048]
+            "propagation_reg": [0, 1],
+            "training_type": ["semi_supervised"],
+            "dimensionality_reduction": ["scvi", "pca"],
+        },
+        {"training_type": ["semi_supervised"], "model": ["scpoli"]},
+        {"pretraining_epochs": [10], "model": ["scpoli", "swav"]},
+        {"augmentation_type": ["mask", "nb", "swav"], "pretraining_epochs": [10]},
+        {
+            "model": ["wandb_sweep"],
+            "experiment_name": [f"mask_sweep{i}" for i in range(5)],
         },
         {
-            "dataset_id": ["hlca"],
-            "propagation_reg": [1],
-            "num_prototypes": [5000],
-            "batch_size": [256, 512, 2048]
+            "model": ["scpoli"],
+            "experiment_name": ["rerun_scpoli"],
+            "training_type": ["semi_supervised", "fully_supervised", "pretrain"],
         },
-        {'dimensionality_reduction': ['scvi'], 'batch_sinkhorn': [0,1]},
-        {'dimensionality_reduction': ['scvi'], "propagation_reg": [1, 3, 5]},
-        {'dimensionality_reduction': ['scvi'], "prot_emb_sim_reg": [1, 3, 5]}
+        {
+            "model": ["scpoli"],
+            "pretraining_epochs": [5],
+        },
+        {
+            "model": ["wandb_sweep"],
+            "experiment_name": [f"sweep{i}" for i in range(10)],
+        },
+        {
+            "num_prototypes": [100, 150],
+            "dataset_id": ["pancreas"],
+            "propagation_reg": [2, 1.5]
+            
+        }
     ]
-    evaluate_job_count(seacell)
-    for item_to_test in seacell:
+    n = 1
+    evaluate_job_count(experiments[-n:])
+    for item_to_test in experiments[-n:]:
         runner.run_multiple_experiments(item_to_test, True)
