@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 class MultiCropsDataset(MultiConditionAnnotatedDataset):
     def __init__(
         self,
-        adata,
+        sc_ds,
         original_indicies,
         n_augmentations,
         augmentation_type="cell_type",
@@ -36,7 +36,6 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         use_bknn=0,
         knn_similarity="cosine",
         knn_method="faiss",
-        ds_name="hlca",
         save_dir=None,
         mask_probability=0.2,
         default_dispersion = 0.1,
@@ -66,7 +65,7 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         """
         self.n_augmentations = n_augmentations
         self.augmentation_type = augmentation_type
-        self.adata = adata
+        self.adata = sc_ds.adata
         self.k_neighbors = k_neighbors
         self.longest_path = longest_path
         self.dimensionality_reduction = dimensionality_reduction
@@ -80,7 +79,10 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         self.knn_method = knn_method
         self.save_dir = save_dir
 
-        self.graph_name = f"graph_{ds_name}{len(adata)}_{self.dimensionality_reduction}{self.n_components}_knn{self.k_neighbors}.pkl"
+        self.graph_name = f"graph_{str(sc_ds)}{len(sc_ds.adata)}_{self.dimensionality_reduction}{self.n_components}_knn{self.k_neighbors}"
+        if sc_ds.fold != 0:
+            self.graph_name += f"_fold{sc_ds.fold}"
+        self.graph_name += ".pkl"
 
         os.makedirs(self.save_dir, exist_ok=True)
         self.save_path = os.path.join(save_dir, self.graph_name)
@@ -98,7 +100,7 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
             else np.full(self.mean_expression.shape, self.default_dispersion)
         )
                 
-        super().__init__(adata, **kwargs)
+        super().__init__(sc_ds.adata, **kwargs)
 
     def get_random_indices(self, n, specific_index):
         """

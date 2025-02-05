@@ -144,7 +144,6 @@ class ScpoliTrainer(Trainer):
             data_values = adata.obs[key].unique()
             is_subset = set(data_values).issubset(values)
             if not is_subset:
-                print(data_values, 'is not subset of ', values)
                 return False
         return True
     
