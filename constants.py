@@ -68,4 +68,5 @@ ABBREVIATIONS = {
     "no_sinkhorn": 'nosink',
     "mask_probability": 'mask-prob',
     "default_dispertion": 'disp',
+    "fold": 'fold'
 }

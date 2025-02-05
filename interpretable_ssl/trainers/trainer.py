@@ -36,11 +36,11 @@ class Trainer(TrainerBase):
     def get_dataset(self, dataset_id):
 
         if dataset_id == "pbmc-immune":
-            return ImmuneDataset()
+            return ImmuneDataset(fold=self.fold)
         if dataset_id == "hlca":
-            return HLCADataset()
+            return HLCADataset(fold=self.fold)
         elif dataset_id == 'pancreas':
-            return PancreasDataset()
+            return PancreasDataset(fold=self.fold)
         else:
             print("dataset not implemented")
             return None

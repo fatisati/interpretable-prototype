@@ -7,10 +7,14 @@ import pickle as pkl
 import inspect
 from interpretable_ssl.utils import log_time
 
+import itertools
+
 
 class SingleCellDataset(Dataset):
 
-    def __init__(self, name, adata=None, label_encoder_path=None, original_idx=None):
+    def __init__(
+        self, name, adata=None, label_encoder_path=None, original_idx=None, fold=0, test_study_cnt=2
+    ):
         # self.device = utils.get_device()
         self.name = name
         if not adata:
@@ -33,6 +37,9 @@ class SingleCellDataset(Dataset):
         self.original_idx = original_idx
         if self.original_idx is None:
             self.original_idx = list(range(len(self.adata)))
+        self.fold = fold
+        self.study_list = None
+        self.test_study_cnt = test_study_cnt
 
     def __str__(self) -> str:
         return self.name
@@ -42,9 +49,9 @@ class SingleCellDataset(Dataset):
 
     def read_adata(self):
         data_path = self.get_data_path()
-        print(f'loading {str(self)} data')
+        print(f"loading {str(self)} data")
         data = sc.read_h5ad(data_path)
-        print('done')
+        print("done")
         return data
 
     def load_label_encoder(self):
@@ -58,9 +65,9 @@ class SingleCellDataset(Dataset):
         y = self.get_y(idx).squeeze(0)
         return x, y
 
-    def get_study_ids(self):
-        study_ids = self.adata.obs.study.unique()
-        return study_ids
+    def get_unique_studies(self):
+        unique_studies = self.adata.obs.study.unique()
+        return unique_studies
 
     def get_x(self, i):
         x = self.adata[i].X.toarray()
@@ -100,7 +107,7 @@ class SingleCellDataset(Dataset):
         filtered_args["original_idx"] = indices
         return self.__class__(**filtered_args)
 
-    @log_time('get train test')
+    @log_time("get train test")
     def get_train_test(self):
         test_studies = self.get_test_studies()
         test_idx = self.adata.obs.study.isin(test_studies)
@@ -108,5 +115,34 @@ class SingleCellDataset(Dataset):
             test_idx
         )
 
-    def get_test_studies(self):
+    def get_default_studies(self):
         pass
+
+    def set_study_list(self):
+        # Get unique values
+        unique_studies = list(self.adata.obs.study.unique())
+
+        # Generate all possible combinations of selecting 2
+        combinations = list(itertools.combinations(unique_studies, self.test_study_cnt))
+
+        # Convert to a list of lists
+        combinations = [list(combo) for combo in combinations]
+        # Define the target pair
+        target_pair = self.get_default_studies()
+
+        # Sort the list to place target_pair at index 0
+        combinations.sort(key=lambda x: x != target_pair)
+        return combinations
+
+    def get_test_studies(self):
+        if self.fold == 0:
+            return self.get_default_studies()
+        if self.study_list is None:
+            self.study_list = self.set_study_list()
+        if self.fold > len(self.study_list):
+            raise ValueError(
+                f"Fold {self.fold} is greater than the number of possible folds"
+            )
+        test_studies = self.study_list[self.fold]
+        print(f"Test studies: {test_studies}")
+        return test_studies

@@ -84,7 +84,7 @@ class SwAV(AdoptiveTrainer):
         # model = self.scpoli_.model
         scpoli_encoder = self.model.scpoli_encoder
         self.train_ds = MultiCropsDataset(
-            self.ref.adata,
+            self.ref,
             self.ref.original_idx,
             self.nmb_crops[0],
             self.train_augmentation,
@@ -96,7 +96,6 @@ class SwAV(AdoptiveTrainer):
             use_bknn=self.use_bknn,
             condition_keys=[self.condition_key],
             knn_similarity=self.knn_similarity,
-            ds_name=str(self.ref),
             save_dir='./graphs',
             mask_probability=self.mask_probability,
             default_dispersion=self.default_dispersion,
@@ -109,7 +108,7 @@ class SwAV(AdoptiveTrainer):
         self.original_train_loader = self.train_loader
         if self.multi_layer_protos == 1:
             self.cell_type_ds = MultiCropsDataset(
-                self.ref.adata,
+                self.ref,
                 self.ref.original_idx,
                 self.nmb_crops[0],
                 "cell_type",
