@@ -10,6 +10,7 @@ import torch
 import torch.nn.functional as F
 import torch.backends.cudnn as cudnn
 import torch.optim
+
 # import apex
 from larc import LARC
 
@@ -98,7 +99,7 @@ class SwAV(AdoptiveTrainer):
             condition_keys=[self.condition_key],
             knn_similarity=self.knn_similarity,
             ds_name=str(self.ref),
-            save_dir='./graphs',
+            save_dir="./graphs",
             mask_probability=self.mask_probability,
             default_dispersion=self.default_dispersion,
             # cell_type_keys=[self.cell_type_key],
@@ -164,6 +165,7 @@ class SwAV(AdoptiveTrainer):
                 self.multi_layer_protos,
                 self.num_prototypes,
                 recon_loss=self.recon_loss,
+                learnable_prior=(self.learnable_prior == 1),
             )
 
     def get_model_path(self):
@@ -204,9 +206,7 @@ class SwAV(AdoptiveTrainer):
             momentum=0.9,
             weight_decay=self.wd,
         )
-        self.optimizer = LARC(
-            optimizer=self.optimizer
-        )
+        self.optimizer = LARC(optimizer=self.optimizer)
 
         warmup_lr_schedule = np.linspace(
             self.start_warmup,
@@ -330,7 +330,7 @@ class SwAV(AdoptiveTrainer):
 
             add_metric(ref, "ref")
             add_metric(query, "query")
-            add_metric(all, 'all')
+            add_metric(all, "all")
             log_dict = log_dict | metric_dict
 
         if not self.debug:
@@ -510,7 +510,7 @@ class SwAV(AdoptiveTrainer):
             # projector_out = projector_out.detach()
             # swav_loss = self.compute_swav_loss(projector_out, scores, bs, use_the_queue)
 
-            def calc_input_loss(inputs, proto_layer_id=0):
+            def calc_input_loss(inputs, batch_id, proto_layer_id=0):
                 bs = inputs["x"].size(0)
                 inputs = self.move_input_on_device(inputs)
                 inputs = reshape_and_reorder_dict(inputs)
@@ -521,17 +521,17 @@ class SwAV(AdoptiveTrainer):
                     scores = scores[proto_layer_id]
                 projector_out = projector_out.detach()
                 swav_loss = self.compute_swav_loss(
-                    projector_out, scores, bs, use_the_queue
+                    projector_out, scores, bs, use_the_queue, batch_id
                 )
                 return swav_loss, prot_decoding_loss, cvae_loss, scores
 
-            def process_inputs(inputs):
+            def process_inputs(inputs, batch_id):
                 bs = inputs["x"].size(0)
                 swav_loss, prot_decoding_loss, cvae_loss, scores = calc_input_loss(
-                    inputs
+                    inputs, batch_id
                 )
                 if self.multi_layer_protos == 1:
-                    swav_loss2, _, _, _ = calc_input_loss(cell_type_inputs, 1)
+                    swav_loss2, _, _, _ = calc_input_loss(cell_type_inputs, batch_id, 1)
                     swav_loss += self.batch_removal_ratio * swav_loss2
 
                 num_match, prob_entropy, p_entropy = self.calculate_pair_matching(
@@ -591,8 +591,8 @@ class SwAV(AdoptiveTrainer):
                     metrics = defaultdict(lambda: {"sum": 0.0, "count": 0})
 
                     # Process each batch input
-                    for inputs in batch_inputs:
-                        results = process_inputs(inputs)  # Call your function
+                    for batch_id, inputs in enumerate(batch_inputs):
+                        results = process_inputs(inputs, batch_id)  # Call your function
                         metric_names = [
                             "swav_loss",
                             "cvae_loss",
@@ -643,7 +643,7 @@ class SwAV(AdoptiveTrainer):
                     p_entropy,
                     propagation,
                     prot_emb_sim,
-                ) = process_inputs(inputs)
+                ) = process_inputs(inputs, -1)
             prop_reg = self.propagation_reg
             # if self.finetuning:
             #     prop_reg = 5
@@ -655,6 +655,9 @@ class SwAV(AdoptiveTrainer):
                 + propagation * prop_reg
                 + prot_emb_sim * self.prot_emb_sim_reg
             )
+            if self.learnable_prior:
+                loss += self.model.proto_prior_loss()
+
             self.optimizer.zero_grad()
 
             # if self.use_fp16:
@@ -740,7 +743,7 @@ class SwAV(AdoptiveTrainer):
 
         return one_hot_max_tensor(out)
 
-    def compute_swav_loss(self, embedding, scores, bs, use_the_queue):
+    def compute_swav_loss(self, embedding, scores, bs, use_the_queue, batch_id):
         loss = 0
         for i, crop_id in enumerate(self.crops_for_assign):
             with torch.no_grad():
@@ -759,7 +762,10 @@ class SwAV(AdoptiveTrainer):
                 if self.no_sinkhorn:
                     q = torch.exp(out / self.epsilon)[-bs:]
                 else:
-                    q = self.distributed_sinkhorn(out)[-bs:]
+                    if self.learnable_prior:
+                        q = self.sinkhorn_knopp(out, self.model.proto_prior()[batch_id])
+                    else:
+                        q = self.distributed_sinkhorn(out)[-bs:]
                 if self.hard_clustering == 1:
                     q = self.hard_clusters(q)
 
@@ -814,17 +820,19 @@ class SwAV(AdoptiveTrainer):
 
         Q *= B
         return Q.t()
+
     @torch.no_grad()
-    
-    def sinkhorn_knopp(scores, n_iters=3, epsilon=0.05, 
-                    target_row=None, target_col=None):
+    def sinkhorn_knopp(self, scores, target_row=None, target_col=None, min_value=1e-6):
         """
         scores: (B, K) unnormalized logits (before softmax), where:
             - B: batch size (number of samples)
             - K: number of prototypes
         target_row: (K,) target distribution over prototypes (sum to 1)
         target_col: (B,) target distribution over samples (sum to 1)
+        min_value: minimum allowed value to avoid zeros
         """
+        n_iters = self.sinkhorn_iterations
+        epsilon = self.epsilon
 
         Q = torch.exp(scores / epsilon).T  # (K, B)
         K, B = Q.shape
@@ -834,6 +842,12 @@ class SwAV(AdoptiveTrainer):
         # Default to uniform marginals
         r = target_row if target_row is not None else torch.ones(K, device=Q.device) / K
         c = target_col if target_col is not None else torch.ones(B, device=Q.device) / B
+
+        # Clamp zero entries and renormalize
+        r = r.clamp(min=min_value)
+        r /= r.sum()
+        c = c.clamp(min=min_value)
+        c /= c.sum()
 
         r = r.view(-1, 1)  # (K, 1)
         c = c.view(1, -1)  # (1, B)
@@ -845,9 +859,9 @@ class SwAV(AdoptiveTrainer):
             Q /= Q.sum(dim=0, keepdim=True)
             Q *= c  # match column marginals
 
-        Q *= B  # optional: re-scale for consistency with SwAV
+        Q *= B  # optional: rescale
 
-        return Q.T  # return shape (B, K)
+        return Q.T  # shape (B, K)
 
     def get_model_prototypes(self, model):
         prototypes = model.get_prototypes()
@@ -1027,23 +1041,30 @@ class SwAV(AdoptiveTrainer):
 
     def get_proto_adata(self):
         similarity = self.encode_adata(self.ref.adata, self.model, True)
-        prot_df = assign_prototype_labels(self.ref.adata, similarity, self.nmb_prototypes)
-        x = self.model.decode_proto(recon_loss=self.recon_loss, use_avg_batch_embedding=True)
+        prot_df = assign_prototype_labels(
+            self.ref.adata, similarity, self.nmb_prototypes
+        )
+        x = self.model.decode_proto(
+            recon_loss=self.recon_loss, use_avg_batch_embedding=True
+        )
         prot_adata = generate_proto_adata(
-            x.detach(), prot_df["prototype_label"].values, self.ref.adata.var.index.tolist()
+            x.detach(),
+            prot_df["prototype_label"].values,
+            self.ref.adata.var.index.tolist(),
         )
         return prot_adata
-        
+
     def plot_marker_genes(self, single_cell=False):
         def nk_markers(adata):
             return plot_marker_gene_expressions(
                 adata, ["CD8+ T cells", "NK cells"], x_gene="TYROBP"
             )
+
         if single_cell:
             p1 = plot_marker_gene_expressions(self.ref.adata)
             p2 = nk_markers(self.ref.adata)
         else:
-            
+
             prot_adata = self.get_proto_adata()
             p1 = plot_marker_gene_expressions(prot_adata)
             p2 = nk_markers(prot_adata)

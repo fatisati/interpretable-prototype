@@ -66,5 +66,6 @@ ABBREVIATIONS = {
     "knn_similarity": 'knnsim',
     "recon_loss": 'recon',
     "no_sinkhorn": 'nosink',
+    "learnable_prior": 'lr-prior'
 }
 HOME = '/content/drive/MyDrive/'

@@ -108,6 +108,7 @@ def get_defaults():
         "sweep_id": -1,
         "mask_probability": 0.2,
         "default_dispersion": 0.1,
-        "save_umaps": 0
+        "save_umaps": 0,
+        "learnable_prior": 0
     }
     return defaults

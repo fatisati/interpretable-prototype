@@ -304,6 +304,7 @@ class SwAVModel(SwavBase):
         multi_layer_proto=False,
         np2=None,
         recon_loss="nb",
+        learnable_prior=False,
     ):  # , propagation_reg=0.5, prot_emb_sim_reg=0.5
         # self.cell_type_key = "cell_type"
         self.condition_key = "study"
@@ -311,6 +312,32 @@ class SwAVModel(SwavBase):
         super().__init__(
             self.scpoli_.model, latent_dim, nmb_prototypes, multi_layer_proto, np2
         )  # , propagation_reg, prot_emb_sim_reg
+        if learnable_prior:
+            ds_count = adata.obs[self.condition_key].nunique()
+            self.dataset_prototype_logits = nn.Parameter(
+                torch.ones(ds_count, nmb_prototypes)
+            )
+
+    def proto_prior(self):
+        return F.softmax(self.dataset_prototype_logits, dim=1)  # row-normalized
+
+    def proto_prior_loss(self, lambda_row_entropy=1.0, lambda_col_entropy=1.0):
+        """
+        Encourages:
+        - Row-wise entropy: each dataset uses multiple prototypes
+        - Column-wise entropy: each prototype is shared across datasets
+        """
+        prior = self.proto_prior()  # shape: (num_datasets, num_prototypes)
+
+        # Row entropy: encourages diverse usage within each dataset
+        row_entropy = -torch.sum(prior * torch.log(prior + 1e-8), dim=1).mean()
+
+        # Column entropy: encourages sharing of prototypes across datasets
+        col_entropy = -torch.sum(prior.T * torch.log(prior.T + 1e-8), dim=1).mean()
+
+        # Combine
+        loss = -lambda_row_entropy * row_entropy - lambda_col_entropy * col_entropy
+        return loss
 
     def init_scpoli(self, adata, latent_dim, recon_loss="nb"):
         return scPoli(
