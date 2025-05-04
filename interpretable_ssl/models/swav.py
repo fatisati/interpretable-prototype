@@ -325,6 +325,7 @@ class SwAVModel(SwavBase):
         self.scpoli_ = scpoli_
         self.scpoli_encoder = scpoli_.model
 
+
 class SwAVDecodableProto(SwAVModel):
 
     def find_closest_prototype(self, embeddings):

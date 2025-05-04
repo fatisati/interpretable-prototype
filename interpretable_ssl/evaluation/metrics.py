@@ -9,7 +9,7 @@ from interpretable_ssl.evaluation.knn import *
 import sys
 from constants import HOME
 
-sys.path.append(f"{HOME}/codes/Islander/src")
+sys.path.append(f"{HOME}/codes/Islander/src/")
 from scGraph import *
 import os
 
