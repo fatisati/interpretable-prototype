@@ -814,6 +814,40 @@ class SwAV(AdoptiveTrainer):
 
         Q *= B
         return Q.t()
+    @torch.no_grad()
+    
+    def sinkhorn_knopp(scores, n_iters=3, epsilon=0.05, 
+                    target_row=None, target_col=None):
+        """
+        scores: (B, K) unnormalized logits (before softmax), where:
+            - B: batch size (number of samples)
+            - K: number of prototypes
+        target_row: (K,) target distribution over prototypes (sum to 1)
+        target_col: (B,) target distribution over samples (sum to 1)
+        """
+
+        Q = torch.exp(scores / epsilon).T  # (K, B)
+        K, B = Q.shape
+
+        Q /= Q.sum()
+
+        # Default to uniform marginals
+        r = target_row if target_row is not None else torch.ones(K, device=Q.device) / K
+        c = target_col if target_col is not None else torch.ones(B, device=Q.device) / B
+
+        r = r.view(-1, 1)  # (K, 1)
+        c = c.view(1, -1)  # (1, B)
+
+        for _ in range(n_iters):
+            Q /= Q.sum(dim=1, keepdim=True)
+            Q *= r  # match row marginals
+
+            Q /= Q.sum(dim=0, keepdim=True)
+            Q *= c  # match column marginals
+
+        Q *= B  # optional: re-scale for consistency with SwAV
+
+        return Q.T  # return shape (B, K)
 
     def get_model_prototypes(self, model):
         prototypes = model.get_prototypes()
