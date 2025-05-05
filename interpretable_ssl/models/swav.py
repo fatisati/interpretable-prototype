@@ -343,7 +343,7 @@ class SwAVModel(SwavBase):
 
         # Combine
         loss = -lambda_row_entropy * row_entropy - lambda_col_entropy * col_entropy
-        return loss
+        return 0
 
     def init_scpoli(self, adata, latent_dim, recon_loss="nb"):
         return scPoli(
