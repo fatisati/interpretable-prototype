@@ -23,6 +23,7 @@ class SwavBase(nn.Module):
         nmb_prototypes,  # , propagation_reg=0.5, prot_emb_sim_reg=0.5
         multi_layer_proto=False,
         np2=None,
+        dataset_prototype_logits = None
     ):
         super().__init__()
         self.scpoli_encoder = scpoli_encoder
@@ -32,6 +33,8 @@ class SwavBase(nn.Module):
             self.cell_protos = nn.Linear(latent_dim, np2, bias=False)
         self.projection_head = None
         self.l2norm = True
+        if dataset_prototype_logits is not None:
+            self.dataset_prototype_logits = dataset_prototype_logits
         # self.propagation_reg = propagation_reg
         # self.prot_emb_sim_reg = prot_emb_sim_reg
 
@@ -309,14 +312,17 @@ class SwAVModel(SwavBase):
         # self.cell_type_key = "cell_type"
         self.condition_key = "study"
         self.scpoli_ = self.init_scpoli(adata, latent_dim, recon_loss)
-        super().__init__(
-            self.scpoli_.model, latent_dim, nmb_prototypes, multi_layer_proto, np2
-        )  # , propagation_reg, prot_emb_sim_reg
+
         if learnable_prior:
             ds_count = adata.obs[self.condition_key].nunique()
-            self.dataset_prototype_logits = nn.Parameter(
+            dataset_prototype_logits = nn.Parameter(
                 torch.ones(ds_count, nmb_prototypes)
             )
+        else:
+            dataset_prototype_logits = None
+        super().__init__(
+            self.scpoli_.model, latent_dim, nmb_prototypes, multi_layer_proto, np2, dataset_prototype_logits
+        )  # , propagation_reg, prot_emb_sim_reg
 
     def proto_prior(self):
         return F.softmax(self.dataset_prototype_logits, dim=1)  # row-normalized
