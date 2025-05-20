@@ -99,6 +99,7 @@ class SwAV(AdoptiveTrainer):
             save_dir='./graphs',
             mask_probability=self.mask_probability,
             default_dispersion=self.default_dispersion,
+            spatial=self.spatial,
             # cell_type_keys=[self.cell_type_key],
             condition_encoders=scpoli_encoder.condition_encoders,
             conditions_combined_encoder=scpoli_encoder.conditions_combined_encoder,

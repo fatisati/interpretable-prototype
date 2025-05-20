@@ -15,6 +15,7 @@ import faiss
 import os
 import pickle as pkl
 import scvi
+from sklearn.preprocessing import StandardScaler
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -38,7 +39,8 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         knn_method="faiss",
         save_dir=None,
         mask_probability=0.2,
-        default_dispersion = 0.1,
+        default_dispersion=0.1,
+        spatial=0,
         **kwargs,
     ):
         """
@@ -80,6 +82,9 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         self.save_dir = save_dir
 
         self.graph_name = f"graph_{str(sc_ds)}{len(sc_ds.adata)}_{self.dimensionality_reduction}{self.n_components}_knn{self.k_neighbors}"
+        self.spatial = spatial
+        if self.spatial:
+            self.graph_name += "_spatial"
         if sc_ds.fold != 0:
             self.graph_name += f"_fold{sc_ds.fold}"
         self.graph_name += ".pkl"
@@ -89,7 +94,7 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         if self.augmentation_type not in ["cell_type", "nb"]:
             self.set_graph()
         self.mask_probability = mask_probability
-        
+
         self.default_dispersion = default_dispersion
 
         # Calculate mean expression and default dispersion from the data
@@ -99,7 +104,6 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
             if "overdispersion" in self.adata.varm
             else np.full(self.mean_expression.shape, self.default_dispersion)
         )
-                
         super().__init__(sc_ds.adata, **kwargs)
 
     def get_random_indices(self, n, specific_index):
@@ -211,7 +215,10 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         logger.info(f"Running FAISS neighbors with k={self.k_neighbors}.")
         self._apply_dimensionality_reduction_if_needed()
         # Extract PCA or representation for the kNN graph
-        if self.need_dim_reduction():
+        if self.spatial == 1:
+            logging.info("generating joint spatio + transcriptional knn graph")
+            data = self.get_joint_pca_spatial_representation()
+        elif self.need_dim_reduction():
             data = self.adata.obsm[f"X_{self.dimensionality_reduction}"]
         else:
             data = (
@@ -449,7 +456,9 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
             augmented_data = original_data.copy()
             augmented_data["x"] = torch.tensor(
                 augmented_expression, dtype=torch.float32
-            ).view(-1)  # Ensure it's a 1D tensor
+            ).view(
+                -1
+            )  # Ensure it's a 1D tensor
 
             augmented_data_list.append(augmented_data)
 
@@ -485,12 +494,13 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
             augmented_data = original_data.copy()
             augmented_data["x"] = torch.tensor(
                 augmented_expression, dtype=torch.float32
-            ).view(-1)  # Ensure it's a 1D tensor
+            ).view(
+                -1
+            )  # Ensure it's a 1D tensor
 
             augmented_data_list.append(augmented_data)
 
         return augmented_data_list
-
 
     def augment_on_the_fly(self, index):
         """Augment a single cell by sampling from the same cell type, performing a random walk on the kNN graph, or adding negative binomial noise."""
@@ -569,6 +579,36 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         if os.path.exists(self.save_path):
             return pkl.load(open(self.save_path, "rb"))
         return None
+
+    def get_joint_pca_spatial_representation(self, w=10):
+        # Get PCA features
+        X_pca = self.adata.obsm["X_pca"][:, :20]  # 20 PCs is usually enough
+
+        # Get spatial coordinates
+        if "spatial" in self.adata.obsm:
+            X_spatial = self.adata.obsm["spatial"]
+        elif {"x", "y"}.issubset(self.adata.obs.columns):
+            X_spatial = self.adata.obs[["x", "y"]].to_numpy()
+        else:
+            raise ValueError(
+                "No spatial coordinates found: neither 'spatial' in obsm nor 'x', 'y' in obs."
+            )
+
+        # Standardize both
+        pca_scaled = StandardScaler().fit_transform(X_pca)
+        spatial_scaled = StandardScaler().fit_transform(X_spatial)
+
+        # Concatenate
+        X_combined = np.concatenate([pca_scaled, spatial_scaled * w], axis=1)
+        return X_combined
+
+    # def generate_joint_graph(self, k=50):
+    #     X = self.get_joint_pca_spatial_representation()
+    #     nbrs = NearestNeighbors(n_neighbors=k+1).fit(X)
+    #     dists, indices = nbrs.kneighbors(X)
+    #     indices = indices[:, 1:]         # remove self
+    #     dists = dists[:, 1:]             # remove self
+    #     return indices, dists
 
 
 def reshape_and_reorder_dict(data_dict):
