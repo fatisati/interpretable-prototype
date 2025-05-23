@@ -111,7 +111,8 @@ class AdoptiveTrainer(ScpoliTrainer):
         img_name = f"/{data_part}-umap"
         if self.finetuning:
             img_name = f"{img_name}_finetuned"
-        umap_paths = [self.get_dump_path() + f"/{img_name}.png"]
+        # umap_paths = [self.get_dump_path() + f"/{img_name}.png"]
+        umap_paths = []
         if self.save_temp_res == 1:
             umap_paths.append(self.get_temp_res_path() + f"/{img_name}.png")
         return umap_paths

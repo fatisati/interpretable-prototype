@@ -16,7 +16,7 @@ import os
 import pickle as pkl
 import scvi
 from sklearn.preprocessing import StandardScaler
-
+from interpretable_ssl.augmenters.spatial_graph import *
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -215,10 +215,7 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         logger.info(f"Running FAISS neighbors with k={self.k_neighbors}.")
         self._apply_dimensionality_reduction_if_needed()
         # Extract PCA or representation for the kNN graph
-        if self.spatial == 1:
-            logging.info("generating joint spatio + transcriptional knn graph")
-            data = self.get_joint_pca_spatial_representation()
-        elif self.need_dim_reduction():
+        if self.need_dim_reduction():
             data = self.adata.obsm[f"X_{self.dimensionality_reduction}"]
         else:
             data = (
@@ -226,6 +223,11 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
                 if hasattr(self.adata.X, "toarray")
                 else self.adata.X
             )
+            
+        if self.spatial == 1:
+            return generate_spatio_transcriptional_graph(self.adata, self.k_neighbors, self.n_augmentations)
+            # logging.info("generating joint spatio + transcriptional knn graph")
+            # data = self.get_joint_pca_spatial_representation()
 
         # Initialize the FAISS index
         logger.info("Initializing FAISS index.")
@@ -352,8 +354,21 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
 
         for _ in range(path_length):
             neighbors = indices[current_index]
-            weights = distances[current_index]
-            weights = weights / weights.sum()  # Normalize weights
+            dists = distances[current_index]
+
+            # Handle inf and zero distances
+            with np.errstate(divide='ignore', invalid='ignore'):
+                weights = 1.0 / dists
+                weights[np.isinf(weights)] = 0  # 1/inf = 0 (unreachable)
+                weights[np.isnan(weights)] = 0  # in case of 0/0
+
+            weights_sum = weights.sum()
+            if weights_sum == 0:
+                # Fallback to uniform if all weights are zero
+                weights = np.ones_like(weights) / len(weights)
+            else:
+                weights = weights / weights_sum  # Normalize
+
             next_index = np.random.choice(neighbors, p=weights)
             current_index = next_index
 
