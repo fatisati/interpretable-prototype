@@ -86,7 +86,7 @@ def get_defaults():
         "freeze_prototypes_nepochs": 0,
         "prot_init": 'random', #can be kmeans
         "cvae_loss_scaler": 0.01,  # swav specific, 0.0001
-        "propagation_reg": 0.0,
+        "propagation_reg": 1,
         "prot_emb_sim_reg": 0.0,
         "loss_type": 'cross_entropy',
         "decodable_prototypes": 0,
@@ -109,6 +109,9 @@ def get_defaults():
         "mask_probability": 0.2,
         "default_dispersion": 0.1,
         "fold": 0,
-        "spatial": 0
+        "spatial": 0,
+        "use_the_queue": 0,
+        "entropy_reg": 0.0
+        
     }
     return defaults

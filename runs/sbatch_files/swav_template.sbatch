@@ -12,7 +12,7 @@
 
 source ~/.bashrc
 conda activate shiny-apex
-python main.py {model} {sweep_id} --num_prototypes {num_prototypes} --latent_dims {latent_dims} --batch_size {batch_size} \
+python main.py {model} --num_prototypes {num_prototypes} --latent_dims {latent_dims} --batch_size {batch_size} \
 --augmentation_type {augmentation_type} --epsilon {epsilon} --cvae_loss_scaler {cvae_loss_scaler} \
 --prot_decoding_loss_scaler {prot_decoding_loss_scaler} --model_version {model_version} \
 --dimensionality_reduction {dimensionality_reduction} --k_neighbors {k_neighbors} --experiment_name {experiment_name} \
@@ -25,4 +25,4 @@ python main.py {model} {sweep_id} --num_prototypes {num_prototypes} --latent_dim
 --batch_removal_ratio {batch_removal_ratio} --use_bknn {use_bknn} --freeze_batch_embedding {freeze_batch_embedding} \
 --batch_sinkhorn {batch_sinkhorn} --weighted_batch {weighted_batch} --knn_similarity {knn_similarity} \
 --prot_emb_sim_reg {prot_emb_sim_reg} --propagation_reg {propagation_reg} --recon_loss {recon_loss} --no_sinkhorn {no_sinkhorn} \
---mask_probability {mask_probability} --default_dispersion {default_dispersion} --fold {fold}
+--mask_probability {mask_probability} --default_dispersion {default_dispersion} --fold {fold} --spatial {spatial} --entropy_reg {entropy_reg}

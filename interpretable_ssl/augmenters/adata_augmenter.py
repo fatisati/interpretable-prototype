@@ -17,8 +17,10 @@ import pickle as pkl
 import scvi
 from sklearn.preprocessing import StandardScaler
 from interpretable_ssl.augmenters.spatial_graph import *
+from interpretable_ssl.augmenters.graph_utils import *
+
 # Set up logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 
@@ -209,44 +211,20 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         return self.dimensionality_reduction in ["pca", "scvi"]
 
     def build_knn_graph_with_faiss(self):
-        """
-        Build the k-nearest neighbors graph using FAISS and return indices and distances.
-        """
-        logger.info(f"Running FAISS neighbors with k={self.k_neighbors}.")
+        logger.info(f"Running FAISS neighbors per batch with k={self.k_neighbors}.")
         self._apply_dimensionality_reduction_if_needed()
-        # Extract PCA or representation for the kNN graph
-        if self.need_dim_reduction():
-            data = self.adata.obsm[f"X_{self.dimensionality_reduction}"]
-        else:
-            data = (
-                self.adata.X.toarray()
-                if hasattr(self.adata.X, "toarray")
-                else self.adata.X
-            )
-            
+
+        data = self.adata.obsm.get(f"X_{self.dimensionality_reduction}", self.adata.X)
+        if hasattr(data, "toarray"):
+            data = data.toarray()
+
         if self.spatial == 1:
-            return generate_spatio_transcriptional_graph(self.adata, self.k_neighbors, self.n_augmentations)
-            # logging.info("generating joint spatio + transcriptional knn graph")
-            # data = self.get_joint_pca_spatial_representation()
+            return generate_spatio_transcriptional_graph(
+                self.adata, self.k_neighbors, self.n_augmentations
+            )
 
-        # Initialize the FAISS index
-        logger.info("Initializing FAISS index.")
-        faiss_index = faiss.IndexFlatL2(data.shape[1])
-        faiss_index.add(data)
-
-        # Perform the kNN search
-        logger.info("Performing kNN search with FAISS.")
-        distances, indices = faiss_index.search(data, self.k_neighbors + 1)
-
-        # Exclude the self-loop (first column corresponds to the point itself)
-        distances = distances[:, 1:]
-        indices = indices[:, 1:]
-
-        logger.info(
-            f"kNN graph generated with FAISS. Indices shape: {indices.shape}, Distances shape: {distances.shape}."
-        )
-
-        return indices, distances
+        batch_ids = self.adata.obs["batch"].values
+        return faiss_knn_within_batches(data, batch_ids, self.k_neighbors)
 
     def _build_knn_graph_with_scanpy(self):
         """
@@ -357,7 +335,7 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
             dists = distances[current_index]
 
             # Handle inf and zero distances
-            with np.errstate(divide='ignore', invalid='ignore'):
+            with np.errstate(divide="ignore", invalid="ignore"):
                 weights = 1.0 / dists
                 weights[np.isinf(weights)] = 0  # 1/inf = 0 (unreachable)
                 weights[np.isnan(weights)] = 0  # in case of 0/0

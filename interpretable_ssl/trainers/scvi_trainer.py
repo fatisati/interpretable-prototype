@@ -4,9 +4,9 @@ import scvi
 
 class ScviTrainer(Trainer):
     def __init__(
-        self, partially_train_ratio=None, self_supervised=False, dataset=None
+        self, partially_train_ratio=None, self_supervised=False, dataset=None,  **kwargs
     ) -> None:
-        super().__init__(partially_train_ratio, self_supervised, dataset)
+        super().__init__(partially_train_ratio, self_supervised, dataset,  **kwargs)
         # add batch_size in name in version 2
         self.model_name_version = 2
 

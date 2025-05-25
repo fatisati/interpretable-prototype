@@ -4,51 +4,11 @@ from sklearn.neighbors import NearestNeighbors
 import logging
 import faiss
 from sklearn.preprocessing import StandardScaler
+from interpretable_ssl.augmenters.graph_utils import *
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-
-def build_knn_graph_per_batch(spatial_coords, batch_ids, k=10):
-    from sklearn.neighbors import NearestNeighbors
-    import numpy as np
-
-    all_edges = set()
-    unique_batches = np.unique(batch_ids)
-
-    for batch in unique_batches:
-        # mask for current batch
-        mask = batch_ids == batch
-        coords = spatial_coords[mask]
-        global_indices = np.where(mask)[0]  # index in full adata
-
-        # # build kNN on this batch
-        # nn = NearestNeighbors(n_neighbors=k + 1)
-        # nn.fit(coords)
-        # _, indices = nn.kneighbors(coords)
-        # Initialize the FAISS index
-        logger.info("Initializing FAISS index.")
-        faiss_index = faiss.IndexFlatL2(coords.shape[1])
-        faiss_index.add(coords)
-
-        # Perform the kNN search
-        logger.info("Performing kNN search with FAISS.")
-        distances, indices = faiss_index.search(coords, k + 1)
-
-        # Exclude the self-loop (first column corresponds to the point itself)
-        distances = distances[:, 1:]
-        indices = indices[:, 1:]
-
-        # add edges using global indices
-        for i, row in enumerate(indices):
-            for j in row[1:]:  # skip self
-                u = global_indices[i]
-                v = global_indices[j]
-                # keep edge as directed (do NOT sort)
-                all_edges.add((u, v))
-
-    return all_edges
 
 
 def get_graph_intersection(edges1, edges2):
@@ -65,49 +25,35 @@ def count_nodes_with_less_than(edges, num_nodes, threshold):
     return count
 
 
-def fill_in_missing_edges(intersect_edges, candidate_edges, k, n_nodes):
-    # Track out-degree
+from collections import defaultdict
+
+
+def fill_missing_edges(intersect_edges, knn_indices, k):
+    """
+    Return a new set of edges that fills from combined features
+    only where intersection edges are insufficient.
+    """
+    from collections import defaultdict
+
+    n_nodes = knn_indices.shape[0]
     out_degree = defaultdict(int)
     for u, v in intersect_edges:
         out_degree[u] += 1
 
-    # Candidate neighbors: directed u → v
-    candidate_neighbors = defaultdict(list)
-    for u, v in candidate_edges:
-        candidate_neighbors[u].append(v)
-
-    updated_edges = set(intersect_edges)
-
-    for node in range(n_nodes):
-        needed = k - out_degree[node]
+    # Collect candidate edges from combined_knn
+    added_edges = set()
+    for u in range(n_nodes):
+        needed = k - out_degree[u]
         if needed <= 0:
             continue
-
-        tried = set()
-        for neighbor in candidate_neighbors[node]:
-            if neighbor == node or (node, neighbor) in updated_edges:
-                continue
-            updated_edges.add((node, neighbor))
-            out_degree[node] += 1
-            tried.add(neighbor)
-            if out_degree[node] >= k:
-                break
-
-        # Fallback: connect to any other nodes if still not enough
-        if out_degree[node] < k:
-            for neighbor in range(n_nodes):
-                if (
-                    neighbor == node
-                    or (node, neighbor) in updated_edges
-                    or neighbor in tried
-                ):
-                    continue
-                updated_edges.add((node, neighbor))
-                out_degree[node] += 1
-                if out_degree[node] >= k:
+        for v in knn_indices[u]:
+            if (u, v) not in intersect_edges and (u, v) not in added_edges and u != v:
+                added_edges.add((u, v))
+                out_degree[u] += 1
+                if out_degree[u] >= k:
                     break
+    return added_edges
 
-    return updated_edges
 
 
 def compare_graphs(reference_edges, test_edges, name=""):
@@ -144,65 +90,67 @@ def get_combined_features(adata):
     )
     return combined_features
 
-
-def build_indices_and_distances_from_edges(edges, combined_features, k):
+def build_neighbor_dict_from_edges(edges, combined_features):
     neighbor_dict = defaultdict(list)
-
     for u, v in edges:
-        # Compute Euclidean distance between combined feature vectors
         d = np.linalg.norm(combined_features[u] - combined_features[v])
         neighbor_dict[u].append((v, d))
-        neighbor_dict[v].append((u, d))  # assuming undirected
 
-    n = combined_features.shape[0]
-    indices = np.full((n, k), -1, dtype=int)
-    distances = np.full((n, k), np.inf, dtype=float)
+    # Sort each neighbor list by distance
+    sorted_dict = {
+        u: sorted(neighbors, key=lambda x: x[1])
+        for u, neighbors in neighbor_dict.items()
+    }
+    return sorted_dict
 
-    for i in neighbor_dict:
-        # Sort neighbors by distance
-        sorted_neighbors = sorted(neighbor_dict[i], key=lambda x: x[1])[:k]
-        for j, (nbr, dist) in enumerate(sorted_neighbors):
-            indices[i, j] = nbr
-            distances[i, j] = dist
+def neighbor_dict_to_array(neighbor_dict, max_k=None):
+    n = len(neighbor_dict)
+    max_neighbors = max(len(v) for v in neighbor_dict.values()) if max_k is None else max_k
+    indices = np.full((n, max_neighbors), -1, dtype=int)
+    distances = np.full((n, max_neighbors), np.inf, dtype=float)
+
+    for i in range(n):
+        for j, (v, d) in enumerate(neighbor_dict.get(i, [])[:max_neighbors]):
+            indices[i, j] = v
+            distances[i, j] = d
 
     return indices, distances
 
-
 def generate_spatio_transcriptional_graph(adata, k, min_k, batch_label="batch"):
-    print("using new method:)")
-    spatial = adata.obs[["x", "y"]].to_numpy()
     batch_ids = adata.obs[batch_label].values
-    spatial_edges = build_knn_graph_per_batch(spatial, batch_ids, k)
+    num_nodes = adata.n_obs
 
-    expr = adata.obsm["X_pca"]  # or your embedding
-    expr_edges = build_knn_graph_per_batch(expr, batch_ids, k)
+    # Spatial edges
+    spatial = adata.obs[["x", "y"]].to_numpy()
+    spatial_knn, _ = faiss_knn_within_batches(spatial, batch_ids, k)
+    spatial_edges = knn_indices_to_edge_set(spatial_knn)
+
+    # Expression edges
+    expr = adata.obsm["X_pca"]
+    expr_knn, _ = faiss_knn_within_batches(expr, batch_ids, k)
+    expr_edges = knn_indices_to_edge_set(expr_knn)
 
     # Intersect graphs
     intersect_edges = get_graph_intersection(spatial_edges, expr_edges)
-
-    # Print results
     print(f"Spatial edges: {len(spatial_edges)}")
     print(f"Expression edges: {len(expr_edges)}")
     print(f"Intersection edges: {len(intersect_edges)}")
 
-    num_nodes = adata.n_obs  # or len(adata)
     count_nodes_with_less_than(intersect_edges, num_nodes, min_k)
 
-    combined_features = get_combined_features(adata)
-    candidate_knn_edges = build_knn_graph_per_batch(
-        combined_features, batch_ids, k=min_k
-    )
-    filled_edges = fill_in_missing_edges(
-        intersect_edges, candidate_knn_edges, k=min_k, n_nodes=adata.n_obs
+    # Use combined features to fill missing edges
+    combined = get_combined_features(adata)
+    combined_knn, combined_distances = faiss_knn_within_batches(
+        combined, batch_ids, min_k
     )
 
-    count_nodes_with_less_than(filled_edges, num_nodes, min_k)
+    added_edges = fill_missing_edges(intersect_edges, combined_knn, min_k)
+    final_edges = intersect_edges | added_edges
 
-    # Example: compare filled graph to spatial and expression graphs
-    compare_graphs(spatial_edges, filled_edges, name="spatial")
-    compare_graphs(expr_edges, filled_edges, name="expression")
+    count_nodes_with_less_than(final_edges, num_nodes, min_k)
+    compare_graphs(spatial_edges, final_edges, name="spatial")
+    compare_graphs(expr_edges, final_edges, name="expression")
 
-    indices, distances = build_indices_and_distances_from_edges(
-        filled_edges, combined_features, k
-    )
+    neighbor_dict = build_neighbor_dict_from_edges(final_edges, combined)
+    indices, distances = neighbor_dict_to_array(neighbor_dict)
     return indices, distances
