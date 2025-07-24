@@ -77,6 +77,7 @@ def fit_label_encoder(adata, save_path):
 
     # save it
     pkl.dump(le, open(save_path, "wb"))
+    return le
 
 
 def get_model_dir():
