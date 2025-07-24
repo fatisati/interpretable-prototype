@@ -6,14 +6,21 @@ import interpretable_ssl.utils as utils
 import pickle as pkl
 import inspect
 from interpretable_ssl.utils import log_time
-
+import os
 import itertools
 
 
 class SingleCellDataset(Dataset):
 
     def __init__(
-        self, name, adata=None, label_encoder_path=None, original_idx=None, fold=0, test_study_cnt=2
+        self,
+        name,
+        adata=None,
+        label_encoder_path=None,
+        original_idx=None,
+        fold=0,
+        test_study_cnt=2,
+        batch_key = 'study'
     ):
         # self.device = utils.get_device()
         self.name = name
@@ -40,6 +47,7 @@ class SingleCellDataset(Dataset):
         self.fold = fold
         self.study_list = None
         self.test_study_cnt = test_study_cnt
+        self.batch_key = batch_key
 
     def __str__(self) -> str:
         return self.name
@@ -55,7 +63,10 @@ class SingleCellDataset(Dataset):
         return data
 
     def load_label_encoder(self):
-        return pkl.load(open(self.label_encoder_path, "rb"))
+        if os.path.exists(self.label_encoder_path):
+            return pkl.load(open(self.label_encoder_path, "rb"))
+        else:
+            return utils.fit_label_encoder(self.adata, self.label_encoder_path)
 
     def __len__(self):
         return len(self.adata)
@@ -110,7 +121,7 @@ class SingleCellDataset(Dataset):
     @log_time("get train test")
     def get_train_test(self):
         test_studies = self.get_test_studies()
-        test_idx = self.adata.obs.study.isin(test_studies)
+        test_idx = self.adata.obs[self.batch_key].isin(test_studies)
         return self._create_split_instance(~test_idx), self._create_split_instance(
             test_idx
         )
