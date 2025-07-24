@@ -6,10 +6,10 @@ def get_label_encoder_path():
 
 
 class MerfishDataset(SpatialDataset):
-    def __init__(self, adata=None, original_idx=None, **kwargs):
-        super().__init__(
-            "merfish", adata, get_label_encoder_path(), original_idx, **kwargs
-        )
+    def __init__(self, **kwargs):
+        kwargs['name'] = 'merfish'
+        kwargs['label_encoder_path'] = get_label_encoder_path()
+        super().__init__(**kwargs)
 
     def get_data_path(self):
         return "/home/icb/fatemehs.hashemig/data/spatial/merfish-mouse-brain/adata.h5ad"
