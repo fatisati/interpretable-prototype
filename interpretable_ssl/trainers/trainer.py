@@ -6,6 +6,10 @@ from interpretable_ssl.datasets.hlca import HLCADataset
 from interpretable_ssl.trainers.base import TrainerBase
 from interpretable_ssl.datasets.pancreas import PancreasDataset
 from interpretable_ssl.datasets.mouse_organoid import MouseDataset
+
+from interpretable_ssl.datasets.merfish import MerfishDataset
+
+
 from interpretable_ssl.utils import log_time
 
 
@@ -44,6 +48,8 @@ class Trainer(TrainerBase):
             return PancreasDataset(fold=self.fold)
         elif dataset_id == 'mouse_org':
             return MouseDataset()
+        elif dataset_id == 'merfish':
+            return MerfishDataset()
         else:
             print("dataset not implemented")
             return None
