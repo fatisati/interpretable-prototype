@@ -18,6 +18,8 @@ import scvi
 from sklearn.preprocessing import StandardScaler
 from interpretable_ssl.augmenters.spatial_graph import *
 from interpretable_ssl.augmenters.graph_utils import *
+from sklearn.cluster import KMeans
+from collections import defaultdict
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
@@ -43,6 +45,8 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         mask_probability=0.2,
         default_dispersion=0.1,
         spatial=0,
+        return_idx=False,
+        n_clusters=None,
         **kwargs,
     ):
         """
@@ -93,6 +97,7 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
 
         os.makedirs(self.save_dir, exist_ok=True)
         self.save_path = os.path.join(save_dir, self.graph_name)
+        self.batch_key = kwargs["condition_keys"][0]
         if self.augmentation_type not in ["cell_type", "nb"]:
             self.set_graph()
         self.mask_probability = mask_probability
@@ -106,7 +111,61 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
             if "overdispersion" in self.adata.varm
             else np.full(self.mean_expression.shape, self.default_dispersion)
         )
+        
+        self.ds_index_dict = {
+            ds_key: np.where(self.adata.obs[self.batch_key].values == ds_key)[0]
+            for ds_key in self.adata.obs[self.batch_key].unique()
+        }
+        self.ds_keys = list(self.ds_index_dict.keys())
+        self.current_ds_id = None
+        self.return_idx = return_idx
+        self.cluster_dict = None
+        self.sample_cluster_id = None
+        self.n_clusters = n_clusters
         super().__init__(sc_ds.adata, **kwargs)
+
+    def __getitem__(self, index):
+        if self.current_ds_id is not None:
+            index = self.ds_index_dict[self.current_ds_id][index]
+        return self.normal_get_item(index)
+
+    def __len__(self):
+        if self.current_ds_id is not None:
+            return len(self.ds_index_dict[self.current_ds_id])
+        else:
+            return len(self.adata)
+
+    def normal_get_item(self, index):
+        if isinstance(index, (int, np.integer)):
+            # Single index
+            augmented_data_list = self.augment_on_the_fly(index)
+        elif isinstance(index, slice):
+            # Slice of indices
+            indices = range(*index.indices(len(self)))
+
+            augmented_data_list = []
+            for idx in indices:
+                augmented_data_list.extend(self.augment_on_the_fly(idx))
+        else:
+            raise TypeError("Invalid index type")
+
+        if self.augmentation_type == "nb" or self.augmentation_type == "mask":
+            combined_data = self.combine_augmented_data(augmented_data_list)
+        else:
+            # Fetch the augmented data using the parent's __getitem__ method
+            augmented_data_list = [
+                super().__getitem__(aug_idx)
+                | (
+                    {"index": np.array([aug_idx]), "sample_id": index}
+                    if self.return_idx
+                    else {}
+                )
+                for aug_idx in augmented_data_list
+            ]
+
+            combined_data = self.combine_augmented_data(augmented_data_list)
+
+        return combined_data
 
     def get_random_indices(self, n, specific_index):
         """
@@ -133,6 +192,24 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         # Append the specific index to the list
         indices.append(specific_index)
         return indices
+
+    def get_kmeans_clusters(self, random_state=0):
+        self._apply_dimensionality_reduction_if_needed()
+        x_pca = self.adata.obsm["X_pca"]
+        sample_ids = np.arange(x_pca.shape[0])
+        
+        kmeans = KMeans(n_clusters=self.n_clusters, random_state=random_state)
+        cluster_labels = kmeans.fit_predict(x_pca)
+
+        # cluster_id -> [sample_ids]
+        cluster_dict = defaultdict(list)
+        for sid, cid in zip(sample_ids, cluster_labels):
+            cluster_dict[cid].append(sid)
+
+        # sample_id -> cluster_id
+        sample_cluster_id = dict(zip(sample_ids, cluster_labels))
+
+        return cluster_dict, sample_cluster_id
 
     def build_knn_graph(self):
         logger.info(f"building knn graph")
@@ -177,22 +254,22 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
 
         return indices, distances
 
-    def _apply_dimensionality_reduction_if_needed(self):
-        """
-        Apply PCA to the data if dimensionality reduction is set to 'pca'.
-        """
-        if self.dimensionality_reduction == "pca":
-            if self.n_components is None:
-                logger.error("n_components must be specified when using PCA.")
-                raise ValueError("n_components must be specified when using PCA.")
+    # def _apply_dimensionality_reduction_if_needed(self):
+    #     """
+    #     Apply PCA to the data if dimensionality reduction is set to 'pca'.
+    #     """
+    #     if self.dimensionality_reduction == "pca":
+    #         if self.n_components is None:
+    #             logger.error("n_components must be specified when using PCA.")
+    #             raise ValueError("n_components must be specified when using PCA.")
 
-            logger.info(f"Performing PCA with n_components={self.n_components}.")
-            sc.tl.pca(self.adata, n_comps=self.n_components)
-            logger.debug(
-                f"PCA completed. Shape of data after PCA: {self.adata.obsm['X_pca'].shape}"
-            )
-        if self.dimensionality_reduction == "scvi":
-            self._apply_scvi()
+    #         logger.info(f"Performing PCA with n_components={self.n_components}.")
+    #         sc.tl.pca(self.adata, n_comps=self.n_components)
+    #         logger.debug(
+    #             f"PCA completed. Shape of data after PCA: {self.adata.obsm['X_pca'].shape}"
+    #         )
+    #     if self.dimensionality_reduction == "scvi":
+    #         self._apply_scvi()
 
     def _apply_scvi(self):
         # Setup AnnData for scVI
@@ -212,19 +289,19 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
 
     def build_knn_graph_with_faiss(self):
         logger.info(f"Running FAISS neighbors per batch with k={self.k_neighbors}.")
-        self._apply_dimensionality_reduction_if_needed()
+        # self._apply_dimensionality_reduction_if_needed()
 
-        data = self.adata.obsm.get(f"X_{self.dimensionality_reduction}", self.adata.X)
-        if hasattr(data, "toarray"):
-            data = data.toarray()
+        # data = self.adata.obsm.get(f"X_{self.dimensionality_reduction}", self.adata.X)
+        # if hasattr(data, "toarray"):
+        #     data = data.toarray()
 
-        if self.spatial == 1:
-            return generate_spatio_transcriptional_graph(
-                self.adata, self.k_neighbors, self.n_augmentations
-            )
+        # if self.spatial == 1:
+        #     return generate_spatio_transcriptional_graph(
+        #         self.adata, self.k_neighbors, self.n_augmentations
+        #     )
 
-        batch_ids = self.adata.obs["batch"].values
-        return faiss_knn_within_batches(data, batch_ids, self.k_neighbors)
+        # batch_ids = self.adata.obs["batch"].values
+        return faiss_knn_within_batches(self.adata, self.batch_key, self.n_components, self.k_neighbors)
 
     def _build_knn_graph_with_scanpy(self):
         """
@@ -495,6 +572,19 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
 
         return augmented_data_list
 
+    def kmean_augment(self, index):
+        if self.cluster_dict is None:
+            self.cluster_dict, self.sample_cluster_id = self.get_kmeans_clusters()
+        sc_id = self.sample_cluster_id[index]
+        candidates = self.cluster_dict[sc_id]
+        n = self.n_augmentations
+        if len(candidates) < n - 1:
+            extra = random.choices(candidates, k=n - 1) if candidates else [index] * (n - 1)
+        else:
+            extra = random.sample(candidates, k=n - 1)
+
+        return [index] + extra
+
     def augment_on_the_fly(self, index):
         """Augment a single cell by sampling from the same cell type, performing a random walk on the kNN graph, or adding negative binomial noise."""
         if self.augmentation_type == "cell_type":
@@ -516,33 +606,10 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
             )
         elif self.augmentation_type == "mask":
             return self.mask_augment(index)
+        elif self.augmentation_type == "kmeans":
+            return self.kmean_augment(index)
         else:
             raise ValueError(f"Invalid augmentation_type: {self.augmentation_type}")
-
-    def __getitem__(self, index):
-        if isinstance(index, int):
-            # Single index
-            augmented_data_list = self.augment_on_the_fly(index)
-        elif isinstance(index, slice):
-            # Slice of indices
-            indices = range(*index.indices(len(self)))
-
-            augmented_data_list = []
-            for idx in indices:
-                augmented_data_list.extend(self.augment_on_the_fly(idx))
-        else:
-            raise TypeError("Invalid index type")
-
-        if self.augmentation_type == "nb" or self.augmentation_type == "mask":
-            combined_data = self.combine_augmented_data(augmented_data_list)
-        else:
-            # Fetch the augmented data using the parent's __getitem__ method
-            augmented_data_list = [
-                super().__getitem__(aug_idx) for aug_idx in augmented_data_list
-            ]
-            combined_data = self.combine_augmented_data(augmented_data_list)
-
-        return combined_data
 
     def combine_augmented_data(self, augmented_data_list):
         """Combine the list of augmented data into a single batch."""
@@ -554,14 +621,19 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
             "combined_batch",
             # "study",
             "celltypes",
+            "index",
+            "sample_id",
         ]
 
         combined_data = {}
         for key in keys_to_stack:
             if key in augmented_data_list[0]:
-                combined_data[key] = torch.stack(
-                    [data[key] for data in augmented_data_list]
-                )
+                values = [data[key] for data in augmented_data_list]
+
+                if all(isinstance(v, torch.Tensor) for v in values):
+                    combined_data[key] = torch.stack(values)
+                else:
+                    combined_data[key] = np.stack(values)
 
         return combined_data
 
