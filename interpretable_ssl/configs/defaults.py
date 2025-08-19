@@ -18,9 +18,9 @@ def get_defaults():
         "only_eval": False,
         "use_early_stopping": False,        
         "pretraining_epochs": 200,
-        "fine_tuning_epochs": 100,
-        "cvae_epochs": 0,
-        "training_type": 'pretrain',  # semi_supervised, transfer_learning
+        "fine_tuning_epochs": 0,
+        "cvae_epochs": 100,
+        "training_type": 'pretrain_encoder',  # semi_supervised, transfer_learning
         'pretrain_dataset_id': 'hlca',
         'finetune_dataset_id': 'pbmc-immune',
         
@@ -30,8 +30,8 @@ def get_defaults():
         "size_crops": [224],  # swav specific
         "min_scale_crops": [0.14],  # swav specific
         "max_scale_crops": [1],  # swav specific
-        "crops_for_assign": [0, 1],  # swav specific
-        "temperature": 0.05,  # swav specific
+        "views_for_assign": [0],  # swav specific
+        "temperature": 0.05,  # swav specific, lower make sharper assignment of z to protos
         "epsilon": 0.02,  # swav specific, 0.05
         "sinkhorn_iterations": 3,  # swav specific
         "feat_dim": 8,  # swav specific
@@ -45,7 +45,7 @@ def get_defaults():
         "start_warmup": 0,  # swav specific
         "cvae_reg": 0,  # swav specific
         "dist_url": "env://",  # swav specific
-        "world_size": -1,  # swav specific
+        "world_size": 1,  # swav specific
         "rank": 0,  # swav specific
         "local_rank": 0,  # swav specific
         "workers": 10,  # swav specific
@@ -83,8 +83,8 @@ def get_defaults():
         'no_data': 'False',
         "freezable_prototypes": 0,  # swav specific (should be true)
         "freeze_prototypes_niters": 0,  # swav specific
-        "freeze_prototypes_nepochs": 0,
-        "prot_init": 'random', #can be kmeans
+        "freeze_prototypes_nepochs": 50,
+        "prot_init": 'kmeans', #can be kmeans
         "cvae_loss_scaler": 0.01,  # swav specific, 0.0001
         "propagation_reg": 1,
         "prot_emb_sim_reg": 0.0,
@@ -111,7 +111,9 @@ def get_defaults():
         "fold": 0,
         "spatial": 0,
         "use_the_queue": 0,
-        "entropy_reg": 0.0
-        
+        "entropy_reg": 0.0,
+        "dataset_cnt": 0,
+        "queue_length":  0, # 6144,
+        "epoch_queue_starts": 5
     }
     return defaults

@@ -1,19 +1,24 @@
 import numpy as np
 import faiss
+import scanpy as sc
 
-def faiss_knn_within_batches(data, batch_ids, k):
-    n = data.shape[0]
+def faiss_knn_within_batches(adata, batch_key, n_comps, k):
+    n = len(adata)
     indices = np.zeros((n, k), dtype=int)
     distances = np.zeros((n, k), dtype=float)
 
-    for batch in np.unique(batch_ids):
-        mask = batch_ids == batch
-        batch_data = data[mask]
+    for batch_id in adata.obs[batch_key].unique():
+        
+        mask = adata.obs[batch_key] == batch_id
+        b_adata = adata[mask]
+        sc.tl.pca(b_adata, n_comps=n_comps)
+        batch_pca = b_adata.obsm['X_pca']
+        
         global_idx = np.where(mask)[0]
 
-        index = faiss.IndexFlatL2(batch_data.shape[1])
-        index.add(batch_data)
-        D, I = index.search(batch_data, k + 1)
+        index = faiss.IndexFlatL2(batch_pca.shape[1])
+        index.add(batch_pca)
+        D, I = index.search(batch_pca, k + 1)
 
         indices[global_idx] = global_idx[I[:, 1:]]
         distances[global_idx] = D[:, 1:]

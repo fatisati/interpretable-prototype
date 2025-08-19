@@ -127,13 +127,16 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
     def __getitem__(self, index):
         if self.current_ds_id is not None:
             index = self.ds_index_dict[self.current_ds_id][index]
-        return self.normal_get_item(index)
+        
+        items = []
+        for ds_id in self.ds_index_dict.keys():
+            ds_index = index % len(self.ds_index_dict[ds_id])
+            global_index = self.ds_index_dict[ds_id][ds_index]
+            items.append(self.normal_get_item(global_index))
+        return self.combine_augmented_data(items)
 
     def __len__(self):
-        if self.current_ds_id is not None:
-            return len(self.ds_index_dict[self.current_ds_id])
-        else:
-            return len(self.adata)
+        return max([len(self.ds_index_dict[ds_id]) for ds_id in self.ds_index_dict.keys()])
 
     def normal_get_item(self, index):
         if isinstance(index, (int, np.integer)):
@@ -253,23 +256,6 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         )
 
         return indices, distances
-
-    # def _apply_dimensionality_reduction_if_needed(self):
-    #     """
-    #     Apply PCA to the data if dimensionality reduction is set to 'pca'.
-    #     """
-    #     if self.dimensionality_reduction == "pca":
-    #         if self.n_components is None:
-    #             logger.error("n_components must be specified when using PCA.")
-    #             raise ValueError("n_components must be specified when using PCA.")
-
-    #         logger.info(f"Performing PCA with n_components={self.n_components}.")
-    #         sc.tl.pca(self.adata, n_comps=self.n_components)
-    #         logger.debug(
-    #             f"PCA completed. Shape of data after PCA: {self.adata.obsm['X_pca'].shape}"
-    #         )
-    #     if self.dimensionality_reduction == "scvi":
-    #         self._apply_scvi()
 
     def _apply_scvi(self):
         # Setup AnnData for scVI
@@ -666,14 +652,6 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         # Concatenate
         X_combined = np.concatenate([pca_scaled, spatial_scaled * w], axis=1)
         return X_combined
-
-    # def generate_joint_graph(self, k=50):
-    #     X = self.get_joint_pca_spatial_representation()
-    #     nbrs = NearestNeighbors(n_neighbors=k+1).fit(X)
-    #     dists, indices = nbrs.kneighbors(X)
-    #     indices = indices[:, 1:]         # remove self
-    #     dists = dists[:, 1:]             # remove self
-    #     return indices, dists
 
 
 def reshape_and_reorder_dict(data_dict):

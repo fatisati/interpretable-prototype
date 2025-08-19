@@ -24,7 +24,7 @@ class SingleCellDataset(Dataset):
     ):
         # self.device = utils.get_device()
         self.name = name
-        if not adata:
+        if adata is None:
             self.adata = self.read_adata()
         else:
             self.adata = adata

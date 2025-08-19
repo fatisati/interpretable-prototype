@@ -10,6 +10,9 @@
 #SBATCH --qos={qos}
 #SBATCH --gres={gres}
 
+export TMPDIR=$HOME/tmp
+mkdir -p $TMPDIR
+
 source ~/.bashrc
 conda activate shiny-apex
 python main.py {model} --num_prototypes {num_prototypes} --latent_dims {latent_dims} --batch_size {batch_size} \
@@ -25,4 +28,5 @@ python main.py {model} --num_prototypes {num_prototypes} --latent_dims {latent_d
 --batch_removal_ratio {batch_removal_ratio} --use_bknn {use_bknn} --freeze_batch_embedding {freeze_batch_embedding} \
 --batch_sinkhorn {batch_sinkhorn} --weighted_batch {weighted_batch} --knn_similarity {knn_similarity} \
 --prot_emb_sim_reg {prot_emb_sim_reg} --propagation_reg {propagation_reg} --recon_loss {recon_loss} --no_sinkhorn {no_sinkhorn} \
---mask_probability {mask_probability} --default_dispersion {default_dispersion} --fold {fold} --spatial {spatial} --entropy_reg {entropy_reg}
+--mask_probability {mask_probability} --default_dispersion {default_dispersion} --fold {fold} --spatial {spatial} --entropy_reg {entropy_reg} \
+--temperature {temperature} --dataset_cnt {dataset_cnt} --queue_length {queue_length}

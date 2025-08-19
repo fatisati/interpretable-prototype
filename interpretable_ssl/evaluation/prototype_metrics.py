@@ -83,14 +83,14 @@ class PrototypeAnalyzer:
         # Store summary
         self.summary = {
             "Min Embeddings per Prototype": min_count,
-            "Max Embeddings per Prototype": max_count,
+            # "Max Embeddings per Prototype": max_count,
             "Avg Embeddings per Prototype": avg_count,
             "Min Purity": min_purity,
-            "Max Purity": max_purity,
+            # "Max Purity": max_purity,
             "Avg Purity": avg_purity,
             "Weighted Avg Purity": weighted_avg_purity
         }
-        self.calculate_closest_prototype_distances()
+        # self.calculate_closest_prototype_distances()
         return self.summary
 
     def calculate_closest_prototype_distances(self):

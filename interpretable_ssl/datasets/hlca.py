@@ -9,7 +9,7 @@ class HLCADataset(SingleCellDataset):
     def __init__(self, adata=None, original_idx=None, **kwargs):
         super().__init__("hlca", adata, get_label_encoder_path(), original_idx, **kwargs)
         # self.adata.obs.rename(columns={'study': 'batch'}, inplace=True)
-        self.adata.obs["batch"] = self.adata.obs["study"]
+        self.adata.obs["batch"] = self.adata.obs["dataset"]
 
     def get_data_path(self):
         return "/home/icb/fatemehs.hashemig/data/hlca/hlca_core_hvg.h5ad"

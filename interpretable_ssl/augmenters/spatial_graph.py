@@ -80,7 +80,10 @@ def compare_graphs(reference_edges, test_edges, name=""):
 def get_combined_features(adata):
     # Combined features
     lambda_ = 0.5
-    spatial_scaled = StandardScaler().fit_transform(adata.obs[["x", "y"]])
+    if 'x' in adata.obs:
+        spatial_scaled = StandardScaler().fit_transform(adata.obs[["x", "y"]])
+    else:
+        spatial_scaled = StandardScaler().fit_transform(adata.obsm['spatial'])
     expr_scaled = StandardScaler().fit_transform(adata.obsm["X_pca"])
     spatial_weight = lambda_
     expr_weight = (1 - lambda_) * (spatial_scaled.shape[1] / expr_scaled.shape[1])
@@ -121,7 +124,10 @@ def generate_spatio_transcriptional_graph(adata, k, min_k, batch_label="batch"):
     num_nodes = adata.n_obs
 
     # Spatial edges
-    spatial = adata.obs[["x", "y"]].to_numpy()
+    if 'x' in adata.obs:
+        spatial = adata.obs[["x", "y"]].to_numpy()
+    else:
+        spatial = adata.obsm['spatial']
     spatial_knn, _ = faiss_knn_within_batches(spatial, batch_ids, k)
     spatial_edges = knn_indices_to_edge_set(spatial_knn)
 

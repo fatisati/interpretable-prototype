@@ -64,7 +64,7 @@ class SwavBase(nn.Module):
         if self.l2norm:
             x = nn.functional.normalize(x, dim=1, p=2)
 
-        prot_decoding_loss = self.prototype_decoding_loss(x)
+        propagation_sim = self.propagation_sim_loss(x)
 
         # TO DO: recheck this with original scpoli
         # calc_alpha_coeff = 0.5
@@ -77,20 +77,22 @@ class SwavBase(nn.Module):
                 x,
                 (self.prototypes(x), self.cell_protos(x)),
                 cvae_loss,
-                prot_decoding_loss,
+                propagation_sim,
             )
         else:
-            return x, x, self.prototypes(x), cvae_loss, prot_decoding_loss
+            sim_pos = self.proto_cosin_sim_pos(x)
+            return x, x, sim_pos, cvae_loss, propagation_sim
 
+    def proto_cosin_sim_pos(self, z):
+        z = F.normalize(z, dim=1)
+        prototypes = F.normalize(self.prototypes.weight, dim=1)
+        sim = torch.matmul(z, prototypes.T)
+        sim_pos = (sim + 1) / 2
+        return sim_pos
+    
     def propagation(self, z: torch.Tensor):
-        cosine_sim = self.prototypes(z)
-        cosine_dist = 1 - cosine_sim
-
-        # Find the minimum distance (closest prototype) for each sample
-        min_distances = cosine_dist.min(dim=1).values
-
-        # Return the max of these minimum distances
-        return min_distances.max()
+        cosine_sim = self.proto_cosin_sim_pos(z)
+        return (1 - cosine_sim.max(dim=1).values).max()
 
     def embedding_similarity(self, z: torch.Tensor):
         cosine_sim = self.prototypes(z)
@@ -100,9 +102,9 @@ class SwavBase(nn.Module):
         return min_distances.max()
         # dist = torch.cdist(self.prototypes.weight, z)
         # return dist.min(1).values.mean()
-        # Convert cosine similarity to cosine distance
 
-    def prototype_decoding_loss(self, z):
+
+    def propagation_sim_loss(self, z):
         return self.propagation(z), self.embedding_similarity(z)
 
     # def set_scpoli_encoder(self, scpoli_encoder):
@@ -307,9 +309,10 @@ class SwAVModel(SwavBase):
         multi_layer_proto=False,
         np2=None,
         recon_loss="nb",
+        batch_key = 'study'
     ):  # , propagation_reg=0.5, prot_emb_sim_reg=0.5
         # self.cell_type_key = "cell_type"
-        self.condition_key = "study"
+        self.condition_key = batch_key
         self.scpoli_ = self.init_scpoli(adata, latent_dim, recon_loss)
         super().__init__(
             self.scpoli_.model, latent_dim, nmb_prototypes, multi_layer_proto, np2

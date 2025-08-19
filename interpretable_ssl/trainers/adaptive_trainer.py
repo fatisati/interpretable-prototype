@@ -91,7 +91,7 @@ class AdoptiveTrainer(ScpoliTrainer):
         self.setup()
         self.pretrain_encoder()
         self.init_prototypes()
-
+        self.plot_umap(self.model, self.ref.adata, 'pretrained-ref')
         # pretrain with swav
         self.train()
 
@@ -124,6 +124,7 @@ class AdoptiveTrainer(ScpoliTrainer):
 
     def run(self):
         if not self.debug:
+            self.set_job_name(self.dump_path)
             self.init_wandb(self.dump_path)
         if self.training_type == "semi_supervised":
             self.train_semi_supervised()

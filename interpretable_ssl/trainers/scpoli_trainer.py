@@ -183,7 +183,8 @@ class ScpoliTrainer(Trainer):
         latent_umap, prototype_umap = calculate_umap(latent, prototypes)
         obs = adata.obs
         if prototypes is not None:
-            prototype_assignments = self.encode_adata(adata, model, True, False)
+            # prototype_assignments = self.encode_adata(adata, model, True, False)
+            prototype_assignments = model.prototypes(latent).detach().cpu().numpy()
             proto_df = assign_prototype_labels(
                 adata, prototype_assignments, self.num_prototypes
             )
@@ -194,7 +195,7 @@ class ScpoliTrainer(Trainer):
             latent_umap,
             prototype_umap,
             obs.cell_type,
-            obs.study,
+            obs[self.ref.batch_key],
             proto_labels,
             save_plot,
             self.get_umap_path(split),

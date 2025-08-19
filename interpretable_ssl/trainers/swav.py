@@ -41,6 +41,7 @@ import torch
 from collections import Counter, defaultdict
 from interpretable_ssl.evaluation.cd4_marker import *
 from interpretable_ssl.trainers.swav_utils import *
+from sklearn.model_selection import train_test_split
 
 
 logger = getLogger()
@@ -89,11 +90,9 @@ class SwAV(AdoptiveTrainer):
         # why nmb_crops is a list? i used fisrt element but not change it in case needed in furure
         # model = self.scpoli_.model
         scpoli_encoder = self.model.scpoli_encoder
-        self.train_ds = MultiCropsDataset(
-            self.ref,
-            self.ref.original_idx,
-            self.nmb_crops[0],
-            self.train_augmentation,
+        common_dataset_kwargs = dict(
+            n_augmentations=self.nmb_crops[0],
+            augmentation_type=self.train_augmentation,
             k_neighbors=self.k_neighbors,
             longest_path=self.longest_path,
             dimensionality_reduction=self.dimensionality_reduction,
@@ -107,12 +106,28 @@ class SwAV(AdoptiveTrainer):
             default_dispersion=self.default_dispersion,
             spatial=self.spatial,
             n_clusters=self.num_prototypes,
-            # cell_type_keys=[self.cell_type_key],
             condition_encoders=scpoli_encoder.condition_encoders,
             conditions_combined_encoder=scpoli_encoder.conditions_combined_encoder,
+            # cell_type_keys=[self.cell_type_key],
             # cell_type_encoder=model.cell_type_encoder,
         )
+        
+        train_ind, val_ind = train_test_split(range(len(self.ref)), test_size=0.1, random_state=42)
+        train, val = self.ref._create_split_instance(train_ind), self.ref._create_split_instance(val_ind)
+        self.train_ds = MultiCropsDataset(
+            train,
+            train.original_idx,
+            **common_dataset_kwargs
+        )
+        self.test_ds = MultiCropsDataset(
+            val,
+            val.original_idx,
+            **common_dataset_kwargs
+        )
+        
         self.train_loader = self.get_data_laoder(self.train_ds)
+        self.test_loader = self.get_data_laoder(self.test_ds)
+        
         self.original_train_loader = self.train_loader
         if self.multi_layer_protos == 1:
             self.cell_type_ds = MultiCropsDataset(
@@ -317,33 +332,14 @@ class SwAV(AdoptiveTrainer):
 
             if (epoch % self.umap_checkpoint_freq == 0) and (self.wandb_sweep == 0):
                 self.plot_umap(self.model, self.original_ref.adata, f"ref-e{epoch}")
-
-            # if (
-            #     self.queue_length > 0
-            #     and epoch >= self.epoch_queue_starts
-            #     and self.queue is None
-            # ):
-            #     self.queue = torch.zeros(
-            #         len(self.crops_for_assign),
-            #         self.queue_length,
-            #         self.feat_dim,
-            #     ).cuda()
             
-            scores = self.train_one_epoch(epoch)
-            # metrics = None
-            # if (epoch % self.scib_freq == 0) and (self.save_scib == 1):
-            #     metrics = self.save_metrics(self.wandb_sweep == 0, False)
-            self.log_wandb_loss(scores, epoch)
+            train_meters = self.train_one_epoch(epoch)
+            test_meters = self.test_epoch()
+            test_meters = {f'test_{key}': val for key, val in test_meters.items()}
+            
+            self.log_wandb_loss(train_meters | test_meters, epoch)
             self.save_checkpoint(epoch)
-
-        # if self.train_decoder:
-        #     self.only_decoder_train()
-
-        # try:
-        #     self.save_metrics(self.wandb_sweep == 0)
-        # except Exception as e:
-        #     # Log other general exceptions
-        #     logging.error("Unexpected error occurred: %s", e)
+        return train_meters | test_meters
 
     def calculate_prototype_metrics(self):
         emb = self.encode_ref(self.model)
@@ -424,7 +420,52 @@ class SwAV(AdoptiveTrainer):
             for param in embedding_layer.parameters():
                 param.requires_grad = de_freeze
 
+    def calc_ds_loss(self, inputs, ds_id, meters, bs):
+        ds_inputs = {k: inputs[k][ds_id] for k in inputs.keys()}
+        metrics = self._process_batch(ds_inputs)
+        # averaged = self._average_metrics(metrics)
+        # Update meters
+        for key in metrics:
+            if key not in meters:
+                meters[key] = AverageMeter()
+            value = (
+                metrics[key].item()
+                if hasattr(metrics[key], "item")
+                else metrics[key]
+            )
+            meters[key].update(value, bs)
+
+        loss = (
+            metrics["swav"]
+            + metrics["cvae"] * self.cvae_loss_scaler
+            + metrics["propagation"] * self.propagation_reg
+            + metrics["similarity"] * self.prot_emb_sim_reg
+            + metrics["p_entropy"] * self.entropy_reg
+        )
+        meters["loss"].update(loss.item(), bs)
+        return loss, meters
+    
+    def test_epoch(self):
+        self.model.eval()
+        with torch.no_grad():
+            for inputs in self.test_loader:
+                bs = inputs["x"].size(0)
+                ds_ids = range(inputs['x'].size(1))
+                inputs = {k: inputs[k].transpose(0, 1) for k in inputs.keys()} # bring dataset in first to calc loss per dataset
+                meters = {"loss": AverageMeter()}
+                
+                for ds_id in ds_ids:
+                    _, meters = self.calc_ds_loss(inputs, ds_id, meters, bs)
+        meters = {k: getattr(v, "avg", v) for k, v in meters.items()}
+        return meters
+
+        # define test loader
+        # pass data, get loss and metrics
+        # return the dict
+        
+        
     def train_one_epoch(self, epoch):
+        self.model.train()
         self._handle_prototype_freezing(epoch)
         
         if self.queue_length > 0 and epoch > self.epoch_queue_starts and self.queue is None:
@@ -443,60 +484,39 @@ class SwAV(AdoptiveTrainer):
             dataset_ids = dataset_ids[:self.dataset_cnt]
         random.shuffle(dataset_ids)
 
-        for dataset_id in dataset_ids:
-            self.train_ds.current_ds_id = dataset_id
-
-            self.model.train()
-            if not self.check_proto_freeze(epoch):
-                self.model.normalize_prototypes()
-
+        if not self.check_proto_freeze(epoch):
+            self.model.normalize_prototypes()
+        # inputs must have d*b samples, batch examples from each dataset
+        # calculate loss on each b from each dataset
+        # update gradient with respect to all of them
+        
+        for iteration, inputs in enumerate(self.train_loader):
+            meters["data_time"].update(time.time() - end)
+            self.update_learning_rate(epoch, iteration)
+            
+            bs = inputs["x"].size(0)
+            ds_ids = range(inputs['x'].size(1))
+            inputs = {k: inputs[k].transpose(0, 1) for k in inputs.keys()} # bring dataset in first to calc loss per dataset
+            
             self.optimizer.zero_grad()
-
-            for iteration, inputs in enumerate(self.train_loader):
-                bs = inputs["x"].size(0)
-                meters["data_time"].update(time.time() - end)
-                self.update_learning_rate(epoch, iteration)
-
-                # batch_inputs = self._split_by_batch(inputs)
-                metrics = self._process_batch(inputs)
-                # averaged = self._average_metrics(metrics)
-
-                loss = (
-                    metrics["swav"]
-                    + metrics["cvae"] * self.cvae_loss_scaler
-                    + metrics["propagation"] * self.propagation_reg
-                    + metrics["similarity"] * self.prot_emb_sim_reg
-                    + metrics["p_entropy"] * self.entropy_reg
+            
+            for ds_id in ds_ids:
+                loss, meters = self.calc_ds_loss(inputs, ds_id, meters, bs)
+                loss.backward()
+                
+            self.optimizer.step()
+            
+            meters["batch_time"].update(time.time() - end)
+            end = time.time()
+            if iteration % 50 == 0:
+                logger.info(
+                    f"Epoch: [{epoch}][{iteration}] "
+                    f"Time {meters['batch_time'].val:.3f} ({meters['batch_time'].avg:.3f}) "
+                    f"Data {meters['data_time'].val:.3f} ({meters['data_time'].avg:.3f}) "
+                    f"Loss {meters['loss'].val:.4f} ({meters['loss'].avg:.4f}) "
+                    f"Lr {self.optimizer.param_groups[0]['lr']:.4f}"
                 )
 
-                # self.optimizer.zero_grad()
-                loss.backward()
-                # self.optimizer.step()
-
-                meters["loss"].update(loss.item(), bs)
-                # Update meters
-                for key in metrics:
-                    if key not in meters:
-                        meters[key] = AverageMeter()
-                    value = (
-                        metrics[key].item()
-                        if hasattr(metrics[key], "item")
-                        else metrics[key]
-                    )
-                    meters[key].update(value, bs)
-
-                meters["batch_time"].update(time.time() - end)
-                end = time.time()
-
-                if iteration % 50 == 0:
-                    logger.info(
-                        f"Epoch: [{epoch}][{iteration}] "
-                        f"Time {meters['batch_time'].val:.3f} ({meters['batch_time'].avg:.3f}) "
-                        f"Data {meters['data_time'].val:.3f} ({meters['data_time'].avg:.3f}) "
-                        f"Loss {meters['loss'].val:.4f} ({meters['loss'].avg:.4f}) "
-                        f"Lr {self.optimizer.param_groups[0]['lr']:.4f}"
-                    )
-            self.optimizer.step()
         meters = {k: getattr(v, "avg", v) for k, v in meters.items()}
         return meters
 
@@ -590,8 +610,8 @@ class SwAV(AdoptiveTrainer):
         return one_hot_max_tensor(out)
 
     def compute_swav_loss(self, logits, z, bs):
-
-        loss, assignment_metrics_list, avg_matched_pairs = 0, [], 0
+        
+        loss, assignment_metrics_list, avg_matched_pairs, avg_q_matched = 0, [], 0, 0
 
         # each crop mean each augmentation, just caluclate q and loss for first crops_for_assign
         for view_idx, view_id in enumerate(self.views_for_assign):

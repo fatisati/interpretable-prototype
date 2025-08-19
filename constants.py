@@ -21,7 +21,7 @@ ABBREVIATIONS = {
     "latent_dims": "LD",
     "num_prototypes": "NP",
     "epsilon": "eps",
-    "cvae_loss_scaler": "cvaeLS",
+    "cvae_loss_scaler": "cvae",
     "prot_decoding_loss_scaler": "PDLS",
     "model_version": "MV",
     "k_neighbors": "kN",
@@ -42,7 +42,7 @@ ABBREVIATIONS = {
     'epsilon': "eps",
     'freeze_prototypes_nepochs': 'frz',
     'prot_init': 'prtInit',
-    'propagation_reg': 'propReg',
+    'propagation_reg': 'prop',
     'prot_emb_sim_reg': 'PEmbSimReg',
     'loss_type': 'loss',
     'training_type': 'train',
@@ -70,5 +70,6 @@ ABBREVIATIONS = {
     "default_dispertion": 'disp',
     "fold": 'fold',
     "spatial": 'spatial',
-    "entropy_reg": "entropy"
+    "entropy_reg": "entropy",
+    "queue_length": 'qlen'
 }
