@@ -310,38 +310,36 @@ if __name__ == "__main__":
     runner = ExperimentRunner("swav_template.sbatch")
     experiments = [
         {
-            "propagation_reg": [0, 1],
-            "training_type": ["semi_supervised"],
-            "dimensionality_reduction": ["scvi", "pca"],
-        },
-        {"training_type": ["semi_supervised"], "model": ["scpoli"]},
-        {"pretraining_epochs": [10], "model": ["scpoli", "swav"]},
-        {"augmentation_type": ["mask", "nb", "swav"], "pretraining_epochs": [10]},
-        {
-            "model": ["wandb_sweep"],
-            "experiment_name": [f"mask_sweep{i}" for i in range(5)],
+            # #   'temperature': [0.04, 0.03, 0.05]            
+            "experiment_name": ['cfreeze'],
+            "num_prototypes": [150, 300],
+            # "nmb_crops": [16],
+            "hard_clustering": [0, 1],
+            # "k_neighbors": [25, 50]
+            "augmentation_type": ['kmeans']
         },
         {
-            "model": ["scpoli"],
-            "experiment_name": ["rerun_scpoli"],
-            "training_type": ["semi_supervised", "fully_supervised", "pretrain"],
+            # "dimensionality_reduction": ["pca", None],
+            "num_prototypes": [1000, 500],
+            "dataset_id": ["merfish"],
+            "spatial": [0, 1],
+            # "batch_size": [2048],
+            # "augmentation_type": ["knn", "scanpy_knn", "community"],
         },
         {
-            "model": ["scpoli"],
-            "pretraining_epochs": [5],
+            # "dimensionality_reduction": ["pca", None],
+            "propagation_reg": [0, 1]
+            # "augmentation_type": ["knn", "scanpy_knn", "community"],
         },
         {
-            "model": ["wandb_sweep"],
-            "experiment_name": [f"sweep{i}" for i in range(10)],
+            # "dimensionality_reduction": ["pca", None],
+            "num_prototypes": [500],
+            "dataset_id": ["mouse_org"],
+            "spatial": [0, 1],
+            # "augmentation_type": ["knn", "scanpy_knn", "community"],
         },
-        {
-            "num_prototypes": [100, 150],
-            "dataset_id": ["pancreas"],
-            "propagation_reg": [2, 1.5]
-            
-        }
     ]
-    n = 1
-    evaluate_job_count(experiments[-n:])
-    for item_to_test in experiments[-n:]:
+
+    evaluate_job_count(experiments)
+    for item_to_test in [experiments[0]]:
         runner.run_multiple_experiments(item_to_test, True)

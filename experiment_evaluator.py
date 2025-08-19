@@ -8,7 +8,7 @@ from interpretable_ssl.trainers.scpoli_original import (
 import itertools
 import os
 import pandas as pd
-from interpretable_ssl.evaluation.metrics import *
+from interpretable_ssl.evaluation.metric_calculator import *
 from tqdm import tqdm
 import psutil
 from interpretable_ssl.trainers.base import TrainerBase
@@ -189,16 +189,17 @@ if __name__ == "__main__":
 
     item_to_test = {
         "swav": {
-            "dimensionality_reduction": ["pca", None],
-            "num_prototypes": [100, 300, 500],
-            "latent_dims": [8, 16],
-            "augmentation_type": ["knn", "scanpy_knn", "community"],
+            # "dimensionality_reduction": ["pca", None],
+            "num_prototypes": [1000],
+            "latent_dims": [8],
+            "dataset_id": ['merfish']
+            # "augmentation_type": ["knn", "scanpy_knn", "community"],
         },
-        "scpoli": {
-            "latent_dims": [8, 16, 32],
-            "batch_size": [512, 1024],
-            "debug": [True, False],
-        },
+        # "scpoli": {
+        #     "latent_dims": [8, 16, 32],
+        #     "batch_size": [512, 1024],
+        #     "debug": [True, False],
+        # },
     }
 
     # Generate trainers based on parameter combinations

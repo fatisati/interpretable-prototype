@@ -1,5 +1,12 @@
+import numba
+# numba.config.CACHE_DIR = ''  # Proper way to disable caching
+numba.config.CACHE = False
+
 import sys
 import argparse
+import os
+os.environ["TMPDIR"] = os.path.expanduser("~/tmp")
+
 
 def get_trainer(model_name, parser):
     if model_name == "swav":
