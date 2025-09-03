@@ -74,11 +74,7 @@ class TrainerBase:
             self.experiment_name = None
         if self.experiment_name is not None:
             return
-
-        if self.dump_name_version >= 4:
-            self.experiment_name = f"swav"
-        else:
-            self.set_old_experiment_name()
+        self.experiment_name = f"swav"
 
     def set_old_experiment_name(self):
         if self.dump_name_version < 4:
@@ -98,26 +94,7 @@ class TrainerBase:
         return generate_model_name(get_defaults().copy(), self.params)
 
     def get_model_name(self):
-        if self.model_name_version >= 5:
-            return self.generate_name_based_on_changes()
-        else:
-            base = f"num-prot-{self.num_prototypes}"
-            if self.model_name_version < 3:
-                base += f"_hidden-{self.hidden_dim}_bs-{self.batch_size}"
-            else:
-                base += f"_latent{self.latent_dims}"
-
-            if self.experiment_name is not None:
-                if self.model_name_version < 3:
-                    base = f"{self.experiment_name}-{base}"
-                else:
-                    base = f"{self.experiment_name}_{base}"
-            if self.model_name_version >= 3:
-                base = self.append_batch(base)
-
-            if self.training_type == "semi_supervised":
-                base = f"{base}-semi"
-            return base
+        return self.generate_name_based_on_changes()
 
     def append_batch(self, base):
         if self.is_swav == 1 and (self.batch_size == self.default_values["batch_size"]):
@@ -155,10 +132,8 @@ class TrainerBase:
         return f"{save_dir}{name}"
 
     def get_dump_path(self):
-        if self.is_swav == 1 and self.model_name_version < 5:
-            return self.get_swav_dump_path()
-        else:
-            return self.get_general_dump_path()
+        
+        return self.get_general_dump_path()
 
     def get_model_path(self):
         return self.get_dump_path() + ".pth"

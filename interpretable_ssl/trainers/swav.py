@@ -319,7 +319,6 @@ class SwAV(AdoptiveTrainer):
         
         checkpoint_file = self.get_checkpoint_file()
         torch.save(save_dict, os.path.join(self.dump_path, checkpoint_file))
-        print('model saved at: ', os.path.join(self.dump_path, checkpoint_file))
         if epoch % self.checkpoint_freq == 0 or epoch == self.pretraining_epochs - 1:
             shutil.copyfile(
                 os.path.join(self.dump_path, checkpoint_file),
@@ -858,18 +857,10 @@ class SwAV(AdoptiveTrainer):
         self.train(self.fine_tuning_epochs)
         # self.augmentation_type = old_aug_type
 
-    def tune_nmb_crops(self, adata_list):
-        max_nmb_crops = sys.maxsize
-
-        for adata in adata_list:
-            min_cell_cnt = adata.obs.cell_type.value_counts().min()
-            max_nmb_crops = min(min_cell_cnt, max_nmb_crops)
-        self.nmb_crops[0] = min(self.nmb_crops[0], max_nmb_crops)
-
     def get_proto_adata(self):
         similarity = self.encode_adata(self.ref.adata, self.model, True)
         prot_df = assign_prototype_labels(
-            self.ref.adata, similarity, self.nmb_prototypes, self.dataset.cell_type_key
+            self.ref.adata, similarity, self.nmb_prototypes, cell_type_column = self.dataset.cell_type_key
         )
         x = self.model.decode_proto(
             recon_loss=self.recon_loss, use_avg_batch_embedding=True

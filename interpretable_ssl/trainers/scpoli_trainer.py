@@ -91,7 +91,7 @@ class ScpoliTrainer(Trainer):
         query_model.load_state_dict(ref_model.state_dict())
         scpoli_query = scPoli.load_query_data(
             adata=adata,
-            reference_model=self.get_scpoli(query_model, False),
+            reference_model=self.get_scpoli_model(query_model, False),
             labeled_indices=[],
         )
         if retrain_epochs > 0:
@@ -107,6 +107,7 @@ class ScpoliTrainer(Trainer):
             inputs[key] = inputs[key].to(self.device)
         return inputs
 
+    # TODO: return mapped and mapped_idx should have cleaner logic
     def encode_batch(self, model, batch, return_maped=False, return_mapped_idx=True):
         batch = self.move_input_on_device(batch)
         model.eval()
@@ -124,7 +125,7 @@ class ScpoliTrainer(Trainer):
             # return x_mapped
         return encoder_out
 
-    def get_scpoli(self, pretrained_model, return_model=True):
+    def get_scpoli_model(self, pretrained_model, return_model=True):
         if return_model:
             return pretrained_model.scpoli_cvae
         return pretrained_model.scpoli_wrapper
@@ -140,7 +141,7 @@ class ScpoliTrainer(Trainer):
         return self.encode_adata(self.query.adata, model)
 
     def is_ref(self, model, adata):
-        for key, values in self.get_scpoli(model, return_model=False).conditions_.items():
+        for key, values in self.get_scpoli_model(model, return_model=False).conditions_.items():
             data_values = adata.obs[key].unique()
             is_subset = set(data_values).issubset(values)
             if not is_subset:
@@ -161,7 +162,7 @@ class ScpoliTrainer(Trainer):
         model = self.prepare_model(model, adata, retrain_epochs)
             
         loader = self.prepare_scpoli_dataloader(
-            adata, self.get_scpoli(model), shuffle=False
+            adata, self.get_scpoli_model(model), shuffle=False
         )
         embeddings = [
             self.encode_batch(model, batch, return_mapped, return_mapped_idx)
@@ -186,7 +187,7 @@ class ScpoliTrainer(Trainer):
             # prototype_assignments = self.encode_adata(adata, model, True, False)
             prototype_assignments = model.prototypes(latent).detach().cpu().numpy()
             proto_df = assign_prototype_labels(
-                adata, prototype_assignments, self.num_prototypes, self.dataset.cell_type_key
+                adata, prototype_assignments, self.num_prototypes, cell_type_column = self.dataset.cell_type_key
             )
             proto_labels = proto_df.prototype_label
         else:
@@ -194,7 +195,7 @@ class ScpoliTrainer(Trainer):
         return plot_3umaps(
             latent_umap,
             prototype_umap,
-            obs.cell_type,
+            obs[self.dataset.cell_type_key],
             obs[self.ref.batch_key],
             proto_labels,
             save_plot,

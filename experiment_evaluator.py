@@ -35,6 +35,7 @@ class ExperimentEvaluator(ExperimentRunner):
         """Create a trainer instance based on the model type and parameters."""
         if params.get("experiment_name") is None:
             params["experiment_name"] = model_type
+            print('set the exp name to: ', model_type)
         if model_type == "swav":
             trainer = SwAV(**params)
         elif model_type == "scpoli":
@@ -42,10 +43,11 @@ class ExperimentEvaluator(ExperimentRunner):
         else:
             raise ValueError("Unsupported model type: {}".format(model_type))
 
-        trainer.name = self.generate_job_name(params, model_type)
+        trainer.name = self.generate_job_name(params)
         return trainer
 
-    def generate_job_name(self, params, model_type):
+    def generate_job_name(self, params):
+        
         job_name = super().generate_job_name(params)
         return job_name
 

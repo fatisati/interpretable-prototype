@@ -27,7 +27,7 @@ class AdoptiveTrainer(ScpoliTrainer):
 
     def split_train_data(self, finetune_size=0.1):
         self.partial_ref, self.finetune_ds = self.original_ref.split(finetune_size)
-        self.tune_nmb_crops([self.partial_ref.adata, self.finetune_ds.adata])
+        # self.tune_nmb_crops([self.partial_ref.adata, self.finetune_ds.adata])
 
     def finetune(self):
         pass
@@ -76,7 +76,7 @@ class AdoptiveTrainer(ScpoliTrainer):
         
     def pretrain_encoder(self):
         if self.decodable_prototypes == 0:
-            self.get_scpoli(self.model, False).train(
+            self.get_scpoli_model(self.model, False).train(
                 n_epochs=self.cvae_epochs,
                 pretraining_epochs=self.cvae_epochs,
                 eta=5,
@@ -84,6 +84,9 @@ class AdoptiveTrainer(ScpoliTrainer):
         else:
             self.pretrain_decodabale_proto()
 
+    def init_prototypes(self):
+        pass
+    
     def train_pretrain_encoder(self):
         if self.fine_tuning_epochs > 0:
             self.split_train_data()

@@ -8,26 +8,26 @@ import os
 os.environ["TMPDIR"] = os.path.expanduser("~/tmp")
 
 
-def get_trainer(model_name, parser):
-    if model_name == "swav":
+def get_trainer(model, parser):
+    if model == "swav":
         from interpretable_ssl.trainers.swav import SwAV
         return SwAV(parser = parser)
-    elif model_name == "scpoli":
+    elif model == "scpoli":
         from interpretable_ssl.trainers.scpoli_original import OriginalTrainer
         return OriginalTrainer(parser = parser)
     else:
-        raise ValueError(f"Unknown model name: {model_name}")
+        raise ValueError(f"Unknown model name: {model}")
 
 def main():
     if len(sys.argv) < 2:
         raise ValueError("Model name must be provided as the first argument.")
     
-    model_name = sys.argv[1]
-    print(model_name)
+    model = sys.argv[1]
+    print(model)
     sys.argv = sys.argv[1:]
-    parser = argparse.ArgumentParser(description=f"{model_name} Trainer Parameters")
+    parser = argparse.ArgumentParser(description=f"{model} Trainer Parameters")
     
-    trainer = get_trainer(model_name, parser)
+    trainer = get_trainer(model, parser)
     trainer.setup()
     print(trainer.dump_path, " has been set up")
     trainer.run()
