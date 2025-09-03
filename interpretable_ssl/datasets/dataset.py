@@ -20,18 +20,20 @@ class SingleCellDataset(Dataset):
         original_idx=None,
         fold=0,
         test_study_cnt=2,
-        batch_key = 'study'
+        batch_key = 'study',
+        cell_type_key = 'cell_type'
     ):
         # self.device = utils.get_device()
         self.name = name
+        self.batch_key = batch_key
         if adata is None:
             self.adata = self.read_adata()
         else:
             self.adata = adata
         self.label_encoder_path = label_encoder_path
         self.le = self.load_label_encoder()
-
-        self.num_classes = len(set(self.adata.obs["cell_type"].cat.categories))
+        self.cell_type_key = cell_type_key
+        self.num_classes = len(set(self.adata.obs[self.cell_type_key].cat.categories))
         self.x_dim = self.adata[0].X.shape[1]
 
         # Store the initialization arguments
@@ -47,7 +49,7 @@ class SingleCellDataset(Dataset):
         self.fold = fold
         self.study_list = None
         self.test_study_cnt = test_study_cnt
-        self.batch_key = batch_key
+        
 
     def __str__(self) -> str:
         return self.name
@@ -85,7 +87,7 @@ class SingleCellDataset(Dataset):
         return torch.tensor(x)
 
     def get_y(self, i):
-        y = self.le.transform(self.adata[i].obs["cell_type"])
+        y = self.le.transform(self.adata[i].obs[self.cell_type_key])
         return torch.tensor(y)
 
     def split(self, test_size=0.2, random_state=None):

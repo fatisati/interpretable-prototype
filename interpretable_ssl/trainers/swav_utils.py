@@ -1,5 +1,11 @@
 import torch
 
+def get_assign_cnts(logits):
+    assignments = logits.argmax(dim=1)
+    num_prototypes = logits.size(1)
+    counts = torch.bincount(assignments, minlength=num_prototypes)
+    return counts
+
 def get_assignment_metrics(assignments, label):
     res = {}
 
@@ -18,14 +24,14 @@ def get_assignment_metrics(assignments, label):
     res[f"{label}_entropy"] = entropy
 
     # Hard assignments
-    assignments = assignments_prob.argmax(dim=1)
-    num_prototypes = assignments_prob.size(1)
-    counts = torch.bincount(assignments, minlength=num_prototypes)
+    counts = get_assign_cnts(assignments)
 
     # Number of empty prototypes
-    res[f"{label}_num_empty_prototypes"] = (counts == 0).sum().item()
+    num_prototypes = assignments.size(1)
+    res[f"{label}_empty_protos_ratio"] = (counts == 0).sum().item() / num_prototypes
 
     # Uniformity metric (L2 distance from uniform distribution, normalized)
+    
     expected = counts.sum() / num_prototypes
     uniform_metric = (
         torch.norm(counts.float() - expected, p=2).item() / counts.sum().item()

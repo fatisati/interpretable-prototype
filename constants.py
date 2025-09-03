@@ -71,5 +71,13 @@ ABBREVIATIONS = {
     "fold": 'fold',
     "spatial": 'spatial',
     "entropy_reg": "entropy",
-    "queue_length": 'qlen'
+    "queue_length": 'qlen',
+    "model_type": 'model',
+    "l2norm": "l2norm",
+    "use_rbf": 'rbf',
+    'assignment_metric': 'assn',
+    'study_id': 'sid',
+    'epoch_queue_starts': 'qe',
+    'warmup_epochs': 'warmup',
+    'base_lr': 'blr'
 }

@@ -8,7 +8,7 @@ from interpretable_ssl.datasets.pancreas import PancreasDataset
 from interpretable_ssl.datasets.mouse_organoid import MouseDataset
 
 from interpretable_ssl.datasets.merfish import MerfishDataset
-
+from interpretable_ssl.datasets.cd34 import CD34Dataset
 
 from interpretable_ssl.utils import log_time
 
@@ -51,6 +51,8 @@ class Trainer(TrainerBase):
             return MouseDataset()
         elif dataset_id == "merfish":
             return MerfishDataset()
+        elif dataset_id == 'cd34':
+            return CD34Dataset()
         else:
             print("dataset not implemented")
             return None

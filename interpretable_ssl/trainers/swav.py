@@ -61,7 +61,16 @@ class SwAV(AdoptiveTrainer):
         # would be defferent when trying to finetune, keep original aug type for model path
         self.train_augmentation = self.augmentation_type
         self.condition_key = self.ref.batch_key
-        self.queue = None
+        self.queue = {}
+        if self.study_id != "":
+            mask = self.ref.adata.obs[self.condition_key] == self.study_id
+            self.ref.adata = self.ref.adata[mask].copy()
+
+        # if self.dataset_cnt != 0:
+        #     ds_cnt = self.dataset_cnt
+        # else:
+        ds_cnt = self.ref.adata.obs[self.condition_key].nunique()
+        self.ds_ids = range(ds_cnt)
         # print(self.temperature)
         # self.set_experiment_name()
 
@@ -80,7 +89,7 @@ class SwAV(AdoptiveTrainer):
 
         self.build_optimizer()
         self.init_mixed_precision()
-        self.load_checkpoint()
+        # self.load_checkpoint()
 
     def build_data(self):
 
@@ -88,8 +97,7 @@ class SwAV(AdoptiveTrainer):
         # self.train_adata, self.val_adata = train, val
 
         # why nmb_crops is a list? i used fisrt element but not change it in case needed in furure
-        # model = self.scpoli_.model
-        scpoli_encoder = self.model.scpoli_encoder
+        scpoli_encoder = self.model.scpoli_cvae
         common_dataset_kwargs = dict(
             n_augmentations=self.nmb_crops[0],
             augmentation_type=self.train_augmentation,
@@ -111,23 +119,21 @@ class SwAV(AdoptiveTrainer):
             # cell_type_keys=[self.cell_type_key],
             # cell_type_encoder=model.cell_type_encoder,
         )
-        
-        train_ind, val_ind = train_test_split(range(len(self.ref)), test_size=0.1, random_state=42)
-        train, val = self.ref._create_split_instance(train_ind), self.ref._create_split_instance(val_ind)
+
+        train_ind, val_ind = train_test_split(
+            range(len(self.ref)), test_size=0.1, random_state=42
+        )
+        train, val = self.ref._create_split_instance(
+            train_ind
+        ), self.ref._create_split_instance(val_ind)
         self.train_ds = MultiCropsDataset(
-            train,
-            train.original_idx,
-            **common_dataset_kwargs
+            train, train.original_idx, **common_dataset_kwargs
         )
-        self.test_ds = MultiCropsDataset(
-            val,
-            val.original_idx,
-            **common_dataset_kwargs
-        )
-        
+        self.test_ds = MultiCropsDataset(val, val.original_idx, **common_dataset_kwargs)
+
         self.train_loader = self.get_data_laoder(self.train_ds)
         self.test_loader = self.get_data_laoder(self.test_ds)
-        
+
         self.original_train_loader = self.train_loader
         if self.multi_layer_protos == 1:
             self.cell_type_ds = MultiCropsDataset(
@@ -166,9 +172,20 @@ class SwAV(AdoptiveTrainer):
 
     def get_model(self):
         # if self.model_version == 1:
-        # model = SwavBase(self.scpoli_.model, self.latent_dims, self.num_prototypes)
         # return model
         # else:
+        kwargs = {
+            "latent_dim": self.latent_dims,
+            "nmb_prototypes": self.num_prototypes,
+            "adata": self.ref.adata,
+            "multi_layer_proto": self.multi_layer_protos,
+            "np2": self.num_prototypes,
+            "recon_loss": self.recon_loss,
+            "batch_key": self.ref.batch_key,
+            "l2norm": self.l2norm,
+            "assignment_metric": self.assignment_metric,
+        }
+
         if self.decodable_prototypes == 1:
             return SwAVDecodableProto(
                 self.latent_dims,
@@ -177,16 +194,11 @@ class SwAV(AdoptiveTrainer):
                 self.multi_layer_protos,
                 self.num_prototypes,
             )
+
+        elif self.model_type == "gm":
+            return scProtoGMVAE(use_rbf=self.use_rbf, **kwargs)
         else:
-            return SwAVModel(
-                self.latent_dims,
-                self.num_prototypes,
-                self.ref.adata,
-                self.multi_layer_protos,
-                self.num_prototypes,
-                recon_loss=self.recon_loss,
-                batch_key=self.ref.batch_key,
-            )
+            return SwAVModel(**kwargs)
 
     def get_model_path(self):
         return os.path.join(self.get_dump_path(), self.get_checkpoint_file())
@@ -234,10 +246,10 @@ class SwAV(AdoptiveTrainer):
         warmup_lr_schedule = np.linspace(
             self.start_warmup,
             self.base_lr,
-            len(self.original_train_loader) * self.warmup_epochs,
+            len(self.train_loader) * self.warmup_epochs,
         )
         iters = np.arange(
-            len(self.original_train_loader)
+            len(self.train_loader)
             * (self.pretraining_epochs - self.warmup_epochs)
         )
         cosine_lr_schedule = np.array(
@@ -273,15 +285,16 @@ class SwAV(AdoptiveTrainer):
             logger.info("no mixed precision")
 
     def load_checkpoint(self):
-        to_restore = {"epoch": 0}
-        restart_from_checkpoint(
-            os.path.join(self.dump_path, "checkpoint.pth.tar"),
-            run_variables=to_restore,
-            state_dict=self.model,
-            optimizer=self.optimizer,
-            amp=apex.amp,
-        )
-        self.start_epoch = to_restore["epoch"]
+        # to_restore = {"epoch": 0}
+        # restart_from_checkpoint(
+        #     os.path.join(self.dump_path, "checkpoint.pth.tar"),
+        #     run_variables=to_restore,
+        #     state_dict=self.model,
+        #     optimizer=self.optimizer,
+        #     amp=apex.amp,
+        # )
+        # self.start_epoch = to_restore["epoch"]
+        pass
 
     def get_checkpoint_file(self):
         if self.finetuning:
@@ -294,6 +307,7 @@ class SwAV(AdoptiveTrainer):
 
     def save_checkpoint(self, epoch):
         if self.debug or self.wandb_sweep == 1:
+            print('not saving checkpoint', self.debug, self.wandb_sweep)
             return
         save_dict = {
             "epoch": epoch + 1,
@@ -302,9 +316,10 @@ class SwAV(AdoptiveTrainer):
         }
         if self.use_fp16:
             save_dict["amp"] = apex.amp.state_dict()
-
+        
         checkpoint_file = self.get_checkpoint_file()
         torch.save(save_dict, os.path.join(self.dump_path, checkpoint_file))
+        print('model saved at: ', os.path.join(self.dump_path, checkpoint_file))
         if epoch % self.checkpoint_freq == 0 or epoch == self.pretraining_epochs - 1:
             shutil.copyfile(
                 os.path.join(self.dump_path, checkpoint_file),
@@ -325,18 +340,24 @@ class SwAV(AdoptiveTrainer):
         if epochs is None:
             epochs = self.pretraining_epochs
 
-        if self.freeze_batch_embedding:
-            self.freeze_conditional_embeddings()
-        for epoch in range(self.start_epoch, epochs):
+        for epoch in range(epochs):
             logger.info(f"============ Starting epoch {epoch}============")
 
             if (epoch % self.umap_checkpoint_freq == 0) and (self.wandb_sweep == 0):
                 self.plot_umap(self.model, self.original_ref.adata, f"ref-e{epoch}")
-            
+
+            if (
+                self.queue_length > 0
+                and epoch >= self.epoch_queue_starts
+                and len(self.queue) == 0
+            ):
+                for ds_id in self.ds_ids:
+                    self.init_queue(ds_id)
+
             train_meters = self.train_one_epoch(epoch)
             test_meters = self.test_epoch()
-            test_meters = {f'test_{key}': val for key, val in test_meters.items()}
-            
+            test_meters = {f"test_{key}": val for key, val in test_meters.items()}
+
             self.log_wandb_loss(train_meters | test_meters, epoch)
             self.save_checkpoint(epoch)
         return train_meters | test_meters
@@ -409,29 +430,16 @@ class SwAV(AdoptiveTrainer):
 
         return num_matches, entropy / 2, p_avg_entropy.item()
 
-    def freeze_prototypes(self, de_freeze=False):
-        for name, param in self.model.named_parameters():
-            if "prototypes" in name:
-                param.requires_grad = de_freeze
-
-    def freeze_conditional_embeddings(self, de_freeze=False):
-        # Freeze all conditional embeddings
-        for embedding_layer in self.model.scpoli_encoder.embeddings:
-            for param in embedding_layer.parameters():
-                param.requires_grad = de_freeze
-
     def calc_ds_loss(self, inputs, ds_id, meters, bs):
         ds_inputs = {k: inputs[k][ds_id] for k in inputs.keys()}
-        metrics = self._process_batch(ds_inputs)
+        metrics, assign_cnts = self._process_batch(ds_inputs, ds_id)
         # averaged = self._average_metrics(metrics)
         # Update meters
         for key in metrics:
             if key not in meters:
                 meters[key] = AverageMeter()
             value = (
-                metrics[key].item()
-                if hasattr(metrics[key], "item")
-                else metrics[key]
+                metrics[key].item() if hasattr(metrics[key], "item") else metrics[key]
             )
             meters[key].update(value, bs)
 
@@ -439,39 +447,35 @@ class SwAV(AdoptiveTrainer):
             metrics["swav"]
             + metrics["cvae"] * self.cvae_loss_scaler
             + metrics["propagation"] * self.propagation_reg
-            + metrics["similarity"] * self.prot_emb_sim_reg
-            + metrics["p_entropy"] * self.entropy_reg
+            # + metrics["similarity"] * self.prot_emb_sim_reg
         )
         meters["loss"].update(loss.item(), bs)
-        return loss, meters
-    
+        return loss, meters, assign_cnts
+
     def test_epoch(self):
         self.model.eval()
         with torch.no_grad():
             for inputs in self.test_loader:
                 bs = inputs["x"].size(0)
-                ds_ids = range(inputs['x'].size(1))
-                inputs = {k: inputs[k].transpose(0, 1) for k in inputs.keys()} # bring dataset in first to calc loss per dataset
+                # ds_ids = range(inputs['x'].size(1))
+                inputs = {
+                    k: inputs[k].transpose(0, 1) for k in inputs.keys()
+                }  # bring dataset in first to calc loss per dataset
                 meters = {"loss": AverageMeter()}
-                
-                for ds_id in ds_ids:
-                    _, meters = self.calc_ds_loss(inputs, ds_id, meters, bs)
+
+                for ds_id in self.ds_ids:
+                    _, meters, _ = self.calc_ds_loss(inputs, ds_id, meters, bs)
         meters = {k: getattr(v, "avg", v) for k, v in meters.items()}
         return meters
 
         # define test loader
         # pass data, get loss and metrics
         # return the dict
-        
-        
+
     def train_one_epoch(self, epoch):
         self.model.train()
-        self._handle_prototype_freezing(epoch)
-        
-        if self.queue_length > 0 and epoch > self.epoch_queue_starts and self.queue is None:
-            self.use_the_queue = 1
-            self.init_queue()
-        
+        self.use_the_queue = 0
+
         meters = {
             "loss": AverageMeter(),
             "batch_time": AverageMeter(),
@@ -479,38 +483,39 @@ class SwAV(AdoptiveTrainer):
         }
 
         end = time.time()
-        dataset_ids = list(self.train_ds.ds_index_dict.keys())
-        if self.dataset_cnt != 0:
-            dataset_ids = dataset_ids[:self.dataset_cnt]
-        random.shuffle(dataset_ids)
+        ds_assign_cnts = {
+            ds_id: np.zeros(self.nmb_prototypes, dtype=int) for ds_id in self.ds_ids
+        }
 
-        if not self.check_proto_freeze(epoch):
-            self.model.normalize_prototypes()
-        # inputs must have d*b samples, batch examples from each dataset
-        # calculate loss on each b from each dataset
-        # update gradient with respect to all of them
-        
-        for iteration, inputs in enumerate(self.train_loader):
+        for it, inputs in enumerate(self.train_loader):
             meters["data_time"].update(time.time() - end)
-            self.update_learning_rate(epoch, iteration)
-            
+            iteration = epoch * len(self.train_loader) + it
+            self.update_learning_rate(iteration)
+
+            if self.l2norm == 1:
+                with torch.no_grad():
+                    self.model.normalize_prototypes()
+
             bs = inputs["x"].size(0)
-            ds_ids = range(inputs['x'].size(1))
-            inputs = {k: inputs[k].transpose(0, 1) for k in inputs.keys()} # bring dataset in first to calc loss per dataset
-            
+            inputs = {
+                k: inputs[k].transpose(0, 1) for k in inputs.keys()
+            }  # bring dataset in first to calc loss per dataset
+
             self.optimizer.zero_grad()
-            
-            for ds_id in ds_ids:
-                loss, meters = self.calc_ds_loss(inputs, ds_id, meters, bs)
+
+            for ds_id in self.ds_ids:
+                loss, meters, assign_cnts = self.calc_ds_loss(inputs, ds_id, meters, bs)
+                ds_assign_cnts[ds_id] += assign_cnts.cpu().numpy()
                 loss.backward()
-                
+
+            self._handle_prototype_freezing(epoch)
             self.optimizer.step()
-            
+
             meters["batch_time"].update(time.time() - end)
             end = time.time()
-            if iteration % 50 == 0:
+            if it % 50 == 0:
                 logger.info(
-                    f"Epoch: [{epoch}][{iteration}] "
+                    f"Epoch: [{epoch}][{it}] "
                     f"Time {meters['batch_time'].val:.3f} ({meters['batch_time'].avg:.3f}) "
                     f"Data {meters['data_time'].val:.3f} ({meters['data_time'].avg:.3f}) "
                     f"Loss {meters['loss'].val:.4f} ({meters['loss'].avg:.4f}) "
@@ -518,38 +523,27 @@ class SwAV(AdoptiveTrainer):
                 )
 
         meters = {k: getattr(v, "avg", v) for k, v in meters.items()}
+        meters["p_empty_protos_ratio"] = (
+            np.mean(
+                [(ds_assign_cnts[ds_id] == 0).sum().item() for ds_id in ds_assign_cnts]
+            )
+            / self.nmb_prototypes
+        )
+        eps = 1
+        meters["p_ams"] = meters["p_matched"] / (meters["p_empty_protos_ratio"] + eps)
         return meters
 
-    def _split_by_batch(self, inputs):
-        from collections import defaultdict
-
-        batch_labels = inputs[self.ref.batch_key].squeeze(-1).tolist()
-        grouped = defaultdict(list)
-
-        for i, b in enumerate(batch_labels):
-            grouped[b[0] if isinstance(b, list) else b].append(i)
-
-        return [
-            {
-                k: (
-                    v[indices]
-                    if isinstance(v, torch.Tensor)
-                    else [v[i] for i in indices]
-                )
-                for k, v in inputs.items()
-            }
-            for indices in grouped.values()
-        ]
-
-    def _process_batch(self, inputs):
+    def _process_batch(self, inputs, ds_id):
         bs = inputs["x"].size(0)
         inputs = self.move_input_on_device(inputs)
         inputs = reshape_and_reorder_dict(inputs)
         z, _, logits, cvae_loss, (propagation, sim) = self.model(inputs)
-
-        swav_loss, matched_pairs_ratio, q_matched, assignment_metrics = self.compute_swav_loss(
-            logits, z, bs
+        z = z.detach()
+        assign_cnts = get_assign_cnts(logits)
+        swav_loss, matched_pairs_ratio, q_matched, assignment_metrics = (
+            self.compute_swav_loss(logits, z, bs, ds_id)
         )
+
         # entropy = self.peaky_softmax_loss(scores)
         # match, prob_ent, p_ent = self.calculate_pair_matching(scores, bs)
 
@@ -558,13 +552,13 @@ class SwAV(AdoptiveTrainer):
             "cvae": cvae_loss,
             "propagation": propagation,
             "similarity": sim,
-            "matched_pairs_ratio": matched_pairs_ratio,
-            "q_matched": q_matched
+            "p_matched": matched_pairs_ratio,
+            "q_matched": q_matched,
             # "entropy": entropy,
             # "match": match,
             # "prob_ent": prob_ent,
             # "p_ent": p_ent,
-        } | assignment_metrics
+        } | assignment_metrics, assign_cnts
 
     def _average_metrics(self, metric_list):
         n = len(metric_list)
@@ -577,11 +571,15 @@ class SwAV(AdoptiveTrainer):
         return epoch <= self.freeze_prototypes_nepochs
 
     def _handle_prototype_freezing(self, epoch):
-        if self.freeze_prototypes_nepochs > 0:
-            self.freeze_prototypes(de_freeze=(epoch >= self.freeze_prototypes_nepochs))
 
-    def update_learning_rate(self, epoch, iteration):
-        iteration = epoch * len(self.original_train_loader) + iteration
+        for name, p in self.model.named_parameters():
+            if "prototypes" in name:
+                if epoch < self.freeze_prototypes_nepochs:
+                    p.grad = None
+                else:
+                    break
+
+    def update_learning_rate(self, iteration):
         for param_group in self.optimizer.param_groups:
             param_group["lr"] = self.lr_schedule[iteration]
 
@@ -609,52 +607,62 @@ class SwAV(AdoptiveTrainer):
 
         return one_hot_max_tensor(out)
 
-    def compute_swav_loss(self, logits, z, bs):
-        
+    def compute_swav_loss(self, logits, z, bs, ds_id):
+
         loss, assignment_metrics_list, avg_matched_pairs, avg_q_matched = 0, [], 0, 0
 
         # each crop mean each augmentation, just caluclate q and loss for first crops_for_assign
         for view_idx, view_id in enumerate(self.views_for_assign):
+
+            # outputs for 1 batch of data, [aug1s1, a1s2, a1s3, .., a1sb]
+            view_logits = logits[bs * view_id : bs * (view_id + 1)]
             with torch.no_grad():
-                # outputs for 1 batch of data, [aug1s1, a1s2, a1s3, .., a1sb]
-                view_logits = logits[bs * view_id : bs * (view_id + 1)].detach()
-                sinkhorn_input = self.prepare_sinkhorn_input(view_idx, z, view_id, bs, view_logits)
-                
-                # get assignments
-                q = self.distributed_sinkhorn(sinkhorn_input)[-bs:]
+                sinkhorn_input = self.prepare_sinkhorn_input(
+                    view_idx, z, view_id, bs, view_logits, ds_id
+                )
+                q = self.distributed_sinkhorn(sinkhorn_input)
 
-            assignment_metrics_list.append(
-                get_assignment_metrics(q, "q") | get_assignment_metrics(view_logits, "p")
-            )
-
+            assignment_metrics_list.append(get_assignment_metrics(q, "q"))
+            q = q[-bs:]
             # check how consitent q is with other augmentations [cross entropy]
             subloss = 0
             matched_pairs_ratio = 0
             q_matched = 0
             if self.hard_clustering == 1:
                 q = self.hard_clusters(q)
-            for v in np.delete(np.arange(np.sum(self.nmb_crops)), view_id):
+
+            aug_view_ids = np.delete(np.arange(np.sum(self.nmb_crops)), view_id)
+            for v in aug_view_ids:
                 aug_logits = (
                     logits[bs * v : bs * (v + 1)] / self.temperature
                 )  # logits for the v-th crop
-                subloss -= torch.mean(torch.sum(q * F.log_softmax(aug_logits, dim=1), dim=1))
+                subloss -= torch.mean(
+                    torch.sum(q * F.log_softmax(aug_logits, dim=1), dim=1)
+                )
                 matched_pairs_ratio += get_matched_pairs_ratio(view_logits, aug_logits)
                 q_matched += get_matched_pairs_ratio(q, aug_logits)
 
-            loss += subloss / (np.sum(self.nmb_crops) - 1)
-            avg_matched_pairs += matched_pairs_ratio
-            avg_q_matched += q_matched 
-            
+            loss += subloss / len(aug_view_ids)
+            avg_matched_pairs += matched_pairs_ratio / len(aug_view_ids)
+            avg_q_matched += q_matched / len(aug_view_ids)
+
         avg = lambda metrics: {
             k: torch.tensor([m[k] for m in metrics]).float().mean().item()
             for k in metrics[0]
         }
+        avg_assign_metrics = avg(assignment_metrics_list)
+        q_matched = avg_q_matched / len(self.views_for_assign)
+        p_matched = avg_matched_pairs / len(self.views_for_assign)
+        eps = 1
+        avg_assign_metrics["q_ams"] = (
+            q_matched / (avg_assign_metrics["q_empty_protos_ratio"] + eps) * 100
+        )
 
         return (
             loss / len(self.views_for_assign),
-            avg_matched_pairs / len(self.views_for_assign),
-            avg_q_matched /  len(self.views_for_assign),
-            avg(assignment_metrics_list),
+            p_matched,
+            q_matched,
+            avg_assign_metrics,
         )
 
     def peaky_softmax_loss(self, scores):
@@ -801,7 +809,7 @@ class SwAV(AdoptiveTrainer):
             weight_decay=self.wd,
         )
         decoder_optimizer = LARC(
-            optimizer=decoder_optimizer, trust_coefficient=0.001, clip=False
+            optimizer=decoder_optimizer, trust_coefficient=0.001, clip=True
         )
 
         cvae_losses = AverageMeter()
@@ -861,7 +869,7 @@ class SwAV(AdoptiveTrainer):
     def get_proto_adata(self):
         similarity = self.encode_adata(self.ref.adata, self.model, True)
         prot_df = assign_prototype_labels(
-            self.ref.adata, similarity, self.nmb_prototypes
+            self.ref.adata, similarity, self.nmb_prototypes, self.dataset.cell_type_key
         )
         x = self.model.decode_proto(
             recon_loss=self.recon_loss, use_avg_batch_embedding=True
@@ -889,30 +897,37 @@ class SwAV(AdoptiveTrainer):
             p2 = nk_markers(prot_adata)
         return p1, p2
 
-    def init_queue(self):
-        if self.queue_length > 0 and self.queue is None:
-            self.queue = torch.zeros(
-                len(self.views_for_assign),
-                self.queue_length, # // divide by wprld size
-                self.latent_dims,
-            ).cuda()
-            
-    def prepare_sinkhorn_input(self, view_idx, z, view_id, bs, view_logits):
+    def init_queue(self, ds_id):
+
+        self.queue[ds_id] = torch.zeros(
+            len(self.views_for_assign),
+            self.queue_length,  # // divide by wprld size
+            self.latent_dims,
+        ).cuda()
+
+    def prepare_sinkhorn_input(self, view_idx, z, view_id, bs, view_logits, ds_id):
+        output_logits = view_logits.detach()
+
         # time to use the queue
-        if self.queue is not None:
+        if ds_id in self.queue:
             # check if the queue has any real data
-            if self.use_the_queue or not torch.all(self.queue[view_idx, -1, :] == 0):
+            if self.use_the_queue or not torch.all(
+                self.queue[ds_id][view_idx, -1, :] == 0
+            ):
                 self.use_the_queue = 1
                 # 'get prototypes assignment scores for self.queue[i] (which contain some old embeddings)'
-                queue_logits = self.model.proto_cosin_sim_pos(self.queue[view_idx])
+                queue_logits = self.model.proto_soft_assignments(
+                    self.queue[ds_id][view_idx]
+                )
                 output_logits = torch.cat([queue_logits, view_logits])
+
             # fill the queue
-            self.queue[view_idx, bs:] = self.queue[view_idx, :-bs].clone()
-            self.queue[view_idx, :bs] = z[view_id * bs: (view_id + 1) * bs]
-            return output_logits
-        else:
-            return view_logits
-        
+            self.queue[ds_id][view_idx, bs:] = self.queue[ds_id][view_idx, :-bs].clone()
+            self.queue[ds_id][view_idx, :bs] = z[view_id * bs : (view_id + 1) * bs]
+
+        return output_logits
+
+
 if __name__ == "__main__":
     swav = SwAV()
     swav.setup()
@@ -923,4 +938,3 @@ if __name__ == "__main__":
 # Example usage
 # To run with command line arguments:
 # python script.py --dataset some_dataset --dump_name_version 4 --nmb_crops 10 12 --augmentation_type knn --epochs 500
-

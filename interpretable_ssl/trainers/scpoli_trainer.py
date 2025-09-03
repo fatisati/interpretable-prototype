@@ -126,8 +126,8 @@ class ScpoliTrainer(Trainer):
 
     def get_scpoli(self, pretrained_model, return_model=True):
         if return_model:
-            return pretrained_model.scpoli_encoder
-        return pretrained_model.scpoli_
+            return pretrained_model.scpoli_cvae
+        return pretrained_model.scpoli_wrapper
 
     def encode_ref(self, model=None):
         return self.encode_adata(self.ref.adata, model)
@@ -186,7 +186,7 @@ class ScpoliTrainer(Trainer):
             # prototype_assignments = self.encode_adata(adata, model, True, False)
             prototype_assignments = model.prototypes(latent).detach().cpu().numpy()
             proto_df = assign_prototype_labels(
-                adata, prototype_assignments, self.num_prototypes
+                adata, prototype_assignments, self.num_prototypes, self.dataset.cell_type_key
             )
             proto_labels = proto_df.prototype_label
         else:

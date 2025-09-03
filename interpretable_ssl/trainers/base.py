@@ -59,8 +59,8 @@ class TrainerBase:
         if self.wandb_sweep == 1:
             return
         self.dump_path = self.get_dump_path()
-        if not os.path.exists(self.dump_path):
-            os.makedirs(self.dump_path)
+        # if not os.path.exists(self.dump_path):
+        os.makedirs(self.dump_path, exist_ok=True)
 
     def create_temp_res_path(self):
         if self.wandb_sweep == 1:
@@ -203,7 +203,7 @@ class TrainerBase:
         keys_to_check = [
             "dimensionality_reduction",
             "k_neighbors",
-            "freeze_prototypes_niters",
+            "freeze_prototypes_nepochs",
             "temperature",
             "epsilon",
             "prot_init",

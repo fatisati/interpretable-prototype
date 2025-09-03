@@ -22,7 +22,7 @@ class CvaeTrainer(ScpoliTrainer):
             print({"cvae": cvae, "propagation": propagation})
             
     def build_data(self, adata):
-        return self.prepare_scpoli_dataloader(adata, self.model.scpoli_encoder)
+        return self.prepare_scpoli_dataloader(adata, self.model.scpoli_cvae)
 
     def build_optimizer(self, lr=1e-3, eps=0.01):
         params_embedding = []

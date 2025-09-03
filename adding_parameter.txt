@@ -1,4 +1,4 @@
-add to deafults
+add to configs/deafults
 add to constats
 add to sbatch template
 they will pss to trainer, use it in trainer (pass to any sub object if needed)
