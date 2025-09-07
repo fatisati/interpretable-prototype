@@ -10,6 +10,10 @@ import scvi
 import scanpy as sc
 import scanpy.external as sce
 
+from interpretable_ssl.trainers.scpoli_original import *
+from interpretable_ssl.trainers.swav import *
+
+
 res_dir = "/home/icb/fatemehs.hashemig/models/"
 # use this code to calculate scib and scgraph metrics for models [scProto, scPoli, scVI, pca, pca+harmoney, seacell]
 
@@ -56,17 +60,23 @@ def save_metrics(adata, emb_keys, dataset, bk, lk):
     return scib_m, scgraph_m
 
 
+def add_trainer_emb(t, adata):
+    if t.model is None:
+        t.setup()
+    model = t.load_model()
+    # adata = t.dataset.adata
+    adata.obsm[t.get_model_name()] = t.encode_adata(adata, model).detach().cpu().numpy()
+    return adata
+
+
 # used to be save_metrics
 def save_trainer_metrics(t, dataset, append=True):
-    model = t.load_model()
-    adata = t.dataset.adata
-    adata.obsm[t.get_model_name()] = t.encode_adata(adata, model).detach().cpu().numpy()
-    sc.tl.pca(adata)
+    adata = add_trainer_emb(t)
     bk, lk = t.dataset.batch_key, t.dataset.cell_type_key
     return save_metrics(adata, [t.get_model_name()], dataset, bk, lk, append)
 
 
-def get_scvi_metrics(adata, query_stu, bk, lk, dataset):
+def add_scvi_emb(adata, query_stu, bk):
     ref = adata[~adata.obs[bk].isin(query_stu)].copy()
 
     # 1) Setup AnnData for scVI
@@ -81,11 +91,15 @@ def get_scvi_metrics(adata, query_stu, bk, lk, dataset):
     query_model = scvi.model.SCVI.load_query_data(adata, model)
     query_model.train(1)
     adata.obsm["X_scvi"] = query_model.get_latent_representation(adata)
+    return adata
 
+
+def get_scvi_metrics(adata, query_stu, bk, lk, dataset):
+    adata = add_scvi_emb(adata, query_stu, bk)
     return save_metrics(adata, ["X_scvi"], dataset, bk, lk)
 
 
-def save_pca_harmoney_metrics(adata, bk, lk, dataset, pca_key="X_pca"):
+def add_pca_harmoney(adata, bk, pca_key):
     sc.tl.pca(adata)
     if pca_key != "X_pca":
         adata.obsm[pca_key] = adata.obsm["X_pca"].copy()
@@ -97,6 +111,11 @@ def save_pca_harmoney_metrics(adata, bk, lk, dataset, pca_key="X_pca"):
         basis=pca_key,  # which embedding to correct
         adjusted_basis=f"{pca_key}_harmoney",  # where to store corrected PCs
     )
+    return adata
+
+
+def save_pca_harmoney_metrics(adata, bk, lk, dataset, pca_key="X_pca"):
+    adata = add_pca_harmoney(adata, bk, pca_key)
     return save_metrics(adata, [pca_key, f"{pca_key}_harmoney"], dataset, bk, lk)
 
 
@@ -119,3 +138,20 @@ def get_seacell_metrics(SEACell_ad, adata, bk, lk, ds):
     SEACell_ad = agg_obs(SEACell_ad, adata, lk)
 
     return save_pca_harmoney_metrics(SEACell_ad, bk, lk, ds, "seacell_pca")
+
+
+def calc_adata_metrics(scpoli_params, scproto_params, dataset, ds_conf):
+    adata = sc.read_h5ad(ds_conf["path"])
+    t1 = OriginalTrainer(debug=1, **scpoli_params)
+    t2 = SwAV(debug=1, **scproto_params)
+    for t in [t1, t2]:
+        add_trainer_emb(t, adata)
+    add_scvi_emb(adata, ds_conf["test_studies"], ds_conf["batch_key"])
+    add_pca_harmoney(adata, ds_conf["batch_key"], "X_pca")
+    return save_metrics(
+        adata,
+        [t.get_model_name() for t in [t1, t2]] + ["X_pca", "X_pca_harmoney", "X_scvi"],
+        dataset,
+        ds_conf["batch_key"],
+        ds_conf["label_key"],
+    )
