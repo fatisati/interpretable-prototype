@@ -29,6 +29,7 @@ class TrainerBase:
         self.params = self.__dict__.copy()
         self.create_dump_path()
         self.create_temp_res_path()
+        
         # if self.training_type != "semi_supervised" and self.training_type != "fully_supervised":
         #     self.pretraining_epochs += self.fine_tuning_epochs
 

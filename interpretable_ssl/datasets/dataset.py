@@ -15,25 +15,29 @@ class SingleCellDataset(Dataset):
     def __init__(
         self,
         name,
+        path=None,
+        test_studies=None,
         adata=None,
         label_encoder_path=None,
-        original_idx=None,
         fold=0,
         test_study_cnt=2,
-        batch_key = 'study',
-        cell_type_key = 'cell_type'
+        batch_key=None,
+        label_key="cell_type",
     ):
         # self.device = utils.get_device()
         self.name = name
         self.batch_key = batch_key
+        self.label_key = label_key
+        self.path = path
+        self.test_studies = test_studies
         if adata is None:
             self.adata = self.read_adata()
         else:
             self.adata = adata
         self.label_encoder_path = label_encoder_path
         self.le = self.load_label_encoder()
-        self.cell_type_key = cell_type_key
-        self.num_classes = len(set(self.adata.obs[self.cell_type_key].cat.categories))
+
+        self.num_classes = len(set(self.adata.obs[self.label_key].cat.categories))
         self.x_dim = self.adata[0].X.shape[1]
 
         # Store the initialization arguments
@@ -43,26 +47,38 @@ class SingleCellDataset(Dataset):
             "label_encoder_path": label_encoder_path,
         }
 
-        self.original_idx = original_idx
-        if self.original_idx is None:
-            self.original_idx = list(range(len(self.adata)))
         self.fold = fold
         self.study_list = None
         self.test_study_cnt = test_study_cnt
-        
 
     def __str__(self) -> str:
         return self.name
 
-    def get_data_path(self):
-        pass
+    def requires_hvg(self):
+        if "highly_variable" in self.adata.var.columns:
+            n_hvg = self.adata.var["highly_variable"].sum()
+            if n_hvg == self.adata.n_vars:
+                print(f"✅ Already subsetted to HVGs ({n_hvg} genes).")
+                return False
+            else:
+                print(
+                    f"ℹ️ Found {n_hvg} HVGs out of {self.adata.n_vars} total genes."
+                )
+                return True
+        else:
+            print("⚠️ No HVG column found. Run sc.pp.highly_variable_genes first.")
+            return False
 
     def read_adata(self):
-        data_path = self.get_data_path()
         print(f"loading {str(self)} data")
-        data = sc.read_h5ad(data_path)
+        self.adata = sc.read_h5ad(self.path)
         print("done")
-        return data
+
+        # check if hvg not applied apply it
+        if self.requires_hvg():
+            self.adata = self.adata[:, self.adata.var["highly_variable"].values].copy()
+
+        return self.adata
 
     def load_label_encoder(self):
         if os.path.exists(self.label_encoder_path):
@@ -78,16 +94,12 @@ class SingleCellDataset(Dataset):
         y = self.get_y(idx).squeeze(0)
         return x, y
 
-    def get_unique_studies(self):
-        unique_studies = self.adata.obs.study.unique()
-        return unique_studies
-
     def get_x(self, i):
         x = self.adata[i].X.toarray()
         return torch.tensor(x)
 
     def get_y(self, i):
-        y = self.le.transform(self.adata[i].obs[self.cell_type_key])
+        y = self.le.transform(self.adata[i].obs[self.label_key])
         return torch.tensor(y)
 
     def split(self, test_size=0.2, random_state=None):
@@ -100,40 +112,36 @@ class SingleCellDataset(Dataset):
             self._create_split_instance(test_idx),
         )
 
+    def get_init_args(self):
+        sig = inspect.signature(self.__init__)
+        return {p: getattr(self, p) for p in sig.parameters if p != "self"}
+
     def _create_split_instance(self, indices):
         """Create a new instance of the current class with the given indices of adata."""
         # adata_split = self.adata[indices].copy()
         adata_split = self.adata[indices]
 
         # Get the signature of the __init__ method of the current class
-        init_signature = inspect.signature(self.__class__.__init__)
+        init_dict = self.get_init_args()
 
-        # Filter the init_args to include only those that are accepted by the __init__ method
-        filtered_args = {
-            key: value
-            for key, value in self.init_args.items()
-            if key in init_signature.parameters
-        }
+        init_dict["adata"] = adata_split
+        return self.__class__(**init_dict)
 
-        # Update the adata in the arguments
-        filtered_args["adata"] = adata_split
-        filtered_args["original_idx"] = indices
-        return self.__class__(**filtered_args)
-
-    @log_time("get train test")
+    # @log_time("get train test")
     def get_train_test(self):
-        test_studies = self.get_test_studies()
+        if self.batch_key is None:
+            print("batch key is None, assuming 1 batch dataset")
+            return self, None
+        test_studies = self.get_fold_test_studies()
         test_idx = self.adata.obs[self.batch_key].isin(test_studies)
         return self._create_split_instance(~test_idx), self._create_split_instance(
             test_idx
         )
 
-    def get_default_studies(self):
-        pass
-
     def set_study_list(self):
+
         # Get unique values
-        unique_studies = list(self.adata.obs.study.unique())
+        unique_studies = list(self.adata.obs[self.batch_key].unique())
 
         # Generate all possible combinations of selecting 2
         combinations = list(itertools.combinations(unique_studies, self.test_study_cnt))
@@ -141,15 +149,15 @@ class SingleCellDataset(Dataset):
         # Convert to a list of lists
         combinations = [list(combo) for combo in combinations]
         # Define the target pair
-        target_pair = self.get_default_studies()
+        target_pair = self.test_studies
 
         # Sort the list to place target_pair at index 0
         combinations.sort(key=lambda x: x != target_pair)
         return combinations
 
-    def get_test_studies(self):
+    def get_fold_test_studies(self):
         if self.fold == 0:
-            return self.get_default_studies()
+            return self.test_studies
         if self.study_list is None:
             self.study_list = self.set_study_list()
         if self.fold > len(self.study_list):

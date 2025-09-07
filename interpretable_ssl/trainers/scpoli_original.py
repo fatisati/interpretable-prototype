@@ -31,7 +31,7 @@ class OriginalTrainer(AdoptiveTrainer):
         if self.training_type == "pretrain":
             cell_type_key = None
         else:
-            cell_type_key = self.dataset.cell_type_key
+            cell_type_key = self.dataset.label_key
         condition_key = self.dataset.batch_key
 
         return scPoli(

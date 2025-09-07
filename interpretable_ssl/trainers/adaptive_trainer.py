@@ -18,6 +18,7 @@ class AdoptiveTrainer(ScpoliTrainer):
         self.partial_ref = None
         self.finetuning = False
         self.transfer_learning_mode = False
+        
 
     # split train dataset
     # pretrain model

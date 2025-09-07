@@ -9,7 +9,6 @@ import logging
 import random
 
 from torch.utils.data import get_worker_info
-from interpretable_ssl.augmenters.graph_handler import GraphHandler
 import scipy.sparse as sp
 import faiss
 import os
@@ -30,7 +29,6 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
     def __init__(
         self,
         sc_ds,
-        original_indicies,
         n_augmentations,
         augmentation_type="cell_type",
         k_neighbors=10,  # seacell use 50
@@ -80,7 +78,6 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         self.n_components = n_components
         self.knn_graph = None
 
-        self.graph_handler = GraphHandler(original_indicies)
         self.supervised_ratio = supervised_ratio
         self.use_bknn = use_bknn
         self.knn_similarity = knn_similarity

@@ -1,17 +1,12 @@
 import os
 import wandb
 from interpretable_ssl.utils import get_device
-from interpretable_ssl.datasets.immune import ImmuneDataset
-from interpretable_ssl.datasets.hlca import HLCADataset
 from interpretable_ssl.trainers.base import TrainerBase
-from interpretable_ssl.datasets.pancreas import PancreasDataset
-from interpretable_ssl.datasets.mouse_organoid import MouseDataset
-
-from interpretable_ssl.datasets.merfish import MerfishDataset
-from interpretable_ssl.datasets.cd34 import CD34Dataset
 
 from interpretable_ssl.utils import log_time
 
+from interpretable_ssl.datasets.dataset import SingleCellDataset
+from interpretable_ssl.datasets.dataset_configs import DATASETS
 class Trainer(TrainerBase):
     # @log_time('trainer')
     def __init__(self, debug=False, dataset=None, ref_query=None, **kwargs) -> None:
@@ -35,27 +30,14 @@ class Trainer(TrainerBase):
         if (not self.debug) and (self.wandb_sweep != 1):
             self.set_job_name()
             # self.init_wandb()
-
+        self.condition_key = self.ref.batch_key
+        
     def get_model(self):
         pass
 
     def get_dataset(self, dataset_id):
-
-        if dataset_id == "pbmc-immune":
-            return ImmuneDataset(fold=self.fold)
-        if dataset_id == "hlca":
-            return HLCADataset(fold=self.fold)
-        elif dataset_id == "pancreas":
-            return PancreasDataset(fold=self.fold)
-        elif dataset_id == "mouse_org":
-            return MouseDataset()
-        elif dataset_id == "merfish":
-            return MerfishDataset()
-        elif dataset_id == 'cd34':
-            return CD34Dataset()
-        else:
-            print("dataset not implemented")
-            return None
+        ds_params = DATASETS[dataset_id]
+        return SingleCellDataset(name = dataset_id, **ds_params)
 
     def set_job_name(self, path=None):
         if path is None:

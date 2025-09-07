@@ -187,7 +187,7 @@ class ScpoliTrainer(Trainer):
             # prototype_assignments = self.encode_adata(adata, model, True, False)
             prototype_assignments = model.prototypes(latent).detach().cpu().numpy()
             proto_df = assign_prototype_labels(
-                adata, prototype_assignments, self.num_prototypes, cell_type_column = self.dataset.cell_type_key
+                adata, prototype_assignments, self.num_prototypes, cell_type_column = self.dataset.label_key
             )
             proto_labels = proto_df.prototype_label
         else:
@@ -195,7 +195,7 @@ class ScpoliTrainer(Trainer):
         return plot_3umaps(
             latent_umap,
             prototype_umap,
-            obs[self.dataset.cell_type_key],
+            obs[self.dataset.label_key],
             obs[self.ref.batch_key],
             proto_labels,
             save_plot,

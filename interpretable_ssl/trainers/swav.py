@@ -60,7 +60,7 @@ class SwAV(AdoptiveTrainer):
         self.use_projector_out = False
         # would be defferent when trying to finetune, keep original aug type for model path
         self.train_augmentation = self.augmentation_type
-        self.condition_key = self.ref.batch_key
+        # self.condition_key = self.ref.batch_key
         self.queue = {}
         if self.study_id != "":
             mask = self.ref.adata.obs[self.condition_key] == self.study_id
@@ -127,9 +127,9 @@ class SwAV(AdoptiveTrainer):
             train_ind
         ), self.ref._create_split_instance(val_ind)
         self.train_ds = MultiCropsDataset(
-            train, train.original_idx, **common_dataset_kwargs
+            train, **common_dataset_kwargs
         )
-        self.test_ds = MultiCropsDataset(val, val.original_idx, **common_dataset_kwargs)
+        self.test_ds = MultiCropsDataset(val, **common_dataset_kwargs)
 
         self.train_loader = self.get_data_laoder(self.train_ds)
         self.test_loader = self.get_data_laoder(self.test_ds)
@@ -138,7 +138,6 @@ class SwAV(AdoptiveTrainer):
         if self.multi_layer_protos == 1:
             self.cell_type_ds = MultiCropsDataset(
                 self.ref,
-                self.ref.original_idx,
                 self.nmb_crops[0],
                 "cell_type",
                 k_neighbors=self.k_neighbors,
@@ -860,7 +859,7 @@ class SwAV(AdoptiveTrainer):
     def get_proto_adata(self):
         similarity = self.encode_adata(self.ref.adata, self.model, True)
         prot_df = assign_prototype_labels(
-            self.ref.adata, similarity, self.nmb_prototypes, cell_type_column = self.dataset.cell_type_key
+            self.ref.adata, similarity, self.nmb_prototypes, cell_type_column = self.dataset.label_key
         )
         x = self.model.decode_proto(
             recon_loss=self.recon_loss, use_avg_batch_embedding=True
