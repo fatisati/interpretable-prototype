@@ -66,7 +66,7 @@ class OriginalTrainer(AdoptiveTrainer):
         model.model.load_state_dict(torch.load(path)["model_state_dict"])
         return model
 
-    def adapt_ref_model(self, ref_model, adata, retrain_epochs=0):
+    def adapt_model(self, ref_model, adata, retrain_epochs=0):
         query_model = self.get_model()
         query_model.model.load_state_dict(ref_model.model.state_dict())
         scpoli_query = scPoli.load_query_data(
@@ -80,15 +80,15 @@ class OriginalTrainer(AdoptiveTrainer):
         return scpoli_query
 
     def encode_batch(self, model, batch, return_maped=False, return_mapped_idx=None):
-        batch = self.move_input_on_device(batch)
-        scpoli_model = self.get_scpoli_model(model)
+        batch = self.dict_to_device(batch)
+        scpoli_model = self.extract_scpoli(model)
         scpoli_model.to(self.device)
         scpoli_model.eval()
         with torch.no_grad():
             x, _, _, _ = scpoli_model(**batch)
         return x
 
-    def get_scpoli_model(self, pretrained_model, return_model=True):
+    def extract_scpoli(self, pretrained_model, return_model=True):
         if return_model:
             return pretrained_model.model
         return pretrained_model

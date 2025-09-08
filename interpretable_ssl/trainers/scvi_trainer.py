@@ -28,11 +28,6 @@ class ScviTrainer(Trainer):
         model.train(epochs)
         self.save_model(model)
 
-    def get_model_name(self):
-        name = f"scvi-latent_dim{self.latent_dims}"
-        name = self.append_batch(name)
-        return name
-
     def get_model_path(self):
         path = super().get_model_path()
         name, _ = os.path.splitext(path)

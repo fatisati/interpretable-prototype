@@ -10,8 +10,8 @@ os.environ["TMPDIR"] = os.path.expanduser("~/tmp")
 
 def get_trainer(model, parser):
     if model == "swav":
-        from interpretable_ssl.trainers.swav import SwAV
-        return SwAV(parser = parser)
+        from interpretable_ssl.trainers.scproto import SCProtoTrainer
+        return SCProtoTrainer(parser = parser)
     elif model == "scpoli":
         from interpretable_ssl.trainers.scpoli_original import OriginalTrainer
         return OriginalTrainer(parser = parser)

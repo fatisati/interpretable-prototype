@@ -77,64 +77,25 @@ class TrainerBase:
             return
         self.experiment_name = f"swav"
 
-    def set_old_experiment_name(self):
-        if self.dump_name_version < 4:
-            return
-        if self.prot_decoding_loss_scaler == 0 and self.cvae_loss_scaler == 0:
-            self.experiment_name = "swav-only"
-        elif self.prot_decoding_loss_scaler > 0 and self.cvae_loss_scaler == 0:
-            self.experiment_name = "swav-interpretable"
-        elif self.prot_decoding_loss_scaler > 0 and self.cvae_loss_scaler > 0:
-            self.experiment_name = "swav-all-loss"
-        else:
-            # Optionally handle any other case, or set a default value
-            self.experiment_name = "swav"
-        self.experiment_name = f"{self.experiment_name }_iloss{self.prot_decoding_loss_scaler}_closs{self.cvae_loss_scaler}"
-
     def generate_name_based_on_changes(self):
         return generate_model_name(get_defaults().copy(), self.params)
 
     def get_model_name(self):
         return self.generate_name_based_on_changes()
 
-    def append_batch(self, base):
-        if self.is_swav == 1 and (self.batch_size == self.default_values["batch_size"]):
-            return base
-        else:
-            return f"{base}-bs{self.batch_size}"
-
     def get_save_dir(self):
         if self.training_type == "transfer_learning":
             return f"{MODEL_DIR}/{self.pretrain_dataset_id}_{self.finetune_dataset_id}/"
         return f"{MODEL_DIR}/{self.dataset_id}/"
 
-    def get_swav_dump_path(self):
-        dump_path = self.get_general_dump_path()
-
-        if self.dump_name_version != 1 and self.dump_name_version < 4:
-            dump_path = f"{dump_path}_aug{self.nmb_crops[0]}_latent{self.latent_dims}"
-
-        if self.dump_name_version > 2 and self.dump_name_version < 4:
-            dump_path = f"{dump_path}_aug-type-{self.augmentation_type}"
-
-        if self.dump_name_version > 3:
-            dump_path = f"{dump_path}_aug-{self.augmentation_type}{self.nmb_crops[0]}"
-            dump_path = self.add_additional_parameters(dump_path)
-
-        return dump_path
-
     def get_temp_res_path(self):
         return f"{self.temp_res_path}/{self.get_model_name()}/"
 
-    def get_general_dump_path(self):
+    def get_dump_path(self):
         name = self.get_model_name()
         save_dir = self.get_save_dir()
         Path(save_dir).mkdir(parents=True, exist_ok=True)
         return f"{save_dir}{name}"
-
-    def get_dump_path(self):
-        
-        return self.get_general_dump_path()
 
     def get_model_path(self):
         return self.get_dump_path() + ".pth"
@@ -148,60 +109,7 @@ class TrainerBase:
             return ABBREVIATIONS[key]
         return key
 
-    def add_additional_parameters(self, dump_path):
-        """
-        Modify the dump_path based on specific attributes and a list of keys
-        if their current values differ from the default values.
-
-        Parameters
-        ----------
-        dump_path : str
-            The base path to modify.
-        keys_to_check : list or None
-            List of keys to check against their default values. If None, no additional keys are checked.
-
-        Returns
-        -------
-        str
-            The modified dump_path with additional parameters included if their values differ from the default.
-        """
-        # Preserve current functionality
-        dump_path = f"{dump_path}_ep{self.epsilon}"
-        if self.use_projector:
-            dump_path = (
-                f"{dump_path}_use-projector_hmlp{self.hidden_mlp}_sdim{self.swav_dim}"
-            )
-        if self.default_values["model_version"] != self.model_version:
-            dump_path = f"{dump_path}_model-v{self.model_version}"
-        if self.default_values["longest_path"] != self.longest_path:
-            dump_path = f"{dump_path}_lp{self.longest_path}"
-
-        keys_to_check = [
-            "dimensionality_reduction",
-            "k_neighbors",
-            "freeze_prototypes_nepochs",
-            "temperature",
-            "epsilon",
-            "prot_init",
-            "propagation_reg",
-            "prot_emb_sim_reg",
-            "loss_type",
-        ]
-        # Check additional keys, if provided
-        if keys_to_check:
-            for key in keys_to_check:
-                if key in self.default_values:
-                    current_value = getattr(self, key, None)
-                    default_value = self.default_values[key]
-                    if current_value != default_value:
-                        dump_path = (
-                            f"{dump_path}_{self.get_abbreviation(key)}-{current_value}"
-                        )
-
-        return dump_path
-
-    def prepare_scpoli_dataloader(self, adata, scpoli_model, shuffle=True):
-
+    def prepare_scpoli_dataloader(self, adata, scpoli_cvae, shuffle=True):
         if "condition_combined" not in adata.obs:
             adata.obs["conditions_combined"] = adata.obs[[self.condition_key]].apply(
                 lambda x: "_".join(x), axis=1
@@ -209,10 +117,8 @@ class TrainerBase:
         dataset = MultiConditionAnnotatedDataset(
             adata,
             condition_keys=[self.condition_key],
-            # cell_type_keys=[self.cell_type_key],
-            condition_encoders=scpoli_model.condition_encoders,
-            conditions_combined_encoder=scpoli_model.conditions_combined_encoder,
-            # cell_type_encoder=scpoli_model.cell_type_encoder,
+            condition_encoders=scpoli_cvae.condition_encoders,
+            conditions_combined_encoder=scpoli_cvae.conditions_combined_encoder,
         )
 
         loader = DataLoader(

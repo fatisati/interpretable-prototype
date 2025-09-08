@@ -79,56 +79,58 @@ class ScpoliTrainer(Trainer):
         if adata is None:
             adata = self.query.adata
         model = self.load_model()
-        model = self.prepare_model(model, adata)
+        model = self.adapt_model(model, adata)
         model.to(self.device)
         return model
 
-    def adapt_ref_model(self, ref_model, adata, retrain_epochs=0):
-        query_model = self.get_model()  # Create an uninitialized model of the same type
-        # qshape = self.get_scpoli(query_model).embeddings[0].weight.shape[0]
-        # ref_shape = self.get_scpoli(ref_model).embeddings[0].weight.shape[0]
-        # print(f'query model: {qshape}, ref shape: {ref_shape}')
-        query_model.load_state_dict(ref_model.state_dict())
-        scpoli_query = scPoli.load_query_data(
+    def adapt_model(self, model, adata, retrain_epochs=0):
+        if self.check_conditions_compatible(model, adata):
+            return model
+
+        adapted_model = self.get_model()
+        # because our model is not just an scpoli_cvae
+        adapted_model.load_state_dict(model.state_dict())
+        scpoli_wrapper = scPoli.load_query_data(
             adata=adata,
-            reference_model=self.get_scpoli_model(query_model, False),
+            reference_model=self.extract_scpoli(adapted_model, True),
             labeled_indices=[],
         )
         if retrain_epochs > 0:
-            scpoli_query.train(n_epochs=retrain_epochs, 
-                              pretraining_epochs=retrain_epochs)
-            
-        query_model.set_scpoli_encoder(scpoli_query)
-        query_model.to(self.device)
-        return query_model
+            scpoli_wrapper.train(
+                n_epochs=retrain_epochs, pretraining_epochs=retrain_epochs
+            )
 
-    def move_input_on_device(self, inputs):
-        for key in inputs:
-            inputs[key] = inputs[key].to(self.device)
-        return inputs
+        adapted_model.attach_scpoli(scpoli_wrapper)
+        adapted_model.to(self.device)
+        return adapted_model
+
+    def dict_to_device(self, inputs_dict):
+        for key in inputs_dict:
+            inputs_dict[key] = inputs_dict[key].to(self.device)
+        return inputs_dict
 
     # TODO: return mapped and mapped_idx should have cleaner logic
-    def encode_batch(self, model, batch, return_maped=False, return_mapped_idx=True):
-        batch = self.move_input_on_device(batch)
+    def encode_batch(self, model, batch, return_mapped=False, return_mapped_idx=False):
+
+        batch = self.dict_to_device(batch)
         model.eval()
+
         with torch.no_grad():
             encoder_out, x, x_mapped = model.encode(batch)
-        # if self.use_projector_out:
-        #     return x
-        # else:
-        if return_maped:
-            if return_mapped_idx:
-                return torch.argmax(x_mapped, dim=1)
-            else:
-                return x_mapped
 
-            # return x_mapped
-        return encoder_out
+        if return_mapped_idx:
+            return torch.argmax(x_mapped, dim=1)
 
-    def get_scpoli_model(self, pretrained_model, return_model=True):
-        if return_model:
-            return pretrained_model.scpoli_cvae
-        return pretrained_model.scpoli_wrapper
+        elif return_mapped:
+            return x_mapped
+
+        else:
+            return encoder_out
+
+    def extract_scpoli(self, pretrained_model, return_wrapper=False):
+        if return_wrapper:
+            return pretrained_model.scpoli_wrapper
+        return pretrained_model.scpoli_cvae
 
     def encode_ref(self, model=None):
         return self.encode_adata(self.ref.adata, model)
@@ -137,32 +139,31 @@ class ScpoliTrainer(Trainer):
         if ref_model is None:
             model = self.load_query_model()
         else:
-            model = self.prepare_model(ref_model, self.query.adata)
+            model = self.adapt_model(ref_model, self.query.adata)
         return self.encode_adata(self.query.adata, model)
 
-    def is_ref(self, model, adata):
-        for key, values in self.get_scpoli_model(model, return_model=False).conditions_.items():
+    def check_conditions_compatible(self, model, adata):
+        for key, values in self.extract_scpoli(
+            model, return_wrapper=True
+        ).conditions_.items():
             data_values = adata.obs[key].unique()
             is_subset = set(data_values).issubset(values)
             if not is_subset:
                 return False
         return True
-    
-    def prepare_model(self, model = None, adata=None, retrain_epochs = 0):
-        if model is None:
-            model = self.load_model()
-        if self.is_ref(model, adata):
-            return model
-        model = self.adapt_ref_model(model, adata, retrain_epochs)
-        return model
-        
+
     def encode_adata(
-        self, adata, model=None, return_mapped=False, return_mapped_idx=True, retrain_epochs=0
+        self,
+        adata,
+        model=None,
+        return_mapped=False,
+        return_mapped_idx=True,
+        retrain_epochs=0,
     ):
-        model = self.prepare_model(model, adata, retrain_epochs)
-            
+        model = self.adapt_model(model, adata, retrain_epochs)
+
         loader = self.prepare_scpoli_dataloader(
-            adata, self.get_scpoli_model(model), shuffle=False
+            adata, self.extract_scpoli(model), shuffle=False
         )
         embeddings = [
             self.encode_batch(model, batch, return_mapped, return_mapped_idx)
@@ -187,7 +188,10 @@ class ScpoliTrainer(Trainer):
             # prototype_assignments = self.encode_adata(adata, model, True, False)
             prototype_assignments = model.prototypes(latent).detach().cpu().numpy()
             proto_df = assign_prototype_labels(
-                adata, prototype_assignments, self.num_prototypes, cell_type_column = self.dataset.label_key
+                adata,
+                prototype_assignments,
+                self.num_prototypes,
+                cell_type_column=self.dataset.label_key,
             )
             proto_labels = proto_df.prototype_label
         else:
@@ -216,18 +220,7 @@ class ScpoliTrainer(Trainer):
         model = self.load_query_model()
         return self.plot_umap(model, self.query.adata, "query", save_plot)
 
-    def additional_plots(self):
-        pass
-
-    def calculate_other_metrics(self):
-        return {}, {}
-
     def calc_scib(self, adata, name, other={}, save=True, is_ref=False):
-        # if not is_ref:
-        #     model = self.adapt_ref_model(self.model, adata)
-        # else:
-        #     model = self.model
-        
         latent = self.encode_adata(adata, self.model)
         res_df = MetricCalculator(
             adata,
@@ -238,10 +231,7 @@ class ScpoliTrainer(Trainer):
         return res_df
 
     def save_metrics(self, save=True, calc_others=True):
-        if calc_others:
-            ref_other, query_other = self.calculate_other_metrics()
-        else:
-            ref_other, query_other = {}, {}
+        ref_other, query_other = {}, {}
         ref_df = self.calc_scib(self.ref.adata, "ref", ref_other, save, is_ref=True)
         query_df = self.calc_scib(self.query.adata, "query", query_other, save)
         all_df = self.calc_scib(self.dataset.adata, "all", {}, save)
@@ -258,7 +248,3 @@ class ScpoliTrainer(Trainer):
             )
 
         return get_metrics(ref_df), get_metrics(query_df), get_metrics(all_df)
-
-        # calculate_scib_metrics_using_benchmarker(
-        #     self.query.adata, query_latent, self.get_scib_file_path('query')
-        # )

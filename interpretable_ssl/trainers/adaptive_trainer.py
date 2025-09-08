@@ -3,6 +3,7 @@ from torch.utils.data import random_split
 from logging import getLogger
 from interpretable_ssl.utils import log_time
 from interpretable_ssl.trainers.cvae_trainer import CvaeTrainer
+
 logger = getLogger()
 
 
@@ -18,13 +19,6 @@ class AdoptiveTrainer(ScpoliTrainer):
         self.partial_ref = None
         self.finetuning = False
         self.transfer_learning_mode = False
-        
-
-    # split train dataset
-    # pretrain model
-    # finetune on small portion of the model
-    def tune_nmb_crops(self, adata_list):
-        pass
 
     def split_train_data(self, finetune_size=0.1):
         self.partial_ref, self.finetune_ds = self.original_ref.split(finetune_size)
@@ -38,14 +32,6 @@ class AdoptiveTrainer(ScpoliTrainer):
         self.ref = self.partial_ref
         self.setup()
         self.train()
-        self.finetuning = True
-        self.ref = self.finetune_ds
-        self.finetune()
-
-        # keep finetuning true for scib evaluation on the run
-
-    def train_partial_supervised(self):
-        self.split_train_data()
         self.finetuning = True
         self.ref = self.finetune_ds
         self.finetune()
@@ -71,23 +57,16 @@ class AdoptiveTrainer(ScpoliTrainer):
     def train_fully_supervised(self):
         pass
 
-    def pretrain_decodabale_proto(self):
-        cvae_trainer = CvaeTrainer(self.model, self.batch_size, self.debug, self.dataset, (self.ref, self.query), original_ref=self.original_ref)
-        cvae_trainer.train(self.cvae_epochs)
-        
     def pretrain_encoder(self):
-        if self.decodable_prototypes == 0:
-            self.get_scpoli_model(self.model, False).train(
-                n_epochs=self.cvae_epochs,
-                pretraining_epochs=self.cvae_epochs,
-                eta=5,
-            )
-        else:
-            self.pretrain_decodabale_proto()
+        self.extract_scpoli(self.model, True).train(
+            n_epochs=self.cvae_epochs,
+            pretraining_epochs=self.cvae_epochs,
+            eta=5,
+        )
 
     def init_prototypes(self):
         pass
-    
+
     def train_pretrain_encoder(self):
         if self.fine_tuning_epochs > 0:
             self.split_train_data()
@@ -95,7 +74,7 @@ class AdoptiveTrainer(ScpoliTrainer):
         self.setup()
         self.pretrain_encoder()
         self.init_prototypes()
-        self.plot_umap(self.model, self.ref.adata, 'pretrained-ref')
+        self.plot_umap(self.model, self.ref.adata, "pretrained-ref")
         # pretrain with swav
         self.train()
 
@@ -123,7 +102,7 @@ class AdoptiveTrainer(ScpoliTrainer):
 
     def load_adopt(self):
         model = self.load_model()
-        self.adapt_ref_model(model, self.finetune_ds.adata)
+        self.adapt_model(model, self.finetune_ds.adata)
         return model
 
     def run(self):
@@ -134,26 +113,15 @@ class AdoptiveTrainer(ScpoliTrainer):
             self.train_semi_supervised()
         elif self.training_type == "transfer_learning":
             self.transfer_learning()
-        elif self.training_type == "partial_supervised":
-            self.train_partial_supervised()
         elif self.training_type == "fully_supervised":
             self.train_fully_supervised()
         elif self.training_type == "pretrain_encoder":
             self.train_pretrain_encoder()
         else:
-            print(f'training type: {self.training_type}')
+            print(f"training type: {self.training_type}")
             self.train()
 
         self.ref = self.original_ref
         self.plot_umap(self.model, self.original_ref.adata, "ref")
-        # self.plot_ref_umap(name_postfix="with-model_all", model=self.model)
-        # self.plot_ref_umap(name_postfix="load-adopt_all", model=self.load_adopt())
-        # self.plot_ref_umap(name_postfix="all", model=self.model)
-        # model = self.adapt_ref_model(self.model, self.dataset.adata)
-        # model = self.prepare_model(self.model, self.dataset.adata)
-        self.plot_umap(self.model, self.dataset.adata, 'all', True)
-        self.plot_umap(self.model, self.query.adata, 'query', True)
-        # self.plot_query_umap()
-        self.additional_plots()
-        # moved to the end of train function so we have scib metrics for both pretrain and finetuned version
-        # self.save_scib_metrics()
+        self.plot_umap(self.model, self.dataset.adata, "all", True)
+        self.plot_umap(self.model, self.query.adata, "query", True)

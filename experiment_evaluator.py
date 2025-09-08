@@ -1,7 +1,7 @@
 from experiment_runner import (
     ExperimentRunner,
 )  # Assuming ExperimentRunner is in a file named experiment_runner.py
-from interpretable_ssl.trainers.swav import SwAV  # Import your SwAV model class
+from interpretable_ssl.trainers.scproto import SCProtoTrainer  # Import your SwAV model class
 from interpretable_ssl.trainers.scpoli_original import (
     OriginalTrainer,
 )  # Import your ScPoli model class (if needed)
@@ -37,7 +37,7 @@ class ExperimentEvaluator(ExperimentRunner):
             params["experiment_name"] = model_type
             print('set the exp name to: ', model_type)
         if model_type == "swav":
-            trainer = SwAV(**params)
+            trainer = SCProtoTrainer(**params)
         elif model_type == "scpoli":
             trainer = OriginalTrainer(**params)
         else:

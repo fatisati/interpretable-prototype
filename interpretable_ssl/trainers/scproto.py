@@ -47,7 +47,7 @@ from sklearn.model_selection import train_test_split
 logger = getLogger()
 
 
-class SwAV(AdoptiveTrainer):
+class SCProtoTrainer(AdoptiveTrainer):
 
     # @log_time('swav')
     def __init__(
@@ -126,9 +126,7 @@ class SwAV(AdoptiveTrainer):
         train, val = self.ref._create_split_instance(
             train_ind
         ), self.ref._create_split_instance(val_ind)
-        self.train_ds = MultiCropsDataset(
-            train, **common_dataset_kwargs
-        )
+        self.train_ds = MultiCropsDataset(train, **common_dataset_kwargs)
         self.test_ds = MultiCropsDataset(val, **common_dataset_kwargs)
 
         self.train_loader = self.get_data_laoder(self.train_ds)
@@ -248,8 +246,7 @@ class SwAV(AdoptiveTrainer):
             len(self.train_loader) * self.warmup_epochs,
         )
         iters = np.arange(
-            len(self.train_loader)
-            * (self.pretraining_epochs - self.warmup_epochs)
+            len(self.train_loader) * (self.pretraining_epochs - self.warmup_epochs)
         )
         cosine_lr_schedule = np.array(
             [
@@ -274,27 +271,6 @@ class SwAV(AdoptiveTrainer):
 
         logger.info("Building optimizer done.")
 
-    def init_mixed_precision(self):
-        if self.use_fp16:
-            self.model, self.optimizer = apex.amp.initialize(
-                self.model, self.optimizer, opt_level="O1"
-            )
-            logger.info("Initializing mixed precision done.")
-        else:
-            logger.info("no mixed precision")
-
-    def load_checkpoint(self):
-        # to_restore = {"epoch": 0}
-        # restart_from_checkpoint(
-        #     os.path.join(self.dump_path, "checkpoint.pth.tar"),
-        #     run_variables=to_restore,
-        #     state_dict=self.model,
-        #     optimizer=self.optimizer,
-        #     amp=apex.amp,
-        # )
-        # self.start_epoch = to_restore["epoch"]
-        pass
-
     def get_checkpoint_file(self):
         if self.finetuning:
             checkpoint_file = "finetuned-checkpoint.pth.tar"
@@ -306,7 +282,7 @@ class SwAV(AdoptiveTrainer):
 
     def save_checkpoint(self, epoch):
         if self.debug or self.wandb_sweep == 1:
-            print('not saving checkpoint', self.debug, self.wandb_sweep)
+            print("not saving checkpoint", self.debug, self.wandb_sweep)
             return
         save_dict = {
             "epoch": epoch + 1,
@@ -315,7 +291,7 @@ class SwAV(AdoptiveTrainer):
         }
         if self.use_fp16:
             save_dict["amp"] = apex.amp.state_dict()
-        
+
         checkpoint_file = self.get_checkpoint_file()
         torch.save(save_dict, os.path.join(self.dump_path, checkpoint_file))
         if epoch % self.checkpoint_freq == 0 or epoch == self.pretraining_epochs - 1:
@@ -352,7 +328,7 @@ class SwAV(AdoptiveTrainer):
                 for ds_id in self.ds_ids:
                     self.init_queue(ds_id)
 
-            train_meters = self.train_one_epoch(epoch)
+            train_meters = self.train_epoch(epoch)
             test_meters = self.test_epoch()
             test_meters = {f"test_{key}": val for key, val in test_meters.items()}
 
@@ -360,73 +336,8 @@ class SwAV(AdoptiveTrainer):
             self.save_checkpoint(epoch)
         return train_meters | test_meters
 
-    def calculate_prototype_metrics(self):
-        emb = self.encode_ref(self.model)
-        p = PrototypeAnalyzer(emb, self.model.prototypes, self.ref.adata)
-        return p.calculate_summary()
-
-    def calculate_other_metrics(self):
-        if self.wand_sweep == 1:
-            return None
-        ref_emb = self.encode_adata(self.original_ref.adata, self.model)
-        query_emb = self.encode_query(self.model)
-        return {"propagation loss": self.model.propagation(ref_emb).cpu().item()}, {
-            "propagation loss": self.model.propagation(query_emb).cpu().item()
-        }
-
-    def get_p(self, s):
+    def softmax_probs(self, s):
         return F.softmax(s / self.temperature)
-
-    def calculate_pair_matching(self, scores, bs):
-        def get_hard_cluster(tensor):
-            # Find the indices of the maximum values along each row
-            max_indices = torch.argmax(tensor, dim=1)
-
-            # Create a one-hot tensor with the same shape as the input
-            one_hot = torch.zeros_like(tensor)
-
-            # Scatter 1s into the one-hot tensor at the max indices
-            one_hot.scatter_(1, max_indices.unsqueeze(1), 1.0)
-            return one_hot
-
-        def calculate_entropy(tensor):
-            """
-            Calculate the entropy of a tensor.
-
-            Parameters:
-                tensor (torch.Tensor): Input tensor.
-
-            Returns:
-                float: Entropy of the tensor.
-            """
-            # Flatten the tensor and convert to probabilities
-            flattened = tensor.flatten()
-            probabilities = flattened / flattened.sum()
-
-            # Ensure no zero values (to avoid log(0))
-            probabilities = probabilities[probabilities > 0]
-
-            # Compute entropy
-            entropy = -torch.sum(probabilities * torch.log(probabilities))
-            return entropy.item()
-
-        score_t, score_s = (
-            scores[:bs],
-            scores[bs : 2 * bs],
-        )
-        p_t, p_s = self.get_p(score_t), self.get_p(score_s)
-        h_t, h_s = get_hard_cluster(score_t), get_hard_cluster(score_s)
-        cluster_labels_t, cluster_labels_s = torch.argmax(h_t, dim=1), torch.argmax(
-            h_s, dim=1
-        )
-        matches = cluster_labels_t == cluster_labels_s
-        num_matches = matches.sum().item()
-        entropy = calculate_entropy(p_t.sum(0)) + calculate_entropy(p_s.sum(0))
-        p_avg_entropy = -torch.sum(
-            p_t * torch.log(p_t + 1e-9), dim=1
-        ).mean()  # Add small epsilon to avoid log(0)
-
-        return num_matches, entropy / 2, p_avg_entropy.item()
 
     def calc_ds_loss(self, inputs, ds_id, meters, bs):
         ds_inputs = {k: inputs[k][ds_id] for k in inputs.keys()}
@@ -470,7 +381,7 @@ class SwAV(AdoptiveTrainer):
         # pass data, get loss and metrics
         # return the dict
 
-    def train_one_epoch(self, epoch):
+    def train_epoch(self, epoch):
         self.model.train()
         self.use_the_queue = 0
 
@@ -533,7 +444,7 @@ class SwAV(AdoptiveTrainer):
 
     def _process_batch(self, inputs, ds_id):
         bs = inputs["x"].size(0)
-        inputs = self.move_input_on_device(inputs)
+        inputs = self.dict_to_device(inputs)
         inputs = reshape_and_reorder_dict(inputs)
         z, _, logits, cvae_loss, (propagation, sim) = self.model(inputs)
         z = z.detach()
@@ -558,16 +469,6 @@ class SwAV(AdoptiveTrainer):
             # "p_ent": p_ent,
         } | assignment_metrics, assign_cnts
 
-    def _average_metrics(self, metric_list):
-        n = len(metric_list)
-        return {
-            key: sum(metrics[key] for metrics in metric_list) / n
-            for key in metric_list[0]
-        }
-
-    def check_proto_freeze(self, epoch):
-        return epoch <= self.freeze_prototypes_nepochs
-
     def _handle_prototype_freezing(self, epoch):
 
         for name, p in self.model.named_parameters():
@@ -581,29 +482,16 @@ class SwAV(AdoptiveTrainer):
         for param_group in self.optimizer.param_groups:
             param_group["lr"] = self.lr_schedule[iteration]
 
-    def hard_clusters(self, out):
-        def one_hot_max_tensor(tensor):
-            """
-            Convert each row of a tensor into a one-hot encoded row based on the maximum value in each row.
-
-            Parameters:
-            - tensor (torch.Tensor): Input 2D tensor of shape (b, p).
-
-            Returns:
-            - one_hot_tensor (torch.Tensor): One-hot encoded tensor of the same shape as the input.
-            """
-            # Find the indices of the maximum values along each row
-            max_indices = torch.argmax(tensor, dim=1)
-
-            # Create a zero tensor of the same shape as the input
-            one_hot_tensor = torch.zeros_like(tensor)
-
-            # Set the maximum indices to 1 in each row
-            one_hot_tensor[torch.arange(tensor.size(0)), max_indices] = 1
-
-            return one_hot_tensor
-
-        return one_hot_max_tensor(out)
+    def hard_clusters(self, out: torch.Tensor) -> torch.Tensor:
+        """
+        Convert output probabilities/logits into hard one-hot clusters.
+        Args:
+            out (torch.Tensor): shape (batch, prototypes)
+        Returns:
+            torch.Tensor: one-hot encoded tensor of same shape as `out`
+        """
+        max_indices = torch.argmax(out, dim=1)
+        return F.one_hot(max_indices, num_classes=out.size(1)).to(out.dtype)
 
     def compute_swav_loss(self, logits, z, bs, ds_id):
 
@@ -663,11 +551,6 @@ class SwAV(AdoptiveTrainer):
             avg_assign_metrics,
         )
 
-    def peaky_softmax_loss(self, scores):
-        p = F.softmax(scores / self.temperature, dim=1)
-        entropy = -torch.sum(p * torch.log(p + 1e-8), dim=1)
-        return torch.mean(entropy)
-
     @torch.no_grad()
     def distributed_sinkhorn(self, out):
         Q = torch.exp(out / self.epsilon).t()
@@ -695,149 +578,6 @@ class SwAV(AdoptiveTrainer):
         else:
             return prototypes
 
-    def plot_by_augmentation(self, n_samples, n_augmentations):
-        print("using new plot augmentations, correct decoding")
-        model = self.load_model()
-        # Initialize the dataset with the entire adata
-        self.train_ds.n_augmentations = n_augmentations
-
-        # Sample indices from the entire dataset
-        indices = np.random.choice(len(self.ref.adata), n_samples, replace=False)
-        indices = [int(idx) for idx in indices]
-
-        # Create a DataLoader for the sampled subset
-        subset_dataset = Subset(self.train_ds, indices)
-        dataloader = DataLoader(
-            subset_dataset, batch_size=self.batch_size, shuffle=False
-        )
-
-        # Initialize lists to store embeddings, labels, and study labels
-        all_embeddings = []
-        all_labels = []
-        all_celltypes = []
-        all_study_labels = []
-
-        for i, inputs in enumerate(dataloader):
-            # Move inputs to device
-            inputs = self.move_input_on_device(inputs)
-            batch_size = inputs["x"].shape[0]
-            labels = np.repeat(np.arange(batch_size), n_augmentations)
-            labels = labels.reshape(batch_size, n_augmentations)
-            labels = torch.tensor(labels)
-
-            # Reshape and reorder the inputs
-            inputs = reshape_and_reorder_dict(inputs)
-            labels = reshape_and_reorde_tensor(labels)
-
-            # Calculate embeddings
-            with torch.no_grad():
-                embeddings, _, _, _ = model(inputs)
-                embeddings = embeddings.detach().cpu().numpy()
-
-            # Generate labels for the augmentations
-            batch_size = inputs["x"].shape[0] // n_augmentations
-
-            # Append embeddings, labels, cell types, and study labels to the lists
-            all_embeddings.append(embeddings)
-            all_labels.append(labels)
-            all_celltypes.append(inputs["celltypes"].cpu().numpy())
-            all_study_labels.append(
-                inputs["batch"].cpu().numpy()
-            )  # Extract study labels
-
-        # Concatenate all embeddings, labels, cell types, and study labels
-        all_embeddings = np.concatenate(all_embeddings, axis=0)
-        all_labels = np.concatenate(all_labels, axis=0)
-        all_celltypes = np.concatenate(all_celltypes, axis=0)
-        all_study_labels = np.concatenate(
-            all_study_labels, axis=0
-        )  # Concatenate study labels
-
-        # Create a reverse dictionary for cell type decoding
-        all_celltypes = all_celltypes.reshape(-1)
-        cell_type_encoder = self.train_ds.cell_type_encoder
-        reverse_cell_type_encoder = {v: k for k, v in cell_type_encoder.items()}
-        decoded_celltypes = np.array(
-            [reverse_cell_type_encoder[idx] for idx in all_celltypes]
-        )
-
-        cell_umap, prototype_umap = calculate_umap(all_embeddings)
-        plot_umap(
-            cell_umap,
-            prototype_umap,
-            decoded_celltypes,
-            all_study_labels.reshape(-1),  # Pass study labels to plot_umap
-            all_labels.reshape(-1),  # Optional augmentation labels
-        )
-
-    def plot_projected_umap(self, save=True):
-        self.use_projector_out = True
-        ref = self.plot_ref_umap(save)
-        query = self.plot_query_umap(save)
-        self.use_projector_out = False
-        return ref, query
-
-    def additional_plots(self):
-        if self.use_projector:
-            return self.plot_projected_umap()
-
-    def freeze_except_decoder(self, model):
-        """
-        Freeze all the weights of the model except those in the decoder.
-
-        Args:
-            model: The model whose weights need to be frozen.
-        """
-        # Iterate over all modules in the model
-        for name, param in model.named_parameters():
-            if "decoder" not in name:
-                param.requires_grad = False
-            else:
-                param.requires_grad = True
-
-    def only_decoder_train(self):
-        # Freeze all parts of the model except the decoder
-        self.freeze_except_decoder(self.model)
-
-        # Initialize a separate optimizer for the decoder parameters
-        decoder_optimizer = torch.optim.SGD(
-            filter(lambda p: p.requires_grad, self.model.parameters()),
-            lr=self.base_lr,
-            momentum=0.9,
-            weight_decay=self.wd,
-        )
-        decoder_optimizer = LARC(
-            optimizer=decoder_optimizer, trust_coefficient=0.001, clip=True
-        )
-
-        cvae_losses = AverageMeter()
-
-        for epoch in range(self.pretraining_epochs):
-            for iteration, inputs in enumerate(self.train_loader):
-                inputs = self.move_input_on_device(inputs)
-                inputs = reshape_and_reorder_dict(inputs)
-                _, _, _, cvae_loss, _ = self.model(inputs)  # Modify as needed
-                decoder_optimizer.zero_grad()
-
-                if self.use_fp16:
-                    with apex.amp.scale_loss(
-                        cvae_loss, decoder_optimizer
-                    ) as scaled_loss:
-                        scaled_loss.backward()
-                else:
-                    cvae_loss.backward()
-
-                decoder_optimizer.step()
-                cvae_losses.update(cvae_loss.item(), inputs["x"].size(0))
-
-            # Log the average loss for this epoch
-            wandb.log({"decoder loss": cvae_losses.avg})
-
-            logger.info(
-                f"Epoch: [{epoch+1}/{self.pretraining_epochs}]\t"
-                f"Decoder Loss {cvae_losses.val:.4f} ({cvae_losses.avg:.4f})"
-            )
-
     def finetune(self):
         print(f"-------finetuning: {self.fine_tuning_epochs}----------")
         # old_aug_type = self.augmentation_type
@@ -848,52 +588,13 @@ class SwAV(AdoptiveTrainer):
         #     labeled_indices=[],
         # )
         # self.model.set_scpoli_model(scpoli_query.model)
-        self.model = self.prepare_model(self.model, self.ref.adata)
+        self.model = self.adapt_model(self.model, self.ref.adata)
         self.train_augmentation = "cell_type"
         self.build_data()
         self.build_optimizer()
         # self.setup()
         self.train(self.fine_tuning_epochs)
         # self.augmentation_type = old_aug_type
-
-    def get_proto_adata(self):
-        similarity = self.encode_adata(self.ref.adata, self.model, True)
-        prot_df = assign_prototype_labels(
-            self.ref.adata, similarity, self.nmb_prototypes, cell_type_column = self.dataset.label_key
-        )
-        x = self.model.decode_proto(
-            recon_loss=self.recon_loss, use_avg_batch_embedding=True
-        )
-        prot_adata = generate_proto_adata(
-            x.detach(),
-            prot_df["prototype_label"].values,
-            self.ref.adata.var.index.tolist(),
-        )
-        return prot_adata
-
-    def plot_marker_genes(self, single_cell=False):
-        def nk_markers(adata):
-            return plot_marker_gene_expressions(
-                adata, ["CD8+ T cells", "NK cells"], x_gene="TYROBP"
-            )
-
-        if single_cell:
-            p1 = plot_marker_gene_expressions(self.ref.adata)
-            p2 = nk_markers(self.ref.adata)
-        else:
-
-            prot_adata = self.get_proto_adata()
-            p1 = plot_marker_gene_expressions(prot_adata)
-            p2 = nk_markers(prot_adata)
-        return p1, p2
-
-    def init_queue(self, ds_id):
-
-        self.queue[ds_id] = torch.zeros(
-            len(self.views_for_assign),
-            self.queue_length,  # // divide by wprld size
-            self.latent_dims,
-        ).cuda()
 
     def prepare_sinkhorn_input(self, view_idx, z, view_id, bs, view_logits, ds_id):
         output_logits = view_logits.detach()
@@ -919,12 +620,7 @@ class SwAV(AdoptiveTrainer):
 
 
 if __name__ == "__main__":
-    swav = SwAV()
+    swav = SCProtoTrainer()
     swav.setup()
     swav.run()
     swav.encode_ref()
-
-
-# Example usage
-# To run with command line arguments:
-# python script.py --dataset some_dataset --dump_name_version 4 --nmb_crops 10 12 --augmentation_type knn --epochs 500

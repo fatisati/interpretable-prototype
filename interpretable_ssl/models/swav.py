@@ -352,9 +352,9 @@ class SwAVModel(SwavBase):
             recon_loss=recon_loss,
         )
 
-    def set_scpoli_encoder(self, scpoli_):
-        self.scpoli_wrapper = scpoli_
-        self.scpoli_cvae = scpoli_.model
+    def attach_scpoli(self, scpoli_wrapper):
+        self.scpoli_wrapper = scpoli_wrapper
+        self.scpoli_cvae = scpoli_wrapper.model
 
 
 class SwAVDecodableProto(SwAVModel):
