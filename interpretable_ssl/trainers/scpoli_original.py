@@ -6,7 +6,7 @@
 from interpretable_ssl.datasets.immune import ImmuneDataset
 from scarches.models.scpoli import scPoli
 from interpretable_ssl import utils
-from interpretable_ssl.trainers.scpoli_trainer import ScpoliTrainer
+from interpretable_ssl.trainers.trainer import Trainer
 import torch
 import wandb
 import sys
@@ -17,7 +17,6 @@ class OriginalTrainer(AdoptiveTrainer):
     def __init__(
         self, **kwargs
     ):
-        self.is_swav = 0
         if 'experiment_name' not in kwargs:
             kwargs['experiment_name'] = 'scpoli'
             

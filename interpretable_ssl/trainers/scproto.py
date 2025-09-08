@@ -51,28 +51,17 @@ class SCProtoTrainer(AdoptiveTrainer):
 
     # @log_time('swav')
     def __init__(
-        self, debug=False, dataset=None, ref_query=None, parser=None, **kwargs
+        self, dataset=None, ref_query=None, parser=None, **kwargs
     ):
 
-        self.is_swav = 1
-        super().__init__(debug, dataset, ref_query, parser, **kwargs)
+        super().__init__(dataset, ref_query, parser, **kwargs)
         self.nmb_prototypes = self.num_prototypes
         self.use_projector_out = False
-        # would be defferent when trying to finetune, keep original aug type for model path
+        
         self.train_augmentation = self.augmentation_type
-        # self.condition_key = self.ref.batch_key
         self.queue = {}
-        if self.study_id != "":
-            mask = self.ref.adata.obs[self.condition_key] == self.study_id
-            self.ref.adata = self.ref.adata[mask].copy()
-
-        # if self.dataset_cnt != 0:
-        #     ds_cnt = self.dataset_cnt
-        # else:
         ds_cnt = self.ref.adata.obs[self.condition_key].nunique()
         self.ds_ids = range(ds_cnt)
-        # print(self.temperature)
-        # self.set_experiment_name()
 
     def setup(self):
         fix_random_seeds(self.seed)

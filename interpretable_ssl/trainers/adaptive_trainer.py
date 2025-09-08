@@ -1,4 +1,4 @@
-from interpretable_ssl.trainers.scpoli_trainer import *
+from interpretable_ssl.trainers.trainer import *
 from torch.utils.data import random_split
 from logging import getLogger
 from interpretable_ssl.utils import log_time
@@ -7,13 +7,13 @@ from interpretable_ssl.trainers.cvae_trainer import CvaeTrainer
 logger = getLogger()
 
 
-class AdoptiveTrainer(ScpoliTrainer):
+class AdoptiveTrainer(Trainer):
     # @log_time('adoptive trainer')
     def __init__(
-        self, debug=False, dataset=None, ref_query=None, parser=None, **kwargs
+        self, dataset=None, ref_query=None, parser=None, **kwargs
     ) -> None:
 
-        super().__init__(debug, dataset, ref_query, parser, **kwargs)
+        super().__init__(dataset, ref_query, parser, **kwargs)
         self.finetune_ds = None
         self.original_ref = self.ref
         self.partial_ref = None

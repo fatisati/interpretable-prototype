@@ -1,13 +1,12 @@
 import torch
 
-from interpretable_ssl.trainers.scpoli_trainer import ScpoliTrainer
+from interpretable_ssl.trainers.trainer import Trainer
 import wandb
 from tqdm import tqdm
 import os
 
-class CvaeTrainer(ScpoliTrainer):
+class CvaeTrainer(Trainer):
     def __init__(self, model, batch_size, debug=False, dataset=None, ref_query=None, original_ref=None) -> None:
-        self.is_swav=0
         self.finetuning=False
         self.original_ref = original_ref
         super().__init__(debug, dataset, ref_query, batch_size=batch_size)

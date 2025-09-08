@@ -14,24 +14,18 @@ from torch.utils.data import DataLoader
 class TrainerBase:
     # @log_time('trainer base')
     def __init__(self, **kwargs) -> None:
-        # Get the default values from the function
-        defaults = get_defaults().copy()
-        self.default_values = get_defaults().copy()
-        # Update defaults with any provided keyword arguments
-        defaults.update(kwargs)
-
-        # Assign each default value to an instance variable
-        for key, value in defaults.items():
-            setattr(self, key, value)
-        
-        
+        self.params = self.init_attributes(**kwargs)
         self.set_experiment_name()
-        self.params = self.__dict__.copy()
+        self.set_job_name()
         self.create_dump_path()
         self.create_temp_res_path()
-        
-        # if self.training_type != "semi_supervised" and self.training_type != "fully_supervised":
-        #     self.pretraining_epochs += self.fine_tuning_epochs
+
+    def init_attributes(self, **kwargs):
+        params = get_defaults().copy()
+        params.update(kwargs)
+        for key, value in params.items():
+            setattr(self, key, value)
+        return params
 
     def get_metric_file_path(self, split):
         if self.model_name_version == 3:
@@ -108,23 +102,3 @@ class TrainerBase:
         if key in ABBREVIATIONS:
             return ABBREVIATIONS[key]
         return key
-
-    def prepare_scpoli_dataloader(self, adata, scpoli_cvae, shuffle=True):
-        if "condition_combined" not in adata.obs:
-            adata.obs["conditions_combined"] = adata.obs[[self.condition_key]].apply(
-                lambda x: "_".join(x), axis=1
-            )
-        dataset = MultiConditionAnnotatedDataset(
-            adata,
-            condition_keys=[self.condition_key],
-            condition_encoders=scpoli_cvae.condition_encoders,
-            conditions_combined_encoder=scpoli_cvae.conditions_combined_encoder,
-        )
-
-        loader = DataLoader(
-            dataset,
-            batch_size=self.batch_size,
-            collate_fn=scpoli_utils.custom_collate,
-            shuffle=shuffle,
-        )
-        return loader
