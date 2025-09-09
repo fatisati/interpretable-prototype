@@ -66,18 +66,13 @@ class SCProtoTrainer(AdoptiveTrainer):
     def setup(self):
         fix_random_seeds(self.seed)
         self.dump_path = self.get_dump_path()
-        # self.create_dump_path()
         if self.wandb_sweep == 0:
             logger, self.training_stats = initialize_exp(
                 self, "epoch", "loss", dump_params=self.wandb_sweep == 0
             )
-        # self.init_scpoli()
         self.build_model()
-
         self.build_data()
-
         self.build_optimizer()
-        self.init_mixed_precision()
         # self.load_checkpoint()
 
     def build_data(self):

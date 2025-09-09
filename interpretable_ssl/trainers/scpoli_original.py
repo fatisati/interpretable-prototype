@@ -1,18 +1,7 @@
-# load data
-# define model
-# set training parameters
-# train loop
-
-from interpretable_ssl.datasets.immune import ImmuneDataset
 from scarches.models.scpoli import scPoli
 from interpretable_ssl import utils
-from interpretable_ssl.trainers.trainer import Trainer
 import torch
-import wandb
-import sys
 from interpretable_ssl.trainers.adaptive_trainer import AdoptiveTrainer
-
-
 class OriginalTrainer(AdoptiveTrainer):
     def __init__(
         self, **kwargs
@@ -78,7 +67,7 @@ class OriginalTrainer(AdoptiveTrainer):
                               pretraining_epochs=retrain_epochs)
         return scpoli_query
 
-    def encode_batch(self, model, batch, return_maped=False, return_mapped_idx=None):
+    def encode_batch(self, model, batch, **kwargs):
         batch = self.dict_to_device(batch)
         scpoli_model = self.extract_scpoli(model)
         scpoli_model.to(self.device)

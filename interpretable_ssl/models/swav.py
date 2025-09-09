@@ -25,7 +25,7 @@ class SwavBase(nn.Module):
         multi_layer_proto=False,
         np2=None,
         l2norm=1,
-        assignment_metric = 'dot-product'
+        assignment_metric="dot-product",
     ):
         super().__init__()
         self.scpoli_cvae = scpoli_cvae
@@ -34,7 +34,7 @@ class SwavBase(nn.Module):
             print("initializing cell proto layer")
             self.cell_protos = nn.Linear(latent_dim, np2, bias=False)
         self.projection_head = None
-        self.l2norm = (l2norm == 1)
+        self.l2norm = l2norm == 1
         self.nmb_prototypes = nmb_prototypes
         self.assignment_metric = assignment_metric
         # self.propagation_reg = propagation_reg
@@ -91,28 +91,28 @@ class SwavBase(nn.Module):
         sim = self.proto_cos_sim(z)
         sim_pos = (sim + 1) / 2
         return sim_pos
-    
+
     def proto_cos_sim(self, z):
         z = F.normalize(z, dim=1)
         prototypes = F.normalize(self.prototypes.weight, dim=1)
         sim = torch.matmul(z, prototypes.T)
         return sim
-    
+
     def proto_neg_euclidean(self, z):
         prototypes = self.get_prototypes()
         dist = torch.cdist(z, prototypes)  # (B, K)
         return -dist
-    
+
     def proto_soft_assignments(self, z):
-        if self.assignment_metric == 'dotp':
+        if self.assignment_metric == "dotp":
             return self.prototypes(z)
-        elif self.assignment_metric == 'pcos':
+        elif self.assignment_metric == "pcos":
             return self.proto_pos_cos(z)
-        elif self.assignment_metric == 'cos':
+        elif self.assignment_metric == "cos":
             return self.proto_cos_sim(z)
-        elif self.assignment_metric == 'neuc':
+        elif self.assignment_metric == "neuc":
             return self.proto_neg_euclidean(z)
-        
+
     def propagation(self, z: torch.Tensor):
         cosine_sim = self.proto_soft_assignments(z)
         return (1 - cosine_sim.max(dim=1).values).max()
@@ -316,6 +316,7 @@ class SwavBase(nn.Module):
         input_tensor = self.get_prototypes()
         return self.decode(input_tensor, recon_loss, use_avg_batch_embedding, use_batch)
 
+
 # TODO: refactor input params with swav base
 class SwAVModel(SwavBase):
     def __init__(
@@ -328,7 +329,7 @@ class SwAVModel(SwavBase):
         recon_loss="nb",
         batch_key="study",
         l2norm=1,
-        assignment_metric = 'dot-product'
+        assignment_metric="dot-product",
     ):  # , propagation_reg=0.5, prot_emb_sim_reg=0.5
         # self.cell_type_key = "cell_type"
         self.condition_key = batch_key
@@ -340,7 +341,7 @@ class SwAVModel(SwavBase):
             multi_layer_proto,
             np2,
             l2norm,
-            assignment_metric
+            assignment_metric,
         )  # , propagation_reg, prot_emb_sim_reg
 
     def init_scpoli(self, adata, latent_dim, recon_loss="nb"):
@@ -431,7 +432,7 @@ class scProtoGMVAE(SwAVModel):
         )
         self.beta = 1.0
         self.use_rbf = use_rbf == 1
-    
+
     # TODO: calc responsibilitis from proto soft assignments
     def calc_kl_loss(self, z_mu, z_logvar):
         p_mu = self.get_prototypes()
@@ -521,7 +522,7 @@ class scProtoGMVAE(SwAVModel):
         return z, z, self.proto_soft_assignments(z), cvae_loss, propagation_sim
 
     # def proto_soft_assignments(self, z):
-        # if self.use_rbf:
-        #     return rbf_similarity(z, self.get_prototypes())
-        # else:
-            # return super().proto_soft_assignments(z)
+    # if self.use_rbf:
+    #     return rbf_similarity(z, self.get_prototypes())
+    # else:
+    # return super().proto_soft_assignments(z)

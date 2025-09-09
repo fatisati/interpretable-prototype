@@ -11,7 +11,7 @@ import scanpy as sc
 import scanpy.external as sce
 
 from interpretable_ssl.trainers.scpoli_original import *
-from interpretable_ssl.trainers.swav import *
+from interpretable_ssl.trainers.scproto import *
 
 
 res_dir = "/home/icb/fatemehs.hashemig/models/"
@@ -143,7 +143,7 @@ def get_seacell_metrics(SEACell_ad, adata, bk, lk, ds):
 def calc_adata_metrics(scpoli_params, scproto_params, dataset, ds_conf):
     adata = sc.read_h5ad(ds_conf["path"])
     t1 = OriginalTrainer(debug=1, **scpoli_params)
-    t2 = SwAV(debug=1, **scproto_params)
+    t2 = SCProtoTrainer(debug=1, **scproto_params)
     for t in [t1, t2]:
         add_trainer_emb(t, adata)
     add_scvi_emb(adata, ds_conf["test_studies"], ds_conf["batch_key"])

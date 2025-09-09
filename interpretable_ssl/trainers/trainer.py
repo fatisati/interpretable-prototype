@@ -20,10 +20,15 @@ import wandb
 
 class Trainer(TrainerBase):
     # @log_time('scpoli trainer')
-    def __init__(self, dataset=None, ref_query=None, parser=None, **kwargs) -> None:
-
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+    def __init__(self, dataset=None, ref_query=None, parser=None, **kwargs) -> None:    
+        parser_args = self.collect_parser_args(parser)
+        kwargs.update(parser_args)
         self.dataset = dataset
+        if 'debug' not in kwargs:
+            kwargs['debug'] = 0
+        super().__init__(**kwargs)
+    
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
         if self.dataset is None:
             print(f"dataset is None, loading {self.dataset_id}")
             self.dataset = self.get_dataset(self.dataset_id)
@@ -33,11 +38,6 @@ class Trainer(TrainerBase):
         else:
             self.ref, self.query = ref_query
         self.condition_key = self.ref.batch_key
-
-        parser_args = self.collect_parser_args(parser)
-        kwargs.update(parser_args)
-        super().__init__(**kwargs)
-        
         if self.study_id != "":
             mask = self.ref.adata.obs[self.condition_key] == self.study_id
             self.ref.adata = self.ref.adata[mask].copy()
@@ -170,7 +170,7 @@ class Trainer(TrainerBase):
         adata,
         model=None,
         return_mapped=False,
-        return_mapped_idx=True,
+        return_mapped_idx=False,
         retrain_epochs=0,
     ):
         model = self.adapt_model(model, adata, retrain_epochs)

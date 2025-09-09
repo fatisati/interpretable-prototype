@@ -660,11 +660,11 @@ def reshape_and_reorder_dict(data_dict):
 
     for key, tensor in data_dict.items():
         # Store the reshaped tensor in the dictionary
-        reshaped_dict[key] = reshape_and_reorde_tensor(tensor)
+        reshaped_dict[key] = reshape_and_reorder_tensor(tensor)
     return reshaped_dict
 
 
-def reshape_and_reorde_tensor(tensor):
+def reshape_and_reorder_tensor(tensor):
     batch_size, num_augmentations = tensor.shape[:2]
     feature_dims = tensor.shape[2:]
 
