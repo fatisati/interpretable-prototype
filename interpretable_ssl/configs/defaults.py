@@ -137,6 +137,8 @@ def get_defaults():
         
         "epoch_queue_starts": 0, # used to be 5
         "queue_length":  0,
+        
+        "use_counts": 0
 
     }
     return defaults

@@ -98,6 +98,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             default_dispersion=self.default_dispersion,
             spatial=self.spatial,
             n_clusters=self.num_prototypes,
+            use_counts = (self.use_counts == 1),
             condition_encoders=scpoli_encoder.condition_encoders,
             conditions_combined_encoder=scpoli_encoder.conditions_combined_encoder,
             # cell_type_keys=[self.cell_type_key],

@@ -45,6 +45,7 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         spatial=0,
         return_idx=False,
         n_clusters=None,
+        use_counts = False,
         **kwargs,
     ):
         """
@@ -120,6 +121,9 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         self.sample_cluster_id = None
         self.n_clusters = n_clusters
         super().__init__(sc_ds.adata, **kwargs)
+        self.data = sc_ds.adata.layers.get("counts", sc_ds.adata.X) if use_counts else sc_ds.adata.X
+        if not sp.issparse(self.data):
+            self.data = torch.tensor(self.data, dtype=torch.float32)
 
     def __getitem__(self, index):
         if self.current_ds_id is not None:
