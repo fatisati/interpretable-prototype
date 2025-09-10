@@ -22,9 +22,13 @@ def highlight_max_second(s):
         ]
     return styles
 
-def generate_table(res_dir):
-    scib_df = pd.read_csv(f'{res_dir}/scib.csv', index_col=0)
-    scgraph_df = pd.read_csv(f'{res_dir}/scgraph.csv', index_col=0)
+def generate_table(res_dir, name_postfix=None):
+    files = ['scib', 'scgraph']
+    if name_postfix is not None:
+        files = [f'{f}_{name_postfix}' for f in files]
+    files = [f'{f}.csv' for f in files]
+    scib_df = pd.read_csv(f'{res_dir}/{files[0]}', index_col=0)
+    scgraph_df = pd.read_csv(f'{res_dir}/{files[1]}', index_col=0)
     df = pd.concat([scib_df, scgraph_df], axis=1)
 
     show_cols = ['Batch correction', 'Bio conservation', 'Total', 'Rank-PCA', 'Corr-PCA', 'Corr-Weighted']

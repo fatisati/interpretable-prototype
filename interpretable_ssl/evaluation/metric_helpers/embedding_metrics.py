@@ -18,9 +18,12 @@ res_dir = "/home/icb/fatemehs.hashemig/models/"
 # use this code to calculate scib and scgraph metrics for models [scProto, scPoli, scVI, pca, pca+harmoney, seacell]
 
 
-def save_append(df, save_dir, name, append=True):
+def save_append(df, save_dir, name, append=True, name_postfix=None):
     os.makedirs(os.path.dirname(save_dir), exist_ok=True)
-    save_path = f"{save_dir}/{name}"
+    if name_postfix is not None:
+        name = f'{name}_{name_postfix}'
+    save_path = f"{save_dir}/{name}.csv"
+    print(name_postfix, save_path)
     if append and os.path.exists(save_path):
         saved_res = pd.read_csv(save_path, index_col=0)
         df = pd.concat([df, saved_res])
@@ -28,7 +31,7 @@ def save_append(df, save_dir, name, append=True):
     return df
 
 
-def get_scib(adata, obsm_keys, ds, bk, lk):
+def get_scib(adata, obsm_keys, ds, bk, lk, name_postfix=None):
     bm = Benchmarker(
         adata=adata,
         batch_key=bk,
@@ -39,11 +42,11 @@ def get_scib(adata, obsm_keys, ds, bk, lk):
     results = bm.get_results(min_max_scale=False)  # returns a tidy DataFrame
     results = results.drop(index="Metric Type")
     save_path = f"{res_dir}/{ds}/"
-    return save_append(results, save_path, "scib.csv")
+    return save_append(results, save_path, "scib", name_postfix)
 
 
 def get_scgraph(
-    adata, obsm_keys, dataset_name, batch_key="study", label_key="cell_type", **kwargs
+    adata, obsm_keys, dataset_name, batch_key="study", label_key="cell_type", name_postfix = None, **kwargs
 ):
     adata.write("tmp.h5ad")
     scgraph = scGraph(
@@ -51,12 +54,12 @@ def get_scgraph(
     )
     scgr_res = scgraph.main(_obsm_list=obsm_keys)
     save_path = f"{res_dir}/{dataset_name}/"
-    return save_append(scgr_res, save_path, "scgraph.csv")
+    return save_append(scgr_res, save_path, "scgraph", name_postfix)
 
 
-def save_metrics(adata, emb_keys, dataset, bk, lk):
-    scgraph_m = get_scgraph(adata, emb_keys, dataset, bk, lk)
-    scib_m = get_scib(adata, emb_keys, dataset, bk, lk)
+def save_metrics(adata, emb_keys, dataset, bk, lk, name_postfix = None, **kwargs):
+    scgraph_m = get_scgraph(adata, emb_keys, dataset, bk, lk, name_postfix, **kwargs)
+    scib_m = get_scib(adata, emb_keys, dataset, bk, lk, name_postfix)
     return scib_m, scgraph_m
 
 
