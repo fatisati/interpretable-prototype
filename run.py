@@ -8,20 +8,25 @@ if __name__ == "__main__":
     full_loss = {
         "cvae_loss_scaler": [0.01],
         "propagation_reg": [1],
-        "experiment_name": ["t2"],
+        "experiment_name": ["rt"],
+        "use_counts": [1]
     }
+    
     scpoli_base = {"model": ["scpoli"]}
     imm_1ds = {"study_id": ["10X"], "num_prototypes": [150]}
-    panc_1ds = {
-        "dataset_id": ["pancreas"],
+    
+    pancreas =  {"dataset_id": ["pancreas"], 'num_prototypes': [220], "batch_size": [256],}
+    panc_1ds = pancreas.copy().update({
         "num_prototypes": [50],
         "study_id": ["inDrop3"],
-        "batch_size": [128],
-    }
+        
+    })
 
     cd34 = {"dataset_id": ["cd34"], "num_prototypes": [90], "batch_size": [128]}
     experiments = [
-        full_loss
+        full_loss, 
+        # full_loss | pancreas
+        
         # scpoli_base | imm_1ds,
         # scpoli_base | panc_1ds,
         # scpoli_base | cd34, 

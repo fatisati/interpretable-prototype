@@ -79,5 +79,6 @@ ABBREVIATIONS = {
     'study_id': 'sid',
     'epoch_queue_starts': 'qe',
     'warmup_epochs': 'warmup',
-    'base_lr': 'blr'
+    'base_lr': 'blr',
+    "use_counts": 'raw'
 }
