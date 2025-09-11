@@ -109,3 +109,29 @@ def add_prefix_key(dict, prefix):
         new_dict[f"{prefix}_{key}"] = dict[key]
     return new_dict
 
+
+def reshape_and_reorder_dict(data_dict):
+    """
+    Reshape and reorder the tensors in the dictionary.
+    Handles tensors with different shapes by applying reshaping accordingly.
+    """
+    reshaped_dict = {}
+
+    for key, tensor in data_dict.items():
+        # Store the reshaped tensor in the dictionary
+        reshaped_dict[key] = reshape_and_reorder_tensor(tensor)
+    return reshaped_dict
+
+
+def reshape_and_reorder_tensor(tensor):
+    batch_size, num_augmentations = tensor.shape[:2]
+    feature_dims = tensor.shape[2:]
+
+    # Permute the tensor to bring augmentations to the first dimension
+    permuted_tensor = tensor.permute(1, 0, *range(2, len(tensor.shape)))
+
+    # Reshape to combine the augmentation and batch dimensions
+    reshaped_tensor = permuted_tensor.reshape(
+        num_augmentations * batch_size, *feature_dims
+    )
+    return reshaped_tensor

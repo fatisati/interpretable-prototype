@@ -34,7 +34,7 @@ from torch.utils.data import DataLoader, Subset
 import numpy as np
 from interpretable_ssl.configs.defaults import *
 import sys
-from interpretable_ssl.utils import log_time
+from interpretable_ssl.utils import *
 
 from interpretable_ssl.evaluation.prototype_metrics import *
 import torch
