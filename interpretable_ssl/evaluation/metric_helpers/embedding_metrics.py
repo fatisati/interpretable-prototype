@@ -12,7 +12,7 @@ import scanpy.external as sce
 
 from interpretable_ssl.trainers.scpoli_original import *
 from interpretable_ssl.trainers.scproto import *
-
+from interpretable_ssl.scproto_metacells import *
 
 res_dir = "/home/icb/fatemehs.hashemig/models/"
 # use this code to calculate scib and scgraph metrics for models [scProto, scPoli, scVI, pca, pca+harmoney, seacell]
@@ -21,7 +21,7 @@ res_dir = "/home/icb/fatemehs.hashemig/models/"
 def save_append(df, save_dir, name, append=True, name_postfix=None):
     os.makedirs(os.path.dirname(save_dir), exist_ok=True)
     if name_postfix is not None:
-        name = f'{name}_{name_postfix}'
+        name = f"{name}_{name_postfix}"
     save_path = f"{save_dir}/{name}.csv"
     print(name_postfix, save_path)
     if append and os.path.exists(save_path):
@@ -42,11 +42,17 @@ def get_scib(adata, obsm_keys, ds, bk, lk, name_postfix=None):
     results = bm.get_results(min_max_scale=False)  # returns a tidy DataFrame
     results = results.drop(index="Metric Type")
     save_path = f"{res_dir}/{ds}/"
-    return save_append(results, save_path, "scib", name_postfix)
+    return save_append(results, save_path, "scib", name_postfix=name_postfix)
 
 
 def get_scgraph(
-    adata, obsm_keys, dataset_name, batch_key="study", label_key="cell_type", name_postfix = None, **kwargs
+    adata,
+    obsm_keys,
+    dataset_name,
+    batch_key="study",
+    label_key="cell_type",
+    name_postfix=None,
+    **kwargs,
 ):
     adata.write("tmp.h5ad")
     scgraph = scGraph(
@@ -54,11 +60,13 @@ def get_scgraph(
     )
     scgr_res = scgraph.main(_obsm_list=obsm_keys)
     save_path = f"{res_dir}/{dataset_name}/"
-    return save_append(scgr_res, save_path, "scgraph", name_postfix)
+    return save_append(scgr_res, save_path, "scgraph", name_postfix=name_postfix)
 
 
-def save_metrics(adata, emb_keys, dataset, bk, lk, name_postfix = None, **kwargs):
-    scgraph_m = get_scgraph(adata, emb_keys, dataset, bk, lk, name_postfix, **kwargs)
+def save_metrics(adata, emb_keys, dataset, bk, lk, name_postfix=None, **scgraph_kwargs):
+    scgraph_m = get_scgraph(
+        adata, emb_keys, dataset, bk, lk, name_postfix, **scgraph_kwargs
+    )
     scib_m = get_scib(adata, emb_keys, dataset, bk, lk, name_postfix)
     return scib_m, scgraph_m
 
@@ -117,9 +125,19 @@ def add_pca_harmoney(adata, bk, pca_key):
     return adata
 
 
-def save_pca_harmoney_metrics(adata, bk, lk, dataset, pca_key="X_pca"):
+def save_pca_harmoney_metrics(
+    adata, bk, lk, dataset, pca_key="X_pca", postfix=None, **scgraph_kwargs
+):
     adata = add_pca_harmoney(adata, bk, pca_key)
-    return save_metrics(adata, [pca_key, f"{pca_key}_harmoney"], dataset, bk, lk)
+    return save_metrics(
+        adata,
+        [pca_key, f"{pca_key}_harmoney"],
+        dataset,
+        bk,
+        lk,
+        name_postfix=postfix,
+        **scgraph_kwargs,
+    )
 
 
 def agg_obs(SEACell_ad, adata, obs_key):
@@ -131,7 +149,7 @@ def agg_obs(SEACell_ad, adata, obs_key):
     return SEACell_ad
 
 
-def get_seacell_metrics(SEACell_ad, adata, bk, lk, ds):
+def get_seacell_metrics(SEACell_ad, adata, bk, lk, ds, postfix=None, **scgraph_kwargs):
     # Normalize cells, log transform and compute highly variable genes
     sc.pp.normalize_per_cell(SEACell_ad)
     sc.pp.log1p(SEACell_ad)
@@ -140,7 +158,9 @@ def get_seacell_metrics(SEACell_ad, adata, bk, lk, ds):
     SEACell_ad = agg_obs(SEACell_ad, adata, bk)
     SEACell_ad = agg_obs(SEACell_ad, adata, lk)
 
-    return save_pca_harmoney_metrics(SEACell_ad, bk, lk, ds, "seacell_pca")
+    return save_pca_harmoney_metrics(
+        SEACell_ad, bk, lk, ds, "seacell_pca", postfix=postfix, **scgraph_kwargs
+    )
 
 
 def calc_adata_metrics(scpoli_params, scproto_params, dataset, ds_conf):
@@ -157,4 +177,32 @@ def calc_adata_metrics(scpoli_params, scproto_params, dataset, ds_conf):
         dataset,
         ds_conf["batch_key"],
         ds_conf["label_key"],
+    )
+
+
+def get_scproto_mc_adata(t, adata, bk, lk):
+    model = t.load_model()
+    protos = model.get_prototypes()
+    batch = np.zeros((protos.shape[0], 1))
+    batch = torch.as_tensor(batch, dtype=torch.long, device="cuda")
+    sizefactor = np.ones((protos.shape[0],))
+    sizefactor = torch.as_tensor(sizefactor, dtype=torch.long, device="cuda")
+    metacells = model.decode(protos, batch, sizefactor)
+
+    sample_proto_sim = t.encode_adata(adata, model, return_mapped=True)
+    proto_labels = extract_proto_labels(
+        adata, sample_proto_sim.detach().cpu().numpy(), [bk, lk]
+    )
+    metacells_adata = generate_metacell_adata(metacells, proto_labels)
+    sc.tl.pca(metacells_adata)
+    metacells_adata.obsm["scProto_mc_pca"] = metacells_adata.obsm["X_pca"]
+    return metacells_adata
+
+
+def get_scproto_metacell_metrics(
+    t, adata, ds, bk, lk, name_postfix=None, **scgraph_kwargs
+):
+    metacells_adata = get_scproto_mc_adata(t, adata, bk, lk)
+    return save_metrics(
+        metacells_adata, ["scProto_mc_pca"], ds, bk, lk, name_postfix, **scgraph_kwargs
     )

@@ -67,7 +67,7 @@ class OriginalTrainer(AdoptiveTrainer):
                               pretraining_epochs=retrain_epochs)
         return scpoli_query
 
-    def encode_batch(self, model, batch, **kwargs):
+    def encode_batch(self, model, batch, return_mapped=False, return_mapped_idx=False):
         batch = self.dict_to_device(batch)
         scpoli_model = self.extract_scpoli(model)
         scpoli_model.to(self.device)
