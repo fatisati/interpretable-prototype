@@ -13,7 +13,9 @@ my_shinyapp
 slurm-job-out*
 temp-res*
 tmp_data
-swav
+swav/*
+SEACells/*
+
 graphs
 runs/sbatch_files/auto_generated
 notebooks/explore_datasets/seq_fish_mouse_organoids.ipynb
