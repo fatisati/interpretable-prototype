@@ -16,13 +16,14 @@ import pickle as pkl
 import scvi
 from sklearn.preprocessing import StandardScaler
 from interpretable_ssl.augmenters.spatial_graph import *
-from interpretable_ssl.augmenters.graph_utils import *
-from sklearn.cluster import KMeans
-from collections import defaultdict
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
+import subprocess
+import time
+import os
+import pickle
 
 
 class MultiCropsDataset(MultiConditionAnnotatedDataset):
@@ -30,7 +31,7 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         self,
         sc_ds,
         n_augmentations,
-        augmentation_type="cell_type",
+        augmentation_type="knn",
         k_neighbors=10,  # seacell use 50
         longest_path=3,
         dimensionality_reduction=None,
@@ -45,7 +46,8 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         spatial=0,
         return_idx=False,
         n_clusters=None,
-        use_counts = False,
+        use_counts=True,
+        n_proto=None,
         **kwargs,
     ):
         """
@@ -70,6 +72,7 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         kwargs : dict
             Additional arguments for the parent class.
         """
+        self.n_proto = n_proto
         self.n_augmentations = n_augmentations
         self.augmentation_type = augmentation_type
         self.adata = sc_ds.adata
@@ -85,16 +88,20 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         self.knn_method = knn_method
         self.save_dir = save_dir
 
-        self.graph_name = f"graph_{str(sc_ds)}{len(sc_ds.adata)}_{self.dimensionality_reduction}{self.n_components}_knn{self.k_neighbors}"
+        self.graph_name = f"graph_{str(sc_ds)}{len(sc_ds.adata)}_{self.dimensionality_reduction}{self.n_components}_knn{self.k_neighbors}_{self.knn_method}"
+
         self.spatial = spatial
         if self.spatial:
             self.graph_name += "_spatial"
         if sc_ds.fold != 0:
             self.graph_name += f"_fold{sc_ds.fold}"
+        self.adata_name = self.graph_name + "_tmp.h5ad"
         self.graph_name += ".pkl"
 
         os.makedirs(self.save_dir, exist_ok=True)
         self.save_path = os.path.join(save_dir, self.graph_name)
+        self.adata_path = os.path.join(save_dir, self.adata_name)
+
         self.batch_key = kwargs["condition_keys"][0]
         if self.augmentation_type not in ["cell_type", "nb"]:
             self.set_graph()
@@ -109,7 +116,7 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
             if "overdispersion" in self.adata.varm
             else np.full(self.mean_expression.shape, self.default_dispersion)
         )
-        
+
         self.ds_index_dict = {
             ds_key: np.where(self.adata.obs[self.batch_key].values == ds_key)[0]
             for ds_key in self.adata.obs[self.batch_key].unique()
@@ -121,14 +128,63 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         self.sample_cluster_id = None
         self.n_clusters = n_clusters
         super().__init__(sc_ds.adata, **kwargs)
-        self.data = sc_ds.adata.layers.get("counts", sc_ds.adata.X) if use_counts else sc_ds.adata.X
-        if not sp.issparse(self.data):
+        self.data = (
+            sc_ds.adata.layers.get("counts", sc_ds.adata.X)
+            if use_counts
+            else sc_ds.adata.X
+        )
+        if not self._is_sparse:
             self.data = torch.tensor(self.data, dtype=torch.float32)
+        print(self._is_sparse, type(self.data[0]), self.data.max())
+        if not self.graph_exists():
+            self.knn_graph = self.run_graph_generator()
+        self.set_graph()
+
+    def run_graph_generator(self):
+        print(f"[{os.getpid()}] Generating graph...")
+        self.adata.write(self.adata_path)
+        args = (
+            self.adata_path,
+            self.knn_method,
+            self.batch_key,
+            self.n_components,
+            self.k_neighbors,
+            self.n_proto,
+        )
+        # Spawn g_hand with input + output arguments
+        config_file = self.save_path + ".inputs.pkl"
+        with open(config_file, "wb") as f:
+            pickle.dump(args, f)
+
+        subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "interpretable_ssl.augmenters.graph_generator",
+                config_file,
+                self.save_path,
+            ]
+        )
+        # Wait for graph file
+        while not os.path.exists(self.save_path):
+            time.sleep(1)
+
+        # Load result
+        with open(self.save_path, "rb") as f:
+            graph = pickle.load(f)
+
+        # Cleanup temporary files
+        try:
+            os.remove(config_file)
+            os.remove(self.adata_path)
+        except FileNotFoundError:
+            pass
+        return graph
 
     def __getitem__(self, index):
         if self.current_ds_id is not None:
             index = self.ds_index_dict[self.current_ds_id][index]
-        
+
         items = []
         for ds_id in self.ds_index_dict.keys():
             ds_index = index % len(self.ds_index_dict[ds_id])
@@ -137,7 +193,9 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         return self.combine_augmented_data(items)
 
     def __len__(self):
-        return max([len(self.ds_index_dict[ds_id]) for ds_id in self.ds_index_dict.keys()])
+        return max(
+            [len(self.ds_index_dict[ds_id]) for ds_id in self.ds_index_dict.keys()]
+        )
 
     def normal_get_item(self, index):
         if isinstance(index, (int, np.integer)):
@@ -170,10 +228,6 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
             combined_data = self.combine_augmented_data(augmented_data_list)
 
         return combined_data
-
-    def build_knn_graph(self):
-        logger.info(f"Running FAISS neighbors per batch with k={self.k_neighbors}.")
-        return faiss_knn_within_batches(self.adata, self.batch_key, self.n_components, self.k_neighbors)
 
     def random_walk(self, start_index):
         """
@@ -209,12 +263,8 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
     def set_graph(self):
         if self.knn_graph is None:
             self.knn_graph = self.load_graph()
-            if self.knn_graph is None:
-                self.knn_graph = self.build_knn_graph()
-                self.save_graph()
 
     def knn_augment(self, index):
-        self.set_graph()
         augmented_indices = [index]  # Start with the original index
         for _ in range(self.n_augmentations - 1):
             augmented_indices.append(self.random_walk(index))
@@ -281,3 +331,6 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         # Concatenate
         X_combined = np.concatenate([pca_scaled, spatial_scaled * w], axis=1)
         return X_combined
+
+    def graph_exists(self):
+        return os.path.exists(self.save_path)

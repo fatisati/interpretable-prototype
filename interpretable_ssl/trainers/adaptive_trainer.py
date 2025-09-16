@@ -67,23 +67,6 @@ class AdoptiveTrainer(Trainer):
     def init_prototypes(self):
         pass
 
-    def train_pretrain_encoder(self):
-        if self.fine_tuning_epochs > 0:
-            self.split_train_data()
-            self.ref = self.partial_ref
-        self.setup()
-        self.pretrain_encoder()
-        self.init_prototypes()
-        self.plot_umap(self.model, self.ref.adata, "pretrained-ref")
-        # pretrain with swav
-        self.train()
-
-        if self.fine_tuning_epochs > 0:
-            self.prot_decoding_loss_scaler = 0
-            self.finetuning = True
-            self.ref = self.finetune_ds
-            self.finetune()
-
     def train(self):
         pass
 
@@ -105,23 +88,27 @@ class AdoptiveTrainer(Trainer):
         self.adapt_model(model, self.finetune_ds.adata)
         return model
 
+    def save_checkpoint(self, epoch):
+        pass
+    
     def run(self):
-        if not self.debug:
+        
+        if not (self.debug==1):
             self.set_job_name(self.dump_path)
             self.init_wandb(self.dump_path)
-        if self.training_type == "semi_supervised":
-            self.train_semi_supervised()
-        elif self.training_type == "transfer_learning":
-            self.transfer_learning()
-        elif self.training_type == "fully_supervised":
-            self.train_fully_supervised()
-        elif self.training_type == "pretrain_encoder":
-            self.train_pretrain_encoder()
-        else:
-            print(f"training type: {self.training_type}")
-            self.train()
-
+        
+        if self.cvae_epochs > 0:
+            self.pretrain_encoder()
+            self.plot_umap(self.model, self.ref.adata, "pretrained-ref")
+        
+        self.init_prototypes()
+        self.train()
+        
+        if self.ft_epochs > 0:
+            self.model = self.adapt_model(self.model, self.query.adata, self.ft_epochs)
+            self.save_checkpoint(self.pretraining_epochs + self.ft_epochs)
+        
+        self.save_metrics()
         self.ref = self.original_ref
         self.plot_umap(self.model, self.original_ref.adata, "ref")
         self.plot_umap(self.model, self.dataset.adata, "all", True)
-        self.plot_umap(self.model, self.query.adata, "query", True)

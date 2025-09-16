@@ -4,7 +4,7 @@ from sklearn.neighbors import NearestNeighbors
 import logging
 import faiss
 from sklearn.preprocessing import StandardScaler
-from interpretable_ssl.augmenters.graph_utils import *
+from interpretable_ssl.augmenters.graph_generator import *
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -128,12 +128,12 @@ def generate_spatio_transcriptional_graph(adata, k, min_k, batch_label="batch"):
         spatial = adata.obs[["x", "y"]].to_numpy()
     else:
         spatial = adata.obsm['spatial']
-    spatial_knn, _ = faiss_knn_within_batches(spatial, batch_ids, k)
+    spatial_knn, _ = knn_within_batches(spatial, batch_ids, k)
     spatial_edges = knn_indices_to_edge_set(spatial_knn)
 
     # Expression edges
     expr = adata.obsm["X_pca"]
-    expr_knn, _ = faiss_knn_within_batches(expr, batch_ids, k)
+    expr_knn, _ = knn_within_batches(expr, batch_ids, k)
     expr_edges = knn_indices_to_edge_set(expr_knn)
 
     # Intersect graphs
@@ -146,7 +146,7 @@ def generate_spatio_transcriptional_graph(adata, k, min_k, batch_label="batch"):
 
     # Use combined features to fill missing edges
     combined = get_combined_features(adata)
-    combined_knn, combined_distances = faiss_knn_within_batches(
+    combined_knn, combined_distances = knn_within_batches(
         combined, batch_ids, min_k
     )
 

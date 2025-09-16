@@ -27,6 +27,7 @@ class SingleCellDataset(Dataset):
         # self.device = utils.get_device()
         self.name = name
         self.batch_key = batch_key
+
         self.label_key = label_key
         self.path = path
         self.test_studies = test_studies
@@ -78,6 +79,9 @@ class SingleCellDataset(Dataset):
         if self.requires_hvg():
             self.adata = self.adata[:, self.adata.var["highly_variable"].values].copy()
 
+        if self.batch_key is None:
+            self.batch_key = 'batch'
+            self.adata.obs['batch'] = ['b0'] * len(self.adata)
         return self.adata
 
     def load_label_encoder(self):
@@ -129,8 +133,8 @@ class SingleCellDataset(Dataset):
 
     # @log_time("get train test")
     def get_train_test(self):
-        if self.batch_key is None:
-            print("batch key is None, assuming 1 batch dataset")
+        if self.batch_key is None or (self.adata.obs[self.batch_key].nunique() == 1):
+            print("1 batch dataset")
             return self, None
         test_studies = self.get_fold_test_studies()
         test_idx = self.adata.obs[self.batch_key].isin(test_studies)

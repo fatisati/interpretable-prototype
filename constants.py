@@ -49,7 +49,7 @@ ABBREVIATIONS = {
     # 'pretraining_epochs': 'pre-e',
     # 'fine_tuning_epochs': 'tune-e'
     'pretraining_epochs': 'pretrain',
-    'fine_tuning_epochs': 'finetune',
+    'ft_epochs': 'finetune',
     "cvae_epochs": "cvae_pre",
     'decodable_prototypes':  'dec_protos',
     "sinkhorn_iterations": 'sink_itr',
@@ -80,5 +80,6 @@ ABBREVIATIONS = {
     'epoch_queue_starts': 'qe',
     'warmup_epochs': 'warmup',
     'base_lr': 'blr',
-    "use_counts": 'raw'
+    "use_counts": 'raw',
+    'knn_method': 'knn'
 }

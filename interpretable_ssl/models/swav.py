@@ -357,68 +357,6 @@ class SwAVModel(SwavBase):
         self.scpoli_wrapper = scpoli_wrapper
         self.scpoli_cvae = scpoli_wrapper.model
 
-
-class SwAVDecodableProto(SwAVModel):
-
-    def find_closest_prototype(self, embeddings):
-        similarity_scores = self.prototypes(embeddings)
-        # Get the index of the most similar prototype (highest similarity)
-        closest_prototype_indices = torch.argmax(
-            similarity_scores, dim=1
-        )  # Shape: (b,)
-
-        # Retrieve the corresponding prototype vectors
-        prototype_vectors = self.prototypes.weight  # Shape: (num_prototypes, input_dim)
-        closest_prototypes = prototype_vectors[
-            closest_prototype_indices
-        ]  # Shape: (b, input_dim)
-
-        return closest_prototypes
-
-    def compute_recon_loss(self, x, outputs, sizefactor, combined_batch):
-        # nb
-        dec_mean_gamma, y1 = outputs
-        size_factor_view = sizefactor.unsqueeze(1).expand(
-            dec_mean_gamma.size(0), dec_mean_gamma.size(1)
-        )
-        dec_mean = dec_mean_gamma * size_factor_view
-        dispersion = F.linear(
-            one_hot_encoder(combined_batch, self.scpoli_cvae.n_conditions_combined),
-            self.scpoli_cvae.theta,
-        )
-        dispersion = torch.exp(dispersion)
-
-        recon_loss = -nb(x=x, mu=dec_mean, theta=dispersion).sum(dim=-1).mean()
-        return recon_loss
-
-    def decode_prototypes_loss(self, prototypes, data_dict):
-        batch_embeddings = torch.hstack(
-            [
-                self.scpoli_cvae.embeddings[i](data_dict["batch"][:, i])
-                for i in range(data_dict["batch"].shape[1])
-            ]
-        )
-        outputs = self.scpoli_cvae.decoder(prototypes, batch_embeddings)
-        loss = self.compute_recon_loss(
-            data_dict["x"],
-            outputs,
-            data_dict["sizefactor"],
-            data_dict["combined_batch"],
-        )
-        return loss
-
-    def calculate_proto_recon_loss(self, embeddings, data_dict):
-        closest_prototypes = self.find_closest_prototype(embeddings)
-        loss = self.decode_prototypes_loss(closest_prototypes, data_dict)
-        return loss
-
-    def encoder_out(self, batch):
-        x, recon_loss, kl_loss, mmd_loss = self.scpoli_cvae(**batch)
-        proto_recon_loss = self.calculate_proto_recon_loss(x, batch)
-        cvae_loss = self.compute_cvae_loss(proto_recon_loss, kl_loss, mmd_loss)
-        return x, cvae_loss
-
-
 class scProtoGMVAE(SwAVModel):
     def __init__(self, use_rbf, **kwargs):
         kwargs["recon_loss"] = "nb"

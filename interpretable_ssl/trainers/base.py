@@ -15,7 +15,6 @@ class TrainerBase:
     # @log_time('trainer base')
     def __init__(self, **kwargs) -> None:
         self.params = self.init_attributes(**kwargs)
-        self.set_experiment_name()
         self.set_job_name()
         self.create_dump_path()
         self.create_temp_res_path()
@@ -63,13 +62,6 @@ class TrainerBase:
         temp_res_path = self.get_temp_res_path()
         if self.save_temp_res == 1 and not os.path.exists(temp_res_path):
             os.makedirs(temp_res_path)
-
-    def set_experiment_name(self):
-        if self.experiment_name == "":
-            self.experiment_name = None
-        if self.experiment_name is not None:
-            return
-        self.experiment_name = f"swav"
 
     def generate_name_based_on_changes(self):
         return generate_model_name(get_defaults().copy(), self.params)

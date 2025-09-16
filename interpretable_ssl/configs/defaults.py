@@ -107,12 +107,12 @@ def get_defaults():
         "use_rbf": 1,
         'assignment_metric': 'dotp',
         
-        "pretraining_epochs": 100,
-        "fine_tuning_epochs": 0,
+        "pretraining_epochs": 50,
+        "ft_epochs": 0,
         "cvae_epochs": 0,
         
-        "cvae_loss_scaler": 0.0, # 0.01,  # swav specific, 0.0001
-        "propagation_reg": 0, # 1,
+        "cvae_loss_scaler": 0.01, # 0.01,  # swav specific, 0.0001
+        "propagation_reg": 1, # 1,
        
         "model_type": 'gm',
         
@@ -138,7 +138,8 @@ def get_defaults():
         "epoch_queue_starts": 0, # used to be 5
         "queue_length":  0,
         
-        "use_counts": 0
+        "use_counts": 1,
+        "knn_method": 'faiss'
 
     }
     return defaults

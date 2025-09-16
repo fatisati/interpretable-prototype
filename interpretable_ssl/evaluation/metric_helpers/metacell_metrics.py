@@ -68,4 +68,15 @@ def scproto_metacell_metrics(t, path):
     return metacell_metrics
 
 
+def agg_obs(SEACell_ad, adata, obs_key):
+    SEACell_ad.obs[obs_key] = (
+        adata.obs.groupby("SEACell")[obs_key]
+        .agg(lambda x: x.mode()[0])
+        .reindex(SEACell_ad.obs_names)
+    )
+    return SEACell_ad
 
+def save_seacell(ad, SEACell_ad, ds_id):
+    home = '/home/icb/fatemehs.hashemig/'
+    ad.write(f'{home}/models/{ds_id}/seacell_sc.h5ad')
+    SEACell_ad.write(f'{home}/models/{ds_id}/seacell_agg.h5ad')

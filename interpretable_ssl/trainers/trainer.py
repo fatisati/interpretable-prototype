@@ -17,17 +17,19 @@ from interpretable_ssl.datasets.dataset_configs import DATASETS
 from interpretable_ssl.trainers.base import TrainerBase
 import wandb
 
+from interpretable_ssl.evaluation.metric_helpers.embedding_metrics import *
+
 
 class Trainer(TrainerBase):
     # @log_time('scpoli trainer')
-    def __init__(self, dataset=None, ref_query=None, parser=None, **kwargs) -> None:    
+    def __init__(self, dataset=None, ref_query=None, parser=None, **kwargs) -> None:
         parser_args = self.collect_parser_args(parser)
         kwargs.update(parser_args)
         self.dataset = dataset
-        if 'debug' not in kwargs:
-            kwargs['debug'] = 0
+        if "debug" not in kwargs:
+            kwargs["debug"] = 0
         super().__init__(**kwargs)
-    
+
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         if self.dataset is None:
             print(f"dataset is None, loading {self.dataset_id}")
@@ -98,16 +100,20 @@ class Trainer(TrainerBase):
 
     def adapt_model(self, model, adata, retrain_epochs=0):
         if self.check_conditions_compatible(model, adata):
-            return model
-
-        adapted_model = self.get_model()
-        # because our model is not just an scpoli_cvae
-        adapted_model.load_state_dict(model.state_dict())
-        scpoli_wrapper = scPoli.load_query_data(
-            adata=adata,
-            reference_model=self.extract_scpoli(adapted_model, True),
-            labeled_indices=[],
-        )
+            if retrain_epochs == 0:
+                return model
+            else:
+                adapted_model = model
+                scpoli_wrapper = self.extract_scpoli(adapted_model, True)
+        else:
+            adapted_model = self.get_model()
+            # because our model is not just an scpoli_cvae
+            adapted_model.load_state_dict(model.state_dict())
+            scpoli_wrapper = scPoli.load_query_data(
+                adata=adata,
+                reference_model=self.extract_scpoli(adapted_model, True),
+                labeled_indices=[],
+            )
         if retrain_epochs > 0:
             scpoli_wrapper.train(
                 n_epochs=retrain_epochs, pretraining_epochs=retrain_epochs
@@ -174,7 +180,6 @@ class Trainer(TrainerBase):
         retrain_epochs=0,
     ):
         model = self.adapt_model(model, adata, retrain_epochs)
-
         loader = self.prepare_scpoli_dataloader(
             adata, self.extract_scpoli(model), shuffle=False
         )
@@ -243,24 +248,38 @@ class Trainer(TrainerBase):
         ).calculate(other, save)
         return res_df
 
-    def save_metrics(self, save=True, calc_others=True):
-        ref_other, query_other = {}, {}
-        ref_df = self.calc_scib(self.ref.adata, "ref", ref_other, save, is_ref=True)
-        query_df = self.calc_scib(self.query.adata, "query", query_other, save)
-        all_df = self.calc_scib(self.dataset.adata, "all", {}, save)
-
-        def get_metrics(df):
-            return (
-                df.loc[
-                    "latent", ["Batch correction", "Bio conservation", "scib total"]
-                ],
-                df[["Rank-PCA", "Corr-PCA", "Corr-Weighted"]]
-                .mean(axis=1)
-                .iloc[0]
-                .item(),
-            )
-
-        return get_metrics(ref_df), get_metrics(query_df), get_metrics(all_df)
+    def save_metacell_metrics(self):
+        mc_adata = get_scproto_mc_adata(
+            self,
+            self.dataset.adata,
+            self.dataset.batch_key,
+            self.dataset.label_key,
+        )
+        mc_scg, mc_scb = get_metacell_metrics(
+            mc_adata,
+            [f"{self.get_model_name()}_mc_pca"],
+            self.dataset.batch_key,
+            self.dataset.label_key,
+        )
+        save_append(mc_scg, self.get_dump_path(), 'scgraph')
+        save_append(mc_scb, self.get_dump_path(), 'scib')
+        
+    def save_metrics(self):
+        adata = add_trainer_emb(self, self.dataset.adata)
+        if adata.X.max() > 50:
+            adata = adata.copy()
+            sc.pp.normalize_total(adata, target_sum=1e4)
+            sc.pp.log1p(adata)
+        params = (
+            adata,
+            [self.get_model_name()],
+            self.dataset.batch_key,
+            self.dataset.label_key,
+        )
+        scg, scb = get_metrics(*params)
+        scg.to_csv(self.get_dump_path() + "/scgraph.csv")
+        scb.to_csv(self.get_dump_path() + "/scib.csv")
+        self.save_metacell_metrics()
 
     def get_dataset(self, dataset_id):
         ds_params = DATASETS[dataset_id]
@@ -280,7 +299,7 @@ class Trainer(TrainerBase):
                 "model path": path,
                 "dataset": self.dataset,
                 "train size": len(self.ref),
-                "test size": len(self.query),
+                "test size": len(self.query) if self.query is not None else 0,
                 "batch size": self.batch_size,
             },
         )
@@ -293,6 +312,10 @@ class Trainer(TrainerBase):
             self.job_name = f"{self.get_model_name()}/{self.dataset}"
 
     def prepare_scpoli_dataloader(self, adata, scpoli_cvae, shuffle=True):
+        adata = adata.copy()
+        # because scpoli encoder gets raw counts as input
+        adata.X = adata.layers.get("counts", adata.X)
+        
         if "condition_combined" not in adata.obs:
             adata.obs["conditions_combined"] = adata.obs[[self.condition_key]].apply(
                 lambda x: "_".join(x), axis=1

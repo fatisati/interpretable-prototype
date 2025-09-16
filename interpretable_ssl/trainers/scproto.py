@@ -53,14 +53,18 @@ class SCProtoTrainer(AdoptiveTrainer):
     def __init__(
         self, dataset=None, ref_query=None, parser=None, **kwargs
     ):
-
+        if 'experiment_name' not in kwargs:
+            kwargs['experiment_name'] = 'swav'
         super().__init__(dataset, ref_query, parser, **kwargs)
         self.nmb_prototypes = self.num_prototypes
         self.use_projector_out = False
         
         self.train_augmentation = self.augmentation_type
         self.queue = {}
-        ds_cnt = self.ref.adata.obs[self.condition_key].nunique()
+        if self.condition_key is not None:
+            ds_cnt = self.ref.adata.obs[self.condition_key].nunique()
+        else:
+            ds_cnt = 1
         self.ds_ids = range(ds_cnt)
 
     def setup(self):
@@ -93,12 +97,14 @@ class SCProtoTrainer(AdoptiveTrainer):
             use_bknn=self.use_bknn,
             condition_keys=[self.condition_key],
             knn_similarity=self.knn_similarity,
+            knn_method = self.knn_method,
             save_dir="./graphs",
             mask_probability=self.mask_probability,
             default_dispersion=self.default_dispersion,
             spatial=self.spatial,
             n_clusters=self.num_prototypes,
             use_counts = (self.use_counts == 1),
+            n_proto = self.nmb_prototypes,
             condition_encoders=scpoli_encoder.condition_encoders,
             conditions_combined_encoder=scpoli_encoder.conditions_combined_encoder,
             # cell_type_keys=[self.cell_type_key],
@@ -139,7 +145,6 @@ class SCProtoTrainer(AdoptiveTrainer):
             #     return zip(ld1, ld2)
 
             # self.train_loader = get_train_loader(self.original_train_loader, self.cell_type_loader)
-        logger.info(f"Building data done with {len(self.train_ds)} samples loaded.")
 
     def get_data_laoder(self, ds):
         return DataLoader(
@@ -168,16 +173,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             "assignment_metric": self.assignment_metric,
         }
 
-        if self.decodable_prototypes == 1:
-            return SwAVDecodableProto(
-                self.latent_dims,
-                self.num_prototypes,
-                self.ref.adata,
-                self.multi_layer_protos,
-                self.num_prototypes,
-            )
-
-        elif self.model_type == "gm":
+        if self.model_type == "gm":
             return scProtoGMVAE(use_rbf=self.use_rbf, **kwargs)
         else:
             return SwAVModel(**kwargs)
@@ -187,6 +183,8 @@ class SCProtoTrainer(AdoptiveTrainer):
 
     def load_model(self):
         model = self.get_model()
+        if self.ft_epochs > 0:
+            model = self.adapt_model(model, self.dataset.adata)
         checkpoint_path = self.get_model_path()
         checkpoint = torch.load(checkpoint_path)
         model.load_state_dict(checkpoint["state_dict"])
@@ -302,7 +300,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         for epoch in range(epochs):
             logger.info(f"============ Starting epoch {epoch}============")
 
-            if (epoch % self.umap_checkpoint_freq == 0) and (self.wandb_sweep == 0):
+            if (epoch % self.umap_checkpoint_freq == 5) and (self.wandb_sweep == 0):
                 self.plot_umap(self.model, self.original_ref.adata, f"ref-e{epoch}")
 
             if (
@@ -319,6 +317,11 @@ class SCProtoTrainer(AdoptiveTrainer):
 
             self.log_wandb_loss(train_meters | test_meters, epoch)
             self.save_checkpoint(epoch)
+        
+        # if self.ft_epochs > 0:
+        #     self.model = self.adapt_model(self.model, self.query.adata, self.ft_epochs)
+        #     self.save_checkpoint(epoch + self.ft_epochs)
+            
         return train_meters | test_meters
 
     def softmax_probs(self, s):
@@ -407,7 +410,7 @@ class SCProtoTrainer(AdoptiveTrainer):
 
             meters["batch_time"].update(time.time() - end)
             end = time.time()
-            if it % 50 == 0:
+            if it % 5 == 0:
                 logger.info(
                     f"Epoch: [{epoch}][{it}] "
                     f"Time {meters['batch_time'].val:.3f} ({meters['batch_time'].avg:.3f}) "
@@ -562,24 +565,6 @@ class SCProtoTrainer(AdoptiveTrainer):
             return model.projection_head(prototypes)
         else:
             return prototypes
-
-    def finetune(self):
-        print(f"-------finetuning: {self.fine_tuning_epochs}----------")
-        # old_aug_type = self.augmentation_type
-
-        # scpoli_query = scPoli.load_query_data(
-        #     adata=self.ref.adata,
-        #     reference_model=self.get_scpoli(),
-        #     labeled_indices=[],
-        # )
-        # self.model.set_scpoli_model(scpoli_query.model)
-        self.model = self.adapt_model(self.model, self.ref.adata)
-        self.train_augmentation = "cell_type"
-        self.build_data()
-        self.build_optimizer()
-        # self.setup()
-        self.train(self.fine_tuning_epochs)
-        # self.augmentation_type = old_aug_type
 
     def prepare_sinkhorn_input(self, view_idx, z, view_id, bs, view_logits, ds_id):
         output_logits = view_logits.detach()

@@ -9,9 +9,8 @@ import scanpy as sc
 import scvi
 import scanpy as sc
 import scanpy.external as sce
-
-from interpretable_ssl.trainers.scpoli_original import *
-from interpretable_ssl.trainers.scproto import *
+import torch
+import uuid
 from interpretable_ssl.scproto_metacells import *
 
 res_dir = "/home/icb/fatemehs.hashemig/models/"
@@ -31,7 +30,7 @@ def save_append(df, save_dir, name, append=True, name_postfix=None):
     return df
 
 
-def get_scib(adata, obsm_keys, ds, bk, lk, name_postfix=None):
+def get_scib(adata, obsm_keys, bk, lk):
     bm = Benchmarker(
         adata=adata,
         batch_key=bk,
@@ -41,39 +40,47 @@ def get_scib(adata, obsm_keys, ds, bk, lk, name_postfix=None):
     bm.benchmark()  # runs neighbors, clustering, and metrics
     results = bm.get_results(min_max_scale=False)  # returns a tidy DataFrame
     results = results.drop(index="Metric Type")
-    save_path = f"{res_dir}/{ds}/"
-    return save_append(results, save_path, "scib", name_postfix=name_postfix)
+    return results
+    # save_path = f"{res_dir}/{ds}/"
+    # return save_append(results, save_path, "scib", name_postfix=name_postfix)
 
 
+# thres_batch=100, thres_celltype=10
 def get_scgraph(
     adata,
     obsm_keys,
-    dataset_name,
     batch_key="study",
     label_key="cell_type",
-    name_postfix=None,
     **kwargs,
 ):
-    adata.write("tmp.h5ad")
+    tmp_path = f"tmp_{uuid.uuid4().hex[:8]}.h5ad"
+
+    adata.write(tmp_path)
     scgraph = scGraph(
-        adata_path="tmp.h5ad", batch_key=batch_key, label_key=label_key, **kwargs
+        adata_path=tmp_path, batch_key=batch_key, label_key=label_key, **kwargs
     )
     scgr_res = scgraph.main(_obsm_list=obsm_keys)
-    save_path = f"{res_dir}/{dataset_name}/"
-    return save_append(scgr_res, save_path, "scgraph", name_postfix=name_postfix)
+    if os.path.exists(tmp_path):
+        os.remove(tmp_path)
+        print("Deleted:", tmp_path)
+    return scgr_res
+    # save_path = f"{res_dir}/{dataset_name}/"
+    # return save_append(scgr_res, save_path, "scgraph", name_postfix=name_postfix)
 
 
-def save_metrics(adata, emb_keys, dataset, bk, lk, name_postfix=None, **scgraph_kwargs):
-    scgraph_m = get_scgraph(
-        adata, emb_keys, dataset, bk, lk, name_postfix, **scgraph_kwargs
-    )
-    scib_m = get_scib(adata, emb_keys, dataset, bk, lk, name_postfix)
+def get_metrics(adata, emb_keys, bk, lk, **scgraph_kwargs):
+    scg = get_scgraph(adata, emb_keys, bk, lk, **scgraph_kwargs)
+    scb = get_scib(adata, emb_keys, bk, lk)
+    return scg, scb
+
+
+def save_metrics(adata, emb_keys, dataset, bk, lk, **scgraph_kwargs):
+    scgraph_m = get_scgraph(adata, emb_keys, dataset, bk, lk, **scgraph_kwargs)
+    scib_m = get_scib(adata, emb_keys, dataset, bk, lk)
     return scib_m, scgraph_m
 
 
 def add_trainer_emb(t, adata):
-    if t.model is None:
-        t.setup()
     model = t.load_model()
     # adata = t.dataset.adata
     adata.obsm[t.get_model_name()] = t.encode_adata(adata, model).detach().cpu().numpy()
@@ -87,7 +94,7 @@ def save_trainer_metrics(t, dataset, append=True):
     return save_metrics(adata, [t.get_model_name()], dataset, bk, lk, append)
 
 
-def add_scvi_emb(adata, query_stu, bk):
+def add_scvi_emb(adata, query_stu, bk, pt_epochs, ft_epochs):
     ref = adata[~adata.obs[bk].isin(query_stu)].copy()
 
     # 1) Setup AnnData for scVI
@@ -96,11 +103,11 @@ def add_scvi_emb(adata, query_stu, bk):
 
     # 2) Train model on reference
     model = scvi.model.SCVI(ref, n_latent=8)
-    model.train(max_epochs=100)
+    model.train(max_epochs=pt_epochs)
 
     # Adapt model to whole adata
     query_model = scvi.model.SCVI.load_query_data(adata, model)
-    query_model.train(1)
+    query_model.train(ft_epochs)
     adata.obsm["X_scvi"] = query_model.get_latent_representation(adata)
     return adata
 
@@ -140,40 +147,27 @@ def save_pca_harmoney_metrics(
     )
 
 
-def agg_obs(SEACell_ad, adata, obs_key):
-    SEACell_ad.obs[obs_key] = (
-        adata.obs.groupby("SEACell")[obs_key]
-        .agg(lambda x: x.mode()[0])
-        .reindex(SEACell_ad.obs_names)
-    )
-    return SEACell_ad
-
-
 def get_seacell_metrics(SEACell_ad, adata, bk, lk, ds, postfix=None, **scgraph_kwargs):
     # Normalize cells, log transform and compute highly variable genes
     sc.pp.normalize_per_cell(SEACell_ad)
     sc.pp.log1p(SEACell_ad)
     # sc.pp.highly_variable_genes(ad, n_top_genes=1500)
 
-    SEACell_ad = agg_obs(SEACell_ad, adata, bk)
-    SEACell_ad = agg_obs(SEACell_ad, adata, lk)
+    # SEACell_ad = agg_obs(SEACell_ad, adata, bk)
+    # SEACell_ad = agg_obs(SEACell_ad, adata, lk)
 
     return save_pca_harmoney_metrics(
         SEACell_ad, bk, lk, ds, "seacell_pca", postfix=postfix, **scgraph_kwargs
     )
 
 
-def calc_adata_metrics(scpoli_params, scproto_params, dataset, ds_conf):
+def calc_adata_metrics(dataset, ds_conf):
     adata = sc.read_h5ad(ds_conf["path"])
-    t1 = OriginalTrainer(debug=1, **scpoli_params)
-    t2 = SCProtoTrainer(debug=1, **scproto_params)
-    for t in [t1, t2]:
-        add_trainer_emb(t, adata)
     add_scvi_emb(adata, ds_conf["test_studies"], ds_conf["batch_key"])
     add_pca_harmoney(adata, ds_conf["batch_key"], "X_pca")
     return save_metrics(
         adata,
-        [t.get_model_name() for t in [t1, t2]] + ["X_pca", "X_pca_harmoney", "X_scvi"],
+        ["X_pca", "X_pca_harmoney", "X_scvi"],
         dataset,
         ds_conf["batch_key"],
         ds_conf["label_key"],
@@ -195,7 +189,7 @@ def get_scproto_mc_adata(t, adata, bk, lk):
     )
     metacells_adata = generate_metacell_adata(metacells, proto_labels)
     sc.tl.pca(metacells_adata)
-    metacells_adata.obsm["scProto_mc_pca"] = metacells_adata.obsm["X_pca"]
+    metacells_adata.obsm[f"{t.get_model_name()}_mc_pca"] = metacells_adata.obsm["X_pca"]
     return metacells_adata
 
 
@@ -206,3 +200,21 @@ def get_scproto_metacell_metrics(
     return save_metrics(
         metacells_adata, ["scProto_mc_pca"], ds, bk, lk, name_postfix, **scgraph_kwargs
     )
+
+
+def load_seacell(ds_id):
+    home = "/home/icb/fatemehs.hashemig/"
+    # ad = sc.read_h5ad(f'{home}/models/{ds_id}/seacell_sc.h5ad')
+    mc_ad = sc.read_h5ad(f"{home}/models/{ds_id}/seacell_agg.h5ad")
+    sc.pp.normalize_total(mc_ad, target_sum=1e4)
+    sc.pp.log1p(mc_ad)
+    return mc_ad
+
+
+def get_metacell_metrics(
+    mc_ad,
+    obsm_keys,
+    bk,
+    lk,
+):
+    return get_metrics(mc_ad, obsm_keys, bk, lk, thres_batch=10, thres_celltype=5)
