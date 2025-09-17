@@ -90,7 +90,7 @@ def get_defaults():
         "batch_sinkhorn": 1,
         "weighted_batch": 0,
         "knn_similarity": 'cosine',
-        "recon_loss": 'mse',
+        "recon_loss": 'nb',
         "no_sinkhorn": 0,
         "wandb_sweep": 0,
         "sweep_id": -1,
@@ -107,9 +107,9 @@ def get_defaults():
         "use_rbf": 1,
         'assignment_metric': 'dotp',
         
-        "pretraining_epochs": 50,
-        "ft_epochs": 0,
-        "cvae_epochs": 0,
+        "cvae_epochs": 45,
+        "pretraining_epochs": 45,
+        "ft_epochs": 10,
         
         "cvae_loss_scaler": 0.01, # 0.01,  # swav specific, 0.0001
         "propagation_reg": 1, # 1,
@@ -123,7 +123,6 @@ def get_defaults():
         "final_lr": 0,  # swav specific
         "warmup_epochs": 10,  # swav specific
         "start_warmup": 0,  # swav specific
-        
         
         "batch_size": 1024,
         

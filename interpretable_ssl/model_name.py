@@ -42,7 +42,10 @@ def generate_model_name(defaults, params):
                 if key == 'training_type':
                     max_length = len(val)
             shortened_val = str(val)[:max_length] if isinstance(val, str) else str(val)
-            job_name_parts.append(f"{abbreviated_key}_{shortened_val}")
+            if isinstance(val, (int, float)):
+                job_name_parts.append(f"{abbreviated_key}{shortened_val}")
+            else:
+                job_name_parts.append(f"{abbreviated_key}-{shortened_val}")
     
     # Join all parts to form the job name
     job_name = "_".join(job_name_parts)
