@@ -33,9 +33,10 @@ def generate_table(res_dir, name_postfix=None):
     df = pd.concat([scib_df, scgraph_df], axis=1)
     return show_tb(df)
 
-def show_tb(df):
-    show_cols = ['Batch correction', 'Bio conservation', 'Total', 'Rank-PCA', 'Corr-PCA', 'Corr-Weighted']
-    return df[show_cols].style.apply(highlight_max_second, axis=0).format("{:.3f}")
+def show_tb(df, show_cols = ['Batch correction', 'Bio conservation', 'Total', 'Rank-PCA', 'Corr-PCA', 'Corr-Weighted']):
+    if show_cols is not None:
+        df = df[show_cols]
+    return df.style.apply(highlight_max_second, axis=0).format("{:.3f}")
 
 def load_tb(ds_id):
     p = f'/home/icb/fatemehs.hashemig/models/{ds_id}/'

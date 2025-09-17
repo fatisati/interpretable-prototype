@@ -52,23 +52,11 @@ class OriginalTrainer(AdoptiveTrainer):
 
     def load_model(self):
         model = self.get_model()
+        if self.ft_epochs > 0:
+            model = self.adapt_model(model, self.query.adata)
         path = self.get_model_path()
         model.model.load_state_dict(torch.load(path)["model_state_dict"])
         return model
-
-    def adapt_model(self, ref_model, adata, retrain_epochs=0):
-        query_model = self.get_model()
-        query_model.model.load_state_dict(ref_model.model.state_dict())
-        scpoli_query = scPoli.load_query_data(
-            adata=adata,
-            reference_model=query_model,
-            labeled_indices=[],
-        )
-        if retrain_epochs > 0:
-            scpoli_query.train(
-                n_epochs=retrain_epochs, pretraining_epochs=retrain_epochs
-            )
-        return scpoli_query
 
     def encode_batch(self, model, batch, return_mapped=False, return_mapped_idx=False):
         batch = self.dict_to_device(batch)
@@ -86,3 +74,32 @@ class OriginalTrainer(AdoptiveTrainer):
 
     def save_metacell_metrics(self):
         pass
+
+    def unwrap_model(self, wrapper):
+        return wrapper.model
+    
+    def init_wandb(self, path=None):
+        pass
+    
+    def attach_scpoli(self, wrapper, model):
+        return wrapper
+    
+    
+    def adapt_model(self, wrapper, adata, retrain_epochs=0):
+        if self.check_conditions_compatible(wrapper, adata):
+            if retrain_epochs == 0:
+                return wrapper
+            else:
+                adopted_wrapper = wrapper
+        else:
+            adopted_wrapper = scPoli.load_query_data(
+                adata=adata,
+                reference_model=wrapper,
+                labeled_indices=[],
+            )
+        if retrain_epochs > 0:
+            adopted_wrapper.train(
+                n_epochs=retrain_epochs,
+                pretraining_epochs=retrain_epochs,
+            )
+        return adopted_wrapper

@@ -184,7 +184,7 @@ class SCProtoTrainer(AdoptiveTrainer):
     def load_model(self):
         model = self.get_model()
         if self.ft_epochs > 0:
-            model = self.adapt_model(model, self.dataset.adata)
+            model = self.adapt_model(model, self.query.adata)
         checkpoint_path = self.get_model_path()
         checkpoint = torch.load(checkpoint_path)
         model.load_state_dict(checkpoint["state_dict"])
@@ -300,7 +300,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         for epoch in range(epochs):
             logger.info(f"============ Starting epoch {epoch}============")
 
-            if (epoch % self.umap_checkpoint_freq == 5) and (self.wandb_sweep == 0):
+            if (epoch % self.umap_checkpoint_freq == 10) and (self.wandb_sweep == 0):
                 self.plot_umap(self.model, self.original_ref.adata, f"ref-e{epoch}")
 
             if (
@@ -588,7 +588,13 @@ class SCProtoTrainer(AdoptiveTrainer):
 
         return output_logits
 
-
+    def init_queue(self, ds_id):
+        self.queue[ds_id] = torch.zeros(
+            len(self.views_for_assign),
+            self.queue_length,  # // divide by wprld size
+            self.latent_dims,
+        ).cuda()
+    
 if __name__ == "__main__":
     swav = SCProtoTrainer()
     swav.setup()

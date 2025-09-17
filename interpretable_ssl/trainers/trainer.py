@@ -99,27 +99,28 @@ class Trainer(TrainerBase):
         return model
 
     def adapt_model(self, model, adata, retrain_epochs=0):
+        adapted_model = model
         if self.check_conditions_compatible(model, adata):
             if retrain_epochs == 0:
-                return model
+                return adapted_model
             else:
-                adapted_model = model
-                scpoli_wrapper = self.extract_scpoli(adapted_model, True)
+                adopted_wrapper = self.extract_scpoli(adapted_model, True)
         else:
+            # make a new model not change the old one
             adapted_model = self.get_model()
             # because our model is not just an scpoli_cvae
             adapted_model.load_state_dict(model.state_dict())
-            scpoli_wrapper = scPoli.load_query_data(
+            adopted_wrapper = scPoli.load_query_data(
                 adata=adata,
                 reference_model=self.extract_scpoli(adapted_model, True),
                 labeled_indices=[],
             )
         if retrain_epochs > 0:
-            scpoli_wrapper.train(
+            adopted_wrapper.train(
                 n_epochs=retrain_epochs, pretraining_epochs=retrain_epochs
             )
 
-        adapted_model.attach_scpoli(scpoli_wrapper)
+        adapted_model.attach_scpoli(adopted_wrapper)
         adapted_model.to(self.device)
         return adapted_model
 
@@ -261,9 +262,9 @@ class Trainer(TrainerBase):
             self.dataset.batch_key,
             self.dataset.label_key,
         )
-        save_append(mc_scg, self.get_dump_path(), 'scgraph')
-        save_append(mc_scb, self.get_dump_path(), 'scib')
-        
+        save_append(mc_scg, self.get_dump_path(), "scgraph")
+        save_append(mc_scb, self.get_dump_path(), "scib")
+
     def save_metrics(self):
         adata = add_trainer_emb(self, self.dataset.adata)
         if adata.X.max() > 50:
@@ -315,7 +316,7 @@ class Trainer(TrainerBase):
         adata = adata.copy()
         # because scpoli encoder gets raw counts as input
         adata.X = adata.layers.get("counts", adata.X)
-        
+
         if "condition_combined" not in adata.obs:
             adata.obs["conditions_combined"] = adata.obs[[self.condition_key]].apply(
                 lambda x: "_".join(x), axis=1
