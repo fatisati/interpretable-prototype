@@ -25,7 +25,7 @@ DATASETS = {
         "test_studies": ["celseq", "celseq2"],
     },
     "hlca": {
-        "path": Path(DATA_DIR) / 'hlca/hlca_core_hvg.h5ad"',
+        "path": Path(DATA_DIR) / 'hlca/hlca_core_hvg.h5ad',
         "batch_key": "dataset",
         "label_key": "cell_type",
         "label_encoder_path": "./data/hlca_label_encoder.pkl",
