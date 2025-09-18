@@ -24,7 +24,7 @@ def get_defaults():
         'finetune_dataset_id': 'pbmc-immune',
         
         "dump_name_version": 4,  # swav specific
-        "nmb_crops": [4],  # swav specific
+        "nmb_views": [4],  # swav specific
         "augmentation_type": "knn",  # swav specific
         "size_crops": [224],  # swav specific
         "min_scale_crops": [0.14],  # swav specific
@@ -138,7 +138,7 @@ def get_defaults():
         "queue_length":  0,
         
         "use_counts": 1,
-        "knn_method": 'faiss'
-
+        "knn_method": 'faiss',
+        "version": 2
     }
     return defaults
