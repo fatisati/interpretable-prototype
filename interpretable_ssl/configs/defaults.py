@@ -24,13 +24,13 @@ def get_defaults():
         'finetune_dataset_id': 'pbmc-immune',
         
         "dump_name_version": 4,  # swav specific
-        "nmb_views": [4],  # swav specific
         "augmentation_type": "knn",  # swav specific
         "size_crops": [224],  # swav specific
         "min_scale_crops": [0.14],  # swav specific
         "max_scale_crops": [1],  # swav specific
         "views_for_assign": [0, 1],  # swav specific
-
+        "nmb_views": [4],  # swav specific
+        
         "sinkhorn_iterations": 3,  # swav specific
         "feat_dim": 8,  # swav specific
         
@@ -107,9 +107,9 @@ def get_defaults():
         "use_rbf": 1,
         'assignment_metric': 'dotp',
         
-        "cvae_epochs": 45,
-        "pretraining_epochs": 45,
-        "ft_epochs": 10,
+        "cvae_epochs": 0,
+        "pretraining_epochs": 100,
+        "ft_epochs": 0,
         
         "cvae_loss_scaler": 0.01, # 0.01,  # swav specific, 0.0001
         "propagation_reg": 1, # 1,
@@ -119,15 +119,15 @@ def get_defaults():
         "workers": 1,  # swav specific
         
         "wd": 1e-6,  # swav specific
-        
-        "final_lr": 0,  # swav specific
+        "base_lr": 4.8,  # swav specific
+        "final_lr": 0.0048,  # swav specific
         "warmup_epochs": 10,  # swav specific
-        "start_warmup": 0,  # swav specific
+        "start_warmup": 0.3,  # swav specific
         
         "batch_size": 1024,
         
-        "base_lr": 4.8,  # swav specific
-        "freeze_prototypes_nepochs": 20, # used to be 50
+        
+        "freeze_prototypes_nepochs": 1, # used to be 50
         
         "hard_clustering": 0,
         
@@ -139,6 +139,6 @@ def get_defaults():
         
         "use_counts": 1,
         "knn_method": 'faiss',
-        "version": 2
+        "version": 3
     }
     return defaults

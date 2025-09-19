@@ -44,7 +44,7 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         mask_probability=0.2,
         default_dispersion=0.1,
         spatial=0,
-        return_idx=False,
+        return_idx=True,
         n_clusters=None,
         use_counts=True,
         n_proto=None,

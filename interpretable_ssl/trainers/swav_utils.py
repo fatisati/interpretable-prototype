@@ -29,7 +29,8 @@ def get_assignment_metrics(assignments, label):
     # Number of empty prototypes
     num_prototypes = assignments.size(1)
     res[f"{label}_empty_protos_ratio"] = (counts == 0).sum().item() / num_prototypes
-
+    res[f'{label}_proto_usage'] = (counts != 0).sum().item() / min(num_prototypes, assignments.size(0))
+    
     # Uniformity metric (L2 distance from uniform distribution, normalized)
     
     expected = counts.sum() / num_prototypes

@@ -12,7 +12,7 @@ import scanpy.external as sce
 import torch
 import uuid
 from interpretable_ssl.scproto_metacells import *
-
+from interpretable_ssl.configs.defaults import get_defaults
 res_dir = "/home/icb/fatemehs.hashemig/models/"
 # use this code to calculate scib and scgraph metrics for models [scProto, scPoli, scVI, pca, pca+harmoney, seacell]
 
@@ -94,7 +94,10 @@ def save_trainer_metrics(t, dataset, append=True):
     return save_metrics(adata, [t.get_model_name()], dataset, bk, lk, append)
 
 
-def add_scvi_emb(adata, query_stu, bk, pt_epochs, ft_epochs):
+def add_scvi_emb(adata, query_stu, bk, pt_epochs=None, ft_epochs=None):
+    d = get_defaults()
+    pt_epochs = pt_epochs or d['pretraining_epochs'] + d['cvae_epochs']
+    ft_epochs = ft_epochs or d['ft_epochs']
     ref = adata[~adata.obs[bk].isin(query_stu)].copy()
 
     # 1) Setup AnnData for scVI
@@ -108,7 +111,10 @@ def add_scvi_emb(adata, query_stu, bk, pt_epochs, ft_epochs):
     # Adapt model to whole adata
     query_model = scvi.model.SCVI.load_query_data(adata, model)
     query_model.train(ft_epochs)
-    adata.obsm["X_scvi"] = query_model.get_latent_representation(adata)
+    key = "X_scvi"
+    key += f"_pt{pt_epochs}" if pt_epochs != d['pretraining_epochs'] else ""
+    key += f"_ft{ft_epochs}" if ft_epochs != d['ft_epochs'] else ""
+    adata.obsm[key] = query_model.get_latent_representation(adata)
     return adata
 
 

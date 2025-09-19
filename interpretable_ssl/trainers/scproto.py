@@ -50,15 +50,13 @@ logger = getLogger()
 class SCProtoTrainer(AdoptiveTrainer):
 
     # @log_time('swav')
-    def __init__(
-        self, dataset=None, ref_query=None, parser=None, **kwargs
-    ):
-        if 'experiment_name' not in kwargs:
-            kwargs['experiment_name'] = 'swav'
+    def __init__(self, dataset=None, ref_query=None, parser=None, **kwargs):
+        if "experiment_name" not in kwargs:
+            kwargs["experiment_name"] = "swav"
         super().__init__(dataset, ref_query, parser, **kwargs)
         self.nmb_prototypes = self.num_prototypes
         self.use_projector_out = False
-        
+
         self.train_augmentation = self.augmentation_type
         self.queue = {}
         if self.condition_key is not None:
@@ -87,7 +85,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         # why nmb_crops is a list? i used fisrt element but not change it in case needed in furure
         scpoli_encoder = self.model.scpoli_cvae
         common_dataset_kwargs = dict(
-            n_augmentations=self.nmb_crops[0],
+            n_augmentations=self.nmb_views[0],
             augmentation_type=self.train_augmentation,
             k_neighbors=self.k_neighbors,
             longest_path=self.longest_path,
@@ -97,14 +95,14 @@ class SCProtoTrainer(AdoptiveTrainer):
             use_bknn=self.use_bknn,
             condition_keys=[self.condition_key],
             knn_similarity=self.knn_similarity,
-            knn_method = self.knn_method,
+            knn_method=self.knn_method,
             save_dir="./graphs",
             mask_probability=self.mask_probability,
             default_dispersion=self.default_dispersion,
             spatial=self.spatial,
             n_clusters=self.num_prototypes,
-            use_counts = (self.use_counts == 1),
-            n_proto = self.nmb_prototypes,
+            use_counts=(self.use_counts == 1),
+            n_proto=self.nmb_prototypes,
             condition_encoders=scpoli_encoder.condition_encoders,
             conditions_combined_encoder=scpoli_encoder.conditions_combined_encoder,
             # cell_type_keys=[self.cell_type_key],
@@ -127,7 +125,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         if self.multi_layer_protos == 1:
             self.cell_type_ds = MultiCropsDataset(
                 self.ref,
-                self.nmb_crops[0],
+                self.nmb_views[0],
                 "cell_type",
                 k_neighbors=self.k_neighbors,
                 longest_path=self.longest_path,
@@ -317,57 +315,12 @@ class SCProtoTrainer(AdoptiveTrainer):
 
             self.log_wandb_loss(train_meters | test_meters, epoch)
             self.save_checkpoint(epoch)
-        
+
         # if self.ft_epochs > 0:
         #     self.model = self.adapt_model(self.model, self.query.adata, self.ft_epochs)
         #     self.save_checkpoint(epoch + self.ft_epochs)
-            
+
         return train_meters | test_meters
-
-    def softmax_probs(self, s):
-        return F.softmax(s / self.temperature)
-
-    def calc_ds_loss(self, inputs, ds_id, meters, bs):
-        ds_inputs = {k: inputs[k][ds_id] for k in inputs.keys()}
-        metrics, assign_cnts = self._process_batch(ds_inputs, ds_id)
-        # averaged = self._average_metrics(metrics)
-        # Update meters
-        for key in metrics:
-            if key not in meters:
-                meters[key] = AverageMeter()
-            value = (
-                metrics[key].item() if hasattr(metrics[key], "item") else metrics[key]
-            )
-            meters[key].update(value, bs)
-
-        loss = (
-            metrics["swav"]
-            + metrics["cvae"] * self.cvae_loss_scaler
-            + metrics["propagation"] * self.propagation_reg
-            # + metrics["similarity"] * self.prot_emb_sim_reg
-        )
-        meters["loss"].update(loss.item(), bs)
-        return loss, meters, assign_cnts
-
-    def test_epoch(self):
-        self.model.eval()
-        with torch.no_grad():
-            for inputs in self.test_loader:
-                bs = inputs["x"].size(0)
-                # ds_ids = range(inputs['x'].size(1))
-                inputs = {
-                    k: inputs[k].transpose(0, 1) for k in inputs.keys()
-                }  # bring dataset in first to calc loss per dataset
-                meters = {"loss": AverageMeter()}
-
-                for ds_id in self.ds_ids:
-                    _, meters, _ = self.calc_ds_loss(inputs, ds_id, meters, bs)
-        meters = {k: getattr(v, "avg", v) for k, v in meters.items()}
-        return meters
-
-        # define test loader
-        # pass data, get loss and metrics
-        # return the dict
 
     def train_epoch(self, epoch):
         self.model.train()
@@ -430,6 +383,28 @@ class SCProtoTrainer(AdoptiveTrainer):
         meters["p_ams"] = meters["p_matched"] / (meters["p_empty_protos_ratio"] + eps)
         return meters
 
+    def calc_ds_loss(self, inputs, ds_id, meters, bs):
+        ds_inputs = {k: inputs[k][ds_id] for k in inputs.keys()}
+        metrics, assign_cnts = self._process_batch(ds_inputs, ds_id)
+        # averaged = self._average_metrics(metrics)
+        # Update meters
+        for key in metrics:
+            if key not in meters:
+                meters[key] = AverageMeter()
+            value = (
+                metrics[key].item() if hasattr(metrics[key], "item") else metrics[key]
+            )
+            meters[key].update(value, bs)
+
+        loss = (
+            metrics["swav"]
+            + metrics["cvae"] * self.cvae_loss_scaler
+            + metrics["propagation"] * self.propagation_reg
+            # + metrics["similarity"] * self.prot_emb_sim_reg
+        )
+        meters["loss"].update(loss.item(), bs)
+        return loss, meters, assign_cnts
+
     def _process_batch(self, inputs, ds_id):
         bs = inputs["x"].size(0)
         inputs = self.dict_to_device(inputs)
@@ -437,10 +412,13 @@ class SCProtoTrainer(AdoptiveTrainer):
         z, _, logits, cvae_loss, (propagation, sim) = self.model(inputs)
         z = z.detach()
         assign_cnts = get_assign_cnts(logits)
+
         swav_loss, matched_pairs_ratio, q_matched, assignment_metrics = (
             self.compute_swav_loss(logits, z, bs, ds_id)
         )
-
+        assignment_metrics["p_proto_utilization"] = (
+            assign_cnts != 0
+        ).sum().item() / min(logits.size(0), logits.size(1))
         # entropy = self.peaky_softmax_loss(scores)
         # match, prob_ent, p_ent = self.calculate_pair_matching(scores, bs)
 
@@ -451,35 +429,12 @@ class SCProtoTrainer(AdoptiveTrainer):
             "similarity": sim,
             "p_matched": matched_pairs_ratio,
             "q_matched": q_matched,
+            "z_mean": abs(z.mean().detach().item())
             # "entropy": entropy,
             # "match": match,
             # "prob_ent": prob_ent,
             # "p_ent": p_ent,
         } | assignment_metrics, assign_cnts
-
-    def _handle_prototype_freezing(self, epoch):
-
-        for name, p in self.model.named_parameters():
-            if "prototypes" in name:
-                if epoch < self.freeze_prototypes_nepochs:
-                    p.grad = None
-                else:
-                    break
-
-    def update_learning_rate(self, iteration):
-        for param_group in self.optimizer.param_groups:
-            param_group["lr"] = self.lr_schedule[iteration]
-
-    def hard_clusters(self, out: torch.Tensor) -> torch.Tensor:
-        """
-        Convert output probabilities/logits into hard one-hot clusters.
-        Args:
-            out (torch.Tensor): shape (batch, prototypes)
-        Returns:
-            torch.Tensor: one-hot encoded tensor of same shape as `out`
-        """
-        max_indices = torch.argmax(out, dim=1)
-        return F.one_hot(max_indices, num_classes=out.size(1)).to(out.dtype)
 
     def compute_swav_loss(self, logits, z, bs, ds_id):
 
@@ -505,14 +460,15 @@ class SCProtoTrainer(AdoptiveTrainer):
             if self.hard_clustering == 1:
                 q = self.hard_clusters(q)
 
-            aug_view_ids = np.delete(np.arange(np.sum(self.nmb_crops)), view_id)
+            aug_view_ids = np.delete(np.arange(np.sum(self.nmb_views)), view_id)
             for v in aug_view_ids:
                 aug_logits = (
                     logits[bs * v : bs * (v + 1)] / self.temperature
                 )  # logits for the v-th crop
-                subloss -= torch.mean(
-                    torch.sum(q * F.log_softmax(aug_logits, dim=1), dim=1)
-                )
+                self.check_finit(aug_logits, 'p')
+                log_probs = F.log_softmax(aug_logits, dim=1)
+                subloss -= torch.mean(torch.sum(q * log_probs, dim=1))
+                
                 matched_pairs_ratio += get_matched_pairs_ratio(view_logits, aug_logits)
                 q_matched += get_matched_pairs_ratio(q, aug_logits)
 
@@ -539,9 +495,63 @@ class SCProtoTrainer(AdoptiveTrainer):
             avg_assign_metrics,
         )
 
+    def test_epoch(self):
+        self.model.eval()
+        with torch.no_grad():
+            for inputs in self.test_loader:
+                bs = inputs["x"].size(0)
+                # ds_ids = range(inputs['x'].size(1))
+                inputs = {
+                    k: inputs[k].transpose(0, 1) for k in inputs.keys()
+                }  # bring dataset in first to calc loss per dataset
+                meters = {"loss": AverageMeter()}
+
+                for ds_id in self.ds_ids:
+                    _, meters, _ = self.calc_ds_loss(inputs, ds_id, meters, bs)
+        meters = {k: getattr(v, "avg", v) for k, v in meters.items()}
+        return meters
+
+        # define test loader
+        # pass data, get loss and metrics
+        # return the dict
+
+    def softmax_probs(self, s):
+        return F.softmax(s / self.temperature)
+
+    def _handle_prototype_freezing(self, epoch):
+
+        for name, p in self.model.named_parameters():
+            if "prototypes" in name:
+                if epoch < self.freeze_prototypes_nepochs:
+                    p.grad = None
+                else:
+                    break
+
+    def update_learning_rate(self, iteration):
+        for param_group in self.optimizer.param_groups:
+            param_group["lr"] = self.lr_schedule[iteration]
+
+    def hard_clusters(self, out: torch.Tensor) -> torch.Tensor:
+        """
+        Convert output probabilities/logits into hard one-hot clusters.
+        Args:
+            out (torch.Tensor): shape (batch, prototypes)
+        Returns:
+            torch.Tensor: one-hot encoded tensor of same shape as `out`
+        """
+        max_indices = torch.argmax(out, dim=1)
+        return F.one_hot(max_indices, num_classes=out.size(1)).to(out.dtype)
+
+    def check_finit(self, prob, name):
+        if not torch.isfinite(prob).all():
+            print(f"⚠️ Invalid values in {name}! (nan/inf detected)")
+            print("min:", prob.min().item(), "max:", prob.max().item())
+    
     @torch.no_grad()
     def distributed_sinkhorn(self, out):
         Q = torch.exp(out / self.epsilon).t()
+        # check validity
+        self.check_finit(Q, 'q')
         B = Q.shape[1]
         K = Q.shape[0]
 
@@ -594,7 +604,8 @@ class SCProtoTrainer(AdoptiveTrainer):
             self.queue_length,  # // divide by wprld size
             self.latent_dims,
         ).cuda()
-    
+
+
 if __name__ == "__main__":
     swav = SCProtoTrainer()
     swav.setup()
