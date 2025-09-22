@@ -41,7 +41,7 @@ def get_defaults():
         "local_rank": 0,  # swav specific
         
         "checkpoint_freq": 30,  # swav specific
-        "umap_checkpoint_freq": 10,
+        "umap_checkpoint_freq": 20,
         "scib_freq": 10, 
         "save_scib": 1,
         "use_fp16": False,  # swav specific
@@ -107,9 +107,9 @@ def get_defaults():
         "use_rbf": 1,
         'assignment_metric': 'dotp',
         
-        "cvae_epochs": 0,
+        "cvae_epochs": 50,
         "pretraining_epochs": 100,
-        "ft_epochs": 0,
+        "ft_epochs": 20,
         
         "cvae_loss_scaler": 0.01, # 0.01,  # swav specific, 0.0001
         "propagation_reg": 1, # 1,
@@ -139,6 +139,7 @@ def get_defaults():
         
         "use_counts": 1,
         "knn_method": 'faiss',
-        "version": 3
+        "version": 4,
+        "affinity_type": "inverse_dist"
     }
     return defaults

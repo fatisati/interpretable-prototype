@@ -119,44 +119,52 @@ def neighbor_dict_to_array(neighbor_dict, max_k=None):
 
     return indices, distances
 
-def generate_spatio_transcriptional_graph(adata, k, min_k, batch_label="batch"):
-    batch_ids = adata.obs[batch_label].values
-    num_nodes = adata.n_obs
+def knn_indices_to_edge_set(indices):
+    edges = set()
+    for i, row in enumerate(indices):
+        for j in row:
+            if i != j:  # optional, to avoid self-loops
+                edges.add((i, j))  # directed edge
+    return edges
 
-    # Spatial edges
-    if 'x' in adata.obs:
-        spatial = adata.obs[["x", "y"]].to_numpy()
-    else:
-        spatial = adata.obsm['spatial']
-    spatial_knn, _ = knn_within_batches(spatial, batch_ids, k)
-    spatial_edges = knn_indices_to_edge_set(spatial_knn)
+# def generate_spatio_transcriptional_graph(adata, k, min_k, batch_label="batch"):
+#     batch_ids = adata.obs[batch_label].values
+#     num_nodes = adata.n_obs
 
-    # Expression edges
-    expr = adata.obsm["X_pca"]
-    expr_knn, _ = knn_within_batches(expr, batch_ids, k)
-    expr_edges = knn_indices_to_edge_set(expr_knn)
+#     # Spatial edges
+#     if 'x' in adata.obs:
+#         spatial = adata.obs[["x", "y"]].to_numpy()
+#     else:
+#         spatial = adata.obsm['spatial']
+#     spatial_knn, _ = knn_within_batches(spatial, batch_ids, k)
+#     spatial_edges = knn_indices_to_edge_set(spatial_knn)
 
-    # Intersect graphs
-    intersect_edges = get_graph_intersection(spatial_edges, expr_edges)
-    print(f"Spatial edges: {len(spatial_edges)}")
-    print(f"Expression edges: {len(expr_edges)}")
-    print(f"Intersection edges: {len(intersect_edges)}")
+#     # Expression edges
+#     expr = adata.obsm["X_pca"]
+#     expr_knn, _ = knn_within_batches(expr, batch_ids, k)
+#     expr_edges = knn_indices_to_edge_set(expr_knn)
 
-    count_nodes_with_less_than(intersect_edges, num_nodes, min_k)
+#     # Intersect graphs
+#     intersect_edges = get_graph_intersection(spatial_edges, expr_edges)
+#     print(f"Spatial edges: {len(spatial_edges)}")
+#     print(f"Expression edges: {len(expr_edges)}")
+#     print(f"Intersection edges: {len(intersect_edges)}")
 
-    # Use combined features to fill missing edges
-    combined = get_combined_features(adata)
-    combined_knn, combined_distances = knn_within_batches(
-        combined, batch_ids, min_k
-    )
+#     count_nodes_with_less_than(intersect_edges, num_nodes, min_k)
 
-    added_edges = fill_missing_edges(intersect_edges, combined_knn, min_k)
-    final_edges = intersect_edges | added_edges
+#     # Use combined features to fill missing edges
+#     combined = get_combined_features(adata)
+#     combined_knn, combined_distances = knn_within_batches(
+#         combined, batch_ids, min_k
+#     )
 
-    count_nodes_with_less_than(final_edges, num_nodes, min_k)
-    compare_graphs(spatial_edges, final_edges, name="spatial")
-    compare_graphs(expr_edges, final_edges, name="expression")
+#     added_edges = fill_missing_edges(intersect_edges, combined_knn, min_k)
+#     final_edges = intersect_edges | added_edges
 
-    neighbor_dict = build_neighbor_dict_from_edges(final_edges, combined)
-    indices, distances = neighbor_dict_to_array(neighbor_dict)
-    return indices, distances
+#     count_nodes_with_less_than(final_edges, num_nodes, min_k)
+#     compare_graphs(spatial_edges, final_edges, name="spatial")
+#     compare_graphs(expr_edges, final_edges, name="expression")
+
+#     neighbor_dict = build_neighbor_dict_from_edges(final_edges, combined)
+#     indices, distances = neighbor_dict_to_array(neighbor_dict)
+#     return indices, distances

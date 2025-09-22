@@ -96,7 +96,7 @@ def save_trainer_metrics(t, dataset, append=True):
 
 def add_scvi_emb(adata, query_stu, bk, pt_epochs=None, ft_epochs=None):
     d = get_defaults()
-    pt_epochs = pt_epochs or d['pretraining_epochs'] + d['cvae_epochs']
+    pt_epochs = pt_epochs or (d['pretraining_epochs'] + d['cvae_epochs'])
     ft_epochs = ft_epochs or d['ft_epochs']
     ref = adata[~adata.obs[bk].isin(query_stu)].copy()
 
@@ -105,6 +105,7 @@ def add_scvi_emb(adata, query_stu, bk, pt_epochs=None, ft_epochs=None):
     scvi.model.SCVI.setup_anndata(ref, batch_key=bk)
 
     # 2) Train model on reference
+    print(pt_epochs, ft_epochs)
     model = scvi.model.SCVI(ref, n_latent=8)
     model.train(max_epochs=pt_epochs)
 
@@ -114,13 +115,14 @@ def add_scvi_emb(adata, query_stu, bk, pt_epochs=None, ft_epochs=None):
     key = "X_scvi"
     key += f"_pt{pt_epochs}" if pt_epochs != d['pretraining_epochs'] else ""
     key += f"_ft{ft_epochs}" if ft_epochs != d['ft_epochs'] else ""
+    key += f'v{d["version"]}'
     adata.obsm[key] = query_model.get_latent_representation(adata)
-    return adata
+    return adata, key
 
 
 def get_scvi_metrics(adata, query_stu, bk, lk, dataset):
-    adata = add_scvi_emb(adata, query_stu, bk)
-    return save_metrics(adata, ["X_scvi"], dataset, bk, lk)
+    adata, key = add_scvi_emb(adata, query_stu, bk)
+    return save_metrics(adata, [key], dataset, bk, lk)
 
 
 def add_pca_harmoney(adata, bk, pca_key):

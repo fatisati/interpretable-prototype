@@ -86,16 +86,11 @@ class SCProtoTrainer(AdoptiveTrainer):
         scpoli_encoder = self.model.scpoli_cvae
         common_dataset_kwargs = dict(
             n_augmentations=self.nmb_views[0],
-            augmentation_type=self.train_augmentation,
+            affinity_type=self.affinity_type,
             k_neighbors=self.k_neighbors,
-            longest_path=self.longest_path,
-            dimensionality_reduction=self.dimensionality_reduction,
             n_components=self.n_components,
-            supervised_ratio=self.supervised_ratio,
             use_bknn=self.use_bknn,
             condition_keys=[self.condition_key],
-            knn_similarity=self.knn_similarity,
-            knn_method=self.knn_method,
             save_dir="./graphs",
             mask_probability=self.mask_probability,
             default_dispersion=self.default_dispersion,
@@ -429,7 +424,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             "similarity": sim,
             "p_matched": matched_pairs_ratio,
             "q_matched": q_matched,
-            "z_mean": abs(z.mean().detach().item())
+            "z_mean": abs(z.mean().detach().item()),
             # "entropy": entropy,
             # "match": match,
             # "prob_ent": prob_ent,
@@ -465,10 +460,10 @@ class SCProtoTrainer(AdoptiveTrainer):
                 aug_logits = (
                     logits[bs * v : bs * (v + 1)] / self.temperature
                 )  # logits for the v-th crop
-                self.check_finit(aug_logits, 'p')
+                self.check_finit(aug_logits, "p")
                 log_probs = F.log_softmax(aug_logits, dim=1)
                 subloss -= torch.mean(torch.sum(q * log_probs, dim=1))
-                
+
                 matched_pairs_ratio += get_matched_pairs_ratio(view_logits, aug_logits)
                 q_matched += get_matched_pairs_ratio(q, aug_logits)
 
@@ -546,12 +541,12 @@ class SCProtoTrainer(AdoptiveTrainer):
         if not torch.isfinite(prob).all():
             print(f"⚠️ Invalid values in {name}! (nan/inf detected)")
             print("min:", prob.min().item(), "max:", prob.max().item())
-    
+
     @torch.no_grad()
     def distributed_sinkhorn(self, out):
         Q = torch.exp(out / self.epsilon).t()
         # check validity
-        self.check_finit(Q, 'q')
+        self.check_finit(Q, "q")
         B = Q.shape[1]
         K = Q.shape[0]
 

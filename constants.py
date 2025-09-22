@@ -81,5 +81,6 @@ ABBREVIATIONS = {
     'warmup_epochs': 'warmup',
     'base_lr': 'blr',
     "use_counts": 'raw',
-    'knn_method': 'knn'
+    'knn_method': 'knn',
+    'affinity_type': 'aff'
 }

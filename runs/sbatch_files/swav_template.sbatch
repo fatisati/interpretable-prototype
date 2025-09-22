@@ -30,4 +30,5 @@ python main.py {model} --num_prototypes {num_prototypes} --latent_dims {latent_d
 --prot_emb_sim_reg {prot_emb_sim_reg} --propagation_reg {propagation_reg} --recon_loss {recon_loss} --no_sinkhorn {no_sinkhorn} \
 --mask_probability {mask_probability} --default_dispersion {default_dispersion} --fold {fold} --spatial {spatial} --entropy_reg {entropy_reg} \
 --temperature {temperature} --dataset_cnt {dataset_cnt} --queue_length {queue_length} --model_type {model_type} --l2norm {l2norm} --use_rbf {use_rbf} \
---assignment_metric {assignment_metric} --study_id {study_id} --warmup_epochs {warmup_epochs} --base_lr {base_lr} --use_counts {use_counts} --knn_method {knn_method}
+--assignment_metric {assignment_metric} --study_id {study_id} --warmup_epochs {warmup_epochs} --base_lr {base_lr} --use_counts {use_counts} --knn_method {knn_method} \
+--epoch_queue_starts {epoch_queue_starts} --affinity_type {affinity_type}

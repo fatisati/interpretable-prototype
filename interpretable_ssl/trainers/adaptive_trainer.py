@@ -99,9 +99,10 @@ class AdoptiveTrainer(Trainer):
         
         if self.cvae_epochs > 0:
             self.pretrain_encoder()
-            self.plot_umap(self.model, self.ref.adata, "pretrained-ref")
-        
+            
         self.init_prototypes()
+        if self.cvae_epochs > 0:
+            self.plot_umap(self.model, self.ref.adata, "pretrained-ref")
         self.train()
         
         if self.ft_epochs > 0:
