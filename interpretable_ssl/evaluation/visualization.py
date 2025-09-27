@@ -29,33 +29,6 @@ def calculate_umap(embeddings, prototypes=None, metric="cosine"):
             "prototype"
         ] * num_prototypes
 
-        # # Check for cells with all zero counts
-        # all_zero_cells = np.all(combined_adata.X == 0, axis=1)
-        # if np.any(all_zero_cells):
-        #     print(f"Number of all-zero cells: {np.sum(all_zero_cells)}")
-        #     combined_adata = combined_adata[~all_zero_cells]  # Remove all-zero cells
-
-        # # Normalize the data
-        # sc.pp.normalize_total(combined_adata, target_sum=1e4)
-
-        # # Check for NaNs after normalization
-        # if np.any(np.isnan(combined_adata.X)):
-        #     print("Data contains NaNs after normalization")
-
-        # # Log transform the data
-        # sc.pp.log1p(combined_adata)
-
-        # # Check for NaNs after log transformation
-        # if np.any(np.isnan(combined_adata.X)):
-        #     print("Data contains NaNs after log transformation")
-
-        # # Scale the data
-        # sc.pp.scale(combined_adata, max_value=10)
-
-        # # Check for NaNs after scaling
-        # if np.any(np.isnan(combined_adata.X)):
-        #     print("Data contains NaNs after scaling")
-
         # Perform UMAP on the combined data with specified metric
         sc.pp.neighbors(
             combined_adata, use_rep="X", metric=metric, random_state=random_state
@@ -256,6 +229,8 @@ def plot_3umaps(
     prototype_labels=None,
     save_plot=True,
     save_path_list=None,
+    w = None,
+    w_label = None
 ):
 
     def plot_scatter(
@@ -267,21 +242,27 @@ def plot_3umaps(
         prototype_labels=None,
         exclude_prototypes=False,
         color_by_density=False,
+        w=None,
     ):
         if color_by_density:
-            # Calculate point density
-            xy = np.vstack([data_umap[:, 0], data_umap[:, 1]])
-            density = gaussian_kde(xy)(xy)
+            if w is None:
+                # Calculate point density
+                xy = np.vstack([data_umap[:, 0], data_umap[:, 1]])
+                density = gaussian_kde(xy)(xy)
+                c = density
+            else:
+                c = w
             scatter = ax.scatter(
                 data_umap[:, 0],
                 data_umap[:, 1],
-                c=density,
+                c=c,
                 cmap="viridis",
                 s=20,
                 alpha=0.6,
             )
             cbar = plt.colorbar(scatter, ax=ax, pad=0.01)
-            cbar.set_label("Density")
+            
+            cbar.set_label(w_label if w_label is not None else 'Density')
         else:
             unique_labels = np.unique(labels)
             unique_colors = plt.cm.get_cmap("tab20", len(unique_labels))
@@ -358,8 +339,8 @@ def plot_3umaps(
     fig, axes = plt.subplots(1, 3, figsize=(30, 10))
 
     # Plot cell embeddings colored by density (without prototypes)
-    plot_scatter(axes[0], cell_umap, color_by_density=True)
-    axes[0].set_title("UMAP of Cell Embeddings Colored by Density")
+    plot_scatter(axes[0], cell_umap, color_by_density=True, w=w)
+    axes[0].set_title(f"UMAP of Cell Embeddings Colored by {w_label if w_label is not None else 'Density'}")
 
     # Plot cell embeddings colored by cell types (with prototypes)
     plot_scatter(
@@ -374,7 +355,7 @@ def plot_3umaps(
 
     plt.tight_layout(rect=[0, 0.2, 1, 1])
 
-    if save_path_list is not None:
+    if (save_path_list is not None) and save_plot:
         for save_path in save_path_list:
             fig.savefig(
                 save_path, bbox_inches="tight", pad_inches=0.5

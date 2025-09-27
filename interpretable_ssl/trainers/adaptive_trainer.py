@@ -79,7 +79,7 @@ class AdoptiveTrainer(Trainer):
             img_name = f"{img_name}_finetuned"
         # umap_paths = [self.get_dump_path() + f"/{img_name}.png"]
         umap_paths = []
-        if self.save_temp_res == 1:
+        if self.save_temp_res == 1 and (self.debug!=1):
             umap_paths.append(self.get_temp_res_path() + f"/{img_name}.png")
         return umap_paths
 

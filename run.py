@@ -5,45 +5,53 @@ from experiment_runner import *
 if __name__ == "__main__":
     print("runner started...")
     runner = ExperimentRunner("swav_template.sbatch")
-    full_loss = {
-        "cvae_loss_scaler": [0.01],
-        "propagation_reg": [1],
-        "experiment_name": ["rt"],
-        "use_counts": [1]
+    pancreas = {
+        "dataset_id": ["pancreas"],
+        "num_prototypes": [220],
+        # "batch_size": [256],
     }
-    
-    scpoli_base = {"model": ["scpoli"]}
-    imm_1ds = {"study_id": ["10X"], "num_prototypes": [150]}
-    
-    pancreas =  {"dataset_id": ["pancreas"], 'num_prototypes': [220], "batch_size": [256],}
-    panc_1ds = pancreas.copy().update({
-        "num_prototypes": [50],
-        "study_id": ["inDrop3"],
-        
-    })
+    hlca = {
+        "dataset_id": ["hlca"],
+        "num_prototypes": [3000],
+        "umap_checkpoint_freq": [10],
+        "cvae_epochs": [0],
+        # "hard_clustering": [0, 1]
+        # 'freeze_prototypes_nepochs': [1, 50, 100]
+        # 'epoch_queue_starts': [15],
+        # 'queue_length': [4*1024]
+    }
 
-    cd34 = {"dataset_id": ["cd34"], "num_prototypes": [90], "batch_size": [128]}
+    large_batch = hlca | {"experiment_name": ["large-batch"], "batch_size": [4096]}
+    small_batch = hlca | {
+        "experiment_name": ["small-batch"],
+        "batch_size": [256],
+        "queue_length": [15 * 256],
+        "epoch_queue_starts": [15],
+        "base_lr": [0.6],
+        "final_lr": [0.0006],
+        "warmup_epochs": [0],
+    }
+    assign_sharpness = [
+        {"temperature": [0.2], "epsilon": [0.1, 0.15]},
+        # {"temperature": [0.3], "epsilon": [0.15]},
+    ]
+    affinities = {"affinity_type": ["inverse_dist", "arbf"]}
+
+    base = {
+        "affinity_type": ["arbf"],
+        # "cell_w_mode": ["sigma", "heterogeneity", "mf_score", "uniform"],
+        # "propagation_reg": [0],
+    }
+    prop = {'propagation_reg': [0],  "cell_w_mode": ["sigma",'uniform']}
+    cell_w_modes = {"cell_w_mode": ["heterogeneity", "mf_score"],}
+    sigma_w = {'propagation_reg': [0, 1],  "cell_w_mode": ["wsigma"]}
     experiments = [
-        full_loss, 
-        # full_loss | pancreas
-        
-        # scpoli_base | imm_1ds,
-        # scpoli_base | panc_1ds,
-        # scpoli_base | cd34, 
-        # scpoli_base | {"dataset_id": ["pancreas", "pbmc-immune"]},
-        
-        # full_loss | cd34,
-        # full_loss.copy() | {"study_id": ["10X"], "num_prototypes": [150]},
-        # full_loss.copy() | {"dataset_id": ["pancreas"], 'num_prototypes': [50], 'study_id': ['inDrop3'], 'batch_size': [128]},
-        # full_loss.copy() | {"dataset_id": ["pancreas"], 'num_prototypes': [220], 'batch_size': [128]},
-        # | {
-        #     "assignment_metric": [
-        #         "dotp",  # raw linear projection
-        #         "pcos",  # (cosine similarity + 1)/2
-        #         "cos",  # cosine similarity in [-1,1]
-        #         "neuc",  # negative Euclidean distance
-        #     ]
-        # base.copy() | {"hard_clustering": [0, 1]},
+        sigma_w,
+        sigma_w | pancreas
+        # affinities,
+        # affinities | pancreas,
+        # base | {'cell_w_mode': ['sigma']},
+        # base | {'cell_w_mode': ['sigma']} | pancreas,
     ]
 
     evaluate_job_count(experiments)

@@ -1,7 +1,7 @@
 from collections import Counter
 import numpy as np
 
-def extract_proto_labels(adata, sample_proto_sim, label_keys, k=50):
+def extract_proto_labels(adata, sample_proto_sim, label_keys, k=5):
     proto_to_label = {key: [] for key in label_keys}
     n_protos = sample_proto_sim.shape[1]
 

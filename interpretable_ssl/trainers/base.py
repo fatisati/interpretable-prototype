@@ -50,14 +50,14 @@ class TrainerBase:
         )
 
     def create_dump_path(self):
-        if self.wandb_sweep == 1:
+        if self.debug == 1:
             return
         self.dump_path = self.get_dump_path()
         # if not os.path.exists(self.dump_path):
         os.makedirs(self.dump_path, exist_ok=True)
 
     def create_temp_res_path(self):
-        if self.wandb_sweep == 1:
+        if self.debug == 1:
             return
         temp_res_path = self.get_temp_res_path()
         if self.save_temp_res == 1 and not os.path.exists(temp_res_path):
@@ -75,7 +75,7 @@ class TrainerBase:
         return f"{MODEL_DIR}/{self.dataset_id}/"
 
     def get_temp_res_path(self):
-        return f"{self.temp_res_path}/{self.get_model_name()}/"
+        return f"{self.temp_res_path}/{self.dataset_id}/{self.get_model_name()}/"
 
     def get_dump_path(self):
         name = self.get_model_name()

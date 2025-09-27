@@ -42,7 +42,7 @@ from collections import Counter, defaultdict
 from interpretable_ssl.evaluation.cd4_marker import *
 from interpretable_ssl.trainers.swav_utils import *
 from sklearn.model_selection import train_test_split
-
+from interpretable_ssl.trainers.affinity import *
 
 logger = getLogger()
 
@@ -52,7 +52,7 @@ class SCProtoTrainer(AdoptiveTrainer):
     # @log_time('swav')
     def __init__(self, dataset=None, ref_query=None, parser=None, **kwargs):
         if "experiment_name" not in kwargs:
-            kwargs["experiment_name"] = "swav"
+            kwargs["experiment_name"] = "scproto"
         super().__init__(dataset, ref_query, parser, **kwargs)
         self.nmb_prototypes = self.num_prototypes
         self.use_projector_out = False
@@ -68,7 +68,7 @@ class SCProtoTrainer(AdoptiveTrainer):
     def setup(self):
         fix_random_seeds(self.seed)
         self.dump_path = self.get_dump_path()
-        if self.wandb_sweep == 0:
+        if self.wandb_sweep == 0 and self.debug==0:
             logger, self.training_stats = initialize_exp(
                 self, "epoch", "loss", dump_params=self.wandb_sweep == 0
             )
@@ -98,6 +98,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             n_clusters=self.num_prototypes,
             use_counts=(self.use_counts == 1),
             n_proto=self.nmb_prototypes,
+            use_manifold_weights = (self.cell_w_mode != 'uniform'),
             condition_encoders=scpoli_encoder.condition_encoders,
             conditions_combined_encoder=scpoli_encoder.conditions_combined_encoder,
             # cell_type_keys=[self.cell_type_key],
@@ -110,11 +111,15 @@ class SCProtoTrainer(AdoptiveTrainer):
         train, val = self.ref._create_split_instance(
             train_ind
         ), self.ref._create_split_instance(val_ind)
-        self.train_ds = MultiCropsDataset(train, **common_dataset_kwargs)
+
+        
+        self.train_ds = MultiCropsDataset(
+            train, **common_dataset_kwargs
+        )
         self.test_ds = MultiCropsDataset(val, **common_dataset_kwargs)
 
         self.train_loader = self.get_data_laoder(self.train_ds)
-        self.test_loader = self.get_data_laoder(self.test_ds)
+        self.test_loader = self.get_data_laoder(self.test_ds, drop_last=False)
 
         self.original_train_loader = self.train_loader
         if self.multi_layer_protos == 1:
@@ -139,13 +144,13 @@ class SCProtoTrainer(AdoptiveTrainer):
 
             # self.train_loader = get_train_loader(self.original_train_loader, self.cell_type_loader)
 
-    def get_data_laoder(self, ds):
+    def get_data_laoder(self, ds, drop_last=True):
         return DataLoader(
             ds,
             batch_size=self.batch_size,
             num_workers=self.workers,
             pin_memory=True,
-            drop_last=True,
+            drop_last=drop_last,
             collate_fn=scpoli_utils.custom_collate,
             shuffle=True,
         )
@@ -294,7 +299,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             logger.info(f"============ Starting epoch {epoch}============")
 
             if (epoch % self.umap_checkpoint_freq == 10) and (self.wandb_sweep == 0):
-                self.plot_umap(self.model, self.original_ref.adata, f"ref-e{epoch}")
+                self.plot_umap(self.model, self.train_ds.adata, f"train-e{epoch}")
 
             if (
                 self.queue_length > 0
@@ -404,12 +409,15 @@ class SCProtoTrainer(AdoptiveTrainer):
         bs = inputs["x"].size(0)
         inputs = self.dict_to_device(inputs)
         inputs = reshape_and_reorder_dict(inputs)
+        # manifold_keys = ['sigma', '', 'heterogeneity', 'mf_score']
+        manifold_keys = self.train_ds.manifold.keys()
+        manifold_scores = {k: inputs.pop(k, None) for k in manifold_keys}
+        # label = inputs.pop(self.dataset.label_key)
         z, _, logits, cvae_loss, (propagation, sim) = self.model(inputs)
         z = z.detach()
         assign_cnts = get_assign_cnts(logits)
-
         swav_loss, matched_pairs_ratio, q_matched, assignment_metrics = (
-            self.compute_swav_loss(logits, z, bs, ds_id)
+            self.compute_swav_loss(logits, z, bs, ds_id, manifold_scores)
         )
         assignment_metrics["p_proto_utilization"] = (
             assign_cnts != 0
@@ -425,13 +433,9 @@ class SCProtoTrainer(AdoptiveTrainer):
             "p_matched": matched_pairs_ratio,
             "q_matched": q_matched,
             "z_mean": abs(z.mean().detach().item()),
-            # "entropy": entropy,
-            # "match": match,
-            # "prob_ent": prob_ent,
-            # "p_ent": p_ent,
         } | assignment_metrics, assign_cnts
 
-    def compute_swav_loss(self, logits, z, bs, ds_id):
+    def compute_swav_loss(self, logits, z, bs, ds_id, manifold_scores = None):
 
         loss, assignment_metrics_list, avg_matched_pairs, avg_q_matched = 0, [], 0, 0
 
@@ -440,11 +444,15 @@ class SCProtoTrainer(AdoptiveTrainer):
 
             # outputs for 1 batch of data, [aug1s1, a1s2, a1s3, .., a1sb]
             view_logits = logits[bs * view_id : bs * (view_id + 1)]
-            with torch.no_grad():
-                sinkhorn_input = self.prepare_sinkhorn_input(
-                    view_idx, z, view_id, bs, view_logits, ds_id
-                )
-                q = self.distributed_sinkhorn(sinkhorn_input)
+            # with torch.no_grad(): not nessecary because both funcion has no grad decorator
+            sinkhorn_input = self.prepare_sinkhorn_input(
+                view_idx, z, view_id, bs, view_logits, ds_id
+            )
+            if self.cell_w_mode != 'uniform':
+                cell_weights = manifold_scores[self.cell_w_mode][bs * view_id : bs * (view_id + 1)]
+            else:
+                cell_weights = None # uniform
+            q = self.distributed_sinkhorn(sinkhorn_input, cell_weights)
 
             assignment_metrics_list.append(get_assignment_metrics(q, "q"))
             q = q[-bs:]
@@ -543,26 +551,38 @@ class SCProtoTrainer(AdoptiveTrainer):
             print("min:", prob.min().item(), "max:", prob.max().item())
 
     @torch.no_grad()
-    def distributed_sinkhorn(self, out):
-        Q = torch.exp(out / self.epsilon).t()
-        # check validity
+    def distributed_sinkhorn(self, out, cell_weights=None):
+        """
+        out: (B, P) batch-to-prototype scores
+        sample_marginals: (B,) optional vector of sample marginals (must sum to 1)
+        """
+        Q = torch.exp(out / self.epsilon)
+        Q = Q.t()
+
         self.check_finit(Q, "q")
         B = Q.shape[1]
         K = Q.shape[0]
 
-        sum_Q = torch.sum(Q)
-        Q /= sum_Q
+        Q /= torch.sum(Q)
 
-        for it in range(self.sinkhorn_iterations):
-            sum_of_rows = torch.sum(Q, dim=1, keepdim=True)
-            Q /= sum_of_rows
-            Q /= K
+        # prototypes uniform
+        row_marginals = torch.full((K, 1), 1.0 / K, device=Q.device, dtype=Q.dtype)
 
-            Q /= torch.sum(Q, dim=0, keepdim=True)
-            Q /= B
+        # samples weighted
+        if cell_weights is None:
+            col_marginals = torch.full((1, B), 1.0 / B, device=Q.device, dtype=Q.dtype)
+        else:
+            col_marginals = cell_weights.view(1, -1)
+            col_marginals = col_marginals / col_marginals.sum()
 
-        Q *= B
-        return Q.t()
+        for _ in range(self.sinkhorn_iterations):
+            # match prototypes
+            Q *= row_marginals / (Q.sum(dim=1, keepdim=True) + 1e-12)
+            # match samples (your custom weights)
+            Q *= col_marginals / (Q.sum(dim=0, keepdim=True) + 1e-12)
+
+        return (Q * B).t()   # (B, P)
+
 
     def get_model_prototypes(self, model):
         prototypes = model.get_prototypes()
@@ -571,25 +591,29 @@ class SCProtoTrainer(AdoptiveTrainer):
         else:
             return prototypes
 
-    def prepare_sinkhorn_input(self, view_idx, z, view_id, bs, view_logits, ds_id):
-        output_logits = view_logits.detach()
+    @torch.no_grad()
+    def prepare_sinkhorn_input(
+        self, queue_slot, z, view_id, bs, view_logits, ds_id
+    ):
+        output_logits = view_logits
 
+        # instead of: if queue is not None -> check if ds_id is in queue
         # time to use the queue
         if ds_id in self.queue:
             # check if the queue has any real data
             if self.use_the_queue or not torch.all(
-                self.queue[ds_id][view_idx, -1, :] == 0
+                self.queue[ds_id][queue_slot, -1, :] == 0
             ):
                 self.use_the_queue = 1
                 # 'get prototypes assignment scores for self.queue[i] (which contain some old embeddings)'
                 queue_logits = self.model.proto_soft_assignments(
-                    self.queue[ds_id][view_idx]
+                    self.queue[ds_id][queue_slot]
                 )
                 output_logits = torch.cat([queue_logits, view_logits])
 
             # fill the queue
-            self.queue[ds_id][view_idx, bs:] = self.queue[ds_id][view_idx, :-bs].clone()
-            self.queue[ds_id][view_idx, :bs] = z[view_id * bs : (view_id + 1) * bs]
+            self.queue[ds_id][queue_slot, bs:] = self.queue[ds_id][queue_slot, :-bs].clone()
+            self.queue[ds_id][queue_slot, :bs] = z[view_id * bs : (view_id + 1) * bs]
 
         return output_logits
 

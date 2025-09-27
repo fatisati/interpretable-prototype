@@ -182,12 +182,32 @@ def calc_adata_metrics(dataset, ds_conf):
     )
 
 
-def get_scproto_mc_adata(t, adata, bk, lk):
+def get_scproto_mc_adata(t, adata, bk, lk, use_mean=True):
+    import torch.nn as nn
     model = t.load_model()
     protos = model.get_prototypes()
-    batch = np.zeros((protos.shape[0], 1))
+    
+    if use_mean:
+        old_emb = model.scpoli_cvae.embeddings[0]   # nn.Embedding(14, 10, max_norm=1.0)
+        old_w   = old_emb.weight.detach()
+        mean_w  = old_w.mean(dim=0, keepdim=True)   # [1, emb_dim]
+        new_emb = nn.Embedding(old_w.shape[0] + 1, old_w.shape[1], max_norm=old_emb.max_norm)
+        new_emb.weight.data[:old_w.shape[0]] = old_w
+        new_emb.weight.data[old_w.shape[0]]  = mean_w
+        model.scpoli_cvae.embeddings[0] = new_emb
+        # number of embeddings in the layer
+        last_idx = model.scpoli_cvae.embeddings[0].num_embeddings - 1
+        batch = np.full((protos.shape[0], 1), last_idx)
+        device = torch.device("cuda")
+        model.scpoli_cvae.embeddings[0] = model.scpoli_cvae.embeddings[0].to(device)
+    else:
+        batch = np.zeros((protos.shape[0], 1))
     batch = torch.as_tensor(batch, dtype=torch.long, device="cuda")
-    sizefactor = np.ones((protos.shape[0],))
+    
+    sf = np.ravel(adata.layers.get('counts').sum(1))
+    sf = sf.mean()
+    print('decoding protos using avg sizefactor: ', sf)
+    sizefactor = np.full((protos.shape[0],), sf)
     sizefactor = torch.as_tensor(sizefactor, dtype=torch.long, device="cuda")
     metacells = model.decode(protos, batch, sizefactor)
 
@@ -196,6 +216,10 @@ def get_scproto_mc_adata(t, adata, bk, lk):
         adata, sample_proto_sim.detach().cpu().numpy(), [bk, lk]
     )
     metacells_adata = generate_metacell_adata(metacells, proto_labels)
+    if metacells_adata.X.max() > 50:
+        metacells_adata = metacells_adata.copy()
+        sc.pp.normalize_total(metacells_adata, target_sum=1e4)
+        sc.pp.log1p(metacells_adata)
     sc.tl.pca(metacells_adata)
     metacells_adata.obsm[f"{t.get_model_name()}_mc_pca"] = metacells_adata.obsm["X_pca"]
     return metacells_adata

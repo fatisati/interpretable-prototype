@@ -139,7 +139,10 @@ def get_defaults():
         
         "use_counts": 1,
         "knn_method": 'faiss',
-        "version": 4,
-        "affinity_type": "inverse_dist"
+        "version": 5,
+        "affinity_type": "arbf",
+        'cell_w_mode': 'uniform',
+        
+        # change to dotp in future
     }
     return defaults

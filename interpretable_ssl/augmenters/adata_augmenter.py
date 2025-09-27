@@ -24,6 +24,8 @@ import subprocess
 import time
 import os
 import pickle
+from interpretable_ssl.augmenters.manifold_weights import *
+from tqdm import tqdm
 
 
 class MultiCropsDataset(MultiConditionAnnotatedDataset):
@@ -44,6 +46,7 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         n_clusters=None,
         use_counts=True,
         n_proto=None,
+        use_manifold_weights=False,
         **kwargs,
     ):
         self.n_proto = n_proto
@@ -103,12 +106,74 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         )
         if not self._is_sparse:
             self.data = torch.tensor(self.data, dtype=torch.float32)
-        
+
         print(self._is_sparse, type(self.data[0]), self.data.max())
         if not self.affinities_exists():
             self.ds_affinities = self.run_graph_generator()
         self.set_affinities()
+        self.use_manifold_weights = use_manifold_weights
+        self.manifold = {}
+        # if use_manifold_weights:
+        self.calc_manifold_weights()
+        self.label_key = sc_ds.label_key
+        self.return_label = True
         
+    def calc_manifold_weights(self):
+        print("calculating manifold scores...")
+        self.manifold = {
+            "sigma": np.zeros(self.adata.n_obs),
+            "wsigma": np.zeros(self.adata.n_obs),
+            "heterogeneity": np.zeros(self.adata.n_obs),
+            "mf_score": np.zeros(self.adata.n_obs),
+        }
+        for key in self.manifold.keys():
+            self.adata.obs[key] = np.zeros(self.adata.n_obs)
+        for s in tqdm(self.adata.obs[self.batch_key].unique()):
+            batch_idx = self.adata.obs[self.batch_key] == s
+            ad = self.adata[batch_idx].copy()
+
+            # PCA within batch
+            sc.tl.pca(ad, n_comps=self.n_components)
+
+            # get k neighbors (full, not half)
+            D, I = get_knn(ad.obsm["X_pca"], self.k_neighbors)
+
+            # --- heterogeneity (whatever your function does on neighbors) ---
+            h = homogeneity(ad.obsm["X_pca"], I)
+
+            # --- sigma: median distance across neighbors ---
+            sigma = np.median(np.sqrt(D[:, 1:]), axis=1)  # skip self, median over kNN
+            w_sigma = self.get_w_sigma(sigma)
+            
+            # --- row marginals / weights ---
+            w = compute_row_marginals(sigma, h)
+
+            # store in dictionary
+            self.manifold["sigma"][batch_idx] = sigma
+            self.manifold["wsigma"][batch_idx] = w_sigma
+            self.manifold["heterogeneity"][batch_idx] = h
+            self.manifold["mf_score"][batch_idx] = w
+            for key in self.manifold.keys():
+                self.adata.obs.loc[batch_idx, key] = self.manifold[key][batch_idx]
+            
+        print("---done---")
+
+    def get_w_sigma(self, sigma, alpha=0.25, clip=(0.5, 3.0)):
+        # robust normalization (center & scale)
+        med = np.median(sigma)
+        mad = np.median(np.abs(sigma - med)) + 1e-8  # avoid div/0
+        z = (sigma - med) / mad
+        # self.adata.obs.loc[idx, "z"] = z
+        # exponential mapping
+        w = np.exp(alpha * z)
+
+        # normalize to mean 1 within batch
+        w = w / w.mean()
+
+        # clip extreme values
+        w = np.clip(w, clip[0], clip[1])
+        return w
+
     def run_graph_generator(self):
         print(f"[{os.getpid()}] Generating affinities...")
         self.adata.write(self.adata_path)
@@ -151,7 +216,10 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
 
     def __len__(self):
         return max(
-            [len(self.dataset_index_map[ds_id]) for ds_id in self.dataset_index_map.keys()]
+            [
+                len(self.dataset_index_map[ds_id])
+                for ds_id in self.dataset_index_map.keys()
+            ]
         )
 
     def __getitem__(self, index):
@@ -170,12 +238,21 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         else:
             row = row.ravel()
         probs = row / row.sum()
-        pos_idx = np.random.choice(len(row), size=self.n_augmentations, replace=False, p=probs)
+        pos_idx = np.random.choice(
+            len(row), size=self.n_augmentations, replace=False, p=probs
+        )
         return [self.dataset_index_map[ds_id][i] for i in pos_idx]
 
     def assemble_from_indices(self, indices, sample_index):
         items = [
-            super().__getitem__(i) | ({"index": np.array([i]), "sample_id": sample_index} if self.return_idx else {})
+            super().__getitem__(i)
+            # | ({self.label_key: self.adata.obs[self.label_key][i]} if self.return_label else {})
+            | ({k: self.manifold[k][i] for k in self.manifold.keys()})
+            | (
+                {"index": np.array([i]), "sample_id": sample_index}
+                if self.return_idx
+                else {}
+            )
             for i in indices
         ]
         return self.combine_augmented_data(items)
@@ -192,10 +269,14 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
             "sizefactor",
             "batch",
             "combined_batch",
-            # "study",
-            "celltypes",
+            "study",
+            # "celltypes",
             "index",
             "sample_id",
+            "sigma",
+            'heterogeneity',
+            'mf_score',
+            'wsigma'
         ]
         combined_data = {}
         for key in keys_to_stack:

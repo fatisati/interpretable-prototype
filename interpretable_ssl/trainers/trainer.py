@@ -18,7 +18,7 @@ from interpretable_ssl.trainers.base import TrainerBase
 import wandb
 
 from interpretable_ssl.evaluation.metric_helpers.embedding_metrics import *
-
+from interpretable_ssl.trainers.affinity import *
 
 class Trainer(TrainerBase):
     # @log_time('scpoli trainer')
@@ -196,16 +196,18 @@ class Trainer(TrainerBase):
     def get_umap_path(self, data_part="ref"):
         pass
 
+    def get_proto_assignments(self, z, model):
+        p = model.prototypes(z)
+        return p.detach().cpu().numpy()
+    
     def plot_umap(self, model, adata, split, save_plot=True):
-        if self.wandb_sweep == 1:
-            return
-        latent = self.encode_adata(adata, model)
+        z = self.encode_adata(adata, model)
         prototypes = self.get_model_prototypes(model)
-        latent_umap, prototype_umap = calculate_umap(latent, prototypes)
+        z_umap, prototype_umap = calculate_umap(z, prototypes)
         obs = adata.obs
         if prototypes is not None:
             # prototype_assignments = self.encode_adata(adata, model, True, False)
-            prototype_assignments = model.prototypes(latent).detach().cpu().numpy()
+            prototype_assignments = self.get_proto_assignments(z, model)
             proto_df = assign_prototype_labels(
                 adata,
                 prototype_assignments,
@@ -215,14 +217,22 @@ class Trainer(TrainerBase):
             proto_labels = proto_df.prototype_label
         else:
             proto_labels = None
+        if self.cell_w_mode != 'uniform':
+            w = adata.obs.get(self.cell_w_mode, None)
+            w_label = self.cell_w_mode
+        else:
+            w = adata.obs.get('sigma', None)
+            w_label = 'pca_sigma'
         return plot_3umaps(
-            latent_umap,
+            z_umap,
             prototype_umap,
             obs[self.dataset.label_key],
             obs[self.ref.batch_key],
             proto_labels,
             save_plot,
             self.get_umap_path(split),
+            w=w,
+            w_label = w_label
         )
 
     def plot_ref_umap(self, save_plot=True, name_postfix=None, model=None):

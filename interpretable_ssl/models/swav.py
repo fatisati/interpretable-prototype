@@ -10,6 +10,7 @@ import torch.nn.functional as F
 import itertools
 from torch.distributions import NegativeBinomial
 from interpretable_ssl.trainers.gmvae_utils import *
+from collections import defaultdict
 
 # encoder
 # possibly a projection head
@@ -114,8 +115,20 @@ class SwavBase(nn.Module):
             return self.proto_neg_euclidean(z)
 
     def propagation(self, z: torch.Tensor):
-        cosine_sim = self.proto_soft_assignments(z)
-        return (1 - cosine_sim.max(dim=1).values).max()
+        # prototypes: [nmb_prototypes, latent_dim]
+        protos = self.prototypes.weight  # each row = prototype
+
+        # pairwise Euclidean distances: [n_samples, nmb_prototypes]
+        dists = torch.cdist(z, protos, p=2)
+
+        # for each sample → distance to closest prototype
+        min_dists, _ = dists.min(dim=1)  # shape [n_samples]
+
+        # return the maximum of these minima
+        return min_dists.topk(5).values.mean()
+        # tau = 10.0  # temperature
+        # loss = torch.logsumexp(min_dists * tau, dim=0) / tau
+        # return loss
 
     def embedding_similarity(self, z: torch.Tensor):
         cosine_sim = self.prototypes(z)
@@ -356,6 +369,7 @@ class SwAVModel(SwavBase):
     def attach_scpoli(self, scpoli_wrapper):
         self.scpoli_wrapper = scpoli_wrapper
         self.scpoli_cvae = scpoli_wrapper.model
+
 
 class scProtoGMVAE(SwAVModel):
     def __init__(self, use_rbf, **kwargs):
