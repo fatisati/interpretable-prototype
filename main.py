@@ -1,4 +1,6 @@
 import numba
+from scib_metrics.benchmark import Benchmarker
+
 # numba.config.CACHE_DIR = ''  # Proper way to disable caching
 numba.config.CACHE = False
 
@@ -7,9 +9,14 @@ import argparse
 import os
 os.environ["TMPDIR"] = os.path.expanduser("~/tmp")
 
+# os.environ["JAX_ENABLE_X64"] = "0"
+# os.environ["JAX_DEFAULT_DTYPE_BITS"] = "32"
+
+# import jax
+# jax.config.update("jax_enable_x64", False)
 
 def get_trainer(model, parser):
-    if model == "swav":
+    if model == "scproto":
         from interpretable_ssl.trainers.scproto import SCProtoTrainer
         return SCProtoTrainer(parser = parser)
     elif model == "scpoli":

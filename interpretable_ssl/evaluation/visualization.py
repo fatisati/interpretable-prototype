@@ -229,8 +229,8 @@ def plot_3umaps(
     prototype_labels=None,
     save_plot=True,
     save_path_list=None,
-    w = None,
-    w_label = None
+    w=None,
+    w_label=None,
 ):
 
     def plot_scatter(
@@ -261,8 +261,8 @@ def plot_3umaps(
                 alpha=0.6,
             )
             cbar = plt.colorbar(scatter, ax=ax, pad=0.01)
-            
-            cbar.set_label(w_label if w_label is not None else 'Density')
+
+            cbar.set_label(w_label if w_label is not None else "Density")
         else:
             unique_labels = np.unique(labels)
             unique_colors = plt.cm.get_cmap("tab20", len(unique_labels))
@@ -340,7 +340,9 @@ def plot_3umaps(
 
     # Plot cell embeddings colored by density (without prototypes)
     plot_scatter(axes[0], cell_umap, color_by_density=True, w=w)
-    axes[0].set_title(f"UMAP of Cell Embeddings Colored by {w_label if w_label is not None else 'Density'}")
+    axes[0].set_title(
+        f"UMAP of Cell Embeddings Colored by {w_label if w_label is not None else 'Density'}"
+    )
 
     # Plot cell embeddings colored by cell types (with prototypes)
     plot_scatter(
@@ -524,6 +526,7 @@ def plot_3umaps2(
 
 import matplotlib.pyplot as plt
 
+
 def plot_f1_scores_per_class(f1_scores_dict, class_names):
     """
     Plots a grouped bar plot of F1 scores per class for multiple splits, with values displayed on top of the bars.
@@ -581,4 +584,3 @@ def plot_f1_scores_per_class(f1_scores_dict, class_names):
     plt.grid(axis="y", linestyle="--", alpha=0.7)
     plt.tight_layout()
     plt.show()
-

@@ -12,10 +12,15 @@ from torch.distributions import NegativeBinomial
 from interpretable_ssl.trainers.gmvae_utils import *
 from collections import defaultdict
 
+
 # encoder
 # possibly a projection head
 # prototype layer
 
+from interpretable_ssl.models.gmvae_loss import *
+
+def softplus_inverse(y):
+    return torch.log(torch.exp(y) - 1.0)
 
 class SwavBase(nn.Module):
     def __init__(
@@ -26,7 +31,7 @@ class SwavBase(nn.Module):
         multi_layer_proto=False,
         np2=None,
         l2norm=1,
-        assignment_metric="dot-product",
+        assignment_metric="dotp",
     ):
         super().__init__()
         self.scpoli_cvae = scpoli_cvae
@@ -38,6 +43,7 @@ class SwavBase(nn.Module):
         self.l2norm = l2norm == 1
         self.nmb_prototypes = nmb_prototypes
         self.assignment_metric = assignment_metric
+        self.latent_dim = latent_dim
         # self.propagation_reg = propagation_reg
         # self.prot_emb_sim_reg = prot_emb_sim_reg
 
@@ -49,6 +55,7 @@ class SwavBase(nn.Module):
         # Get cluster centers and convert them back to a PyTorch tensor
         cluster_centers = torch.tensor(kmeans.cluster_centers_)
         self.set_prototypes(cluster_centers)
+        return kmeans
 
     def compute_cvae_loss(self, recon_loss, kl_loss, mmd_loss):
         calc_alpha_coeff = 0.5
@@ -342,7 +349,7 @@ class SwAVModel(SwavBase):
         recon_loss="nb",
         batch_key="study",
         l2norm=1,
-        assignment_metric="dot-product",
+        assignment_metric="dotp",
     ):  # , propagation_reg=0.5, prot_emb_sim_reg=0.5
         # self.cell_type_key = "cell_type"
         self.condition_key = batch_key
@@ -372,7 +379,7 @@ class SwAVModel(SwavBase):
 
 
 class scProtoGMVAE(SwAVModel):
-    def __init__(self, use_rbf, **kwargs):
+    def __init__(self, use_rbf, tempreture, **kwargs):
         kwargs["recon_loss"] = "nb"
         super().__init__(**kwargs)
         # self.log_sigma2_p = torch.nn.Parameter(torch.tensor(-2.0))
@@ -384,6 +391,11 @@ class scProtoGMVAE(SwAVModel):
         )
         self.beta = 1.0
         self.use_rbf = use_rbf == 1
+        self.tempreture = tempreture
+        # free trainbale param which define proto variance (proto_var = softplus(proto_vparam) + eps)
+        self.proto_vparam = nn.Parameter(
+            torch.full((self.nmb_prototypes, self.latent_dim), -2.0)
+        )  # init small
 
     # TODO: calc responsibilitis from proto soft assignments
     def calc_kl_loss(self, z_mu, z_logvar):
@@ -433,6 +445,23 @@ class scProtoGMVAE(SwAVModel):
         recon_loss = -nb(x=x, mu=dec_mean, theta=dispersion).sum(dim=-1).mean()
         return recon_loss
 
+    def init_prototypes_kmeans(self, embeddings, nmb_prots, eps=1e-3):
+        # call parent, get kmeans result
+        kmeans = super().init_prototypes_kmeans(embeddings, nmb_prots)
+
+        labels = kmeans.labels_
+        proto_var = torch.zeros(nmb_prots, embeddings.shape[1], dtype=torch.float32)
+
+        for k in range(nmb_prots):
+            pts = embeddings[labels == k]
+            if pts.shape[0] == 0:
+                proto_var[k].fill_(0.1)
+            else:
+                proto_var[k] = torch.clamp(pts.var(dim=0), min=eps)
+
+        with torch.no_grad():
+            self.proto_vparam.copy_(softplus_inverse(proto_var - 1e-4).to(self.proto_vparam.device))
+
     def decode(self, z, batch, sizefactor):
         batch_embeddings = torch.hstack(
             [self.scpoli_cvae.embeddings[i](batch[:, i]) for i in range(batch.shape[1])]
@@ -462,17 +491,26 @@ class scProtoGMVAE(SwAVModel):
         if self.l2norm:
             z = nn.functional.normalize(z, dim=1, p=2)
         recon = self.cacl_recon_loss(z, batch, sizefactor, combined_batch, x)
-        proto_kl, cluster_kl, responsibilities = self.calc_kl_loss(z_mu, z_logvar)
-
+        # proto_kl, cluster_kl, responsibilities = self.calc_kl_loss(z_mu, z_logvar)
+        # loss = recon + self.beta * (proto_kl + cluster_kl)
+        proto_mu, proto_vparam = self.get_prototypes(), self.proto_vparam
+        resp = responsibilities(z_mu, proto_mu, proto_vparam, self.tempreture)
+        kl, kl_dict = gm_kl(z_mu, z_logvar, proto_mu, proto_vparam, resp)
         # ---------- total ----------
-        loss = recon + self.beta * (proto_kl + cluster_kl)
-        return z, loss, responsibilities
+        loss = recon + self.beta * kl
+        return z, loss, resp
 
     def forward(self, batch):
-        z, cvae_loss, responsibilities = self.calc_z_and_cvae_loss(**batch)
+        z, cvae_loss, resp = self.calc_z_and_cvae_loss(**batch)
         propagation_sim = self.propagation_sim_loss(z)
         return z, z, self.proto_soft_assignments(z), cvae_loss, propagation_sim
 
+    def clip_proto_vparam(self, min_val=-5.0, max_val=5.0):
+        with torch.no_grad():
+            self.proto_vparam.clamp_(min_val, max_val)
+            
+    def get_proto_vars(self):
+        return F.softplus(self.proto_vparam) + 1e-4
     # def proto_soft_assignments(self, z):
     # if self.use_rbf:
     #     return rbf_similarity(z, self.get_prototypes())

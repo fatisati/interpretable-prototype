@@ -25,7 +25,7 @@ from interpretable_ssl.trainers.adaptive_trainer import AdoptiveTrainer
 from interpretable_ssl.augmenters.adata_augmenter import *
 from scarches.models.scpoli import scPoli
 import scarches.trainers.scpoli._utils as scpoli_utils
-from interpretable_ssl.models.swav import *
+from interpretable_ssl.models.scproto import *
 import wandb
 import multiprocessing as mp
 from interpretable_ssl.evaluation.visualization import *
@@ -43,6 +43,8 @@ from interpretable_ssl.evaluation.cd4_marker import *
 from interpretable_ssl.trainers.swav_utils import *
 from sklearn.model_selection import train_test_split
 from interpretable_ssl.trainers.affinity import *
+
+from interpretable_ssl.models.gmvae_loss import *
 
 logger = getLogger()
 
@@ -68,7 +70,7 @@ class SCProtoTrainer(AdoptiveTrainer):
     def setup(self):
         fix_random_seeds(self.seed)
         self.dump_path = self.get_dump_path()
-        if self.wandb_sweep == 0 and self.debug==0:
+        if self.wandb_sweep == 0 and self.debug == 0:
             logger, self.training_stats = initialize_exp(
                 self, "epoch", "loss", dump_params=self.wandb_sweep == 0
             )
@@ -98,7 +100,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             n_clusters=self.num_prototypes,
             use_counts=(self.use_counts == 1),
             n_proto=self.nmb_prototypes,
-            use_manifold_weights = (self.cell_w_mode != 'uniform'),
+            use_manifold_weights=(self.cell_w_mode != "uniform"),
             condition_encoders=scpoli_encoder.condition_encoders,
             conditions_combined_encoder=scpoli_encoder.conditions_combined_encoder,
             # cell_type_keys=[self.cell_type_key],
@@ -112,10 +114,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             train_ind
         ), self.ref._create_split_instance(val_ind)
 
-        
-        self.train_ds = MultiCropsDataset(
-            train, **common_dataset_kwargs
-        )
+        self.train_ds = MultiCropsDataset(train, **common_dataset_kwargs)
         self.test_ds = MultiCropsDataset(val, **common_dataset_kwargs)
 
         self.train_loader = self.get_data_laoder(self.train_ds)
@@ -172,7 +171,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         }
 
         if self.model_type == "gm":
-            return scProtoGMVAE(use_rbf=self.use_rbf, **kwargs)
+            return scProtoGMVAE(use_rbf=self.use_rbf, tempreture=self.temperature, **kwargs)
         else:
             return SwAVModel(**kwargs)
 
@@ -345,7 +344,8 @@ class SCProtoTrainer(AdoptiveTrainer):
             if self.l2norm == 1:
                 with torch.no_grad():
                     self.model.normalize_prototypes()
-
+            
+            
             bs = inputs["x"].size(0)
             inputs = {
                 k: inputs[k].transpose(0, 1) for k in inputs.keys()
@@ -360,7 +360,8 @@ class SCProtoTrainer(AdoptiveTrainer):
 
             self._handle_prototype_freezing(epoch)
             self.optimizer.step()
-
+            self.model.clip_proto_vparam()
+            
             meters["batch_time"].update(time.time() - end)
             end = time.time()
             if it % 5 == 0:
@@ -435,8 +436,11 @@ class SCProtoTrainer(AdoptiveTrainer):
             "z_mean": abs(z.mean().detach().item()),
         } | assignment_metrics, assign_cnts
 
-    def compute_swav_loss(self, logits, z, bs, ds_id, manifold_scores = None):
-
+    def compute_swav_loss(self, logits, z, bs, ds_id, manifold_scores=None):
+        
+        if self.assignment_mode == 'gm':
+            logits = responsibilities(z, self.model.get_prototypes(), self.model.proto_vparam, return_logits=True)
+        
         loss, assignment_metrics_list, avg_matched_pairs, avg_q_matched = 0, [], 0, 0
 
         # each crop mean each augmentation, just caluclate q and loss for first crops_for_assign
@@ -451,7 +455,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             if self.cell_w_mode != 'uniform':
                 cell_weights = manifold_scores[self.cell_w_mode][bs * view_id : bs * (view_id + 1)]
             else:
-                cell_weights = None # uniform
+                cell_weights = None  # uniform
             q = self.distributed_sinkhorn(sinkhorn_input, cell_weights)
 
             assignment_metrics_list.append(get_assignment_metrics(q, "q"))
@@ -471,7 +475,6 @@ class SCProtoTrainer(AdoptiveTrainer):
                 self.check_finit(aug_logits, "p")
                 log_probs = F.log_softmax(aug_logits, dim=1)
                 subloss -= torch.mean(torch.sum(q * log_probs, dim=1))
-
                 matched_pairs_ratio += get_matched_pairs_ratio(view_logits, aug_logits)
                 q_matched += get_matched_pairs_ratio(q, aug_logits)
 
@@ -581,8 +584,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             # match samples (your custom weights)
             Q *= col_marginals / (Q.sum(dim=0, keepdim=True) + 1e-12)
 
-        return (Q * B).t()   # (B, P)
-
+        return (Q * B).t()  # (B, P)
 
     def get_model_prototypes(self, model):
         prototypes = model.get_prototypes()
@@ -592,9 +594,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             return prototypes
 
     @torch.no_grad()
-    def prepare_sinkhorn_input(
-        self, queue_slot, z, view_id, bs, view_logits, ds_id
-    ):
+    def prepare_sinkhorn_input(self, queue_slot, z, view_id, bs, view_logits, ds_id):
         output_logits = view_logits
 
         # instead of: if queue is not None -> check if ds_id is in queue
@@ -612,7 +612,9 @@ class SCProtoTrainer(AdoptiveTrainer):
                 output_logits = torch.cat([queue_logits, view_logits])
 
             # fill the queue
-            self.queue[ds_id][queue_slot, bs:] = self.queue[ds_id][queue_slot, :-bs].clone()
+            self.queue[ds_id][queue_slot, bs:] = self.queue[ds_id][
+                queue_slot, :-bs
+            ].clone()
             self.queue[ds_id][queue_slot, :bs] = z[view_id * bs : (view_id + 1) * bs]
 
         return output_logits

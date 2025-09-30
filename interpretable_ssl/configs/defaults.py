@@ -142,7 +142,7 @@ def get_defaults():
         "version": 5,
         "affinity_type": "arbf",
         'cell_w_mode': 'uniform',
-        
+        'assignment_mode': 'gm' # TODO: remove addignment metric
         # change to dotp in future
     }
     return defaults

@@ -1,5 +1,8 @@
 import scanpy as sc
 import SEACells
+import pandas as pd
+import numpy as np
+import os
 
 
 def preprocess(ad, n_top_genes):
@@ -44,13 +47,24 @@ def compute_seacells(ad, n_SEACells, build_kernel_on="X_pca"):
     return ad, SEACell_ad, model
 
 
-def get_metacell_metrics(ad, cell_type_key="celltype"):
+def mc_quality_metrics(ad=None, cell_type_key="celltype"):
     if "X_pca" not in ad.obsm:
         sc.tl.pca(ad)
     purity = SEACells.evaluate.compute_celltype_purity(ad, cell_type_key)
     compactness = SEACells.evaluate.compactness(ad, "X_pca")
     separation = SEACells.evaluate.separation(ad, "X_pca", nth_nbr=1)
-    return {"purity": purity, "compactness": compactness, "separation": separation}
+    res_dict = {"purity": purity, "compactness": compactness, "separation": separation}
+    summary = {}
+
+    for metric, df in res_dict.items():
+        vals = df.iloc[:, -1].dropna().values
+        median = np.median(vals)
+        q25, q75 = np.percentile(vals, [25, 75])
+        iqr = q75 - q25
+
+        summary[metric] = f"{median:.3f} ± {iqr:.3f}"
+    summary_df = pd.DataFrame([summary])
+    return summary_df, res_dict  # single row
 
 
 def save_seacell_df(named_dfs, p):
@@ -60,10 +74,11 @@ def save_seacell_df(named_dfs, p):
 
 def scproto_metacell_metrics(t, path):
     model = t.load_model()
-    proto_ids = t.encode_adata(t.ref.adata, model, True, True)
+    z = t.encode_adata(t.ref.adata, model)
+    proto_ids = t.get_proto_assignments(z, model).argmax(axis=1)
     adata = t.ref.adata
-    adata.obs["SEACell"] = proto_ids.detach().cpu().numpy()
-    metacell_metrics = get_metacell_metrics(adata, t.dataset.cell_type_key)
+    adata.obs["SEACell"] = proto_ids
+    metacell_metrics = mc_quality_metrics(adata, t.dataset.cell_type_key)
     save_seacell_df(metacell_metrics, path)
     return metacell_metrics
 
@@ -76,7 +91,8 @@ def agg_obs(SEACell_ad, adata, obs_key):
     )
     return SEACell_ad
 
+
 def save_seacell(ad, SEACell_ad, ds_id):
-    home = '/home/icb/fatemehs.hashemig/'
-    ad.write(f'{home}/models/{ds_id}/seacell_sc.h5ad')
-    SEACell_ad.write(f'{home}/models/{ds_id}/seacell_agg.h5ad')
+    home = "/home/icb/fatemehs.hashemig/"
+    ad.write(f"{home}/models/{ds_id}/seacell_sc.h5ad")
+    SEACell_ad.write(f"{home}/models/{ds_id}/seacell_agg.h5ad")

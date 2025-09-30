@@ -19,6 +19,8 @@ import wandb
 
 from interpretable_ssl.evaluation.metric_helpers.embedding_metrics import *
 from interpretable_ssl.trainers.affinity import *
+from interpretable_ssl.models.gmvae_loss import *
+import subprocess
 
 class Trainer(TrainerBase):
     # @log_time('scpoli trainer')
@@ -197,8 +199,12 @@ class Trainer(TrainerBase):
         pass
 
     def get_proto_assignments(self, z, model):
-        p = model.prototypes(z)
-        return p.detach().cpu().numpy()
+        if self.assignment_mode == 'gm':
+            resp = responsibilities(z, model.get_prototypes(), model.proto_vparam, return_logits=False)
+            return resp.detach().cpu().numpy()
+        else:
+            p = model.prototypes(z)
+            return p.detach().cpu().numpy()
     
     def plot_umap(self, model, adata, split, save_plot=True):
         z = self.encode_adata(adata, model)
@@ -260,7 +266,7 @@ class Trainer(TrainerBase):
         return res_df
 
     def save_metacell_metrics(self):
-        mc_adata = get_scproto_mc_adata(
+        mc_adata, sim = get_scproto_mc_adata(
             self,
             self.dataset.adata,
             self.dataset.batch_key,
@@ -274,6 +280,22 @@ class Trainer(TrainerBase):
         )
         save_append(mc_scg, self.get_dump_path(), "scgraph")
         save_append(mc_scb, self.get_dump_path(), "scib")
+        
+        self.dataset.adata.obs["SEACell"] = sim.argmax(axis=1)
+        tmp_path = f"tmp_{uuid.uuid4().hex[:8]}.h5ad"
+        self.dataset.adata.write(tmp_path)
+        process = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "interpretable_ssl.evaluation.metric_helpers.mc_quality",
+                tmp_path, self.dataset.label_key, self.get_dump_path(), self.get_model_name() 
+            ]
+        )
+        process.wait()  # ✅ wait for the subprocess to finish
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+            print("Deleted:", tmp_path)
 
     def save_metrics(self):
         adata = add_trainer_emb(self, self.dataset.adata)
@@ -288,6 +310,7 @@ class Trainer(TrainerBase):
             self.dataset.label_key,
         )
         scg, scb = get_metrics(*params)
+        
         scg.to_csv(self.get_dump_path() + "/scgraph.csv")
         scb.to_csv(self.get_dump_path() + "/scib.csv")
         self.save_metacell_metrics()

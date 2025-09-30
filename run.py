@@ -44,10 +44,10 @@ if __name__ == "__main__":
     }
     prop = {'propagation_reg': [0],  "cell_w_mode": ["sigma",'uniform']}
     cell_w_modes = {"cell_w_mode": ["heterogeneity", "mf_score"],}
-    sigma_w = {'propagation_reg': [0, 1],  "cell_w_mode": ["wsigma"]}
+    l2norm = {'experiment_name': ['trvar_v2'], 'epsilon': [0.5], 'temperature': [1.0], 'l2norm': [0], "propagation_reg": [0]}
     experiments = [
-        sigma_w,
-        sigma_w | pancreas
+        l2norm,
+        l2norm | pancreas
         # affinities,
         # affinities | pancreas,
         # base | {'cell_w_mode': ['sigma']},
