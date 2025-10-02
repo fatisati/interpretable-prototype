@@ -10,14 +10,11 @@ class OriginalTrainer(AdoptiveTrainer):
             kwargs["experiment_name"] = "scpoli"
 
         super().__init__(**kwargs)
-        print("input data size: ", len(self.ref))
+        print("input data size: ", len(self.train_))
         self.model = self.get_model()
 
-        # self.set_ds_raw_counts(self.ref)
-        # self.set_ds_raw_counts(self.query)
-
     def get_model(self):
-        adata = self.ref.adata.copy()
+        adata = self.train_.adata.copy()
         adata.X = adata.layers.get("counts", adata.X)
         condition_key = self.dataset.batch_key
 

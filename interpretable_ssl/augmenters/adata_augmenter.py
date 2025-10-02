@@ -211,7 +211,7 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
 
         # Load result
         with open(self.save_path, "rb") as f:
-            graph = pickle.load(f)
+            ds_affinities = pickle.load(f)
 
         # Cleanup temporary files
         try:
@@ -219,7 +219,7 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
             os.remove(self.adata_path)
         except FileNotFoundError:
             pass
-        return graph
+        return ds_affinities
 
     def __len__(self):
         return max(

@@ -47,7 +47,7 @@ def compute_seacells(ad, n_SEACells, build_kernel_on="X_pca"):
     return ad, SEACell_ad, model
 
 
-def mc_quality_metrics(ad=None, cell_type_key="celltype"):
+def mc_quality_metrics(ad=None, cell_type_key="celltype", version=5):
     if "X_pca" not in ad.obsm:
         sc.tl.pca(ad)
     purity = SEACells.evaluate.compute_celltype_purity(ad, cell_type_key)
@@ -58,11 +58,14 @@ def mc_quality_metrics(ad=None, cell_type_key="celltype"):
 
     for metric, df in res_dict.items():
         vals = df.iloc[:, -1].dropna().values
-        median = np.median(vals)
+        if metric == 'purity' and version>5:
+            center = np.mean(vals)
+        else:
+            center = np.median(vals)
         q25, q75 = np.percentile(vals, [25, 75])
         iqr = q75 - q25
 
-        summary[metric] = f"{median:.3f} ± {iqr:.3f}"
+        summary[metric] = f"{center:.3f} ± {iqr:.3f}"
     summary_df = pd.DataFrame([summary])
     return summary_df, res_dict  # single row
 

@@ -20,6 +20,7 @@ import wandb
 from interpretable_ssl.evaluation.metric_helpers.embedding_metrics import *
 from interpretable_ssl.trainers.affinity import *
 import subprocess
+from sklearn.model_selection import train_test_split
 
 class Trainer(TrainerBase):
     # @log_time('scpoli trainer')
@@ -40,6 +41,13 @@ class Trainer(TrainerBase):
             self.ref, self.query = self.dataset.get_train_test()
         else:
             self.ref, self.query = ref_query
+            
+        train_ind, val_ind = train_test_split(
+            range(len(self.ref)), test_size=0.1, random_state=42
+        )
+        self.train_, self.val_ = self.ref._create_split_instance(
+            train_ind
+        ), self.ref._create_split_instance(val_ind)
         self.condition_key = self.ref.batch_key
         if self.study_id != "":
             mask = self.ref.adata.obs[self.condition_key] == self.study_id

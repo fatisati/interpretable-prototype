@@ -47,10 +47,10 @@ def load_tb(ds_id):
             return pd.read_csv(p, index_col = 0)
         else:
             print(p)
-    for key in ['scib', 'scgraph']:
+    for key in ['scib', 'scgraph', 'mc_quality']:
         dfs[key] = pd.concat(
             [load_csv(f"{p}{fol}/{key}.csv") for fol in os.listdir(p)],
         )
-    scib_df, scgraph_df = dfs['scib'], dfs['scgraph']
+    scib_df, scgraph_df, mc_df = dfs['scib'], dfs['scgraph'], dfs['mc_quality']
     df = pd.concat([scib_df, scgraph_df], axis=1)
     return df, dfs

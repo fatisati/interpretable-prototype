@@ -41,7 +41,7 @@ import torch
 from collections import Counter, defaultdict
 from interpretable_ssl.evaluation.cd4_marker import *
 from interpretable_ssl.trainers.swav_utils import *
-from sklearn.model_selection import train_test_split
+
 from interpretable_ssl.trainers.affinity import *
 
 logger = getLogger()
@@ -104,19 +104,10 @@ class SCProtoTrainer(AdoptiveTrainer):
             # cell_type_keys=[self.cell_type_key],
             # cell_type_encoder=model.cell_type_encoder,
         )
-
-        train_ind, val_ind = train_test_split(
-            range(len(self.ref)), test_size=0.1, random_state=42
-        )
-        train, val = self.ref._create_split_instance(
-            train_ind
-        ), self.ref._create_split_instance(val_ind)
-
-        
         self.train_ds = MultiCropsDataset(
-            train, **common_dataset_kwargs
+            self.train_, **common_dataset_kwargs
         )
-        self.test_ds = MultiCropsDataset(val, **common_dataset_kwargs)
+        self.test_ds = MultiCropsDataset(self.val_, **common_dataset_kwargs)
 
         self.train_loader = self.get_data_laoder(self.train_ds)
         self.test_loader = self.get_data_laoder(self.test_ds, drop_last=False)

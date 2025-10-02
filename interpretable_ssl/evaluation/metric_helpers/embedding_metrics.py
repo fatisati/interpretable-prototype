@@ -13,6 +13,7 @@ import torch
 import uuid
 from interpretable_ssl.scproto_metacells import *
 from interpretable_ssl.configs.defaults import get_defaults
+from sklearn.model_selection import train_test_split
 
 res_dir = "/home/icb/fatemehs.hashemig/models/"
 # use this code to calculate scib and scgraph metrics for models [scProto, scPoli, scVI, pca, pca+harmoney, seacell]
@@ -76,9 +77,10 @@ def get_metrics(adata, emb_keys, bk, lk, **scgraph_kwargs):
 
 
 def save_metrics(adata, emb_keys, dataset, bk, lk, **scgraph_kwargs):
-    scgraph_m = get_scgraph(adata, emb_keys, dataset, bk, lk, **scgraph_kwargs)
-    scib_m = get_scib(adata, emb_keys, dataset, bk, lk)
-    return scib_m, scgraph_m
+    scg_m, scib_m = get_metrics(adata, emb_keys, bk, lk, **scgraph_kwargs)
+    save_append(scib_m, f'/home/icb/fatemehs.hashemig/models/{dataset}/baselines/', 'scib')
+    save_append(scg_m, f'/home/icb/fatemehs.hashemig/models/{dataset}/baselines/', 'scgraph')
+    return scib_m, scg_m
 
 
 def add_trainer_emb(t, adata):
@@ -97,25 +99,28 @@ def save_trainer_metrics(t, dataset, append=True):
 
 def add_scvi_emb(adata, query_stu, bk, pt_epochs=None, ft_epochs=None):
     d = get_defaults()
-    pt_epochs = pt_epochs or (d['pretraining_epochs'] + d['cvae_epochs'])
-    ft_epochs = ft_epochs or d['ft_epochs']
+    pt_epochs = pt_epochs or (d["pretraining_epochs"] + d["cvae_epochs"])
+    ft_epochs = ft_epochs or d["ft_epochs"]
     ref = adata[~adata.obs[bk].isin(query_stu)].copy()
-
+    train_ind, val_ind = train_test_split(
+        range(len(ref)), test_size=0.1, random_state=42
+    )
+    train_ad = ref[train_ind].copy()
+    print(f"training scvi with ds size: {len(train_ad)} and {pt_epochs}, {ft_epochs}")
     # 1) Setup AnnData for scVI
     #    No need for common genes step since ref_adata comes from adata
-    scvi.model.SCVI.setup_anndata(ref, batch_key=bk)
+    scvi.model.SCVI.setup_anndata(train_ad, batch_key=bk)
 
     # 2) Train model on reference
-    print(pt_epochs, ft_epochs)
-    model = scvi.model.SCVI(ref, n_latent=8)
+    model = scvi.model.SCVI(train_ad, n_latent=8)
     model.train(max_epochs=pt_epochs)
 
     # Adapt model to whole adata
     query_model = scvi.model.SCVI.load_query_data(adata, model)
     query_model.train(ft_epochs)
     key = "X_scvi"
-    key += f"_pt{pt_epochs}" if pt_epochs != d['pretraining_epochs'] else ""
-    key += f"_ft{ft_epochs}" if ft_epochs != d['ft_epochs'] else ""
+    key += f"_pt{pt_epochs}" if pt_epochs != (d["pretraining_epochs"] + d["cvae_epochs"]) else ""
+    key += f"_ft{ft_epochs}" if ft_epochs != d["ft_epochs"] else ""
     key += f'v{d["version"]}'
     adata.obsm[key] = query_model.get_latent_representation(adata)
     return adata, key
@@ -185,16 +190,19 @@ def calc_adata_metrics(dataset, ds_conf):
 
 def get_scproto_mc_adata(t, adata, bk, lk, use_mean=True):
     import torch.nn as nn
+
     model = t.load_model()
     protos = model.get_prototypes()
-    
+
     if use_mean:
-        old_emb = model.scpoli_cvae.embeddings[0]   # nn.Embedding(14, 10, max_norm=1.0)
-        old_w   = old_emb.weight.detach()
-        mean_w  = old_w.mean(dim=0, keepdim=True)   # [1, emb_dim]
-        new_emb = nn.Embedding(old_w.shape[0] + 1, old_w.shape[1], max_norm=old_emb.max_norm)
-        new_emb.weight.data[:old_w.shape[0]] = old_w
-        new_emb.weight.data[old_w.shape[0]]  = mean_w
+        old_emb = model.scpoli_cvae.embeddings[0]  # nn.Embedding(14, 10, max_norm=1.0)
+        old_w = old_emb.weight.detach()
+        mean_w = old_w.mean(dim=0, keepdim=True)  # [1, emb_dim]
+        new_emb = nn.Embedding(
+            old_w.shape[0] + 1, old_w.shape[1], max_norm=old_emb.max_norm
+        )
+        new_emb.weight.data[: old_w.shape[0]] = old_w
+        new_emb.weight.data[old_w.shape[0]] = mean_w
         model.scpoli_cvae.embeddings[0] = new_emb
         # number of embeddings in the layer
         last_idx = model.scpoli_cvae.embeddings[0].num_embeddings - 1
@@ -204,18 +212,16 @@ def get_scproto_mc_adata(t, adata, bk, lk, use_mean=True):
     else:
         batch = np.zeros((protos.shape[0], 1))
     batch = torch.as_tensor(batch, dtype=torch.long, device="cuda")
-    
-    sf = np.ravel(adata.layers.get('counts').sum(1))
+
+    sf = np.ravel(adata.layers.get("counts").sum(1))
     sf = sf.mean()
-    print('decoding protos using avg sizefactor: ', sf)
+    print("decoding protos using avg sizefactor: ", sf)
     sizefactor = np.full((protos.shape[0],), sf)
     sizefactor = torch.as_tensor(sizefactor, dtype=torch.float, device="cuda")
     metacells = model.decode(protos, batch, sizefactor)
     z = t.encode_adata(adata, model)
     sample_proto_sim = t.get_proto_assignments(z, model)
-    proto_labels = extract_proto_labels(
-        adata, sample_proto_sim, [bk, lk]
-    )
+    proto_labels = extract_proto_labels(adata, sample_proto_sim, [bk, lk])
     metacells_adata = generate_metacell_adata(metacells, proto_labels)
     if metacells_adata.X.max() > 50:
         metacells_adata = metacells_adata.copy()
@@ -251,4 +257,3 @@ def get_metacell_metrics(
     lk,
 ):
     return get_metrics(mc_ad, obsm_keys, bk, lk, thres_batch=10, thres_celltype=5)
-    
