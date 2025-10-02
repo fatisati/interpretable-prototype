@@ -309,8 +309,6 @@ class Trainer(TrainerBase):
         scb.to_csv(self.get_dump_path() + "/scib.csv")
         self.save_metacell_metrics()
         
-        
-
     def get_dataset(self, dataset_id):
         ds_params = DATASETS[dataset_id]
         return SingleCellDataset(name=dataset_id, **ds_params)

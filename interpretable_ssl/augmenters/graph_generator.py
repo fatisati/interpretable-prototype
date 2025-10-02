@@ -35,14 +35,14 @@ def generate_affinity(batch_ad, k, affinity_type="inverse_dist"):
         inv_dist = 1.0 / (dist + 1e-8)  # avoid div by zero
         return inv_dist
 
-    elif affinity_type in ["arbf", "coaffinity"]:
+    elif affinity_type in ["arbf", "coaff"]:
         import SEACells
 
         kernel_model = SEACells.build_graph.SEACellGraph(
             batch_ad, "X_pca", verbose=True
         )
         M = kernel_model.rbf(k)
-        if affinity_type == "coaffinity":
+        if affinity_type == "coaff":
             return M @ M.T
         else:
             return M

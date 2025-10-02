@@ -27,6 +27,8 @@ import pickle
 from interpretable_ssl.augmenters.manifold_weights import *
 from tqdm import tqdm
 
+from scipy.special import softmax
+
 
 class MultiCropsDataset(MultiConditionAnnotatedDataset):
     def __init__(
@@ -123,6 +125,8 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         self.manifold = {
             "sigma": np.zeros(self.adata.n_obs),
             "wsigma": np.zeros(self.adata.n_obs),
+            "zsigma": np.zeros(self.adata.n_obs),
+            "ssigma": np.zeros(self.adata.n_obs),
             "heterogeneity": np.zeros(self.adata.n_obs),
             "mf_score": np.zeros(self.adata.n_obs),
         }
@@ -143,7 +147,7 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
 
             # --- sigma: median distance across neighbors ---
             sigma = np.median(np.sqrt(D[:, 1:]), axis=1)  # skip self, median over kNN
-            w_sigma = self.get_w_sigma(sigma)
+            w_sigma, z_sigma, softmax_sigma = self.sigma_transform(sigma)
             
             # --- row marginals / weights ---
             w = compute_row_marginals(sigma, h)
@@ -151,6 +155,8 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
             # store in dictionary
             self.manifold["sigma"][batch_idx] = sigma
             self.manifold["wsigma"][batch_idx] = w_sigma
+            self.manifold["zsigma"][batch_idx] = z_sigma
+            self.manifold["ssigma"][batch_idx] = softmax_sigma
             self.manifold["heterogeneity"][batch_idx] = h
             self.manifold["mf_score"][batch_idx] = w
             for key in self.manifold.keys():
@@ -158,7 +164,7 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
             
         print("---done---")
 
-    def get_w_sigma(self, sigma, alpha=0.25, clip=(0.5, 3.0)):
+    def sigma_transform(self, sigma, alpha=0.3, clip=(0.5, 3.0)):
         # robust normalization (center & scale)
         med = np.median(sigma)
         mad = np.median(np.abs(sigma - med)) + 1e-8  # avoid div/0
@@ -172,7 +178,8 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
 
         # clip extreme values
         w = np.clip(w, clip[0], clip[1])
-        return w
+        return w, z, softmax(alpha * z)
+
 
     def run_graph_generator(self):
         print(f"[{os.getpid()}] Generating affinities...")
@@ -276,7 +283,9 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
             "sigma",
             'heterogeneity',
             'mf_score',
-            'wsigma'
+            'wsigma',
+            'zsigma',
+            'ssigma'
         ]
         combined_data = {}
         for key in keys_to_stack:
