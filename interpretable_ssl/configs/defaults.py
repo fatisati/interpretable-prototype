@@ -48,7 +48,7 @@ def get_defaults():
         "sync_bn": "pytorch",  # swav specific
         "syncbn_process_group_size": 8,  # swav specific
         "seed": 31,  # swav specific
-        "model": "",  # swav specific
+        
         "optimizer": "",  # swav specific
         "lr_schedule": "",  # swav specific
         "queue": None,  # swav specific
@@ -142,7 +142,7 @@ def get_defaults():
         "version": 5,
         "affinity_type": "arbf",
         'cell_w_mode': 'uniform',
-        
+        "model": "swav",  # swav specific
         # change to dotp in future
     }
     return defaults

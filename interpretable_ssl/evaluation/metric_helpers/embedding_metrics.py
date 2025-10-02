@@ -13,6 +13,7 @@ import torch
 import uuid
 from interpretable_ssl.scproto_metacells import *
 from interpretable_ssl.configs.defaults import get_defaults
+
 res_dir = "/home/icb/fatemehs.hashemig/models/"
 # use this code to calculate scib and scgraph metrics for models [scProto, scPoli, scVI, pca, pca+harmoney, seacell]
 
@@ -208,12 +209,12 @@ def get_scproto_mc_adata(t, adata, bk, lk, use_mean=True):
     sf = sf.mean()
     print('decoding protos using avg sizefactor: ', sf)
     sizefactor = np.full((protos.shape[0],), sf)
-    sizefactor = torch.as_tensor(sizefactor, dtype=torch.long, device="cuda")
+    sizefactor = torch.as_tensor(sizefactor, dtype=torch.float, device="cuda")
     metacells = model.decode(protos, batch, sizefactor)
-
-    sample_proto_sim = t.encode_adata(adata, model, return_mapped=True)
+    z = t.encode_adata(adata, model)
+    sample_proto_sim = t.get_proto_assignments(z, model)
     proto_labels = extract_proto_labels(
-        adata, sample_proto_sim.detach().cpu().numpy(), [bk, lk]
+        adata, sample_proto_sim, [bk, lk]
     )
     metacells_adata = generate_metacell_adata(metacells, proto_labels)
     if metacells_adata.X.max() > 50:
@@ -222,13 +223,13 @@ def get_scproto_mc_adata(t, adata, bk, lk, use_mean=True):
         sc.pp.log1p(metacells_adata)
     sc.tl.pca(metacells_adata)
     metacells_adata.obsm[f"{t.get_model_name()}_mc_pca"] = metacells_adata.obsm["X_pca"]
-    return metacells_adata
+    return metacells_adata, sample_proto_sim
 
 
 def get_scproto_metacell_metrics(
     t, adata, ds, bk, lk, name_postfix=None, **scgraph_kwargs
 ):
-    metacells_adata = get_scproto_mc_adata(t, adata, bk, lk)
+    metacells_adata, sim = get_scproto_mc_adata(t, adata, bk, lk)
     return save_metrics(
         metacells_adata, ["scProto_mc_pca"], ds, bk, lk, name_postfix, **scgraph_kwargs
     )
@@ -250,3 +251,4 @@ def get_metacell_metrics(
     lk,
 ):
     return get_metrics(mc_ad, obsm_keys, bk, lk, thres_batch=10, thres_celltype=5)
+    
