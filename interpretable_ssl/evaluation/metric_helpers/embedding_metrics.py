@@ -78,8 +78,8 @@ def get_metrics(adata, emb_keys, bk, lk, **scgraph_kwargs):
 
 def save_metrics(adata, emb_keys, dataset, bk, lk, **scgraph_kwargs):
     scg_m, scib_m = get_metrics(adata, emb_keys, bk, lk, **scgraph_kwargs)
-    save_append(scib_m, f'/home/icb/fatemehs.hashemig/models/{dataset}/baselines/', 'scib')
-    save_append(scg_m, f'/home/icb/fatemehs.hashemig/models/{dataset}/baselines/', 'scgraph')
+    scib_m = save_append(scib_m, f'/home/icb/fatemehs.hashemig/models/{dataset}/baselines/', 'scib')
+    scg_m = save_append(scg_m, f'/home/icb/fatemehs.hashemig/models/{dataset}/baselines/', 'scgraph')
     return scib_m, scg_m
 
 
@@ -98,6 +98,8 @@ def save_trainer_metrics(t, dataset, append=True):
 
 
 def add_scvi_emb(adata, query_stu, bk, pt_epochs=None, ft_epochs=None):
+    adata.X = adata.layers.get('counts', adata.X)
+    print(f'adata.X max: {adata.X.max()}')
     d = get_defaults()
     pt_epochs = pt_epochs or (d["pretraining_epochs"] + d["cvae_epochs"])
     ft_epochs = ft_epochs or d["ft_epochs"]
@@ -106,6 +108,7 @@ def add_scvi_emb(adata, query_stu, bk, pt_epochs=None, ft_epochs=None):
         range(len(ref)), test_size=0.1, random_state=42
     )
     train_ad = ref[train_ind].copy()
+    
     print(f"training scvi with ds size: {len(train_ad)} and {pt_epochs}, {ft_epochs}")
     # 1) Setup AnnData for scVI
     #    No need for common genes step since ref_adata comes from adata
@@ -121,9 +124,8 @@ def add_scvi_emb(adata, query_stu, bk, pt_epochs=None, ft_epochs=None):
     key = "X_scvi"
     key += f"_pt{pt_epochs}" if pt_epochs != (d["pretraining_epochs"] + d["cvae_epochs"]) else ""
     key += f"_ft{ft_epochs}" if ft_epochs != d["ft_epochs"] else ""
-    key += f'v{d["version"]}'
-    adata.obsm[key] = query_model.get_latent_representation(adata)
-    return adata, key
+    key += f'_uc_v{d["version"]}'
+    return query_model.get_latent_representation(adata), key
 
 
 def get_scvi_metrics(adata, query_stu, bk, lk, dataset):
@@ -147,7 +149,7 @@ def add_pca_harmoney(adata, bk, pca_key):
 
 
 def save_pca_harmoney_metrics(
-    adata, bk, lk, dataset, pca_key="X_pca", postfix=None, **scgraph_kwargs
+    adata, bk, lk, dataset, pca_key="X_pca", **scgraph_kwargs
 ):
     adata = add_pca_harmoney(adata, bk, pca_key)
     return save_metrics(
@@ -156,7 +158,6 @@ def save_pca_harmoney_metrics(
         dataset,
         bk,
         lk,
-        name_postfix=postfix,
         **scgraph_kwargs,
     )
 
@@ -243,11 +244,11 @@ def get_scproto_metacell_metrics(
 
 def load_seacell(ds_id):
     home = "/home/icb/fatemehs.hashemig/"
-    # ad = sc.read_h5ad(f'{home}/models/{ds_id}/seacell_sc.h5ad')
+    ad = sc.read_h5ad(f'{home}/models/{ds_id}/seacell_sc.h5ad')
     mc_ad = sc.read_h5ad(f"{home}/models/{ds_id}/seacell_agg.h5ad")
     sc.pp.normalize_total(mc_ad, target_sum=1e4)
     sc.pp.log1p(mc_ad)
-    return mc_ad
+    return ad, mc_ad
 
 
 def get_metacell_metrics(

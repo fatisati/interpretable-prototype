@@ -43,6 +43,7 @@ from interpretable_ssl.evaluation.cd4_marker import *
 from interpretable_ssl.trainers.swav_utils import *
 
 from interpretable_ssl.trainers.affinity import *
+from interpretable_ssl.trainers.scpoli_helpers import *
 
 logger = getLogger()
 
@@ -60,7 +61,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         self.train_augmentation = self.augmentation_type
         self.queue = {}
         if self.condition_key is not None:
-            ds_cnt = self.ref.adata.obs[self.condition_key].nunique()
+            ds_cnt = self.train_.adata.obs[self.condition_key].nunique()
         else:
             ds_cnt = 1
         self.ds_ids = range(ds_cnt)
@@ -107,33 +108,13 @@ class SCProtoTrainer(AdoptiveTrainer):
         self.train_ds = MultiCropsDataset(
             self.train_, **common_dataset_kwargs
         )
+        self.val_.adata = add_condition_combined(self.val_.adata, [self.train_.batch_key])
         self.test_ds = MultiCropsDataset(self.val_, **common_dataset_kwargs)
 
         self.train_loader = self.get_data_laoder(self.train_ds)
         self.test_loader = self.get_data_laoder(self.test_ds, drop_last=False)
 
         self.original_train_loader = self.train_loader
-        if self.multi_layer_protos == 1:
-            self.cell_type_ds = MultiCropsDataset(
-                self.ref,
-                self.nmb_views[0],
-                "cell_type",
-                k_neighbors=self.k_neighbors,
-                longest_path=self.longest_path,
-                dimensionality_reduction=self.dimensionality_reduction,
-                n_components=self.n_components,
-                supervised_ratio=self.supervised_ratio,
-                condition_keys=[self.condition_key],
-                # cell_type_keys=[self.cell_type_key],
-                condition_encoders=scpoli_encoder.condition_encoders,
-                conditions_combined_encoder=scpoli_encoder.conditions_combined_encoder,
-                # cell_type_encoder=model.cell_type_encoder,
-            )
-            self.cell_type_loader = self.get_data_laoder(self.cell_type_ds)
-            # def get_train_loader(ld1, ld2):
-            #     return zip(ld1, ld2)
-
-            # self.train_loader = get_train_loader(self.original_train_loader, self.cell_type_loader)
 
     def get_data_laoder(self, ds, drop_last=True):
         return DataLoader(
@@ -153,11 +134,11 @@ class SCProtoTrainer(AdoptiveTrainer):
         kwargs = {
             "latent_dim": self.latent_dims,
             "nmb_prototypes": self.num_prototypes,
-            "adata": self.ref.adata,
+            "adata": self.train_.adata,
             "multi_layer_proto": self.multi_layer_protos,
             "np2": self.num_prototypes,
             "recon_loss": self.recon_loss,
-            "batch_key": self.ref.batch_key,
+            "batch_key": self.train_.batch_key,
             "l2norm": self.l2norm,
             "assignment_metric": self.assignment_metric,
         }

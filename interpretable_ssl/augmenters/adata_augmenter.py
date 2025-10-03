@@ -28,6 +28,7 @@ from interpretable_ssl.augmenters.manifold_weights import *
 from tqdm import tqdm
 
 from scipy.special import softmax
+from scipy import sparse
 
 
 class MultiCropsDataset(MultiConditionAnnotatedDataset):
@@ -106,10 +107,10 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
             if use_counts
             else sc_ds.adata.X
         )
+        self._is_sparse = sparse.issparse(self.data)
         if not self._is_sparse:
             self.data = torch.tensor(self.data, dtype=torch.float32)
 
-        print(self._is_sparse, type(self.data[0]), self.data.max())
         if not self.affinities_exists():
             self.ds_affinities = self.run_graph_generator()
         self.set_affinities()
@@ -119,7 +120,7 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         self.calc_manifold_weights()
         self.label_key = sc_ds.label_key
         self.return_label = True
-        
+
     def calc_manifold_weights(self):
         print("calculating manifold scores...")
         self.manifold = {
@@ -148,7 +149,7 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
             # --- sigma: median distance across neighbors ---
             sigma = np.median(np.sqrt(D[:, 1:]), axis=1)  # skip self, median over kNN
             w_sigma, z_sigma, softmax_sigma = self.sigma_transform(sigma)
-            
+
             # --- row marginals / weights ---
             w = compute_row_marginals(sigma, h)
 
@@ -161,7 +162,7 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
             self.manifold["mf_score"][batch_idx] = w
             for key in self.manifold.keys():
                 self.adata.obs.loc[batch_idx, key] = self.manifold[key][batch_idx]
-            
+
         print("---done---")
 
     def sigma_transform(self, sigma, alpha=0.3, clip=(0.5, 3.0)):
@@ -179,7 +180,6 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         # clip extreme values
         w = np.clip(w, clip[0], clip[1])
         return w, z, softmax(alpha * z)
-
 
     def run_graph_generator(self):
         print(f"[{os.getpid()}] Generating affinities...")
@@ -281,11 +281,11 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
             "index",
             "sample_id",
             "sigma",
-            'heterogeneity',
-            'mf_score',
-            'wsigma',
-            'zsigma',
-            'ssigma'
+            "heterogeneity",
+            "mf_score",
+            "wsigma",
+            "zsigma",
+            "ssigma",
         ]
         combined_data = {}
         for key in keys_to_stack:
