@@ -108,6 +108,7 @@ class Trainer(TrainerBase):
         return model
 
     def adapt_model(self, model, adata, retrain_epochs=0):
+        adata.X = adata.layers.get("counts", adata.X)
         adapted_model = model
         if self.check_conditions_compatible(model, adata):
             if retrain_epochs == 0:
