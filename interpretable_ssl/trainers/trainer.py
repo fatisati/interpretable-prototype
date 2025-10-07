@@ -199,7 +199,10 @@ class Trainer(TrainerBase):
             self.encode_batch(model, batch, return_mapped, return_mapped_idx)
             for batch in tqdm(loader)
         ]
-        return torch.cat(embeddings)
+        z = torch.cat(embeddings)
+        # if getattr(model, "l2norm", False):
+        #     z = F.normalize(z, dim=1)
+        return z
 
     def get_model_prototypes(self, model):
         return None

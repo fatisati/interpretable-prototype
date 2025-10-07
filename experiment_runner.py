@@ -13,7 +13,7 @@ class ExperimentRunner:
         template_file="run_template.sbatch",
         output_dir="slurm-job-out",
         conda_env="apex-env",
-        sbatch_dir="./runs/sbatch_files/",
+        sbatch_dir="./",
     ):
         self.template_file = template_file
         self.output_dir = output_dir
@@ -39,18 +39,17 @@ class ExperimentRunner:
                 # "cvae_loss_scaler": 0.0,
                 # "prot_decoding_loss_scaler": 0,
                 "model_version": 1,
-                "model": "swav",
             }
         )
-        self.defaults["experiment_name"] = "swav"
+        self.defaults["experiment_name"] = "scproto"
         self.defaults = {
             key: None if value == "" else value for key, value in self.defaults.items()
         }
         self.original_defaults = self.defaults.copy()
         self.qos_dict = {
-            "gpu_long": 8,
+            "gpu_normal": 16,
+            # "gpu_long": 8,
             # "gpu_power": 25,
-            "gpu_normal": 15,
             # "gpu_short": 2,
             # "gpu_priority": 5,
         }
@@ -78,10 +77,10 @@ class ExperimentRunner:
         # Set the output and error file paths based on the job_name
         job_name = self.defaults["job_name"]
         self.defaults["output_file"] = os.path.join(
-            self.output_dir, job_name, "output.txt"
+            self.output_dir, self.defaults["dataset_id"], job_name, "output.txt"
         )
         self.defaults["error_file"] = os.path.join(
-            self.output_dir, job_name, "error.txt"
+            self.output_dir, self.defaults["dataset_id"], job_name, "error.txt"
         )
 
     def generate_sbatch_content(self):
@@ -113,7 +112,7 @@ class ExperimentRunner:
     def run_experiment(self):
         """Generate the SBATCH file, save it, and submit the job."""
         job_name = self.defaults["job_name"]
-        experiment_dir = os.path.join(self.output_dir, job_name)
+        experiment_dir = os.path.join(self.output_dir, self.defaults["dataset_id"], job_name)
 
         # Create directory for job output
         os.makedirs(experiment_dir, exist_ok=True)
@@ -310,13 +309,13 @@ if __name__ == "__main__":
     runner = ExperimentRunner("swav_template.sbatch")
     experiments = [
         {
-            # #   'temperature': [0.04, 0.03, 0.05]            
-            "experiment_name": ['cfreeze'],
+            # #   'temperature': [0.04, 0.03, 0.05]
+            "experiment_name": ["cfreeze"],
             "num_prototypes": [150, 300],
             # "nmb_crops": [16],
             "hard_clustering": [0, 1],
             # "k_neighbors": [25, 50]
-            "augmentation_type": ['kmeans']
+            "augmentation_type": ["kmeans"],
         },
         {
             # "dimensionality_reduction": ["pca", None],

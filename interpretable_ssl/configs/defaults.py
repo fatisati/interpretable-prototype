@@ -7,7 +7,6 @@ def get_defaults():
         "latent_dims": 8,  # swav specific
         # "batch_size_version": 2,
         
-        
         # "custom_cross_val": False,
         # "description": "",
         "experiment_name": "",  # swav specific / or swav
@@ -17,7 +16,6 @@ def get_defaults():
         "linear_eval": False,
         "only_eval": False,
         "use_early_stopping": False,        
-        
         
         "training_type": 'pretrain_encoder',  # semi_supervised, transfer_learning
         'pretrain_dataset_id': 'hlca',
@@ -56,8 +54,6 @@ def get_defaults():
         "training_stats": "",  # swav specific
         "device": "cuda",  # swav specific
         
-        
-        
         ## TODO: replaced by 2 new reg, to be removed
         "prot_decoding_loss_scaler": 0.0,  # swav specific, 5
         "hidden_mlp": 1024,  # swav specific
@@ -75,7 +71,6 @@ def get_defaults():
         "freezable_prototypes": 0,  # swav specific (should be true)
         "prot_init": 'kmeans', #can be kmeans
         
-        "prot_emb_sim_reg": 0.0,
         "loss_type": 'cross_entropy',
         "decodable_prototypes": 0,
         "save_temp_res": 1,
@@ -113,7 +108,8 @@ def get_defaults():
         
         "cvae_loss_scaler": 0.01, # 0.01,  # swav specific, 0.0001
         "propagation_reg": 1, # 1,
-       
+        "prot_emb_sim_reg": 0.5,
+        
         "model_type": 'gm',
         
         "workers": 1,  # swav specific
@@ -139,10 +135,11 @@ def get_defaults():
         
         "use_counts": 1,
         "knn_method": 'faiss',
-        "version": 5,
+        "version": 6,
         "affinity_type": "arbf",
         'cell_w_mode': 'uniform',
         "model": "swav",  # swav specific
+        "lambda_align": 0,
         # change to dotp in future
     }
     return defaults

@@ -12,12 +12,12 @@ from torch.distributions import NegativeBinomial
 from interpretable_ssl.trainers.gmvae_utils import *
 from collections import defaultdict
 from interpretable_ssl.models.gmvae_loss import *
+from interpretable_ssl.models.loss_helper import *
+
 
 # encoder
 # possibly a projection head
 # prototype layer
-
-
 def softplus_inverse(y):
     return torch.log(torch.exp(y) - 1.0)
 
@@ -36,6 +36,7 @@ class SwavBase(nn.Module):
         super().__init__()
         self.scpoli_cvae = scpoli_cvae
         self.prototypes = nn.Linear(latent_dim, nmb_prototypes, bias=False)
+        self.latent_dim = latent_dim
         if multi_layer_proto:
             print("initializing cell proto layer")
             self.cell_protos = nn.Linear(latent_dim, np2, bias=False)
@@ -43,7 +44,6 @@ class SwavBase(nn.Module):
         self.l2norm = l2norm == 1
         self.nmb_prototypes = nmb_prototypes
         self.assignment_metric = assignment_metric
-        self.latent_dim = latent_dim
         # self.propagation_reg = propagation_reg
         # self.prot_emb_sim_reg = prot_emb_sim_reg
 
@@ -67,15 +67,15 @@ class SwavBase(nn.Module):
         return x, cvae_loss
 
     def forward(self, batch):
-        x, cvae_loss = self.encoder_out(batch)
+        x_swav, cvae_loss = self.encoder_out(batch)
 
         if self.projection_head is not None:
-            x = self.projection_head(x)
+            x_swav = self.projection_head(x_swav)
 
         if self.l2norm:
-            x = nn.functional.normalize(x, dim=1, p=2)
+            x_swav = nn.functional.normalize(x_swav, dim=1, p=2)
 
-        propagation_sim = self.propagation_sim_loss(x)
+        propagation_sim = self.propagation_sim_loss(x_swav)
 
         # TO DO: recheck this with original scpoli
         # calc_alpha_coeff = 0.5
@@ -84,15 +84,15 @@ class SwavBase(nn.Module):
         # return 2 x so it would be match the other model output
         if hasattr(self, "cell_protos"):
             return (
-                x,
-                x,
-                (self.prototypes(x), self.cell_protos(x)),
+                x_swav,
+                x_swav,
+                (self.prototypes(x_swav), self.cell_protos(x_swav)),
                 cvae_loss,
                 propagation_sim,
             )
         else:
-            proto_assignments = self.proto_soft_assignments(x)
-            return x, x, proto_assignments, cvae_loss, propagation_sim
+            proto_assignments = self.proto_soft_assignments(x_swav)
+            return x_swav, x_swav, proto_assignments, cvae_loss, propagation_sim
 
     def proto_pos_cos(self, z):
         sim = self.proto_cos_sim(z)
@@ -106,11 +106,11 @@ class SwavBase(nn.Module):
         return sim
 
     def proto_neg_euclidean(self, z):
-        prototypes = self.get_prototypes()
+        prototypes = self.get_swav_prototypes()
         dist = torch.cdist(z, prototypes)  # (B, K)
         return -dist
 
-    def proto_soft_assignments(self, z):
+    def proto_soft_assignments(self, z, *args, **kwargs):
         if self.assignment_metric == "dotp":
             return self.prototypes(z)
         elif self.assignment_metric == "pcos":
@@ -120,50 +120,43 @@ class SwavBase(nn.Module):
         elif self.assignment_metric == "neuc":
             return self.proto_neg_euclidean(z)
 
-    # move prototypes toward uncovered embeddings to improve coverage
     def propagation(self, z: torch.Tensor):
         # prototypes: [nmb_prototypes, latent_dim]
         protos = self.prototypes.weight  # each row = prototype
 
         # pairwise Euclidean distances: [n_samples, nmb_prototypes]
-        dists = torch.cdist(z.detach(), protos, p=2)
+        dists = torch.cdist(z, protos, p=2)
 
         # for each sample → distance to closest prototype
         min_dists, _ = dists.min(dim=1)  # shape [n_samples]
 
-        # TODO: try this maybe smoother gradient
-        # threshold = torch.quantile(min_dists, 0.95)
-        # loss = min_dists[min_dists >= threshold].mean()
-
         # return the maximum of these minima
-        # min_dists.topk(5).values.mean()
-        return min_dists.topk(k=int(0.1 * len(min_dists))).values.mean()
+        return min_dists.topk(5).values.mean()
+        # tau = 10.0  # temperature
+        # loss = torch.logsumexp(min_dists * tau, dim=0) / tau
+        # return loss
 
-    # move embeddings (z) toward their nearest prototypes
-    def z_commit(self, z: torch.Tensor):
-        # detach prototypes → commitment-type loss
-        protos = self.prototypes.weight.detach()
-        # pairwise Euclidean distances [n_samples, n_prototypes]
-        dists = torch.cdist(z, protos, p=2)
-        # for each prototype, take closest embedding
-        min_dists, _ = dists.min(dim=0)
-        # encourage all prototypes to have at least one nearby embedding
-        # focus on underused prototypes: min_dists.topk(k=int(0.1 * len(min_dists)))
-        return min_dists.topk(k=int(0.1 * len(min_dists))).values.mean()
-        # return min_dists.mean()
+    def embedding_similarity(self, z: torch.Tensor):
+        cosine_sim = self.prototypes(z)
+        cosine_dist = 1 - cosine_sim
+
+        min_distances = cosine_dist.min(dim=0).values
+        return min_distances.max()
+        # dist = torch.cdist(self.prototypes.weight, z)
+        # return dist.min(1).values.mean()
 
     def propagation_sim_loss(self, z):
-        return self.propagation(z), self.z_commit(z)
+        return self.propagation(z), self.embedding_similarity(z)
 
     def encode(self, batch):
-        encoder_out, x, x_mapped, _, _ = self.forward(batch)
-        return encoder_out, x, x_mapped
+        z_swav, z_cvae, proto_assign, _, _ = self.forward(batch)
+        return z_swav, z_cvae, proto_assign
 
-    def get_prototypes(self):
+    def get_swav_prototypes(self):
         return self.prototypes.weight
 
     def normalize_prototypes(self):
-        w = self.get_prototypes().data.clone()
+        w = self.get_swav_prototypes().data.clone()
         w = nn.functional.normalize(w, dim=1, p=2)
         self.set_prototypes(w)
         # if hasattr(self, "cell_protos"):
@@ -186,7 +179,7 @@ class SwavBase(nn.Module):
         Returns:
             float: The average of the average distances for all p tensors.
         """
-        tensor = self.get_prototypes()
+        tensor = self.get_swav_prototypes()
         # Calculate pairwise distances using broadcasting
         pairwise_diff = tensor.unsqueeze(1) - tensor.unsqueeze(0)  # Shape: (p, p, d)
         pairwise_distances = torch.norm(pairwise_diff, dim=2)  # Shape: (p, p)
@@ -339,7 +332,7 @@ class SwavBase(nn.Module):
             Averaged decoded tensor of shape (batch_size, output_dim).
         """
         # Move input tensor to GPU
-        input_tensor = self.get_prototypes()
+        input_tensor = self.get_swav_prototypes()
         return self.decode(input_tensor, recon_loss, use_avg_batch_embedding, use_batch)
 
 
@@ -395,14 +388,11 @@ class scProtoGMVAE(SwAVModel):
             "proto_priors",
             torch.full((self.nmb_prototypes,), 1.0 / self.nmb_prototypes),
         )
-        self.beta = 0.3
-
+        self.beta = 1.0
+        # self.use_rbf = use_rbf == 1
         self.temperature = temperature
-        self.gm_vparam = softplus_inverse(
-            torch.ones(self.nmb_prototypes, self.latent_dim)
-        )
+        self.gm_vparam = softplus_inverse(torch.ones(self.nmb_prototypes, self.latent_dim))
 
-    # same as scpoli nb loss
     def cacl_recon_loss(self, z, batch, sizefactor, combined_batch, x):
         dec_mean = self.decode(z, batch, sizefactor)
         dispersion = F.linear(
@@ -438,12 +428,11 @@ class scProtoGMVAE(SwAVModel):
         )
         x_log = torch.log(1 + x)
         z_mu, z_logvar = self.scpoli_cvae.encoder(x_log, batch_embeddings)
-        if self.l2norm:
-            z_mu = nn.functional.normalize(z_mu, dim=1, p=2)
-
         z = self.scpoli_cvae.sampling(z_mu, z_logvar)
+        if self.l2norm:
+            z = nn.functional.normalize(z, dim=1, p=2)
         recon = self.cacl_recon_loss(z, batch, sizefactor, combined_batch, x)
-        # proto_kl, cluster_kl, responsibilities = self.calc_kl_loss(z_mu, z_logvar)
+
         # proto_kl, cluster_kl, responsibilities = self.calc_kl_loss(z_mu, z_logvar)
         gm_mu = self.get_gm_mu()
         gm_vparam = self.gm_vparam.to(gm_mu.device)
@@ -451,23 +440,55 @@ class scProtoGMVAE(SwAVModel):
         resp = responsibilities(z_mu, gm_mu, gm_vparam, self.temperature)
         z_var = torch.exp(z_logvar)
         z_vparam = softplus_inverse(z_var)
+
         kl, kl_dict = gm_kl(z_mu, z_vparam, gm_mu, gm_vparam, resp)
         # ---------- total ----------
+        # loss = recon + self.beta * (proto_kl + cluster_kl)
         loss = recon + self.beta * kl
         return z_mu, loss, resp
 
     def forward(self, batch):
-        z, cvae_loss, resp = self.calc_z_and_cvae_loss(**batch)
-        propagation_sim = self.propagation_sim_loss(z)
-        return z, z, self.proto_soft_assignments(z), cvae_loss, propagation_sim
-
-    def proto_soft_assignments(self, z):
-        if self.l2norm:
-            return self.prototypes(z)
-        else:
-            return F.cosine_similarity(
-                z.unsqueeze(1), self.prototypes.weight.unsqueeze(0), dim=-1
-            )
+        z_swav, cvae_loss, resp = self.calc_z_and_cvae_loss(**batch)
+        propagation_sim = self.propagation_sim_loss(z_swav)
+        return (
+            z_swav,
+            z_swav,
+            self.proto_soft_assignments(z_swav),
+            cvae_loss,
+            propagation_sim,
+        )
 
     def get_gm_mu(self):
         return self.prototypes.weight
+
+
+class scProtoHybrid(scProtoGMVAE):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # projector
+        self.swav_projector = nn.Linear(self.latent_dim, self.latent_dim, bias=False)
+        # (optional) good init:
+        nn.init.orthogonal_(self.swav_projector.weight)
+
+    def forward(self, batch):
+        # zg: z in gaussian space
+        z_gm, cvae_loss, resp = self.calc_z_and_cvae_loss(**batch)
+        
+        z_p = self.swav_projector(z_gm)
+        z_swav = nn.functional.normalize(z_p, dim=1, p=2)  # L2 normalize
+        
+        proto_assign = self.proto_soft_assignments(z_swav)
+        # assignment_kl = kl(proto_assign, resp) + kl(resp, proto_assign)
+        ortho_l = ortho_loss(self.swav_projector.weight)
+        return z_swav, z_gm, proto_assign, cvae_loss, (resp, ortho_l)
+    
+    def proto_soft_assignments(self, z, from_cvae=False):
+        if from_cvae:
+            z = self.swav_projector(z)
+        swav_prototypes = self.get_swav_prototypes()
+        return z @ swav_prototypes.T
+    
+    def get_swav_prototypes(self):
+        gm_mu = self.get_gm_mu()
+        swav_protos = self.swav_projector(gm_mu)
+        return nn.functional.normalize(swav_protos, dim=1, p=2)

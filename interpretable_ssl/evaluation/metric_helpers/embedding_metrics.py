@@ -193,7 +193,7 @@ def get_scproto_mc_adata(t, adata, bk, lk, use_mean=True):
     import torch.nn as nn
 
     model = t.load_model()
-    protos = model.get_prototypes()
+    protos = model.get_prototypes().detach()
 
     if use_mean:
         old_emb = model.scpoli_cvae.embeddings[0]  # nn.Embedding(14, 10, max_norm=1.0)

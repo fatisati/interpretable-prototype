@@ -77,6 +77,8 @@ class SCProtoTrainer(AdoptiveTrainer):
         self.build_data()
         if self.debug == 0:
             self.init_prototypes()
+        # logger.info(self.model)
+        logger.info(f"Building model done. with prot init {self.prot_init}")
         self.build_optimizer()
         # self.load_checkpoint()
 
@@ -143,10 +145,13 @@ class SCProtoTrainer(AdoptiveTrainer):
             "batch_key": self.train_.batch_key,
             "l2norm": self.l2norm,
             "assignment_metric": self.assignment_metric,
+            "temperature": self.temperature,
         }
 
         if self.model_type == "gm":
-            return scProtoGMVAE(temperature=self.temperature, **kwargs)
+            return scProtoGMVAE(**kwargs)
+        elif self.model_type == "dual-space":
+            return scProtoHybrid(**kwargs)
         else:
             return SwAVModel(**kwargs)
 
@@ -173,14 +178,15 @@ class SCProtoTrainer(AdoptiveTrainer):
     def init_prototypes(self):
         if self.prot_init == "kmeans" and self.decodable_prototypes == 0:
             logger.info("initalizing prototypes using kmeans")
-            embeddings = self.encode_ref(self.model)
+            # get cvae embedding: encode_idx=1
+            embeddings = self.encode_adata(
+                self.train_ds.adata, self.model, encode_idx=1
+            )
             self.model.init_prototypes_kmeans(embeddings, self.nmb_prototypes)
 
     def build_model(self):
         self.model = self.get_model()
         self.model = self.model.cuda()
-        # logger.info(self.model)
-        logger.info(f"Building model done.")
 
     def build_optimizer(self):
         self.optimizer = torch.optim.SGD(
@@ -212,7 +218,7 @@ class SCProtoTrainer(AdoptiveTrainer):
                         math.pi
                         * t
                         / (
-                            len(self.train_loader)
+                            len(self.original_train_loader)
                             * (self.pretraining_epochs - self.warmup_epochs)
                         )
                     )
@@ -372,8 +378,9 @@ class SCProtoTrainer(AdoptiveTrainer):
             metrics["swav"]
             + metrics["cvae"] * self.cvae_loss_scaler
             + metrics["propagation"] * self.propagation_reg
-            + metrics["similarity"] * self.prot_emb_sim_reg
-            # + metrics["align_loss"] * self.lambda_align
+            + metrics["align_loss"] * self.lambda_assign
+            + metrics["ortho_l"] * self.lambda_ortho
+            # + metrics["similarity"] * self.prot_emb_sim_reg
         )
         meters["loss"].update(loss.item(), bs)
         return loss, meters, assign_cnts
@@ -386,12 +393,15 @@ class SCProtoTrainer(AdoptiveTrainer):
         manifold_keys = self.train_ds.manifold.keys()
         manifold_scores = {k: inputs.pop(k, None) for k in manifold_keys}
         # label = inputs.pop(self.dataset.label_key)
-        z, _, logits, cvae_loss, (propagation, sim) = self.model(inputs)
-        # z, logits, cvae_loss, resp, propagation, sim = self.parse_model_output(outputs)
+
+        model_out = self.model(inputs)
+        z, logits, cvae_loss, resp, ortho_l, propagation, sim = (
+            self.parse_model_output(model_out)
+        )
         z = z.detach()
         assign_cnts = get_assign_cnts(logits)
         swav_loss, align_loss, matched_pairs_ratio, q_matched, assignment_metrics = (
-            self.compute_swav_loss(logits, z, bs, ds_id, manifold_scores, None)
+            self.compute_swav_loss(logits, z, bs, ds_id, manifold_scores, resp)
         )
         assignment_metrics["p_proto_utilization"] = (
             assign_cnts != 0
@@ -405,22 +415,23 @@ class SCProtoTrainer(AdoptiveTrainer):
             "propagation": propagation,
             "similarity": sim,
             "align_loss": align_loss,
+            "ortho_l": ortho_l,
             "p_matched": matched_pairs_ratio,
             "q_matched": q_matched,
             "z_mean": abs(z.mean().detach().item()),
         } | assignment_metrics, assign_cnts
 
     def parse_model_output(self, outputs):
-        if self.model_type == "gm":
-            z_swav, _, logits, cvae_loss, (propagation, sim), resp = outputs
+        if self.model_type == "dual-space":
+            z_swav, _, logits, cvae_loss, (resp, ortho_l) = outputs
             propagation, sim = 0, 0
         else:
             z_swav, _, logits, cvae_loss, (propagation, sim) = outputs
-            resp = None
+            resp, ortho_l = None, 0
 
-        return z_swav, logits, cvae_loss, resp, propagation, sim
+        return z_swav, logits, cvae_loss, resp, ortho_l, propagation, sim
 
-    def compute_swav_loss(self, logits, z, bs, ds_id, manifold_scores=None, resp = None):
+    def compute_swav_loss(self, logits, z, bs, ds_id, manifold_scores=None, resp=None):
 
         loss, assignment_metrics_list, avg_matched_pairs, avg_q_matched = 0, [], 0, 0
         align_loss = 0
@@ -441,7 +452,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             else:
                 cell_weights = None  # uniform
             q = self.distributed_sinkhorn(sinkhorn_input, cell_weights)
-            
+
             assignment_metrics_list.append(get_assignment_metrics(q, "q"))
             q = q[-bs:]
             
@@ -449,7 +460,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             if resp is not None:
                 view_resp = resp[bs * view_id : bs * (view_id + 1)]
                 align_loss -= torch.mean(torch.sum(q * torch.log(view_resp + 1e-8), dim=1))
-                
+            
             # check how consitent q is with other augmentations [cross entropy]
             subloss = 0
             matched_pairs_ratio = 0
@@ -578,13 +589,6 @@ class SCProtoTrainer(AdoptiveTrainer):
 
         return (Q * B).t()  # (B, P)
 
-    def get_model_prototypes(self, model):
-        prototypes = model.get_prototypes()
-        if self.use_projector_out:
-            return model.projection_head(prototypes)
-        else:
-            return prototypes
-
     @torch.no_grad()
     def prepare_sinkhorn_input(self, queue_slot, z, view_id, bs, view_logits, ds_id):
         output_logits = view_logits
@@ -623,4 +627,3 @@ if __name__ == "__main__":
     swav = SCProtoTrainer()
     swav.setup()
     swav.run()
-    swav.encode_ref()
