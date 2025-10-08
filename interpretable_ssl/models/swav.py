@@ -385,7 +385,7 @@ class SwAVModel(SwavBase):
 
 
 class scProtoGMVAE(SwAVModel):
-    def __init__(self, temperature, **kwargs):
+    def __init__(self, temperature, beta, **kwargs):
         kwargs["recon_loss"] = "nb"
         super().__init__(**kwargs)
         # self.log_sigma2_p = torch.nn.Parameter(torch.tensor(-2.0))
@@ -395,7 +395,7 @@ class scProtoGMVAE(SwAVModel):
             "proto_priors",
             torch.full((self.nmb_prototypes,), 1.0 / self.nmb_prototypes),
         )
-        self.beta = 0.3
+        self.beta = beta
 
         self.temperature = temperature
         self.gm_vparam = softplus_inverse(
@@ -464,6 +464,9 @@ class scProtoGMVAE(SwAVModel):
     def proto_soft_assignments(self, z):
         if self.l2norm:
             return self.prototypes(z)
+        elif self.assignment_metric == "neuc":
+            protos = self.get_prototypes()
+            return -torch.cdist(z, protos, p=2).pow(2)
         else:
             return F.cosine_similarity(
                 z.unsqueeze(1), self.prototypes.weight.unsqueeze(0), dim=-1

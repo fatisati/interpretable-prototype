@@ -98,7 +98,7 @@ def get_defaults():
         "dataset_cnt": 0,
         "study_id": '',
         
-        "l2norm": 1,
+        "l2norm": 0,
         "use_rbf": 1,
         'assignment_metric': 'dotp',
         
@@ -140,6 +140,7 @@ def get_defaults():
         'cell_w_mode': 'uniform',
         "model": "swav",  # swav specific
         "lambda_align": 0,
+        "beta": 0.3
         # change to dotp in future
     }
     return defaults
