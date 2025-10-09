@@ -100,7 +100,7 @@ def get_defaults():
         
         "l2norm": 0,
         "use_rbf": 1,
-        'assignment_metric': 'dotp',
+        'assignment_metric': 'cos',
         
         "cvae_epochs": 50,
         "pretraining_epochs": 100,

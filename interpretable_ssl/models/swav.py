@@ -143,12 +143,17 @@ class SwavBase(nn.Module):
     def z_commit(self, z: torch.Tensor):
         # detach prototypes → commitment-type loss
         protos = self.prototypes.weight.detach()
+
         # pairwise Euclidean distances [n_samples, n_prototypes]
         dists = torch.cdist(z, protos, p=2)
+
         # for each prototype, take closest embedding
+        # shape nmb_proto
+        # for each proto, we have the distance to the closest embedding
         min_dists, _ = dists.min(dim=0)
-        # encourage all prototypes to have at least one nearby embedding
+
         # focus on underused prototypes: min_dists.topk(k=int(0.1 * len(min_dists)))
+        # for those proto which this distance is high, move samples to the prototypes - move samples to unused prototypes
         return min_dists.topk(k=int(0.1 * len(min_dists))).values.mean()
         # return min_dists.mean()
 
@@ -156,8 +161,8 @@ class SwavBase(nn.Module):
         return self.propagation(z), self.z_commit(z)
 
     def encode(self, batch):
-        encoder_out, x, x_mapped, _, _ = self.forward(batch)
-        return encoder_out, x, x_mapped
+        out = self.forward(batch)
+        return out[:3]
 
     def get_prototypes(self):
         return self.prototypes.weight
@@ -401,7 +406,7 @@ class scProtoGMVAE(SwAVModel):
         self.gm_vparam = softplus_inverse(
             torch.ones(self.nmb_prototypes, self.latent_dim)
         )
-
+        self.gm_vparam = self.gm_vparam.to(self.get_prototypes().device)
     # same as scpoli nb loss
     def cacl_recon_loss(self, z, batch, sizefactor, combined_batch, x):
         dec_mean = self.decode(z, batch, sizefactor)
@@ -474,3 +479,47 @@ class scProtoGMVAE(SwAVModel):
 
     def get_gm_mu(self):
         return self.prototypes.weight
+
+    # def propagation_sim_loss(self, z):
+    #     return self.move_prototypes(z), 0
+    
+    def get_gm_vparam(self):
+        gm_mu = self.get_gm_mu()
+        return self.gm_vparam.to(gm_mu.device)
+    
+    def coverage_loss(self, z, top_proto_ratio=0.1, top_sample_ratio=0.1):
+        proto_cover = self.move_prototypes(z)
+        sample_cover = self.move_samples(z)
+        return proto_cover + sample_cover
+
+    def select_uncovered(self, resp, dists, top_proto_ratio=0.1, top_sample_ratio=0.1):
+        # protos = self.get_prototypes()
+        # resp = torch.softmax(resp_logits / self.temperature, dim=1)
+        usage = resp.sum(dim=0)
+        num_proto = int(self.nmb_prototypes * top_proto_ratio)
+        _, proto_idx = torch.topk(usage, num_proto, largest=False)
+
+        # dists = torch.cdist(z, protos, p=2)
+        min_dists, _ = dists.min(dim=1)
+        num_samples = int(resp.size(0) * top_sample_ratio)
+        _, sample_idx = torch.topk(min_dists, num_samples, largest=True)
+        return proto_idx, sample_idx
+
+    def move_prototypes(self, z, *args):
+        k = int(0.1*self.nmb_prototypes)
+        return self.soft_align(z.detach(), self.get_prototypes(), 1)
+
+    def move_samples(self, z, *args):
+        k = int(0.1*z.size(0))
+        return self.soft_align(z, self.get_prototypes().detach(), 0)
+
+    def soft_align(self, z, protos, dim):
+        resp_logits = responsibilities(z, protos, self.get_gm_vparam(), return_logits=True)
+        weights = torch.softmax(resp_logits / 0.05, dim=1)
+        dist = torch.cdist(z, protos, p=2)
+        w_dist = (weights * dist).sum(dim=dim)
+
+        threshold = torch.quantile(w_dist, 0.9)
+        mask = (w_dist > threshold).float()
+        loss = (w_dist * mask).sum() / mask.sum().clamp_min(1.0)
+        return loss
