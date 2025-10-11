@@ -43,7 +43,7 @@ ABBREVIATIONS = {
     'freeze_prototypes_nepochs': 'frz',
     'prot_init': 'prtInit',
     'propagation_reg': 'prop',
-    'prot_emb_sim_reg': 'PEmbSimReg',
+    'prot_emb_sim_reg': 'cmit',
     'loss_type': 'loss',
     'training_type': 'train',
     # 'pretraining_epochs': 'pre-e',
@@ -83,5 +83,8 @@ ABBREVIATIONS = {
     "use_counts": 'raw',
     'knn_method': 'knn',
     'affinity_type': 'aff',
-    'cell_w_mode': 'cw'
+    'cell_w_mode': 'cw',
+    'beta': 'beta',
+    'lambda_align': 'align',
+    'lambda_l2': 'l2n'
 }

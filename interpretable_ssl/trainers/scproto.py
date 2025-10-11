@@ -373,6 +373,8 @@ class SCProtoTrainer(AdoptiveTrainer):
             + metrics["cvae"] * self.cvae_loss_scaler
             + metrics["propagation"] * self.propagation_reg
             + metrics["similarity"] * self.prot_emb_sim_reg
+            + metrics["z_norm"] * self.lambda_l2
+            + metrics["proto_norm"] * self.lambda_l2
             # + metrics["align_loss"] * self.lambda_align
         )
         meters["loss"].update(loss.item(), bs)
@@ -387,6 +389,8 @@ class SCProtoTrainer(AdoptiveTrainer):
         manifold_scores = {k: inputs.pop(k, None) for k in manifold_keys}
         # label = inputs.pop(self.dataset.label_key)
         z, _, logits, cvae_loss, (propagation, sim) = self.model(inputs)
+        z_norm = z.norm(dim=1).mean()
+        proto_norm = self.model.get_prototypes().norm(dim=1).mean()
         # z, logits, cvae_loss, resp, propagation, sim = self.parse_model_output(outputs)
         z = z.detach()
         assign_cnts = get_assign_cnts(logits)
@@ -398,7 +402,8 @@ class SCProtoTrainer(AdoptiveTrainer):
         ).sum().item() / min(logits.size(0), logits.size(1))
         # entropy = self.peaky_softmax_loss(scores)
         # match, prob_ent, p_ent = self.calculate_pair_matching(scores, bs)
-
+        
+        
         return {
             "swav": swav_loss,
             "cvae": cvae_loss,
@@ -408,6 +413,8 @@ class SCProtoTrainer(AdoptiveTrainer):
             "p_matched": matched_pairs_ratio,
             "q_matched": q_matched,
             "z_mean": abs(z.mean().detach().item()),
+            "z_norm": z_norm,
+            "proto_norm": proto_norm
         } | assignment_metrics, assign_cnts
 
     def parse_model_output(self, outputs):

@@ -140,7 +140,8 @@ def get_defaults():
         'cell_w_mode': 'uniform',
         "model": "swav",  # swav specific
         "lambda_align": 0,
-        "beta": 0.3
+        "beta": 0.3,
+        "lambda_l2": 0.0 # 1e-3
         # change to dotp in future
     }
     return defaults
