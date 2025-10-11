@@ -370,7 +370,8 @@ class SCProtoTrainer(AdoptiveTrainer):
 
         loss = (
             metrics["swav"]
-            + metrics["cvae"] * self.cvae_loss_scaler
+            + metrics["recon"] * self.lambda_recon
+            + metrics['kl'] * self.lambda_kl
             + metrics["propagation"] * self.propagation_reg
             + metrics["similarity"] * self.prot_emb_sim_reg
             + metrics["z_norm"] * self.lambda_l2
@@ -388,7 +389,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         manifold_keys = self.train_ds.manifold.keys()
         manifold_scores = {k: inputs.pop(k, None) for k in manifold_keys}
         # label = inputs.pop(self.dataset.label_key)
-        z, _, logits, cvae_loss, (propagation, sim) = self.model(inputs)
+        z, _, logits, recon, (propagation, sim), kl = self.model(inputs)
         z_norm = z.norm(dim=1).mean()
         proto_norm = self.model.get_prototypes().norm(dim=1).mean()
         # z, logits, cvae_loss, resp, propagation, sim = self.parse_model_output(outputs)
@@ -406,7 +407,8 @@ class SCProtoTrainer(AdoptiveTrainer):
         
         return {
             "swav": swav_loss,
-            "cvae": cvae_loss,
+            "recon": recon,
+            "kl": kl,
             "propagation": propagation,
             "similarity": sim,
             "align_loss": align_loss,

@@ -141,7 +141,10 @@ def get_defaults():
         "model": "swav",  # swav specific
         "lambda_align": 0,
         "beta": 0.3,
-        "lambda_l2": 0.0 # 1e-3
+        "lambda_l2": 0.0, # 1e-3
+        
+        "lambda_kl": 0.01*0.3,
+        "lambda_recon": 0.01
         # change to dotp in future
     }
     return defaults

@@ -64,10 +64,10 @@ class SwavBase(nn.Module):
     def encoder_out(self, batch):
         x, recon_loss, kl_loss, mmd_loss = self.scpoli_cvae(**batch)
         cvae_loss = self.compute_cvae_loss(recon_loss, kl_loss, mmd_loss)
-        return x, cvae_loss
+        return x, recon_loss + mmd_loss, kl_loss
 
     def forward(self, batch):
-        x, cvae_loss = self.encoder_out(batch)
+        x, recon_loss, kl_loss = self.encoder_out(batch)
 
         if self.projection_head is not None:
             x = self.projection_head(x)
@@ -92,7 +92,7 @@ class SwavBase(nn.Module):
             )
         else:
             proto_assignments = self.proto_soft_assignments(x)
-            return x, x, proto_assignments, cvae_loss, propagation_sim
+            return x, x, proto_assignments, recon_loss, propagation_sim, kl_loss
 
     def proto_pos_cos(self, z):
         sim = self.proto_cos_sim(z)
@@ -407,6 +407,7 @@ class scProtoGMVAE(SwAVModel):
             torch.ones(self.nmb_prototypes, self.latent_dim)
         )
         self.gm_vparam = self.gm_vparam.to(self.get_prototypes().device)
+
     # same as scpoli nb loss
     def cacl_recon_loss(self, z, batch, sizefactor, combined_batch, x):
         dec_mean = self.decode(z, batch, sizefactor)
@@ -459,12 +460,12 @@ class scProtoGMVAE(SwAVModel):
         kl, kl_dict = gm_kl(z_mu, z_vparam, gm_mu, gm_vparam, resp)
         # ---------- total ----------
         loss = recon + self.beta * kl
-        return z_mu, loss, resp
+        return z_mu, recon, kl, resp
 
     def forward(self, batch):
-        z, cvae_loss, resp = self.calc_z_and_cvae_loss(**batch)
+        z, recon, kl, resp = self.calc_z_and_cvae_loss(**batch)
         propagation_sim = self.propagation_sim_loss(z)
-        return z, z, self.proto_soft_assignments(z), cvae_loss, propagation_sim
+        return z, z, self.proto_soft_assignments(z), recon, propagation_sim, kl
 
     def proto_soft_assignments(self, z):
         if self.l2norm:
@@ -482,11 +483,11 @@ class scProtoGMVAE(SwAVModel):
 
     # def propagation_sim_loss(self, z):
     #     return self.move_prototypes(z), 0
-    
+
     def get_gm_vparam(self):
         gm_mu = self.get_gm_mu()
         return self.gm_vparam.to(gm_mu.device)
-    
+
     def coverage_loss(self, z, top_proto_ratio=0.1, top_sample_ratio=0.1):
         proto_cover = self.move_prototypes(z)
         sample_cover = self.move_samples(z)
@@ -506,15 +507,17 @@ class scProtoGMVAE(SwAVModel):
         return proto_idx, sample_idx
 
     def move_prototypes(self, z, *args):
-        k = int(0.1*self.nmb_prototypes)
+        k = int(0.1 * self.nmb_prototypes)
         return self.soft_align(z.detach(), self.get_prototypes(), 1)
 
     def move_samples(self, z, *args):
-        k = int(0.1*z.size(0))
+        k = int(0.1 * z.size(0))
         return self.soft_align(z, self.get_prototypes().detach(), 0)
 
     def soft_align(self, z, protos, dim):
-        resp_logits = responsibilities(z, protos, self.get_gm_vparam(), return_logits=True)
+        resp_logits = responsibilities(
+            z, protos, self.get_gm_vparam(), return_logits=True
+        )
         weights = torch.softmax(resp_logits / 0.05, dim=1)
         dist = torch.cdist(z, protos, p=2)
         w_dist = (weights * dist).sum(dim=dim)
