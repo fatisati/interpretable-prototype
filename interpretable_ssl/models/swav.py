@@ -407,29 +407,12 @@ class scProtoGMVAE(SwAVModel):
             torch.ones(self.nmb_prototypes, self.latent_dim)
         )
         self.gm_vparam = self.gm_vparam.to(self.get_prototypes().device)
-
-    # same as scpoli nb loss
-    def cacl_recon_loss(self, z, batch, sizefactor, combined_batch, x):
-        dec_mean = self.decode(z, batch, sizefactor)
-        dispersion = F.linear(
-            one_hot_encoder(combined_batch, self.scpoli_cvae.n_conditions_combined),
-            self.scpoli_cvae.theta,
-        )
-        dispersion = torch.exp(dispersion)
-        recon_loss = -nb(x=x, mu=dec_mean, theta=dispersion).sum(dim=-1).mean()
-        return recon_loss
-
-    def decode(self, z, batch, sizefactor):
-        batch_embeddings = torch.hstack(
-            [self.scpoli_cvae.embeddings[i](batch[:, i]) for i in range(batch.shape[1])]
-        )
-        dec_mean_gamma, _ = self.scpoli_cvae.decoder(z, batch_embeddings)
-        size_factor_view = sizefactor.unsqueeze(1).expand(
-            dec_mean_gamma.size(0), dec_mean_gamma.size(1)
-        )
-        dec_mean = dec_mean_gamma * size_factor_view
-        return dec_mean
-
+    
+    def forward(self, batch):
+        z, recon, kl, resp, kl_balance = self.calc_z_and_cvae_loss(**batch)
+        propagation_sim = self.propagation_sim_loss(z)
+        return z, z, self.proto_soft_assignments(z), recon, propagation_sim, kl, kl_balance
+    
     def calc_z_and_cvae_loss(
         self,
         x=None,
@@ -462,10 +445,27 @@ class scProtoGMVAE(SwAVModel):
         loss = recon + self.beta * kl
         return z_mu, recon, kl, resp, kl_dict['kl_balance']
 
-    def forward(self, batch):
-        z, recon, kl, resp, kl_balance = self.calc_z_and_cvae_loss(**batch)
-        propagation_sim = self.propagation_sim_loss(z)
-        return z, z, self.proto_soft_assignments(z), recon, propagation_sim, kl, kl_balance
+    # same as scpoli nb loss
+    def cacl_recon_loss(self, z, batch, sizefactor, combined_batch, x):
+        dec_mean = self.decode(z, batch, sizefactor)
+        dispersion = F.linear(
+            one_hot_encoder(combined_batch, self.scpoli_cvae.n_conditions_combined),
+            self.scpoli_cvae.theta,
+        )
+        dispersion = torch.exp(dispersion)
+        recon_loss = -nb(x=x, mu=dec_mean, theta=dispersion).sum(dim=-1).mean()
+        return recon_loss
+
+    def decode(self, z, batch, sizefactor):
+        batch_embeddings = torch.hstack(
+            [self.scpoli_cvae.embeddings[i](batch[:, i]) for i in range(batch.shape[1])]
+        )
+        dec_mean_gamma, _ = self.scpoli_cvae.decoder(z, batch_embeddings)
+        size_factor_view = sizefactor.unsqueeze(1).expand(
+            dec_mean_gamma.size(0), dec_mean_gamma.size(1)
+        )
+        dec_mean = dec_mean_gamma * size_factor_view
+        return dec_mean
 
     def proto_soft_assignments(self, z):
         if self.l2norm:
@@ -526,3 +526,45 @@ class scProtoGMVAE(SwAVModel):
         mask = (w_dist > threshold).float()
         loss = (w_dist * mask).sum() / mask.sum().clamp_min(1.0)
         return loss
+
+
+class scProtoVQVAE(scProtoGMVAE):
+    def forward(self, batch):
+        # recon loss, proto loss, commitment loss
+        z, recon_loss, proto_loss, commit_loss, perplexity = self.calc_z_and_cvae_loss(**batch)
+        # propagation_sim = self.propagation_sim_loss(z)
+        return z, z, self.proto_soft_assignments(z), recon_loss, (proto_loss, commit_loss), perplexity, 0
+    
+    def calc_z_and_cvae_loss(
+        self,
+        x=None,
+        batch=None,
+        combined_batch=None,
+        sizefactor=None,
+        celltypes=None,
+        labeled=None,
+    ):
+        batch_embeddings = torch.hstack(
+            [self.scpoli_cvae.embeddings[i](batch[:, i]) for i in range(batch.shape[1])]
+        )
+        x_log = torch.log(1 + x)
+        z_mu, z_logvar = self.scpoli_cvae.encoder(x_log, batch_embeddings)
+        if self.l2norm:
+            z_mu = nn.functional.normalize(z_mu, dim=1, p=2)
+        
+        dist2 = torch.cdist(z_mu, self.get_prototypes())          # [B, K]
+        proto_ind = dist2.argmin(dim=1)                           # [B]
+        zq = self.get_prototypes()[proto_ind]                    # [B, D]
+        zq = z_mu + (zq - z_mu).detach()                        # straight-through estimator
+        recon_loss = self.cacl_recon_loss(zq, batch, sizefactor, combined_batch, x)
+        proto_loss = torch.mean((zq.detach() - z_mu)**2)
+        commit_loss = torch.mean((zq - z_mu.detach())**2)
+
+        # Compute usage histogram over prototypes
+        usage = torch.bincount(proto_ind, minlength=self.get_prototypes().shape[0]).float()
+        usage = usage / usage.sum()  # normalize to probabilities p_k
+
+        # Compute perplexity = exp(entropy)
+        perplexity = torch.exp(-torch.sum(usage * torch.log(usage + 1e-10)))
+
+        return z_mu, recon_loss, proto_loss, commit_loss, perplexity

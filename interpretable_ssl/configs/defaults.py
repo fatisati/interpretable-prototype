@@ -98,7 +98,6 @@ def get_defaults():
         "dataset_cnt": 0,
         "study_id": '',
         
-        "l2norm": 0,
         "use_rbf": 1,
         
         
@@ -107,8 +106,6 @@ def get_defaults():
         "ft_epochs": 20,
         
         "cvae_loss_scaler": 0.01, # 0.01,  # swav specific, 0.0001
-        
-        "model_type": 'gm',
         
         "workers": 1,  # swav specific
         
@@ -141,17 +138,19 @@ def get_defaults():
         
         "beta": 0.3, # not used any more
         
-        "lambda_l2": 0.1, # 1e-3
+        "lambda_l2": 0.0, # 1e-3
         
-        "lambda_kl": 0.1,
+        "lambda_kl": 0.0,
         "lambda_recon": 0.01,
-        'lambda_balance': 1.0,
+        'lambda_balance': 0.0,
         'lambda_swav': 1.0,
         "propagation_reg": 1.0, # 1,
-        "prot_emb_sim_reg": 0.5,
+        "prot_emb_sim_reg": 0.25,
         'assignment_metric': 'neuc',
+        "model_type": 'vqvae',
+        "l2norm": 1,
         
-        "version": 7,
+        "version": 8,
         # change to dotp in future
     }
     return defaults

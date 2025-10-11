@@ -147,6 +147,8 @@ class SCProtoTrainer(AdoptiveTrainer):
 
         if self.model_type == "gm":
             return scProtoGMVAE(temperature=self.temperature, beta = self.beta, **kwargs)
+        if self.model_type == "vqvae":
+            return scProtoVQVAE(temperature=self.temperature, beta = self.beta, **kwargs)
         else:
             return SwAVModel(**kwargs)
 
