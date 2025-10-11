@@ -460,12 +460,12 @@ class scProtoGMVAE(SwAVModel):
         kl, kl_dict = gm_kl(z_mu, z_vparam, gm_mu, gm_vparam, resp)
         # ---------- total ----------
         loss = recon + self.beta * kl
-        return z_mu, recon, kl, resp
+        return z_mu, recon, kl, resp, kl_dict['kl_balance']
 
     def forward(self, batch):
-        z, recon, kl, resp = self.calc_z_and_cvae_loss(**batch)
+        z, recon, kl, resp, kl_balance = self.calc_z_and_cvae_loss(**batch)
         propagation_sim = self.propagation_sim_loss(z)
-        return z, z, self.proto_soft_assignments(z), recon, propagation_sim, kl
+        return z, z, self.proto_soft_assignments(z), recon, propagation_sim, kl, kl_balance
 
     def proto_soft_assignments(self, z):
         if self.l2norm:

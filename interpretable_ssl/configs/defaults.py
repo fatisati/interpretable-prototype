@@ -100,15 +100,13 @@ def get_defaults():
         
         "l2norm": 0,
         "use_rbf": 1,
-        'assignment_metric': 'cos',
+        
         
         "cvae_epochs": 50,
         "pretraining_epochs": 100,
         "ft_epochs": 20,
         
         "cvae_loss_scaler": 0.01, # 0.01,  # swav specific, 0.0001
-        "propagation_reg": 1, # 1,
-        "prot_emb_sim_reg": 0.5,
         
         "model_type": 'gm',
         
@@ -135,16 +133,25 @@ def get_defaults():
         
         "use_counts": 1,
         "knn_method": 'faiss',
-        "version": 6,
+        
         "affinity_type": "arbf",
         'cell_w_mode': 'uniform',
         "model": "swav",  # swav specific
         "lambda_align": 0,
-        "beta": 0.3,
-        "lambda_l2": 0.0, # 1e-3
         
-        "lambda_kl": 0.01*0.3,
-        "lambda_recon": 0.01
+        "beta": 0.3, # not used any more
+        
+        "lambda_l2": 0.1, # 1e-3
+        
+        "lambda_kl": 0.1,
+        "lambda_recon": 0.01,
+        'lambda_balance': 1.0,
+        'lambda_swav': 1.0,
+        "propagation_reg": 1.0, # 1,
+        "prot_emb_sim_reg": 0.5,
+        'assignment_metric': 'neuc',
+        
+        "version": 7,
         # change to dotp in future
     }
     return defaults

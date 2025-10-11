@@ -86,5 +86,9 @@ ABBREVIATIONS = {
     'cell_w_mode': 'cw',
     'beta': 'beta',
     'lambda_align': 'align',
-    'lambda_l2': 'l2n'
+    'lambda_l2': 'l2n',
+    'lambda_recon': 'recon',
+    'lambda_kl': 'kl',
+    'lambda_balance': 'bal',
+    'lambda_swav': 'lswav',
 }

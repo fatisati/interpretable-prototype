@@ -32,4 +32,4 @@ python main.py {model} --num_prototypes {num_prototypes} --latent_dims {latent_d
 --temperature {temperature} --dataset_cnt {dataset_cnt} --queue_length {queue_length} --model_type {model_type} --l2norm {l2norm} --use_rbf {use_rbf} \
 --assignment_metric {assignment_metric} --study_id {study_id} --warmup_epochs {warmup_epochs} --base_lr {base_lr} --use_counts {use_counts} --knn_method {knn_method} \
 --epoch_queue_starts {epoch_queue_starts} --affinity_type {affinity_type} --cell_w_mode {cell_w_mode} --beta {beta} --lambda_align {lambda_align} \
---lambda_l2 {lambda_l2}
+--lambda_l2 {lambda_l2} --lambda_recon {lambda_recon} --lambda_kl {lambda_kl} --lambda_balance {lambda_balance} --lambda_swav {lambda_swav}
