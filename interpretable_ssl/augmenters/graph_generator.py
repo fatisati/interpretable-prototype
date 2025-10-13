@@ -1,7 +1,7 @@
 import numpy as np
 import scanpy as sc
 from interpretable_ssl.augmenters.diffusion_knn import *
-
+import numpy as np, scipy.sparse as sp
 
 def faiss_knn(b_adata, k):
     import faiss
@@ -60,6 +60,12 @@ def compute_batch_affinities(adata_path, affinity_type, batch_key, n_comps, k):
         mask = adata.obs[batch_key] == batch_id
         b_adata = adata[mask].copy()
         sc.tl.pca(b_adata, n_comps=n_comps)
+        A = generate_affinity(b_adata, k, affinity_type)
+        if sp.issparse(A):
+            A.setdiag(0)
+        else:
+            np.fill_diagonal(A, 0)
+        ds_affinities[batch_id] = A
         ds_affinities[batch_id] = generate_affinity(b_adata, k, affinity_type)
 
     return ds_affinities

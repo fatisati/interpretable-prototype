@@ -31,6 +31,7 @@ from scipy.special import softmax
 from scipy import sparse
 
 
+
 class MultiCropsDataset(MultiConditionAnnotatedDataset):
     def __init__(
         self,
@@ -120,7 +121,13 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         self.calc_manifold_weights()
         self.label_key = sc_ds.label_key
         self.return_label = True
-
+        self.temperature = 0.1
+        self.softmax = False
+        # if self.affinity_type == 'coaff':
+        #     self.softmax = True
+        # else:
+        #     self.softmax = False
+        
     def calc_manifold_weights(self):
         print("calculating manifold scores...")
         self.manifold = {
@@ -244,10 +251,14 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
             row = row.toarray().ravel()
         else:
             row = row.ravel()
-        probs = row / row.sum()
+        if self.softmax:
+            probs = softmax(row/self.temperature)
+        else:
+            probs = row / row.sum()
         pos_idx = np.random.choice(
-            len(row), size=self.n_augmentations, replace=False, p=probs
+            len(row), size=self.n_augmentations - 1, replace=False, p=probs
         )
+        pos_idx = np.insert(pos_idx, 0, local_idx)
         return [self.dataset_index_map[ds_id][i] for i in pos_idx]
 
     def assemble_from_indices(self, indices, sample_index):
@@ -301,7 +312,14 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
 
     def load_affinities(self):
         if os.path.exists(self.save_path):
-            return pkl.load(open(self.save_path, "rb"))
+            a_dict = pkl.load(open(self.save_path, "rb"))
+            for k, A in a_dict.items():
+                if sp.issparse(A):
+                    A.setdiag(0)
+                else:
+                    np.fill_diagonal(A, 0)
+                a_dict[k] = A
+            return a_dict
         return None
 
     def get_joint_pca_spatial_representation(self, w=10):
