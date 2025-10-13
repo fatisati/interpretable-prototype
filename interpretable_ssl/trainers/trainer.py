@@ -22,6 +22,7 @@ from interpretable_ssl.trainers.affinity import *
 import subprocess
 from sklearn.model_selection import train_test_split
 
+
 class Trainer(TrainerBase):
     # @log_time('scpoli trainer')
     def __init__(self, dataset=None, ref_query=None, parser=None, **kwargs) -> None:
@@ -41,7 +42,7 @@ class Trainer(TrainerBase):
             self.ref, self.query = self.dataset.get_train_test()
         else:
             self.ref, self.query = ref_query
-            
+
         train_ind, val_ind = train_test_split(
             range(len(self.ref)), test_size=0.1, random_state=42
         )
@@ -107,6 +108,33 @@ class Trainer(TrainerBase):
         model.to(self.device)
         return model
 
+    def dict_to_device(self, inputs_dict):
+        for key in inputs_dict:
+            inputs_dict[key] = inputs_dict[key].to(self.device)
+        return inputs_dict
+
+    def encode_adata(
+        self,
+        adata,
+        model=None,
+        return_mapped=False,
+        return_mapped_idx=False,
+        retrain_epochs=0,
+        z_idx = 0
+    ):
+        model = self.adapt_model(model, adata, retrain_epochs)
+        loader = self.prepare_scpoli_dataloader(
+            adata, self.extract_scpoli(model), shuffle=False
+        )
+        embeddings = [
+            self.encode_batch(model, batch, z_idx, return_mapped, return_mapped_idx)
+            for batch in tqdm(loader)
+        ]
+        z = torch.cat(embeddings)
+        # if getattr(model, "l2norm", False):
+        #     z = F.normalize(z, dim=1)
+        return z
+
     def adapt_model(self, model, adata, retrain_epochs=0):
         adata = adata.copy()
         adata.X = adata.layers.get("counts", adata.X)
@@ -135,28 +163,48 @@ class Trainer(TrainerBase):
         adapted_model.to(self.device)
         return adapted_model
 
-    def dict_to_device(self, inputs_dict):
-        for key in inputs_dict:
-            inputs_dict[key] = inputs_dict[key].to(self.device)
-        return inputs_dict
+    def prepare_scpoli_dataloader(self, adata, scpoli_cvae, shuffle=True):
+        adata = adata.copy()
+        # because scpoli encoder gets raw counts as input
+        adata.X = adata.layers.get("counts", adata.X)
+
+        if "condition_combined" not in adata.obs:
+            adata.obs["conditions_combined"] = adata.obs[[self.condition_key]].apply(
+                lambda x: "_".join(x), axis=1
+            )
+        dataset = MultiConditionAnnotatedDataset(
+            adata,
+            condition_keys=[self.condition_key],
+            condition_encoders=scpoli_cvae.condition_encoders,
+            conditions_combined_encoder=scpoli_cvae.conditions_combined_encoder,
+        )
+
+        loader = DataLoader(
+            dataset,
+            batch_size=self.batch_size,
+            collate_fn=scpoli_utils.custom_collate,
+            shuffle=shuffle,
+        )
+        return loader
 
     # TODO: return mapped and mapped_idx should have cleaner logic
-    def encode_batch(self, model, batch, return_mapped=False, return_mapped_idx=False):
+    def encode_batch(self, model, batch, return_idx = 0, return_mapped_idx=False, return_mapped=False):
 
         batch = self.dict_to_device(batch)
         model.eval()
 
         with torch.no_grad():
-            encoder_out, x, x_mapped = model.encode(batch)
-
+            outs = model.encode(batch)
+            z_swav, z_vae, logits = outs
+            
         if return_mapped_idx:
-            return torch.argmax(x_mapped, dim=1)
+            return torch.argmax(logits, dim=1)
 
         elif return_mapped:
-            return x_mapped
+            return logits
 
         else:
-            return encoder_out
+            return outs[return_idx]
 
     def extract_scpoli(self, scproto_model, return_wrapper=False):
         if return_wrapper:
@@ -183,27 +231,6 @@ class Trainer(TrainerBase):
                 return False
         return True
 
-    def encode_adata(
-        self,
-        adata,
-        model=None,
-        return_mapped=False,
-        return_mapped_idx=False,
-        retrain_epochs=0,
-    ):
-        model = self.adapt_model(model, adata, retrain_epochs)
-        loader = self.prepare_scpoli_dataloader(
-            adata, self.extract_scpoli(model), shuffle=False
-        )
-        embeddings = [
-            self.encode_batch(model, batch, return_mapped, return_mapped_idx)
-            for batch in tqdm(loader)
-        ]
-        z = torch.cat(embeddings)
-        # if getattr(model, "l2norm", False):
-        #     z = F.normalize(z, dim=1)
-        return z
-
     def get_model_prototypes(self, model):
         return None
 
@@ -211,32 +238,32 @@ class Trainer(TrainerBase):
         pass
 
     def get_proto_assignments(self, z, model):
-        p = model.proto_soft_assignments(z)
-        return p.detach().cpu().numpy()
-    
+        scores = model.proto_soft_assignments(z)
+        return scores.detach().cpu().numpy()
+
     def plot_umap(self, model, adata, split, save_plot=True):
-        z = self.encode_adata(adata, model)
+        z = self.encode_adata(adata, model, z_idx = 1)
         prototypes = self.get_model_prototypes(model)
         z_umap, prototype_umap = calculate_umap(z, prototypes)
         obs = adata.obs
         if prototypes is not None:
             # prototype_assignments = self.encode_adata(adata, model, True, False)
-            prototype_assignments = self.get_proto_assignments(z, model)
+            scores = self.get_proto_assignments(z, model)
             proto_df = assign_prototype_labels(
                 adata,
-                prototype_assignments,
+                scores,
                 self.num_prototypes,
                 cell_type_column=self.dataset.label_key,
             )
             proto_labels = proto_df.prototype_label
         else:
             proto_labels = None
-        if self.cell_w_mode != 'uniform':
+        if self.cell_w_mode != "uniform":
             w = adata.obs.get(self.cell_w_mode, None)
             w_label = self.cell_w_mode
         else:
-            w = adata.obs.get('sigma', None)
-            w_label = 'pca_sigma'
+            w = adata.obs.get("sigma", None)
+            w_label = "pca_sigma"
         return plot_3umaps(
             z_umap,
             prototype_umap,
@@ -246,7 +273,7 @@ class Trainer(TrainerBase):
             save_plot,
             self.get_umap_path(split),
             w=w,
-            w_label = w_label
+            w_label=w_label,
         )
 
     def plot_ref_umap(self, save_plot=True, name_postfix=None, model=None):
@@ -297,14 +324,17 @@ class Trainer(TrainerBase):
                 sys.executable,
                 "-m",
                 "interpretable_ssl.evaluation.metric_helpers.mc_quality",
-                tmp_path, self.dataset.label_key, self.get_dump_path(), self.get_model_name() 
+                tmp_path,
+                self.dataset.label_key,
+                self.get_dump_path(),
+                self.get_model_name(),
             ]
         )
         process.wait()  # ✅ wait for the subprocess to finish
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
             print("Deleted:", tmp_path)
-        
+
     def save_metrics(self):
         adata = add_trainer_emb(self, self.dataset.adata)
         if adata.X.max() > 50:
@@ -321,7 +351,7 @@ class Trainer(TrainerBase):
         scg.to_csv(self.get_dump_path() + "/scgraph.csv")
         scb.to_csv(self.get_dump_path() + "/scib.csv")
         self.save_metacell_metrics()
-        
+
     def get_dataset(self, dataset_id):
         ds_params = DATASETS[dataset_id]
         return SingleCellDataset(name=dataset_id, **ds_params)
@@ -351,27 +381,3 @@ class Trainer(TrainerBase):
         set_job_name = (self.job_name is None) or (self.job_name == "")
         if set_job_name:
             self.job_name = f"{self.get_model_name()}/{self.dataset}"
-
-    def prepare_scpoli_dataloader(self, adata, scpoli_cvae, shuffle=True):
-        adata = adata.copy()
-        # because scpoli encoder gets raw counts as input
-        adata.X = adata.layers.get("counts", adata.X)
-
-        if "condition_combined" not in adata.obs:
-            adata.obs["conditions_combined"] = adata.obs[[self.condition_key]].apply(
-                lambda x: "_".join(x), axis=1
-            )
-        dataset = MultiConditionAnnotatedDataset(
-            adata,
-            condition_keys=[self.condition_key],
-            condition_encoders=scpoli_cvae.condition_encoders,
-            conditions_combined_encoder=scpoli_cvae.conditions_combined_encoder,
-        )
-
-        loader = DataLoader(
-            dataset,
-            batch_size=self.batch_size,
-            collate_fn=scpoli_utils.custom_collate,
-            shuffle=shuffle,
-        )
-        return loader

@@ -129,29 +129,6 @@ class SCProtoTrainer(AdoptiveTrainer):
             shuffle=True,
         )
 
-    def get_model(self):
-        # if self.model_version == 1:
-        # return model
-        # else:
-        kwargs = {
-            "latent_dim": self.latent_dims,
-            "nmb_prototypes": self.num_prototypes,
-            "adata": self.train_.adata,
-            "multi_layer_proto": self.multi_layer_protos,
-            "np2": self.num_prototypes,
-            "recon_loss": self.recon_loss,
-            "batch_key": self.train_.batch_key,
-            "l2norm": self.l2norm,
-            "assignment_metric": self.assignment_metric,
-        }
-
-        if self.model_type == "gm":
-            return scProtoGMVAE(temperature=self.temperature, beta = self.beta, **kwargs)
-        if self.model_type == "vqvae":
-            return scProtoVQVAE(temperature=self.temperature, beta = self.beta, **kwargs)
-        else:
-            return SwAVModel(**kwargs)
-
     def get_model_path(self):
         return os.path.join(self.get_dump_path(), self.get_checkpoint_file())
 
@@ -175,7 +152,7 @@ class SCProtoTrainer(AdoptiveTrainer):
     def init_prototypes(self):
         if self.prot_init == "kmeans" and self.decodable_prototypes == 0:
             logger.info("initalizing prototypes using kmeans")
-            embeddings = self.encode_ref(self.model)
+            embeddings = self.encode_adata(self.train_ds.adata, self.model, z_idx=1)
             self.model.init_prototypes_kmeans(embeddings, self.nmb_prototypes)
 
     def build_model(self):
@@ -183,6 +160,31 @@ class SCProtoTrainer(AdoptiveTrainer):
         self.model = self.model.cuda()
         # logger.info(self.model)
         logger.info(f"Building model done.")
+
+    def get_model(self):
+        # if self.model_version == 1:
+        # return model
+        # else:
+        kwargs = {
+            "latent_dim": self.latent_dims,
+            "nmb_prototypes": self.num_prototypes,
+            "adata": self.train_.adata,
+            "multi_layer_proto": self.multi_layer_protos,
+            "np2": self.num_prototypes,
+            "recon_loss": self.recon_loss,
+            "batch_key": self.train_.batch_key,
+            "l2norm": self.l2norm,
+            "assignment_metric": self.assignment_metric,
+        }
+
+        if self.model_type == "gm":
+            return scProtoGMVAE(temperature=self.temperature, beta=self.beta, **kwargs)
+        if self.model_type == "vqvae":
+            return scProtoVQVAE(temperature=self.temperature, beta=self.beta, **kwargs)
+        if self.model_type == "hybrid":
+            return scProtoHybrid(temperature=self.temperature, beta=self.beta, **kwargs)
+        else:
+            return SwAVModel(**kwargs)
 
     def build_optimizer(self):
         self.optimizer = torch.optim.SGD(
@@ -265,6 +267,7 @@ class SCProtoTrainer(AdoptiveTrainer):
 
     def train(self, epochs=None):
         self.create_dump_path()
+        self.build_optimizer()
         cudnn.benchmark = True
         if epochs is None:
             epochs = self.pretraining_epochs
@@ -280,6 +283,7 @@ class SCProtoTrainer(AdoptiveTrainer):
                 and epoch >= self.epoch_queue_starts
                 and len(self.queue) == 0
             ):
+                print(f'start using queue at epoch: {epoch}')
                 for ds_id in self.ds_ids:
                     self.init_queue(ds_id)
 
@@ -372,14 +376,11 @@ class SCProtoTrainer(AdoptiveTrainer):
 
         loss = (
             metrics["swav"] * self.lambda_swav
-            
             + metrics["recon"] * self.lambda_recon
-            + metrics['kl'] * self.lambda_kl
-            + metrics['kl_balance'] * self.lambda_balance
-            
+            + metrics["kl"] * self.lambda_kl
+            + metrics["kl_balance"] * self.lambda_balance
             + metrics["propagation"] * self.propagation_reg
             + metrics["similarity"] * self.prot_emb_sim_reg
-            
             + metrics["z_norm"] * self.lambda_l2
             + metrics["proto_norm"] * self.lambda_l2
             # + metrics["align_loss"] * self.lambda_align
@@ -409,8 +410,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         ).sum().item() / min(logits.size(0), logits.size(1))
         # entropy = self.peaky_softmax_loss(scores)
         # match, prob_ent, p_ent = self.calculate_pair_matching(scores, bs)
-        
-        
+
         return {
             "swav": swav_loss,
             "recon": recon,
@@ -423,7 +423,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             "q_matched": q_matched,
             "z_mean": abs(z.mean().detach().item()),
             "z_norm": z_norm,
-            "proto_norm": proto_norm
+            "proto_norm": proto_norm,
         } | assignment_metrics, assign_cnts
 
     def parse_model_output(self, outputs):
@@ -436,40 +436,36 @@ class SCProtoTrainer(AdoptiveTrainer):
 
         return z_swav, logits, cvae_loss, resp, propagation, sim
 
-    def compute_swav_loss(self, logits, z, bs, ds_id, manifold_scores=None, resp = None):
+    def compute_swav_loss(self, logits, z, bs, ds_id, manifold_scores=None, resp=None):
 
         loss, assignment_metrics_list, avg_matched_pairs, avg_q_matched = 0, [], 0, 0
         align_loss = 0
-        
+
         # each crop mean each augmentation, just caluclate q and loss for first crops_for_assign
         for view_idx, view_id in enumerate(self.views_for_assign):
-
-            # outputs for 1 batch of data, [aug1s1, a1s2, a1s3, .., a1sb]
-            view_logits = logits[bs * view_id : bs * (view_id + 1)]
-            # with torch.no_grad(): not nessecary because both funcion has no grad decorator
-            sinkhorn_input = self.prepare_sinkhorn_input(
-                view_idx, z, view_id, bs, view_logits, ds_id
-            )
-            if self.cell_w_mode != "uniform":
-                cell_weights = manifold_scores[self.cell_w_mode][
-                    bs * view_id : bs * (view_id + 1)
-                ]
-            else:
-                cell_weights = None  # uniform
-            q = self.distributed_sinkhorn(sinkhorn_input, cell_weights)
-            
-            assignment_metrics_list.append(get_assignment_metrics(q, "q"))
-            q = q[-bs:]
-            
-            # aligning Gaussian responsibilities with q (Sinkhorn output)
-            if resp is not None:
-                view_resp = resp[bs * view_id : bs * (view_id + 1)]
-                align_loss -= torch.mean(torch.sum(q * torch.log(view_resp + 1e-8), dim=1))
+            with torch.no_grad():
+                # outputs for 1 batch of data, [aug1s1, a1s2, a1s3, .., a1sb]
+                view_logits = logits[bs * view_id : bs * (view_id + 1)].detach()
                 
+                # with torch.no_grad(): not nessecary because both funcion has no grad decorator
+                sinkhorn_input = self.prepare_sinkhorn_input(
+                    view_idx, z, view_id, bs, view_logits, ds_id
+                )
+                if self.cell_w_mode != "uniform":
+                    cell_weights = manifold_scores[self.cell_w_mode][
+                        bs * view_id : bs * (view_id + 1)
+                    ]
+                    
+                else:
+                    cell_weights = None  # uniform
+                q = self.sinkhorn(sinkhorn_input, cell_weights)
+
+                assignment_metrics_list.append(get_assignment_metrics(q, "q"))
+                q = q[-bs:]
+
             # check how consitent q is with other augmentations [cross entropy]
             subloss = 0
-            matched_pairs_ratio = 0
-            q_matched = 0
+            matched_pairs_ratio, q_matched = 0, 0
             if self.hard_clustering == 1:
                 q = self.hard_clusters(q)
 
@@ -529,9 +525,6 @@ class SCProtoTrainer(AdoptiveTrainer):
         # pass data, get loss and metrics
         # return the dict
 
-    def softmax_probs(self, s):
-        return F.softmax(s / self.temperature)
-
     def _handle_prototype_freezing(self, epoch):
 
         for name, p in self.model.named_parameters():
@@ -561,15 +554,33 @@ class SCProtoTrainer(AdoptiveTrainer):
             print(f"⚠️ Invalid values in {name}! (nan/inf detected)")
             print("min:", prob.min().item(), "max:", prob.max().item())
 
+    
     @torch.no_grad()
-    def distributed_sinkhorn(self, out, cell_weights=None):
-        """
-        out: (B, P) batch-to-prototype scores
-        sample_marginals: (B,) optional vector of sample marginals (must sum to 1)
-        """
-        Q = torch.exp(out / self.epsilon)
-        Q = Q.t()
+    def sinkhorn(self, out, _):
+        Q = torch.exp(out / self.epsilon).t() # Q is K-by-B for consistency with notations from our paper
+        B = Q.shape[1] * self.world_size # number of samples to assign
+        K = Q.shape[0] # how many prototypes
 
+        # make the matrix sums to 1
+        sum_Q = torch.sum(Q)
+        Q /= sum_Q
+
+        for it in range(self.sinkhorn_iterations):
+            # normalize each row: total weight per prototype must be 1/K
+            sum_of_rows = torch.sum(Q, dim=1, keepdim=True)
+            Q /= sum_of_rows
+            Q /= K
+
+            # normalize each column: total weight per sample must be 1/B
+            Q /= torch.sum(Q, dim=0, keepdim=True)
+            Q /= B
+
+        Q *= B # the colomns must sum to 1 so that Q is an assignment
+        return Q.t()
+
+    @torch.no_grad()
+    def distributed_sinkhorn_marginal(self, out, cell_weights=None):
+        Q = torch.exp(out / self.epsilon).t()
         self.check_finit(Q, "q")
         B = Q.shape[1]
         K = Q.shape[0]

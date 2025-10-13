@@ -131,7 +131,7 @@ def get_defaults():
         "use_counts": 1,
         "knn_method": 'faiss',
         
-        "affinity_type": "arbf",
+        "affinity_type": "coaff",
         'cell_w_mode': 'uniform',
         "model": "swav",  # swav specific
         "lambda_align": 0,
@@ -146,11 +146,11 @@ def get_defaults():
         'lambda_swav': 1.0,
         "propagation_reg": 1.0, # 1,
         "prot_emb_sim_reg": 0.25,
-        'assignment_metric': 'neuc',
+        'assignment_metric': 'dotp',
         "model_type": 'vqvae',
-        "l2norm": 1,
+        "l2norm": 0,
         
-        "version": 8,
+        "version": 9,
         # change to dotp in future
     }
     return defaults

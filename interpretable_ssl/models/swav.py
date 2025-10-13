@@ -171,11 +171,6 @@ class SwavBase(nn.Module):
         w = self.get_prototypes().data.clone()
         w = nn.functional.normalize(w, dim=1, p=2)
         self.set_prototypes(w)
-        # if hasattr(self, "cell_protos"):
-        #     wc = self.cell_protos.weight.data
-        #     wc = nn.functional.normalize(wc, dim=1, p=2)
-        #     with torch.no_grad():
-        #         self.cell_protos.weight.copy_(wc)
 
     def set_prototypes(self, w):
         with torch.no_grad():
@@ -468,11 +463,11 @@ class scProtoGMVAE(SwAVModel):
         return dec_mean
 
     def proto_soft_assignments(self, z):
-        if self.l2norm:
+        if self.l2norm and self.assignment_metric == 'dotp':
             return self.prototypes(z)
         elif self.assignment_metric == "neuc":
             protos = self.get_prototypes()
-            return -torch.cdist(z, protos, p=2).pow(2)
+            return -torch.cdist(z, protos.detach(), p=2)
         else:
             return F.cosine_similarity(
                 z.unsqueeze(1), self.prototypes.weight.unsqueeze(0), dim=-1
@@ -568,3 +563,34 @@ class scProtoVQVAE(scProtoGMVAE):
         perplexity = torch.exp(-torch.sum(usage * torch.log(usage + 1e-10)))
 
         return z_mu, recon_loss, proto_loss, commit_loss, perplexity
+
+
+class scProtoHybrid(scProtoVQVAE):
+    def __init__(self, temperature, beta, **kwargs):
+        super().__init__(temperature, beta, **kwargs)
+        hidden_dim = self.latent_dim*4
+        self.swav_projector = nn.Sequential(
+                nn.Linear(self.latent_dim, hidden_dim),
+                nn.BatchNorm1d(hidden_dim),
+                nn.ReLU(inplace=True),
+                nn.Linear(hidden_dim, hidden_dim//2),
+            )
+    
+    def forward(self, batch):
+        # recon loss, proto loss, commitment loss
+        z, recon_loss, proto_loss, commit_loss, perplexity = self.calc_z_and_cvae_loss(**batch)
+        # propagation_sim = self.propagation_sim_loss(z)
+        logits, z_swav = self.proto_soft_assignments(z, True)
+        return z_swav, z, logits, recon_loss, (proto_loss, commit_loss), perplexity, 0
+    
+    def proto_soft_assignments(self, z, return_z = False):
+        z_swav = self.swav_projector(z)
+        z_swav = nn.functional.normalize(z_swav, dim=1, p=2)
+        
+        proto_swav = self.swav_projector(self.get_prototypes())
+        proto_swav = nn.functional.normalize(proto_swav, dim=1, p=2)
+        proto_swav = proto_swav.detach()
+        if return_z:
+            return z_swav @ proto_swav.T, z_swav
+        else:
+            return z_swav @ proto_swav.T

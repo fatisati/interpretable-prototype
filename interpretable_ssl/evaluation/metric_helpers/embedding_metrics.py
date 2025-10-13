@@ -220,8 +220,9 @@ def get_scproto_mc_adata(t, adata, bk, lk, use_mean=True):
     sizefactor = np.full((protos.shape[0],), sf)
     sizefactor = torch.as_tensor(sizefactor, dtype=torch.float, device="cuda")
     metacells = model.decode(protos, batch, sizefactor)
-    z = t.encode_adata(adata, model)
-    sample_proto_sim = t.get_proto_assignments(z, model)
+    z_vae = t.encode_adata(adata, model, z_idx = 1)
+    # z_swav = t.encode_adata(adata, model)
+    sample_proto_sim = t.get_proto_assignments(z_vae, model)
     proto_labels = extract_proto_labels(adata, sample_proto_sim, [bk, lk])
     metacells_adata = generate_metacell_adata(metacells, proto_labels)
     if metacells_adata.X.max() > 50:
