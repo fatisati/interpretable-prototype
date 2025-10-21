@@ -99,8 +99,11 @@ class AdoptiveTrainer(Trainer):
         
         if self.cvae_epochs > 0:
             self.pretrain_encoder()
-            
+        
+        if hasattr(self.model, "freeze_batch_embedding"):
+            self.model.freeze_batch_embedding()
         self.init_prototypes()
+
         if self.cvae_epochs > 0:
             self.plot_umap(self.model, self.ref.adata, "pretrained-ref")
         self.train()

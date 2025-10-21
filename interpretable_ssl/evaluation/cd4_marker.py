@@ -122,57 +122,53 @@ def plot_marker_gene_expressions(
     return plt
 
 
+def get_proto_sample_ind(scores, proto_id, k=10, use_knn=True):
+    if use_knn:
+        prototype_scores = scores[:, proto_id]
+
+        # Find the indices of the k-nearest samples
+        return np.argsort(-prototype_scores)[:k]
+    else:
+        # score is np arr
+        # for each cell the id of assigned proto
+        sample_proto_id = scores.argmax(1)
+        # return sample ids which assigned to proto_id
+        return np.where(sample_proto_id == proto_id)[0]
+
+
 def assign_prototype_labels(
-    adata, similarity_tensor, prot_cnts, k=10, cell_type_column="cell_type"
+    adata, scores, prot_cnts, k=10, cell_type_column="cell_type", use_knn=True
 ):
-    """
-    Assigns each sample in AnnData to the prototype with the highest similarity,
-    calculates the majority cell type for each prototype, and assigns the prototype label.
-
-    Args:
-        adata (AnnData): The AnnData object containing `obs[cell_type_column]` labels.
-        similarity_tensor (torch.Tensor or np.ndarray): A tensor of shape (n_samples, n_prototypes)
-                                                        representing the similarity of each sample to each prototype.
-        cell_type_column (str): The column in `adata.obs` that contains cell type labels.
-
-    Returns:
-        AnnData: Updated AnnData object with prototype labels and confidence.
-    """
     # # Ensure similarity_tensor is a numpy array
-    if isinstance(similarity_tensor, torch.Tensor):
-        similarity_tensor = similarity_tensor.cpu().numpy()
+    if isinstance(scores, torch.Tensor):
+        scores = scores.cpu().numpy()
 
     # # Step 1: Assign each sample to the prototype with the highest similarity
     # prototype_assignments = np.argmax(similarity_tensor, axis=1)
-
 
     # Step 3: Calculate majority cell type and confidence for each prototype
     prototype_labels = []
     prototype_confidences = []
 
     for prototype in range(prot_cnts):
-        # Get the similarity scores for the current prototype
-        prototype_scores = similarity_tensor[:, prototype]
-
-        # Find the indices of the k-nearest samples
-        k_nearest_indices = np.argsort(-prototype_scores)[:k]
+        proto_sample_ind = get_proto_sample_ind(scores, prototype, use_knn=use_knn)
 
         # Get the cell types of the k-nearest samples
-        k_nearest_cell_types = adata.obs.iloc[k_nearest_indices][cell_type_column]
+        proto_sample_labels = adata.obs.iloc[proto_sample_ind][cell_type_column]
 
-        if len(k_nearest_cell_types) > 0:
+        if len(proto_sample_labels) > 0:
             # Count the frequency of each cell type
-            cell_type_counts = Counter(k_nearest_cell_types)
+            label_counts = Counter(proto_sample_labels)
 
             # Determine the majority cell type and its confidence
-            majority_cell_type, majority_count = cell_type_counts.most_common(1)[0]
+            majority_label, majority_count = label_counts.most_common(1)[0]
             confidence = majority_count / k
         else:
             # Handle prototypes with no k-nearest samples
-            majority_cell_type = "Unknown"
+            majority_label = "Unknown"
             confidence = 0.0
 
-        prototype_labels.append(majority_cell_type)
+        prototype_labels.append(majority_label)
         prototype_confidences.append(confidence)
 
     # Step 4: Create a DataFrame for prototype labels and confidences
@@ -222,5 +218,3 @@ def generate_proto_adata(x, cell_types, gene_panel=None, confidence=None):
         proto_adata.var.index = pd.Index(gene_panel)
 
     return proto_adata
-
-

@@ -117,8 +117,8 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         self.set_affinities()
         self.use_manifold_weights = use_manifold_weights
         self.manifold = {}
-        # if use_manifold_weights:
-        self.calc_manifold_weights()
+        if self.use_manifold_weights:
+            self.calc_manifold_weights()
         self.label_key = sc_ds.label_key
         self.return_label = True
         self.temperature = 0.1

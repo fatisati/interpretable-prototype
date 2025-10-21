@@ -241,7 +241,7 @@ class Trainer(TrainerBase):
         scores = model.proto_soft_assignments(z)
         return scores.detach().cpu().numpy()
 
-    def plot_umap(self, model, adata, split, save_plot=True):
+    def plot_umap(self, model, adata, split, save_plot=True, use_knn=True):
         z = self.encode_adata(adata, model, z_idx = 1)
         prototypes = self.get_model_prototypes(model)
         z_umap, prototype_umap = calculate_umap(z, prototypes)
@@ -254,6 +254,7 @@ class Trainer(TrainerBase):
                 scores,
                 self.num_prototypes,
                 cell_type_column=self.dataset.label_key,
+                use_knn=use_knn
             )
             proto_labels = proto_df.prototype_label
         else:
@@ -314,7 +315,8 @@ class Trainer(TrainerBase):
             self.dataset.label_key,
         )
         save_append(mc_scg, self.get_dump_path(), "scgraph")
-        save_append(mc_scb, self.get_dump_path(), "scib")
+        if mc_scb is not None:
+            save_append(mc_scb, self.get_dump_path(), "scib")
 
         self.dataset.adata.obs["SEACell"] = sim.argmax(axis=1)
         tmp_path = f"tmp_{uuid.uuid4().hex[:8]}.h5ad"
@@ -349,7 +351,8 @@ class Trainer(TrainerBase):
         )
         scg, scb = get_metrics(*params)
         scg.to_csv(self.get_dump_path() + "/scgraph.csv")
-        scb.to_csv(self.get_dump_path() + "/scib.csv")
+        if scb is not None:
+            scb.to_csv(self.get_dump_path() + "/scib.csv")
         self.save_metacell_metrics()
 
     def get_dataset(self, dataset_id):

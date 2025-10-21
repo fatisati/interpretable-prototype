@@ -1,6 +1,6 @@
 import torch
 
-def get_assign_cnts(logits):
+def get_hard_assign_cnts(logits):
     assignments = logits.argmax(dim=1)
     num_prototypes = logits.size(1)
     counts = torch.bincount(assignments, minlength=num_prototypes)
@@ -24,7 +24,7 @@ def get_assignment_metrics(assignments, label):
     res[f"{label}_entropy"] = entropy
 
     # Hard assignments
-    counts = get_assign_cnts(assignments)
+    counts = get_hard_assign_cnts(assignments)
 
     # Number of empty prototypes
     num_prototypes = assignments.size(1)

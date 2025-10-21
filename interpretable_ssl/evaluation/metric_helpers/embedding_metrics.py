@@ -33,6 +33,8 @@ def save_append(df, save_dir, name, append=True, name_postfix=None):
 
 
 def get_scib(adata, obsm_keys, bk, lk):
+    if adata.obs[bk].nunique() == 1:
+        return None
     bm = Benchmarker(
         adata=adata,
         batch_key=bk,
@@ -243,12 +245,13 @@ def get_scproto_metacell_metrics(
     )
 
 
-def load_seacell(ds_id):
+def load_seacell(ds_id, normalize=True):
     home = "/home/icb/fatemehs.hashemig/"
-    ad = sc.read_h5ad(f'{home}/models/{ds_id}/seacell_sc.h5ad')
-    mc_ad = sc.read_h5ad(f"{home}/models/{ds_id}/seacell_agg.h5ad")
-    sc.pp.normalize_total(mc_ad, target_sum=1e4)
-    sc.pp.log1p(mc_ad)
+    ad = sc.read_h5ad(f'{home}/models/{ds_id}/seacell/seacell_sc.h5ad')
+    mc_ad = sc.read_h5ad(f"{home}/models/{ds_id}/seacell/seacell_agg.h5ad")
+    if normalize:
+        sc.pp.normalize_total(mc_ad, target_sum=1e4)
+        sc.pp.log1p(mc_ad)
     return ad, mc_ad
 
 

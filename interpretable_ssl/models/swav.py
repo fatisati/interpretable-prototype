@@ -31,7 +31,7 @@ class SwavBase(nn.Module):
         multi_layer_proto=False,
         np2=None,
         l2norm=1,
-        assignment_metric="dot-product",
+        assignment_metric="dotp",
     ):
         super().__init__()
         self.scpoli_cvae = scpoli_cvae
@@ -342,7 +342,11 @@ class SwavBase(nn.Module):
         input_tensor = self.get_prototypes()
         return self.decode(input_tensor, recon_loss, use_avg_batch_embedding, use_batch)
 
-
+    def freeze_batch_embedding(self):
+        for name, p in self.named_parameters():
+            if 'scpoli_cvae.embeddings' in name:
+                p.requires_grad = False
+                print(f"Froze: {name}")
 # TODO: refactor input params with swav base
 class SwAVModel(SwavBase):
     def __init__(
@@ -402,12 +406,20 @@ class scProtoGMVAE(SwAVModel):
             torch.ones(self.nmb_prototypes, self.latent_dim)
         )
         self.gm_vparam = self.gm_vparam.to(self.get_prototypes().device)
-    
+
     def forward(self, batch):
         z, recon, kl, resp, kl_balance = self.calc_z_and_cvae_loss(**batch)
         propagation_sim = self.propagation_sim_loss(z)
-        return z, z, self.proto_soft_assignments(z), recon, propagation_sim, kl, kl_balance
-    
+        return (
+            z,
+            z,
+            self.proto_soft_assignments(z),
+            recon,
+            propagation_sim,
+            kl,
+            kl_balance,
+        )
+
     def calc_z_and_cvae_loss(
         self,
         x=None,
@@ -438,7 +450,7 @@ class scProtoGMVAE(SwAVModel):
         kl, kl_dict = gm_kl(z_mu, z_vparam, gm_mu, gm_vparam, resp)
         # ---------- total ----------
         loss = recon + self.beta * kl
-        return z_mu, recon, kl, resp, kl_dict['kl_balance']
+        return z_mu, recon, kl, resp, kl_dict["kl_balance"]
 
     # same as scpoli nb loss
     def cacl_recon_loss(self, z, batch, sizefactor, combined_batch, x):
@@ -463,8 +475,10 @@ class scProtoGMVAE(SwAVModel):
         return dec_mean
 
     def proto_soft_assignments(self, z):
-        if self.l2norm and self.assignment_metric == 'dotp':
+        if self.assignment_metric == "dotp":
             return self.prototypes(z)
+        elif self.assignment_metric == "ddotp":
+            return F.linear(z, self.prototypes.weight.detach())
         elif self.assignment_metric == "neuc":
             protos = self.get_prototypes()
             return -torch.cdist(z, protos.detach(), p=2)
@@ -475,9 +489,6 @@ class scProtoGMVAE(SwAVModel):
 
     def get_gm_mu(self):
         return self.prototypes.weight
-
-    # def propagation_sim_loss(self, z):
-    #     return self.move_prototypes(z), 0
 
     def get_gm_vparam(self):
         gm_mu = self.get_gm_mu()
@@ -526,10 +537,20 @@ class scProtoGMVAE(SwAVModel):
 class scProtoVQVAE(scProtoGMVAE):
     def forward(self, batch):
         # recon loss, proto loss, commitment loss
-        z, recon_loss, proto_loss, commit_loss, perplexity = self.calc_z_and_cvae_loss(**batch)
+        z, recon_loss, proto_loss, commit_loss, perplexity = self.calc_z_and_cvae_loss(
+            **batch
+        )
         # propagation_sim = self.propagation_sim_loss(z)
-        return z, z, self.proto_soft_assignments(z), recon_loss, (proto_loss, commit_loss), perplexity, 0
-    
+        return (
+            z,
+            z,
+            self.proto_soft_assignments(z),
+            recon_loss,
+            (proto_loss, commit_loss),
+            perplexity,
+            0,
+        )
+
     def calc_z_and_cvae_loss(
         self,
         x=None,
@@ -546,17 +567,19 @@ class scProtoVQVAE(scProtoGMVAE):
         z_mu, z_logvar = self.scpoli_cvae.encoder(x_log, batch_embeddings)
         if self.l2norm:
             z_mu = nn.functional.normalize(z_mu, dim=1, p=2)
-        
-        dist2 = torch.cdist(z_mu, self.get_prototypes())          # [B, K]
-        proto_ind = dist2.argmin(dim=1)                           # [B]
-        zq = self.get_prototypes()[proto_ind]                    # [B, D]
-        zq = z_mu + (zq - z_mu).detach()                        # straight-through estimator
+
+        dists = torch.cdist(z_mu, self.get_prototypes())  # [B, K]
+        proto_ind = dists.argmin(dim=1)  # [B]
+        zq_raw = self.get_prototypes()[proto_ind]  # [B, D]
+        zq = z_mu + (zq_raw - z_mu).detach()  # straight-through estimator
         recon_loss = self.cacl_recon_loss(zq, batch, sizefactor, combined_batch, x)
-        proto_loss = torch.mean((zq.detach() - z_mu)**2)
-        commit_loss = torch.mean((zq - z_mu.detach())**2)
+        proto_loss  = torch.mean((zq_raw - z_mu.detach()) ** 2)     # codebook update
+        commit_loss = torch.mean((z_mu - zq_raw.detach()) ** 2)     # encoder commitment
 
         # Compute usage histogram over prototypes
-        usage = torch.bincount(proto_ind, minlength=self.get_prototypes().shape[0]).float()
+        usage = torch.bincount(
+            proto_ind, minlength=self.get_prototypes().shape[0]
+        ).float()
         usage = usage / usage.sum()  # normalize to probabilities p_k
 
         # Compute perplexity = exp(entropy)
@@ -568,25 +591,27 @@ class scProtoVQVAE(scProtoGMVAE):
 class scProtoHybrid(scProtoVQVAE):
     def __init__(self, temperature, beta, **kwargs):
         super().__init__(temperature, beta, **kwargs)
-        hidden_dim = self.latent_dim*4
+        hidden_dim = self.latent_dim * 4
         self.swav_projector = nn.Sequential(
-                nn.Linear(self.latent_dim, hidden_dim),
-                nn.BatchNorm1d(hidden_dim),
-                nn.ReLU(inplace=True),
-                nn.Linear(hidden_dim, hidden_dim//2),
-            )
-    
+            nn.Linear(self.latent_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+        )
+
     def forward(self, batch):
         # recon loss, proto loss, commitment loss
-        z, recon_loss, proto_loss, commit_loss, perplexity = self.calc_z_and_cvae_loss(**batch)
+        z, recon_loss, proto_loss, commit_loss, perplexity = self.calc_z_and_cvae_loss(
+            **batch
+        )
         # propagation_sim = self.propagation_sim_loss(z)
         logits, z_swav = self.proto_soft_assignments(z, True)
         return z_swav, z, logits, recon_loss, (proto_loss, commit_loss), perplexity, 0
-    
-    def proto_soft_assignments(self, z, return_z = False):
+
+    def proto_soft_assignments(self, z, return_z=False):
         z_swav = self.swav_projector(z)
         z_swav = nn.functional.normalize(z_swav, dim=1, p=2)
-        
+
         proto_swav = self.swav_projector(self.get_prototypes())
         proto_swav = nn.functional.normalize(proto_swav, dim=1, p=2)
         proto_swav = proto_swav.detach()

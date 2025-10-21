@@ -41,7 +41,7 @@ def compute_seacells(ad, n_SEACells, build_kernel_on="X_pca"):
     model.fit(min_iter=10, max_iter=50)
 
     SEACell_ad = SEACells.core.summarize_by_SEACell(
-        ad, SEACells_label="SEACell", summarize_layer="X"
+        ad, SEACells_label="SEACell", summarize_layer="counts"
     )
     # SEACell_soft_ad = SEACells.core.summarize_by_soft_SEACell(ad, model.A_, celltype_label='celltype',summarize_layer='raw', minimum_weight=0.05)
     return ad, SEACell_ad, model
@@ -97,5 +97,7 @@ def agg_obs(SEACell_ad, adata, obs_key):
 
 def save_seacell(ad, SEACell_ad, ds_id):
     home = "/home/icb/fatemehs.hashemig/"
-    ad.write(f"{home}/models/{ds_id}/seacell_sc.h5ad")
-    SEACell_ad.write(f"{home}/models/{ds_id}/seacell_agg.h5ad")
+    print('saving to: ', f"{home}/models/{ds_id}/seacell")
+    os.makedirs(f"{home}/models/{ds_id}/seacell", exist_ok=True)
+    ad.write(f"{home}/models/{ds_id}/seacell/seacell_sc.h5ad")
+    SEACell_ad.write(f"{home}/models/{ds_id}/seacell/seacell_agg.h5ad")

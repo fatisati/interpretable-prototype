@@ -141,16 +141,16 @@ def get_defaults():
         "lambda_l2": 0.0, # 1e-3
         
         "lambda_kl": 0.0,
-        "lambda_recon": 0.01,
+        "lambda_recon": 0.0, #0.01, 
         'lambda_balance': 0.0,
-        'lambda_swav': 1.0,
-        "propagation_reg": 1.0, # 1,
-        "prot_emb_sim_reg": 0.25,
+        'lambda_swav': 0.0,
+        "lambda_proto": 0.0, # 1,
+        "lambda_commit": 0.0, # 0.25
         'assignment_metric': 'dotp',
         "model_type": 'vqvae',
         "l2norm": 0,
         
-        "version": 9,
+        "version": 10,
         # change to dotp in future
     }
     return defaults

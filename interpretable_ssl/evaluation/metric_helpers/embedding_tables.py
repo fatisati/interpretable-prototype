@@ -48,9 +48,15 @@ def load_tb(ds_id):
         else:
             print(p)
     for key in ['scib', 'scgraph', 'mc_quality']:
-        dfs[key] = pd.concat(
-            [load_csv(f"{p}{fol}/{key}.csv") for fol in os.listdir(p)],
-        )
+        key_dfs = [load_csv(f"{p}{fol}/{key}.csv") for fol in os.listdir(p)]
+        key_dfs = [df for df in key_dfs if df is not None]  # remove None objects
+        if len(key_dfs)>0:
+            dfs[key] = pd.concat(key_dfs)
+        else:
+            dfs[key] = None
     scib_df, scgraph_df, mc_df = dfs['scib'], dfs['scgraph'], dfs['mc_quality']
-    df = pd.concat([scib_df, scgraph_df], axis=1)
+    try:
+        df = pd.concat([scib_df, scgraph_df], axis=1)
+    except:
+        df = (scib_df, scgraph_df)
     return df, dfs

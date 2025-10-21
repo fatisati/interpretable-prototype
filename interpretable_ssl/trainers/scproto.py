@@ -154,7 +154,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             logger.info("initalizing prototypes using kmeans")
             embeddings = self.encode_adata(self.train_ds.adata, self.model, z_idx=1)
             self.model.init_prototypes_kmeans(embeddings, self.nmb_prototypes)
-
+        
     def build_model(self):
         self.model = self.get_model()
         self.model = self.model.cuda()
@@ -283,7 +283,7 @@ class SCProtoTrainer(AdoptiveTrainer):
                 and epoch >= self.epoch_queue_starts
                 and len(self.queue) == 0
             ):
-                print(f'start using queue at epoch: {epoch}')
+                print(f"start using queue at epoch: {epoch}")
                 for ds_id in self.ds_ids:
                     self.init_queue(ds_id)
 
@@ -319,7 +319,8 @@ class SCProtoTrainer(AdoptiveTrainer):
             meters["data_time"].update(time.time() - end)
             iteration = epoch * len(self.train_loader) + it
             self.update_learning_rate(iteration)
-
+            
+            # normalize prototypes
             if self.l2norm == 1:
                 with torch.no_grad():
                     self.model.normalize_prototypes()
@@ -351,14 +352,23 @@ class SCProtoTrainer(AdoptiveTrainer):
                 )
 
         meters = {k: getattr(v, "avg", v) for k, v in meters.items()}
-        meters["p_empty_protos_ratio"] = (
-            np.mean(
-                [(ds_assign_cnts[ds_id] == 0).sum().item() for ds_id in ds_assign_cnts]
-            )
-            / self.nmb_prototypes
-        )
-        eps = 1
-        meters["p_ams"] = meters["p_matched"] / (meters["p_empty_protos_ratio"] + eps)
+        all_assign_cnts = sum(ds_assign_cnts[ds_id] for ds_id in ds_assign_cnts)
+        meters["proto_unused"] = (
+            all_assign_cnts == 0
+        ).sum().item() / self.nmb_prototypes
+        
+        # all_assign_cnts: shape [n_prototypes], each value = number of assigned samples
+        p = all_assign_cnts / all_assign_cnts.sum()           # normalize to probabilities
+        entropy = -(p * np.log(np.clip(p, 1e-8, None))).sum()
+        norm_entropy = entropy / torch.log(torch.tensor(len(p), dtype=torch.float))  # normalized [0,1]
+        meters["proto_utilization"] = norm_entropy.item()
+        
+        # get proto collapse metric
+        protos = F.normalize(self.model.prototypes.weight, dim=1)
+        cos_sim = protos @ protos.T
+        mean_off_diag = (cos_sim.sum() - cos_sim.diag().sum()) / (cos_sim.numel() - protos.size(0))
+        meters["proto_collapse"] = mean_off_diag.item()
+        
         return meters
 
     def calc_ds_loss(self, inputs, ds_id, meters, bs):
@@ -379,11 +389,10 @@ class SCProtoTrainer(AdoptiveTrainer):
             + metrics["recon"] * self.lambda_recon
             + metrics["kl"] * self.lambda_kl
             + metrics["kl_balance"] * self.lambda_balance
-            + metrics["propagation"] * self.propagation_reg
-            + metrics["similarity"] * self.prot_emb_sim_reg
+            + metrics["proto_loss"] * self.lambda_proto
+            + metrics["commitment_loss"] * self.lambda_commit
             + metrics["z_norm"] * self.lambda_l2
             + metrics["proto_norm"] * self.lambda_l2
-            # + metrics["align_loss"] * self.lambda_align
         )
         meters["loss"].update(loss.item(), bs)
         return loss, meters, assign_cnts
@@ -396,35 +405,40 @@ class SCProtoTrainer(AdoptiveTrainer):
         manifold_keys = self.train_ds.manifold.keys()
         manifold_scores = {k: inputs.pop(k, None) for k in manifold_keys}
         # label = inputs.pop(self.dataset.label_key)
-        z, _, logits, recon, (propagation, sim), kl, kl_balance = self.model(inputs)
+        z, _, logits, recon, (proto_loss, commitment_loss), kl, kl_balance = self.model(inputs)
+
         z_norm = z.norm(dim=1).mean()
         proto_norm = self.model.get_prototypes().norm(dim=1).mean()
         # z, logits, cvae_loss, resp, propagation, sim = self.parse_model_output(outputs)
         z = z.detach()
-        assign_cnts = get_assign_cnts(logits)
-        swav_loss, align_loss, matched_pairs_ratio, q_matched, assignment_metrics = (
-            self.compute_swav_loss(logits, z, bs, ds_id, manifold_scores, None)
-        )
-        assignment_metrics["p_proto_utilization"] = (
-            assign_cnts != 0
-        ).sum().item() / min(logits.size(0), logits.size(1))
-        # entropy = self.peaky_softmax_loss(scores)
-        # match, prob_ent, p_ent = self.calculate_pair_matching(scores, bs)
+
+        if self.lambda_swav != 0:
+            swav_loss, p_matched, q_matched, qproto_utilization, p_uncertainty, q_uncertainty = self.compute_swav_loss(
+                logits, z, bs, ds_id, manifold_scores, None
+            )
+        else:
+            swav_loss, p_matched, q_matched, qproto_utilization, p_uncertainty, q_uncertainty = 0, 0, 0, 0, 0, 0
+
+        assign_cnts = get_hard_assign_cnts(logits)
+        max_active = min(logits.size(0), logits.size(1))
 
         return {
             "swav": swav_loss,
             "recon": recon,
             "kl": kl,
             "kl_balance": kl_balance,
-            "propagation": propagation,
-            "similarity": sim,
-            "align_loss": align_loss,
-            "p_matched": matched_pairs_ratio,
+            "proto_loss": proto_loss,
+            "commitment_loss": commitment_loss,
+            "p_matched": p_matched,
             "q_matched": q_matched,
-            "z_mean": abs(z.mean().detach().item()),
             "z_norm": z_norm,
             "proto_norm": proto_norm,
-        } | assignment_metrics, assign_cnts
+            "pproto_utilization": (assign_cnts != 0).sum().item() / max_active,
+            "qproto_utilization": qproto_utilization,
+            'p_uncertainty': p_uncertainty, 
+            'q_uncertainty': q_uncertainty
+             
+        }, assign_cnts
 
     def parse_model_output(self, outputs):
         if self.model_type == "gm":
@@ -438,15 +452,14 @@ class SCProtoTrainer(AdoptiveTrainer):
 
     def compute_swav_loss(self, logits, z, bs, ds_id, manifold_scores=None, resp=None):
 
-        loss, assignment_metrics_list, avg_matched_pairs, avg_q_matched = 0, [], 0, 0
-        align_loss = 0
+        loss, p_matched, q_matched, p_uncertainty, q_uncertainty, qproto_utilization = 0, 0, 0, 0, 0, 0
 
         # each crop mean each augmentation, just caluclate q and loss for first crops_for_assign
         for view_idx, view_id in enumerate(self.views_for_assign):
             with torch.no_grad():
                 # outputs for 1 batch of data, [aug1s1, a1s2, a1s3, .., a1sb]
                 view_logits = logits[bs * view_id : bs * (view_id + 1)].detach()
-                
+
                 # with torch.no_grad(): not nessecary because both funcion has no grad decorator
                 sinkhorn_input = self.prepare_sinkhorn_input(
                     view_idx, z, view_id, bs, view_logits, ds_id
@@ -455,17 +468,22 @@ class SCProtoTrainer(AdoptiveTrainer):
                     cell_weights = manifold_scores[self.cell_w_mode][
                         bs * view_id : bs * (view_id + 1)
                     ]
-                    
                 else:
                     cell_weights = None  # uniform
                 q = self.sinkhorn(sinkhorn_input, cell_weights)
-
-                assignment_metrics_list.append(get_assignment_metrics(q, "q"))
+                qassign_cnts = get_hard_assign_cnts(q)
+                max_active = min(logits.size(0), logits.size(1))
+                qproto_utilization += (qassign_cnts != 0).sum().item() / max_active
                 q = q[-bs:]
+                q_uncertainty -= (q * (q.clamp_min(1e-8)).log()).sum(dim=1).mean()
+                
+                p = F.softmax(view_logits / self.temperature, dim=1)
+                p_uncertainty -= (p * (p.clamp_min(1e-8)).log()).sum(dim=1).mean()
+
 
             # check how consitent q is with other augmentations [cross entropy]
             subloss = 0
-            matched_pairs_ratio, q_matched = 0, 0
+            vp_matched, vq_matched = 0, 0
             if self.hard_clustering == 1:
                 q = self.hard_clusters(q)
 
@@ -478,31 +496,20 @@ class SCProtoTrainer(AdoptiveTrainer):
                 log_probs = F.log_softmax(aug_logits, dim=1)
                 subloss -= torch.mean(torch.sum(q * log_probs, dim=1))
 
-                matched_pairs_ratio += get_matched_pairs_ratio(view_logits, aug_logits)
-                q_matched += get_matched_pairs_ratio(q, aug_logits)
+                vp_matched += get_matched_pairs_ratio(view_logits, aug_logits)
+                vq_matched += get_matched_pairs_ratio(q, aug_logits)
 
             loss += subloss / len(aug_view_ids)
-            avg_matched_pairs += matched_pairs_ratio / len(aug_view_ids)
-            avg_q_matched += q_matched / len(aug_view_ids)
-
-        avg = lambda metrics: {
-            k: torch.tensor([m[k] for m in metrics]).float().mean().item()
-            for k in metrics[0]
-        }
-        avg_assign_metrics = avg(assignment_metrics_list)
-        q_matched = avg_q_matched / len(self.views_for_assign)
-        p_matched = avg_matched_pairs / len(self.views_for_assign)
-        eps = 1
-        avg_assign_metrics["q_ams"] = (
-            q_matched / (avg_assign_metrics["q_empty_protos_ratio"] + eps) * 100
-        )
+            p_matched += vp_matched / len(aug_view_ids)
+            q_matched += vq_matched / len(aug_view_ids)
 
         return (
             loss / len(self.views_for_assign),
-            align_loss / len(self.views_for_assign),
-            p_matched,
-            q_matched,
-            avg_assign_metrics,
+            p_matched / len(self.views_for_assign),
+            q_matched / len(self.views_for_assign),
+            qproto_utilization / len(self.views_for_assign),
+            p_uncertainty / len(self.views_for_assign),
+            q_uncertainty / len(self.views_for_assign),
         )
 
     def test_epoch(self):
@@ -533,7 +540,7 @@ class SCProtoTrainer(AdoptiveTrainer):
                     p.grad = None
                 else:
                     break
-
+    
     def update_learning_rate(self, iteration):
         for param_group in self.optimizer.param_groups:
             param_group["lr"] = self.lr_schedule[iteration]
@@ -554,12 +561,13 @@ class SCProtoTrainer(AdoptiveTrainer):
             print(f"⚠️ Invalid values in {name}! (nan/inf detected)")
             print("min:", prob.min().item(), "max:", prob.max().item())
 
-    
     @torch.no_grad()
     def sinkhorn(self, out, _):
-        Q = torch.exp(out / self.epsilon).t() # Q is K-by-B for consistency with notations from our paper
-        B = Q.shape[1] * self.world_size # number of samples to assign
-        K = Q.shape[0] # how many prototypes
+        Q = torch.exp(
+            out / self.epsilon
+        ).t()  # Q is K-by-B for consistency with notations from our paper
+        B = Q.shape[1] * self.world_size  # number of samples to assign
+        K = Q.shape[0]  # how many prototypes
 
         # make the matrix sums to 1
         sum_Q = torch.sum(Q)
@@ -575,7 +583,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             Q /= torch.sum(Q, dim=0, keepdim=True)
             Q /= B
 
-        Q *= B # the colomns must sum to 1 so that Q is an assignment
+        Q *= B  # the colomns must sum to 1 so that Q is an assignment
         return Q.t()
 
     @torch.no_grad()
