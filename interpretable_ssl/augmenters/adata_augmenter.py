@@ -103,11 +103,11 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         self.sample_cluster_id = None
         self.n_clusters = n_clusters
         super().__init__(sc_ds.adata, **kwargs)
-        self.data = (
-            sc_ds.adata.layers.get("counts", sc_ds.adata.X)
-            if use_counts
-            else sc_ds.adata.X
-        )
+        # self.data = (
+        #     sc_ds.adata.layers.get("counts", sc_ds.adata.X)
+        #     if use_counts
+        #     else sc_ds.adata.X
+        # )
         self._is_sparse = sparse.issparse(self.data)
         if not self._is_sparse:
             self.data = torch.tensor(self.data, dtype=torch.float32)
@@ -239,26 +239,31 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
     def __getitem__(self, index):
         items = []
         for ds_id in self.dataset_index_map.keys():
-            ds_idx = index % len(self.dataset_index_map[ds_id])
-            pos_sample_ids = self.get_positive_samples(ds_idx, ds_id)
-            global_idx = self.dataset_index_map[ds_id][ds_idx]
-            items.append(self.assemble_from_indices(pos_sample_ids, global_idx))
+            local_idx = index % len(self.dataset_index_map[ds_id])
+            pos_global_ids = self.get_positive_samples(local_idx, ds_id)
+            global_idx = self.dataset_index_map[ds_id][local_idx]
+            items.append(self.assemble_from_indices(pos_global_ids, global_idx))
         return self.combine_augmented_data(items)
 
     def get_positive_samples(self, local_idx, ds_id):
-        row = self.ds_affinities[ds_id][local_idx]
-        if not isinstance(row, np.ndarray):
-            row = row.toarray().ravel()
-        else:
-            row = row.ravel()
+        row = self.ds_affinities[ds_id].getrow(local_idx)  # 1×N sparse row
+
+        # Extract indices and values of non-zero affinities
+        cols = row.indices
+        vals = row.data
+
+        # Compute probabilities only on non-zero entries
         if self.softmax:
-            probs = softmax(row/self.temperature)
+            probs = softmax(vals / self.temperature)
         else:
-            probs = row / row.sum()
-        pos_idx = np.random.choice(
-            len(row), size=self.n_augmentations - 1, replace=False, p=probs
+            probs = vals / vals.sum()
+
+        # Sample among non-zero indices
+        sampled_cols = np.random.choice(
+            cols, size=self.n_augmentations - 1, replace=False, p=probs
         )
-        pos_idx = np.insert(pos_idx, 0, local_idx)
+
+        pos_idx = np.insert(sampled_cols, 0, local_idx)
         return [self.dataset_index_map[ds_id][i] for i in pos_idx]
 
     def assemble_from_indices(self, indices, sample_index):

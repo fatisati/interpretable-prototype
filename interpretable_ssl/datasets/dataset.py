@@ -8,7 +8,8 @@ import inspect
 from interpretable_ssl.utils import log_time
 import os
 import itertools
-
+import numpy as np
+import scipy
 
 class SingleCellDataset(Dataset):
 
@@ -67,28 +68,40 @@ class SingleCellDataset(Dataset):
                 )
                 return True
         else:
-            print("⚠️ No HVG column found. Run sc.pp.highly_variable_genes first.")
+            print("⚠️ No HVG column found.")
             return False
 
     def read_adata(self):
         print(f"loading {str(self)} data")
         self.adata = sc.read_h5ad(self.path)
-        print("done")
-
-        # check if hvg not applied apply it
-        if self.requires_hvg():
-            self.adata = self.adata[:, self.adata.var["highly_variable"].values].copy()
 
         if self.batch_key is None:
             self.batch_key = 'batch'
             self.adata.obs['batch'] = ['b0'] * len(self.adata)
+        
+        if self.adata.X.max() < 30:
+            self.adata.layers["lognorm"] = self.adata.X.copy()
+            self.adata.X = self.adata.layers.get('counts', self.adata.X)
+        else:
+            ad = self.adata.copy()
+            sc.pp.normalize_total(ad, target_sum=1e4)
+            sc.pp.log1p(ad)
+            self.adata.layers["lognorm"] = ad.X.copy()
+            
+        # check if hvg not applied apply it
+        if self.requires_hvg():
+            self.adata.raw = self.adata.copy()
+            self.adata = self.adata[:, self.adata.var["highly_variable"].values].copy()
+            
+        if not (scipy.sparse.isspmatrix_csr(self.adata.X) and self.adata.X.dtype == np.float32) and type(self.adata.X) != np.ndarray:
+            self.adata.X = self.adata.X.tocsr().astype(np.float32)
         return self.adata
 
     def load_label_encoder(self):
         if os.path.exists(self.label_encoder_path):
             return pkl.load(open(self.label_encoder_path, "rb"))
         else:
-            return utils.fit_label_encoder(self.adata, self.label_encoder_path)
+            return utils.fit_label_encoder(self.adata, self.label_encoder_path, self.label_key)
 
     def __len__(self):
         return len(self.adata)

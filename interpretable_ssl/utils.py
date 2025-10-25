@@ -69,11 +69,11 @@ def get_pancras_model_dir():
     return get_home() + "/models/pancras/"
 
 
-def fit_label_encoder(adata, save_path):
+def fit_label_encoder(adata, save_path, label_key):
 
     # fit label encoder
     le = LabelEncoder()
-    le.fit(adata.obs["cell_type"])
+    le.fit(adata.obs[label_key])
 
     # save it
     pkl.dump(le, open(save_path, "wb"))

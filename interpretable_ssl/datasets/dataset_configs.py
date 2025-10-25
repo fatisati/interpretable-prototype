@@ -31,4 +31,12 @@ DATASETS = {
         "label_encoder_path": "./data/hlca_label_encoder.pkl",
         "test_studies": ["Teichmann_Meyer_2019", "Lafyatis_Rojas_2019"],
     },
+    'nsc':
+        {
+        "path": Path(DATA_DIR) / 'spatial/NSCLC_3D_pp.h5ad',
+        "batch_key": "section",
+        "label_key": "celltypes",
+        "label_encoder_path": "./data/NSCLC_3D.pkl",
+        "test_studies": ["section_4", "section_10"],
+    }
 }
