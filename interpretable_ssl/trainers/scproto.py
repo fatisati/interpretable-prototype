@@ -48,10 +48,18 @@ from interpretable_ssl.trainers.scpoli_helpers import *
 logger = getLogger()
 
 
+def get_gpu_type_torch():
+    if not torch.cuda.is_available():
+        return "No GPU available"
+    return [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())]
+
+
 class SCProtoTrainer(AdoptiveTrainer):
 
     # @log_time('swav')
     def __init__(self, dataset=None, ref_query=None, parser=None, **kwargs):
+        logger.info(get_gpu_type_torch())
+
         if "experiment_name" not in kwargs:
             kwargs["experiment_name"] = "scproto"
         super().__init__(dataset, ref_query, parser, **kwargs)
@@ -75,8 +83,6 @@ class SCProtoTrainer(AdoptiveTrainer):
             )
         self.build_model()
         self.build_data()
-        if self.debug == 0:
-            self.init_prototypes()
         self.build_optimizer()
         # self.load_checkpoint()
 
@@ -154,12 +160,12 @@ class SCProtoTrainer(AdoptiveTrainer):
             logger.info("initalizing prototypes using kmeans")
             embeddings = self.encode_adata(self.train_ds.adata, self.model, z_idx=1)
             self.model.init_prototypes_kmeans(embeddings, self.nmb_prototypes)
-        
+
     def build_model(self):
         self.model = self.get_model()
         self.model = self.model.cuda()
         # logger.info(self.model)
-        logger.info(f"Building model done.")
+        logger.info(f"=======>Building model done. max value for adata fed to scpoli_wrapper: {self.model.scpoli_wrapper.adata.X.max()}")
 
     def get_model(self):
         # if self.model_version == 1:
@@ -319,7 +325,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             meters["data_time"].update(time.time() - end)
             iteration = epoch * len(self.train_loader) + it
             self.update_learning_rate(iteration)
-            
+
             # normalize prototypes
             if self.l2norm == 1:
                 with torch.no_grad():
@@ -356,19 +362,23 @@ class SCProtoTrainer(AdoptiveTrainer):
         meters["proto_unused"] = (
             all_assign_cnts == 0
         ).sum().item() / self.nmb_prototypes
-        
+
         # all_assign_cnts: shape [n_prototypes], each value = number of assigned samples
-        p = all_assign_cnts / all_assign_cnts.sum()           # normalize to probabilities
+        p = all_assign_cnts / all_assign_cnts.sum()  # normalize to probabilities
         entropy = -(p * np.log(np.clip(p, 1e-8, None))).sum()
-        norm_entropy = entropy / torch.log(torch.tensor(len(p), dtype=torch.float))  # normalized [0,1]
+        norm_entropy = entropy / torch.log(
+            torch.tensor(len(p), dtype=torch.float)
+        )  # normalized [0,1]
         meters["proto_utilization"] = norm_entropy.item()
-        
+
         # get proto collapse metric
         protos = F.normalize(self.model.prototypes.weight, dim=1)
         cos_sim = protos @ protos.T
-        mean_off_diag = (cos_sim.sum() - cos_sim.diag().sum()) / (cos_sim.numel() - protos.size(0))
+        mean_off_diag = (cos_sim.sum() - cos_sim.diag().sum()) / (
+            cos_sim.numel() - protos.size(0)
+        )
         meters["proto_collapse"] = mean_off_diag.item()
-        
+
         return meters
 
     def calc_ds_loss(self, inputs, ds_id, meters, bs):
@@ -405,7 +415,9 @@ class SCProtoTrainer(AdoptiveTrainer):
         manifold_keys = self.train_ds.manifold.keys()
         manifold_scores = {k: inputs.pop(k, None) for k in manifold_keys}
         # label = inputs.pop(self.dataset.label_key)
-        z, _, logits, recon, (proto_loss, commitment_loss), kl, kl_balance = self.model(inputs)
+        z, _, logits, recon, (proto_loss, commitment_loss), kl, kl_balance = self.model(
+            inputs
+        )
 
         z_norm = z.norm(dim=1).mean()
         proto_norm = self.model.get_prototypes().norm(dim=1).mean()
@@ -413,11 +425,23 @@ class SCProtoTrainer(AdoptiveTrainer):
         z = z.detach()
 
         if self.lambda_swav != 0:
-            swav_loss, p_matched, q_matched, qproto_utilization, p_uncertainty, q_uncertainty = self.compute_swav_loss(
-                logits, z, bs, ds_id, manifold_scores, None
-            )
+            (
+                swav_loss,
+                p_matched,
+                q_matched,
+                qproto_utilization,
+                p_uncertainty,
+                q_uncertainty,
+            ) = self.compute_swav_loss(logits, z, bs, ds_id, manifold_scores, None)
         else:
-            swav_loss, p_matched, q_matched, qproto_utilization, p_uncertainty, q_uncertainty = 0, 0, 0, 0, 0, 0
+            (
+                swav_loss,
+                p_matched,
+                q_matched,
+                qproto_utilization,
+                p_uncertainty,
+                q_uncertainty,
+            ) = (0, 0, 0, 0, 0, 0)
 
         assign_cnts = get_hard_assign_cnts(logits)
         max_active = min(logits.size(0), logits.size(1))
@@ -435,9 +459,8 @@ class SCProtoTrainer(AdoptiveTrainer):
             "proto_norm": proto_norm,
             "pproto_utilization": (assign_cnts != 0).sum().item() / max_active,
             "qproto_utilization": qproto_utilization,
-            'p_uncertainty': p_uncertainty, 
-            'q_uncertainty': q_uncertainty
-             
+            "p_uncertainty": p_uncertainty,
+            "q_uncertainty": q_uncertainty,
         }, assign_cnts
 
     def parse_model_output(self, outputs):
@@ -452,7 +475,14 @@ class SCProtoTrainer(AdoptiveTrainer):
 
     def compute_swav_loss(self, logits, z, bs, ds_id, manifold_scores=None, resp=None):
 
-        loss, p_matched, q_matched, p_uncertainty, q_uncertainty, qproto_utilization = 0, 0, 0, 0, 0, 0
+        loss, p_matched, q_matched, p_uncertainty, q_uncertainty, qproto_utilization = (
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        )
 
         # each crop mean each augmentation, just caluclate q and loss for first crops_for_assign
         for view_idx, view_id in enumerate(self.views_for_assign):
@@ -476,10 +506,9 @@ class SCProtoTrainer(AdoptiveTrainer):
                 qproto_utilization += (qassign_cnts != 0).sum().item() / max_active
                 q = q[-bs:]
                 q_uncertainty -= (q * (q.clamp_min(1e-8)).log()).sum(dim=1).mean()
-                
+
                 p = F.softmax(view_logits / self.temperature, dim=1)
                 p_uncertainty -= (p * (p.clamp_min(1e-8)).log()).sum(dim=1).mean()
-
 
             # check how consitent q is with other augmentations [cross entropy]
             subloss = 0
@@ -540,7 +569,7 @@ class SCProtoTrainer(AdoptiveTrainer):
                     p.grad = None
                 else:
                     break
-    
+
     def update_learning_rate(self, iteration):
         for param_group in self.optimizer.param_groups:
             param_group["lr"] = self.lr_schedule[iteration]

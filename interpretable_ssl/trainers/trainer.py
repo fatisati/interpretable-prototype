@@ -22,6 +22,8 @@ from interpretable_ssl.trainers.affinity import *
 import subprocess
 from sklearn.model_selection import train_test_split
 
+from interpretable_ssl.evaluation.de_helper import *
+
 
 class Trainer(TrainerBase):
     # @log_time('scpoli trainer')
@@ -120,7 +122,7 @@ class Trainer(TrainerBase):
         return_mapped=False,
         return_mapped_idx=False,
         retrain_epochs=0,
-        z_idx = 0
+        z_idx=0,
     ):
         model = self.adapt_model(model, adata, retrain_epochs)
         loader = self.prepare_scpoli_dataloader(
@@ -164,9 +166,9 @@ class Trainer(TrainerBase):
         return adapted_model
 
     def prepare_scpoli_dataloader(self, adata, scpoli_cvae, shuffle=True):
-        adata = adata.copy()
+        # adata = adata.copy()
         # because scpoli encoder gets raw counts as input
-        adata.X = adata.layers.get("counts", adata.X)
+        # adata.X = adata.layers.get("counts", adata.X)
 
         if "condition_combined" not in adata.obs:
             adata.obs["conditions_combined"] = adata.obs[[self.condition_key]].apply(
@@ -188,7 +190,9 @@ class Trainer(TrainerBase):
         return loader
 
     # TODO: return mapped and mapped_idx should have cleaner logic
-    def encode_batch(self, model, batch, return_idx = 0, return_mapped_idx=False, return_mapped=False):
+    def encode_batch(
+        self, model, batch, return_idx=0, return_mapped_idx=False, return_mapped=False
+    ):
 
         batch = self.dict_to_device(batch)
         model.eval()
@@ -196,7 +200,7 @@ class Trainer(TrainerBase):
         with torch.no_grad():
             outs = model.encode(batch)
             z_swav, z_vae, logits = outs
-            
+
         if return_mapped_idx:
             return torch.argmax(logits, dim=1)
 
@@ -242,7 +246,7 @@ class Trainer(TrainerBase):
         return scores.detach().cpu().numpy()
 
     def plot_umap(self, model, adata, split, save_plot=True, use_knn=True):
-        z = self.encode_adata(adata, model, z_idx = 1)
+        z = self.encode_adata(adata, model, z_idx=1)
         prototypes = self.get_model_prototypes(model)
         z_umap, prototype_umap = calculate_umap(z, prototypes)
         obs = adata.obs
@@ -254,7 +258,7 @@ class Trainer(TrainerBase):
                 scores,
                 self.num_prototypes,
                 cell_type_column=self.dataset.label_key,
-                use_knn=use_knn
+                use_knn=use_knn,
             )
             proto_labels = proto_df.prototype_label
         else:
@@ -302,31 +306,34 @@ class Trainer(TrainerBase):
         return res_df
 
     def save_metacell_metrics(self):
+        ad = self.train_.adata.copy()
         mc_adata, sim = get_scproto_mc_adata(
             self,
-            self.dataset.adata,
+            ad,
             self.dataset.batch_key,
             self.dataset.label_key,
         )
+        ad.X = ad.layers['lognorm']
         mc_scg, mc_scb = get_metacell_metrics(
+            ad,
             mc_adata,
-            [f"{self.get_model_name()}_mc_pca"],
+            [f"{self.get_model_name()}_mc_pca", f"{self.get_model_name()}_mc_proto"],
             self.dataset.batch_key,
             self.dataset.label_key,
         )
         save_append(mc_scg, self.get_dump_path(), "scgraph")
         if mc_scb is not None:
             save_append(mc_scb, self.get_dump_path(), "scib")
-
-        self.dataset.adata.obs["SEACell"] = sim.argmax(axis=1)
+        ad.obs["SEACell"] = sim.argmax(axis=1)
         tmp_path = f"tmp_{uuid.uuid4().hex[:8]}.h5ad"
-        self.dataset.adata.write(tmp_path)
+        ad.write(tmp_path)
         process = subprocess.Popen(
             [
                 sys.executable,
                 "-m",
                 "interpretable_ssl.evaluation.metric_helpers.mc_quality",
                 tmp_path,
+                self.dataset.batch_key,
                 self.dataset.label_key,
                 self.get_dump_path(),
                 self.get_model_name(),
@@ -336,13 +343,22 @@ class Trainer(TrainerBase):
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
             print("Deleted:", tmp_path)
+        
+        de_jaccard = get_mc_jaccard(
+            mc_adata,
+            ad,
+            self.dataset.label_key,
+            self.dataset.batch_key,
+            0.05,
+            self.get_model_name(),
+        )
+        de_jaccard.to_csv(self.get_dump_path() + "/de_jaccard.csv")
 
     def save_metrics(self):
         adata = add_trainer_emb(self, self.dataset.adata)
         if adata.X.max() > 50:
             adata = adata.copy()
-            sc.pp.normalize_total(adata, target_sum=1e4)
-            sc.pp.log1p(adata)
+            adata.X = adata.layers['lognorm']
         params = (
             adata,
             [self.get_model_name()],

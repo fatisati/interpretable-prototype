@@ -72,6 +72,41 @@ def get_scgraph(
     # return save_append(scgr_res, save_path, "scgraph", name_postfix=name_postfix)
 
 
+def get_mc_scg(ad, mc_adata, bk, lk, _obsm_list):
+    scg = get_scg_obj(ad, bk, lk)
+    scg.preprocess()
+    scg.process_batches()
+    scg.calculate_consensus()
+    scg.adata = mc_adata
+    res_df = pd.DataFrame(columns=["Rank-PCA", "Corr-PCA", "Corr-Weighted"])
+
+    # self.concensus_df_pca.to_csv("concensus_df_pca_%s.csv"%self.trim_rate)
+    # exit()
+    for _obsm in _obsm_list:
+        adata_df = scg.adata_concensus(_obsm)
+        _row_df = pd.DataFrame(
+            {
+                "Rank-PCA": scg.rank_diff(adata_df, scg.concensus_df_pca).mean().values,
+                "Corr-PCA": scg.corr_diff(adata_df, scg.concensus_df_pca).mean().values,
+                "Corr-Weighted": scg.corrw_diff(adata_df, scg.concensus_df_pca).mean().values,
+            },
+            index=[_obsm],
+        )
+        res_df = pd.concat([res_df, _row_df], axis=0, sort=False)
+    # # suppose your original df is named res_df
+    # flat_df = res_df.stack().to_frame().T  # stack rows, then transpose back to 1 row
+    # flat_df.columns = [f"{row}_{col}" for row, col in flat_df.columns]
+    # flat_df.reset_index(drop=True, inplace=True)
+    return res_df
+
+def get_scg_obj(adata, bk, lk, **kwargs):
+    tmp_path = f"tmp_{uuid.uuid4().hex[:8]}.h5ad"
+
+    adata.write(tmp_path)
+    return scGraph(
+        adata_path=tmp_path, batch_key=bk, label_key=lk, **kwargs
+    )
+    
 def get_metrics(adata, emb_keys, bk, lk, **scgraph_kwargs):
     scg = get_scgraph(adata, emb_keys, bk, lk, **scgraph_kwargs)
     scb = get_scib(adata, emb_keys, bk, lk)
@@ -233,6 +268,8 @@ def get_scproto_mc_adata(t, adata, bk, lk, use_mean=True):
         sc.pp.log1p(metacells_adata)
     sc.tl.pca(metacells_adata)
     metacells_adata.obsm[f"{t.get_model_name()}_mc_pca"] = metacells_adata.obsm["X_pca"]
+    metacells_adata.var_names = adata.var_names
+    metacells_adata.obsm[f"{t.get_model_name()}_mc_proto"] = protos.cpu().numpy()
     return metacells_adata, sample_proto_sim
 
 
@@ -256,9 +293,12 @@ def load_seacell(ds_id, normalize=True):
 
 
 def get_metacell_metrics(
+    ad,
     mc_ad,
     obsm_keys,
     bk,
     lk,
 ):
-    return get_metrics(mc_ad, obsm_keys, bk, lk, thres_batch=10, thres_celltype=5)
+    scb = get_scib(mc_ad, obsm_keys, bk, lk)
+    scg = get_mc_scg(ad, mc_ad, bk, lk, obsm_keys)
+    return scg, scb

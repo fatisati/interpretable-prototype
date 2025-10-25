@@ -47,7 +47,7 @@ def load_tb(ds_id):
             return pd.read_csv(p, index_col = 0)
         else:
             print(p)
-    for key in ['scib', 'scgraph', 'mc_quality']:
+    for key in ['scib', 'scgraph', 'mc_quality_summary']:
         key_dfs = [load_csv(f"{p}{fol}/{key}.csv") for fol in os.listdir(p)]
         key_dfs = [df for df in key_dfs if df is not None]  # remove None objects
         if len(key_dfs)>0:
