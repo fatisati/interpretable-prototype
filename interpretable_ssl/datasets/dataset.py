@@ -24,6 +24,7 @@ class SingleCellDataset(Dataset):
         test_study_cnt=2,
         batch_key=None,
         label_key="cell_type",
+        **kwargs
     ):
         # self.device = utils.get_device()
         self.name = name
@@ -131,7 +132,7 @@ class SingleCellDataset(Dataset):
 
     def get_init_args(self):
         sig = inspect.signature(self.__init__)
-        return {p: getattr(self, p) for p in sig.parameters if p != "self"}
+        return {p: getattr(self, p) for p in sig.parameters if p not in ["self", 'kwargs']}
 
     def _create_split_instance(self, indices):
         """Create a new instance of the current class with the given indices of adata."""

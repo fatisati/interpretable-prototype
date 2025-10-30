@@ -30,6 +30,7 @@ class Trainer(TrainerBase):
     def __init__(self, dataset=None, ref_query=None, parser=None, **kwargs) -> None:
         parser_args = self.collect_parser_args(parser)
         kwargs.update(parser_args)
+        kwargs.update(DATASETS[kwargs['dataset_id']])
         self.dataset = dataset
         if "debug" not in kwargs:
             kwargs["debug"] = 0
@@ -138,8 +139,6 @@ class Trainer(TrainerBase):
         return z
 
     def adapt_model(self, model, adata, retrain_epochs=0):
-        adata = adata.copy()
-        adata.X = adata.layers.get("counts", adata.X)
         adapted_model = model
         if self.check_conditions_compatible(model, adata):
             if retrain_epochs == 0:
@@ -344,15 +343,23 @@ class Trainer(TrainerBase):
             os.remove(tmp_path)
             print("Deleted:", tmp_path)
         
-        de_jaccard = get_mc_jaccard(
+        get_mc_jaccard(
             mc_adata,
-            ad,
+            self.dataset.adata,
             self.dataset.label_key,
             self.dataset.batch_key,
             0.05,
             self.get_model_name(),
-        )
-        de_jaccard.to_csv(self.get_dump_path() + "/de_jaccard.csv")
+        ).to_csv(self.get_dump_path() + "/de_jaccard_all.csv")
+        
+        get_mc_jaccard(
+            mc_adata,
+            self.ref.adata,
+            self.dataset.label_key,
+            self.dataset.batch_key,
+            0.05,
+            self.get_model_name(),
+        ).to_csv(self.get_dump_path() + "/de_jaccard_ref.csv")
 
     def save_metrics(self):
         adata = add_trainer_emb(self, self.dataset.adata)
