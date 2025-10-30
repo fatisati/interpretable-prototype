@@ -29,7 +29,7 @@ from tqdm import tqdm
 
 from scipy.special import softmax
 from scipy import sparse
-
+from filelock import FileLock
 
 
 class MultiCropsDataset(MultiConditionAnnotatedDataset):
@@ -112,8 +112,10 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         if not self._is_sparse:
             self.data = torch.tensor(self.data, dtype=torch.float32)
 
-        if not self.affinities_exists():
-            self.ds_affinities = self.run_graph_generator()
+        lock_path = self.save_path + ".lock"
+        with FileLock(lock_path):  # wait up to 10 minutes
+            if not self.affinities_exists():
+                self.ds_affinities = self.run_graph_generator()
         self.set_affinities()
         self.use_manifold_weights = use_manifold_weights
         self.manifold = {}

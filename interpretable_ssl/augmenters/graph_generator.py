@@ -66,7 +66,6 @@ def compute_batch_affinities(adata_path, affinity_type, batch_key, n_comps, k):
         else:
             np.fill_diagonal(A, 0)
         ds_affinities[batch_id] = A
-        ds_affinities[batch_id] = generate_affinity(b_adata, k, affinity_type)
 
     return ds_affinities
 
