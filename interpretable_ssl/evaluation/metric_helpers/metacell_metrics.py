@@ -50,7 +50,7 @@ def compute_seacells(ad, n_SEACells, build_kernel_on="X_pca"):
 def avg_mc_quality_metrics(ad, bk, lk):
     batch_res = {}
     for b in ad.obs[bk].unique():
-        b_ad = ad[ad.obs.tech == b]
+        b_ad = ad[ad.obs[bk] == b]
         _, res_dict = mc_quality_metrics(
                 ad=b_ad, cell_type_key=lk
             )

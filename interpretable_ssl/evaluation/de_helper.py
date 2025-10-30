@@ -44,6 +44,9 @@ def calculate_avg_jaccard(mc_de, batch_de_dict, col_name=None):
 
 
 def get_mc_jaccard(mc_adata, ad, lk, bk, thr, name=None):
+    if ad.X.max() > 20:
+        ad = ad.copy()
+        ad.X = ad.layers['lognorm']
     mc_de = calc_dge(mc_adata, lk, thr)
     batch_de_dict = {}
     for b in ad.obs[bk].unique():

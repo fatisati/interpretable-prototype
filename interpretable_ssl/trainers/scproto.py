@@ -186,7 +186,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         if self.model_type == "gm":
             return scProtoGMVAE(temperature=self.temperature, beta=self.beta, **kwargs)
         if self.model_type == "vqvae":
-            return scProtoVQVAE(temperature=self.temperature, beta=self.beta, **kwargs)
+            return scProtoVQVAE(temperature=self.temperature, beta=self.beta, recon_update_target = self.recon_update_target, **kwargs)
         if self.model_type == "hybrid":
             return scProtoHybrid(temperature=self.temperature, beta=self.beta, **kwargs)
         else:
@@ -473,7 +473,7 @@ class SCProtoTrainer(AdoptiveTrainer):
 
         return z_swav, logits, cvae_loss, resp, propagation, sim
 
-    def compute_swav_loss(self, logits, z, bs, ds_id, manifold_scores=None, resp=None):
+    def compute_swav_loss(self, scores, z, bs, ds_id, manifold_scores=None, resp=None):
 
         loss, p_matched, q_matched, p_uncertainty, q_uncertainty, qproto_utilization = (
             0,
@@ -488,11 +488,11 @@ class SCProtoTrainer(AdoptiveTrainer):
         for view_idx, view_id in enumerate(self.views_for_assign):
             with torch.no_grad():
                 # outputs for 1 batch of data, [aug1s1, a1s2, a1s3, .., a1sb]
-                view_logits = logits[bs * view_id : bs * (view_id + 1)].detach()
+                view_scores = scores[bs * view_id : bs * (view_id + 1)].detach()
 
                 # with torch.no_grad(): not nessecary because both funcion has no grad decorator
                 sinkhorn_input = self.prepare_sinkhorn_input(
-                    view_idx, z, view_id, bs, view_logits, ds_id
+                    view_idx, z, view_id, bs, view_scores, ds_id
                 )
                 if self.cell_w_mode != "uniform":
                     cell_weights = manifold_scores[self.cell_w_mode][
@@ -500,14 +500,17 @@ class SCProtoTrainer(AdoptiveTrainer):
                     ]
                 else:
                     cell_weights = None  # uniform
-                q = self.sinkhorn(sinkhorn_input, cell_weights)
+                if self.sinkhorn_iterations == 0:
+                    q = F.softmax(view_scores / self.epsilon, dim=1)
+                else:
+                    q = self.sinkhorn(sinkhorn_input, cell_weights)
                 qassign_cnts = get_hard_assign_cnts(q)
-                max_active = min(logits.size(0), logits.size(1))
+                max_active = min(scores.size(0), scores.size(1))
                 qproto_utilization += (qassign_cnts != 0).sum().item() / max_active
                 q = q[-bs:]
                 q_uncertainty -= (q * (q.clamp_min(1e-8)).log()).sum(dim=1).mean()
 
-                p = F.softmax(view_logits / self.temperature, dim=1)
+                p = F.softmax(view_scores / self.temperature, dim=1)
                 p_uncertainty -= (p * (p.clamp_min(1e-8)).log()).sum(dim=1).mean()
 
             # check how consitent q is with other augmentations [cross entropy]
@@ -518,15 +521,15 @@ class SCProtoTrainer(AdoptiveTrainer):
 
             aug_view_ids = np.delete(np.arange(np.sum(self.nmb_views)), view_id)
             for v in aug_view_ids:
-                aug_logits = (
-                    logits[bs * v : bs * (v + 1)] / self.temperature
+                aug_scores = (
+                    scores[bs * v : bs * (v + 1)] / self.temperature
                 )  # logits for the v-th crop
-                self.check_finit(aug_logits, "p")
-                log_probs = F.log_softmax(aug_logits, dim=1)
+                self.check_finit(aug_scores, "p")
+                log_probs = F.log_softmax(aug_scores, dim=1)
                 subloss -= torch.mean(torch.sum(q * log_probs, dim=1))
 
-                vp_matched += get_matched_pairs_ratio(view_logits, aug_logits)
-                vq_matched += get_matched_pairs_ratio(q, aug_logits)
+                vp_matched += get_matched_pairs_ratio(view_scores, aug_scores)
+                vq_matched += get_matched_pairs_ratio(q, aug_scores)
 
             loss += subloss / len(aug_view_ids)
             p_matched += vp_matched / len(aug_view_ids)

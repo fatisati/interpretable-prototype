@@ -15,7 +15,7 @@ class OriginalTrainer(AdoptiveTrainer):
 
     def get_model(self):
         adata = self.train_.adata.copy()
-        adata.X = adata.layers.get("counts", adata.X)
+        # adata.X = adata.layers.get("counts", adata.X)
         condition_key = self.dataset.batch_key
         
         return scPoli(
@@ -84,7 +84,7 @@ class OriginalTrainer(AdoptiveTrainer):
     
     def adapt_model(self, wrapper, adata, retrain_epochs=0):
         adata = adata.copy()
-        adata.X = adata.layers.get("counts", adata.X)
+        # adata.X = adata.layers.get("counts", adata.X)
         if self.check_conditions_compatible(wrapper, adata):
             if retrain_epochs == 0:
                 return wrapper
