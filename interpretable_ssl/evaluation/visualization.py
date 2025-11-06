@@ -4,11 +4,25 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 import scanpy as sc
 from scipy.stats import gaussian_kde
+from collections import Counter
 
 random_state = 42
 
+def calc_umap_v2(z, proto=None, labels=None, k=10, metric="euclidean", random_state=0):
+    if torch.is_tensor(z): z = z.detach().cpu().numpy()
+    data = z if proto is None else np.vstack((z, proto.detach().cpu().numpy() if torch.is_tensor(proto) else proto))
+    adata = sc.AnnData(data)
+    sc.pp.neighbors(adata, use_rep="X", metric=metric, random_state=random_state)
+    sc.tl.umap(adata, random_state=random_state)
+    umap = adata.obsm["X_umap"]
+    if proto is None: return umap, None, None
+    z_umap, proto_umap = umap[:len(z)], umap[len(z):]
+    sim = adata.obsp["connectivities"].toarray()[len(z):, :len(z)]
+    topk = np.argsort(-sim, axis=1)[:, :k]
+    proto_labels = [Counter(labels[idx]).most_common(1)[0][0] for idx in topk]
+    return z_umap, proto_umap, proto_labels
 
-def calculate_umap(embeddings, prototypes=None, metric="cosine"):
+def calculate_umap(embeddings, prototypes=None, metric="euclidean"):
     num_cells = embeddings.shape[0]
 
     # Convert embeddings to numpy arrays if they are tensors

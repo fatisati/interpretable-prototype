@@ -67,13 +67,15 @@ def get_scgraph(
     if os.path.exists(tmp_path):
         os.remove(tmp_path)
         print("Deleted:", tmp_path)
+    else:
+        print(f'could not remove {tmp_path}')
     return scgr_res
     # save_path = f"{res_dir}/{dataset_name}/"
     # return save_append(scgr_res, save_path, "scgraph", name_postfix=name_postfix)
 
 
 def get_mc_scg(ad, mc_adata, bk, lk, _obsm_list):
-    scg = get_scg_obj(ad, bk, lk)
+    scg, tmp_path = get_scg_obj(ad, bk, lk)
     scg.preprocess()
     scg.process_batches()
     scg.calculate_consensus()
@@ -88,7 +90,9 @@ def get_mc_scg(ad, mc_adata, bk, lk, _obsm_list):
             {
                 "Rank-PCA": scg.rank_diff(adata_df, scg.concensus_df_pca).mean().values,
                 "Corr-PCA": scg.corr_diff(adata_df, scg.concensus_df_pca).mean().values,
-                "Corr-Weighted": scg.corrw_diff(adata_df, scg.concensus_df_pca).mean().values,
+                "Corr-Weighted": scg.corrw_diff(adata_df, scg.concensus_df_pca)
+                .mean()
+                .values,
             },
             index=[_obsm],
         )
@@ -97,16 +101,21 @@ def get_mc_scg(ad, mc_adata, bk, lk, _obsm_list):
     # flat_df = res_df.stack().to_frame().T  # stack rows, then transpose back to 1 row
     # flat_df.columns = [f"{row}_{col}" for row, col in flat_df.columns]
     # flat_df.reset_index(drop=True, inplace=True)
+    if os.path.exists(tmp_path):
+        os.remove(tmp_path)
+        print("Deleted:", tmp_path)
+    else:
+        print(f'could not remove {tmp_path}')
     return res_df
+
 
 def get_scg_obj(adata, bk, lk, **kwargs):
     tmp_path = f"tmp_{uuid.uuid4().hex[:8]}.h5ad"
-
     adata.write(tmp_path)
-    return scGraph(
-        adata_path=tmp_path, batch_key=bk, label_key=lk, **kwargs
-    )
-    
+    scg = scGraph(adata_path=tmp_path, batch_key=bk, label_key=lk, **kwargs)
+    return scg, tmp_path
+
+
 def get_metrics(adata, emb_keys, bk, lk, **scgraph_kwargs):
     scg = get_scgraph(adata, emb_keys, bk, lk, **scgraph_kwargs)
     scb = get_scib(adata, emb_keys, bk, lk)
@@ -115,8 +124,12 @@ def get_metrics(adata, emb_keys, bk, lk, **scgraph_kwargs):
 
 def save_metrics(adata, emb_keys, dataset, bk, lk, **scgraph_kwargs):
     scg_m, scib_m = get_metrics(adata, emb_keys, bk, lk, **scgraph_kwargs)
-    scib_m = save_append(scib_m, f'/home/icb/fatemehs.hashemig/models/{dataset}/baselines/', 'scib')
-    scg_m = save_append(scg_m, f'/home/icb/fatemehs.hashemig/models/{dataset}/baselines/', 'scgraph')
+    scib_m = save_append(
+        scib_m, f"/home/icb/fatemehs.hashemig/models/{dataset}/baselines/", "scib"
+    )
+    scg_m = save_append(
+        scg_m, f"/home/icb/fatemehs.hashemig/models/{dataset}/baselines/", "scgraph"
+    )
     return scib_m, scg_m
 
 
@@ -135,8 +148,8 @@ def save_trainer_metrics(t, dataset, append=True):
 
 
 def add_scvi_emb(adata, query_stu, bk, pt_epochs=None, ft_epochs=None):
-    adata.X = adata.layers.get('counts', adata.X)
-    print(f'adata.X max: {adata.X.max()}')
+    adata.X = adata.layers.get("counts", adata.X)
+    print(f"adata.X max: {adata.X.max()}")
     d = get_defaults()
     pt_epochs = pt_epochs or (d["pretraining_epochs"] + d["cvae_epochs"])
     ft_epochs = ft_epochs or d["ft_epochs"]
@@ -145,7 +158,7 @@ def add_scvi_emb(adata, query_stu, bk, pt_epochs=None, ft_epochs=None):
         range(len(ref)), test_size=0.1, random_state=42
     )
     train_ad = ref[train_ind].copy()
-    
+
     print(f"training scvi with ds size: {len(train_ad)} and {pt_epochs}, {ft_epochs}")
     # 1) Setup AnnData for scVI
     #    No need for common genes step since ref_adata comes from adata
@@ -159,7 +172,11 @@ def add_scvi_emb(adata, query_stu, bk, pt_epochs=None, ft_epochs=None):
     query_model = scvi.model.SCVI.load_query_data(adata, model)
     query_model.train(ft_epochs)
     key = "X_scvi"
-    key += f"_pt{pt_epochs}" if pt_epochs != (d["pretraining_epochs"] + d["cvae_epochs"]) else ""
+    key += (
+        f"_pt{pt_epochs}"
+        if pt_epochs != (d["pretraining_epochs"] + d["cvae_epochs"])
+        else ""
+    )
     key += f"_ft{ft_epochs}" if ft_epochs != d["ft_epochs"] else ""
     key += f'_uc_v{d["version"]}'
     return query_model.get_latent_representation(adata), key
@@ -226,10 +243,11 @@ def calc_adata_metrics(dataset, ds_conf):
     )
 
 
-def get_scproto_mc_adata(t, adata, bk, lk, use_mean=True):
+def get_scproto_mc_adata(t, adata, bk, lk, use_mean=False, use_max=True, model=None):
     import torch.nn as nn
 
-    model = t.load_model()
+    if model is None:
+        model = t.load_model()
     protos = model.get_prototypes().detach()
 
     if use_mean:
@@ -247,17 +265,26 @@ def get_scproto_mc_adata(t, adata, bk, lk, use_mean=True):
         batch = np.full((protos.shape[0], 1), last_idx)
         device = torch.device("cuda")
         model.scpoli_cvae.embeddings[0] = model.scpoli_cvae.embeddings[0].to(device)
+    elif use_max:
+        max_bid = adata.obs[bk].value_counts().idxmax()
+        max_bidx = t.train_ds.condition_encoders[bk][max_bid]
+        batch = np.full((protos.shape[0], 1), max_bidx)
     else:
         batch = np.zeros((protos.shape[0], 1))
     batch = torch.as_tensor(batch, dtype=torch.long, device="cuda")
 
-    sf = np.ravel(adata.layers.get("counts").sum(1))
-    sf = sf.mean()
-    print("decoding protos using avg sizefactor: ", sf)
-    sizefactor = np.full((protos.shape[0],), sf)
-    sizefactor = torch.as_tensor(sizefactor, dtype=torch.float, device="cuda")
-    metacells = model.decode(protos, batch, sizefactor)
-    z_vae = t.encode_adata(adata, model, z_idx = 1)
+    if t.recon_loss == "nb":
+        sf = np.ravel(adata.layers.get("counts").sum(1))
+        sf = sf.mean()
+        # but this is bad, maybe for each proto, use avg sizefactor of assigned cells
+        # but within the batch which yu are decoding
+        print("decoding protos using avg sizefactor: ", sf)
+        sizefactor = np.full((protos.shape[0],), sf)
+        sizefactor = torch.as_tensor(sizefactor, dtype=torch.float, device="cuda")
+        metacells = model.nb_decode(protos, batch, sizefactor)
+    else:
+        metacells = model.decode(protos, batch)
+    z_vae = t.encode_adata(adata, model, z_idx=1)
     # z_swav = t.encode_adata(adata, model)
     sample_proto_sim = t.get_proto_assignments(z_vae, model)
     proto_labels = extract_proto_labels(adata, sample_proto_sim, [bk, lk])
@@ -284,7 +311,7 @@ def get_scproto_metacell_metrics(
 
 def load_seacell(ds_id, normalize=True):
     home = "/home/icb/fatemehs.hashemig/"
-    ad = sc.read_h5ad(f'{home}/models/{ds_id}/seacell/seacell_sc.h5ad')
+    ad = sc.read_h5ad(f"{home}/models/{ds_id}/seacell/seacell_sc.h5ad")
     mc_ad = sc.read_h5ad(f"{home}/models/{ds_id}/seacell/seacell_agg.h5ad")
     if normalize:
         sc.pp.normalize_total(mc_ad, target_sum=1e4)

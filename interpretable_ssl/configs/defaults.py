@@ -26,10 +26,10 @@ def get_defaults():
         "size_crops": [224],  # swav specific
         "min_scale_crops": [0.14],  # swav specific
         "max_scale_crops": [1],  # swav specific
-        "views_for_assign": [0, 1],  # swav specific
+        "views_for_assign": [0],  # swav specific
         "nmb_views": [4],  # swav specific
         
-        "sinkhorn_iterations": 3,  # swav specific
+        "sinkhorn_iterations": 0,  # swav specific
         "feat_dim": 8,  # swav specific
         
         "cvae_reg": 0,  # swav specific
@@ -85,7 +85,7 @@ def get_defaults():
         "batch_sinkhorn": 1,
         "weighted_batch": 0,
         "knn_similarity": 'cosine',
-        "recon_loss": 'nb',
+        "recon_loss": 'mse',
         "no_sinkhorn": 0,
         "wandb_sweep": 0,
         "sweep_id": -1,
@@ -146,11 +146,16 @@ def get_defaults():
         'lambda_swav': 0.0,
         "lambda_proto": 0.0, # 1,
         "lambda_commit": 0.0, # 0.25
-        'assignment_metric': 'dotp',
+        'assignment_metric': 'dneuc',
         "model_type": 'vqvae',
         "l2norm": 0,
         
-        "version": 10,
+        "version": 16,
+        "recon_update_target": 'encoder',
+        "description": '15: +softmax for pos sampling, no loss norm',
+        'recon_type': 'normal',
+        'normalize_loss': 0,
+        'div_type': 'ce'
         # change to dotp in future
     }
     return defaults

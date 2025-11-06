@@ -51,8 +51,10 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         use_counts=True,
         n_proto=None,
         use_manifold_weights=False,
+        mc_size=100,
         **kwargs,
     ):
+        self.sc_ds = sc_ds
         self.n_proto = n_proto
         self.n_augmentations = n_augmentations
         self.adata = sc_ds.adata
@@ -64,19 +66,11 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         self.use_bknn = use_bknn
 
         self.save_dir = save_dir
-
-        self.graph_name = f"affinity_{str(sc_ds)}{len(sc_ds.adata)}_ncomp{self.n_components}_kneighbors{self.k_neighbors}_{affinity_type}"
-
         self.spatial = spatial
-        if self.spatial:
-            self.graph_name += "_spatial"
-        if sc_ds.fold != 0:
-            self.graph_name += f"_fold{sc_ds.fold}"
+        self.set_graph_name()
         self.adata_name = self.graph_name + "_tmp.h5ad"
-        self.graph_name += ".pkl"
-
         os.makedirs(self.save_dir, exist_ok=True)
-        self.save_path = os.path.join(save_dir, self.graph_name)
+        # self.save_path = os.path.join(save_dir, self.graph_name)
         self.adata_path = os.path.join(save_dir, self.adata_name)
 
         self.batch_key = kwargs["condition_keys"][0]
@@ -123,13 +117,24 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
             self.calc_manifold_weights()
         self.label_key = sc_ds.label_key
         self.return_label = True
-        self.temperature = 0.1
-        self.softmax = False
+        self.temperature = 0.05
+        self.softmax = True
+        self.k_pos = 10
         # if self.affinity_type == 'coaff':
         #     self.softmax = True
         # else:
         #     self.softmax = False
-        
+
+    def set_graph_name(self):
+        self.graph_name = f"affinity_{str(self.sc_ds)}{len(self.sc_ds.adata)}_ncomp{self.n_components}_kneighbors{self.k_neighbors}_{self.affinity_type}"
+
+        if self.spatial:
+            self.graph_name += "_spatial"
+        if self.sc_ds.fold != 0:
+            self.graph_name += f"_fold{self.sc_ds.fold}"
+        self.graph_name += ".pkl"
+        self.save_path = os.path.join(self.save_dir, self.graph_name)
+
     def calc_manifold_weights(self):
         print("calculating manifold scores...")
         self.manifold = {
@@ -205,16 +210,18 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         with open(config_file, "wb") as f:
             pickle.dump(args, f)
 
-        subprocess.Popen(
+        proc = subprocess.Popen(
             [
                 sys.executable,
+                "-u",  # unbuffered output!
                 "-m",
                 "interpretable_ssl.augmenters.graph_generator",
                 config_file,
                 self.save_path,
-            ]
+            ],
+            stdout=sys.stdout,  # pipe child stdout to parent stdout
+            stderr=sys.stderr,  # pipe child stderr to parent stderr
         )
-        # Wait for graph file
         while not os.path.exists(self.save_path):
             time.sleep(1)
 
@@ -254,6 +261,12 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         cols = row.indices
         vals = row.data
 
+        # --- NEW: restrict to Top-K neighbors ---
+        if len(vals) > self.k_pos:
+            top_idx = np.argpartition(-vals, self.k_pos - 1)[: self.k_pos]
+            cols = cols[top_idx]
+            vals = vals[top_idx]
+
         # Compute probabilities only on non-zero entries
         if self.softmax:
             probs = softmax(vals / self.temperature)
@@ -264,6 +277,10 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         sampled_cols = np.random.choice(
             cols, size=self.n_augmentations - 1, replace=False, p=probs
         )
+        # --- NEW PART: sort sampled neighbors by similarity ---
+        sampled_vals = vals[np.isin(cols, sampled_cols)]
+        order = np.argsort(-sampled_vals)  # descending order
+        sampled_cols = sampled_cols[order]  # reorder by similarity
 
         pos_idx = np.insert(sampled_cols, 0, local_idx)
         return [self.dataset_index_map[ds_id][i] for i in pos_idx]
@@ -278,6 +295,7 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
                 if self.return_idx
                 else {}
             )
+            | {'cell_idx': i}
             for i in indices
         ]
         return self.combine_augmented_data(items)
@@ -304,6 +322,7 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
             "wsigma",
             "zsigma",
             "ssigma",
+            'cell_idx'
         ]
         combined_data = {}
         for key in keys_to_stack:

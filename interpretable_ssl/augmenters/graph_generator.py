@@ -30,21 +30,35 @@ def diffusion_knn(batch_adata, k, n_proto):
 
 
 def generate_affinity(batch_ad, k, affinity_type="inverse_dist"):
+    print(affinity_type)
     if affinity_type == "inverse_dist":
         ind, dist = faiss_knn(batch_ad, k)
         inv_dist = 1.0 / (dist + 1e-8)  # avoid div by zero
         return inv_dist
 
-    elif affinity_type in ["arbf", "coaff"]:
+    elif affinity_type in ["arbf", "coaff", "ncoaff", 'sym-coaff']:
         import SEACells
         print('calculating seacell affinity')
         kernel_model = SEACells.build_graph.SEACellGraph(
             batch_ad, "X_pca", verbose=True
         )
-        M = kernel_model.rbf(k)
+        if affinity_type.startswith('sym'):
+            graph_construction = 'intersect'
+        else:
+            graph_construction = 'union'
+        M = kernel_model.rbf(k, graph_construction=graph_construction)
         if affinity_type == "coaff":
             return M @ M.T
-        else:
+        elif affinity_type == "ncoaff":
+            # --- L2 normalize rows to remove degree bias ---
+            row_norms = np.sqrt(M.multiply(M).sum(axis=1)).A1  # vector of ||M_i||
+            row_norms[row_norms == 0] = 1e-12                  # avoid division by 0
+            M_norm = M.multiply(1.0 / row_norms[:, None])      # each row -> unit L2 norm
+
+            # --- compute normalized co-affinity (cosine between rows of M) ---
+            C = M_norm @ M_norm.T                              # still sparse
+            return C
+        else: #arbf
             return M
 
     elif affinity_type == "umap":
