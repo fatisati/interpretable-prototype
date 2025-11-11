@@ -40,7 +40,7 @@ from interpretable_ssl.evaluation.prototype_metrics import *
 import torch
 from collections import Counter, defaultdict
 from interpretable_ssl.evaluation.cd4_marker import *
-from interpretable_ssl.trainers.swav_utils import *
+from interpretable_ssl.trainers.scproto_utils import *
 
 from interpretable_ssl.trainers.affinity import *
 from interpretable_ssl.trainers.scpoli_helpers import *
@@ -73,6 +73,13 @@ class SCProtoTrainer(AdoptiveTrainer):
         else:
             ds_cnt = 1
         self.ds_ids = range(ds_cnt)
+        self.loss_keys = [
+            "swav",
+            "recon",
+            "kl",
+            "proto",
+            "commit",
+        ]
 
     def setup(self):
         fix_random_seeds(self.seed)
@@ -84,6 +91,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         self.build_model()
         self.build_data()
         self.build_optimizer()
+
         # self.load_checkpoint()
 
     def build_data(self):
@@ -108,6 +116,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             use_counts=(self.use_counts == 1),
             n_proto=self.nmb_prototypes,
             use_manifold_weights=(self.cell_w_mode != "uniform"),
+            mc_size = self.mc_size,
             condition_encoders=scpoli_encoder.condition_encoders,
             conditions_combined_encoder=scpoli_encoder.conditions_combined_encoder,
             # cell_type_keys=[self.cell_type_key],
@@ -165,7 +174,9 @@ class SCProtoTrainer(AdoptiveTrainer):
         self.model = self.get_model()
         self.model = self.model.cuda()
         # logger.info(self.model)
-        logger.info(f"=======>Building model done. max value for adata fed to scpoli_wrapper: {self.model.scpoli_wrapper.adata.X.max()}")
+        logger.info(
+            f"=======>Building model done. max value for adata fed to scpoli_wrapper: {self.model.scpoli_wrapper.adata.X.max()}"
+        )
 
     def get_model(self):
         # if self.model_version == 1:
@@ -186,7 +197,12 @@ class SCProtoTrainer(AdoptiveTrainer):
         if self.model_type == "gm":
             return scProtoGMVAE(temperature=self.temperature, beta=self.beta, **kwargs)
         if self.model_type == "vqvae":
-            return scProtoVQVAE(temperature=self.temperature, beta=self.beta, recon_update_target = self.recon_update_target, **kwargs)
+            return scProtoVQVAE(
+                temperature=self.temperature,
+                beta=self.beta,
+                recon_update_target=self.recon_update_target,
+                **kwargs,
+            )
         if self.model_type == "hybrid":
             return scProtoHybrid(temperature=self.temperature, beta=self.beta, **kwargs)
         else:
@@ -272,6 +288,8 @@ class SCProtoTrainer(AdoptiveTrainer):
             print(log_dict)
 
     def train(self, epochs=None):
+        self.lambda_loss = self.init_lambda_loss()
+        self.setup_scheduler()
         self.create_dump_path()
         self.build_optimizer()
         cudnn.benchmark = True
@@ -297,6 +315,10 @@ class SCProtoTrainer(AdoptiveTrainer):
             test_meters = self.test_epoch()
             test_meters = {f"test_{key}": val for key, val in test_meters.items()}
 
+            scores = self.encode_adata(self.train_.adata, self.model, z_idx=1)
+            cell_ids = self.train_.adata.obs_names
+            train_meters['overal_compactness'], train_meters['overal_separation'] = self.calc_mc_quality(cell_ids, scores, 'train')
+            
             self.log_wandb_loss(train_meters | test_meters, epoch)
             self.save_checkpoint(epoch)
 
@@ -305,6 +327,44 @@ class SCProtoTrainer(AdoptiveTrainer):
         #     self.save_checkpoint(epoch + self.ft_epochs)
 
         return train_meters | test_meters
+
+    def init_lambda_loss(self):
+        meters = {
+            "loss": AverageMeter(),
+        }
+        for it, inputs in enumerate(self.train_loader):
+            bs = inputs["x"].size(0)
+            inputs = {k: inputs[k].transpose(0, 1) for k in inputs.keys()}
+
+            for ds_id in self.ds_ids:
+                loss, meters, assign_cnts = self.calc_ds_loss(inputs, ds_id, meters, bs, self.train_ds.adata, 'train')
+        meters = {k: getattr(v, "avg", v) for k, v in meters.items()}
+        lambda_weight = {
+            key: getattr(self, f"lambda_{key}")
+            for key in self.loss_keys
+            if hasattr(self, f"lambda_{key}")
+        }
+        print("======>", lambda_weight)
+        lambda_loss = {}
+        for loss_key in self.loss_keys:
+            lambda_loss[loss_key] = lambda_weight[loss_key] / meters[loss_key]
+            if self.normalize_loss:
+                setattr(self, f"lambda_{loss_key}", lambda_loss[loss_key])
+        print(lambda_loss)
+        if self.normalize_loss:
+            return lambda_loss
+        else:
+            return lambda_weight
+
+    def setup_scheduler(self):
+        self.steps_per_epoch = len(self.train_loader)
+        self.total_steps = self.pretraining_epochs * self.steps_per_epoch
+        self.warmup_steps = int(0.2 * self.total_steps)
+
+    def update_lambda(self, itr):
+        self.lambda_loss["kl"] = kl_scheduler(
+            itr, warmup_steps=self.warmup_steps, max_lambda=self.lambda_kl
+        )
 
     def train_epoch(self, epoch):
         self.model.train()
@@ -325,7 +385,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             meters["data_time"].update(time.time() - end)
             iteration = epoch * len(self.train_loader) + it
             self.update_learning_rate(iteration)
-
+            # self.update_lambda(iteration)
             # normalize prototypes
             if self.l2norm == 1:
                 with torch.no_grad():
@@ -339,7 +399,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             self.optimizer.zero_grad()
 
             for ds_id in self.ds_ids:
-                loss, meters, assign_cnts = self.calc_ds_loss(inputs, ds_id, meters, bs)
+                loss, meters, assign_cnts = self.calc_ds_loss(inputs, ds_id, meters, bs, self.train_ds.adata, 'train')
                 ds_assign_cnts[ds_id] += assign_cnts.cpu().numpy()
                 loss.backward()
 
@@ -381,9 +441,9 @@ class SCProtoTrainer(AdoptiveTrainer):
 
         return meters
 
-    def calc_ds_loss(self, inputs, ds_id, meters, bs):
+    def calc_ds_loss(self, inputs, ds_id, meters, bs, ad, split):
         ds_inputs = {k: inputs[k][ds_id] for k in inputs.keys()}
-        metrics, assign_cnts = self._process_batch(ds_inputs, ds_id)
+        metrics, assign_cnts = self._process_batch(ds_inputs, ds_id, ad, split)
         # averaged = self._average_metrics(metrics)
         # Update meters
         for key in metrics:
@@ -393,66 +453,67 @@ class SCProtoTrainer(AdoptiveTrainer):
                 metrics[key].item() if hasattr(metrics[key], "item") else metrics[key]
             )
             meters[key].update(value, bs)
-
-        loss = (
-            metrics["swav"] * self.lambda_swav
-            + metrics["recon"] * self.lambda_recon
-            + metrics["kl"] * self.lambda_kl
-            + metrics["kl_balance"] * self.lambda_balance
-            + metrics["proto_loss"] * self.lambda_proto
-            + metrics["commitment_loss"] * self.lambda_commit
-            + metrics["z_norm"] * self.lambda_l2
-            + metrics["proto_norm"] * self.lambda_l2
-        )
-        meters["loss"].update(loss.item(), bs)
+        # loss = (
+        #     metrics["swav"] * self.lambda_swav
+        #     + metrics["recon"] * self.lambda_recon
+        #     + metrics["kl"] * self.lambda_kl
+        #     + metrics["kl_balance"] * self.lambda_balance
+        #     + metrics["proto_loss"] * self.lambda_proto
+        #     + metrics["commitment_loss"] * self.lambda_commit
+        #     + metrics["z_norm"] * self.lambda_l2
+        #     + metrics["proto_norm"] * self.lambda_l2
+        # )
+        if hasattr(self, "lambda_loss"):
+            loss = torch.stack(
+                [metrics[k] * self.lambda_loss[k] for k in self.loss_keys]
+            ).sum()
+            meters["loss"].update(loss.item(), bs)
+        else:  # when init lambda loss
+            loss = -1
         return loss, meters, assign_cnts
 
-    def _process_batch(self, inputs, ds_id):
+    def _process_batch(self, inputs, ds_id, ad, split):
         bs = inputs["x"].size(0)
         inputs = self.dict_to_device(inputs)
         inputs = reshape_and_reorder_dict(inputs)
         # manifold_keys = ['sigma', '', 'heterogeneity', 'mf_score']
         manifold_keys = self.train_ds.manifold.keys()
         manifold_scores = {k: inputs.pop(k, None) for k in manifold_keys}
+        cell_idx = inputs.pop('cell_idx', None).cpu().numpy()
+        cell_ids = [ad.obs.index[i] for i in cell_idx]
+        sim = inputs.pop('sim', None)
         # label = inputs.pop(self.dataset.label_key)
-        z, _, logits, recon, (proto_loss, commitment_loss), kl, kl_balance = self.model(
+        z, _, scores, recon, (proto_loss, commitment_loss), kl, kl_balance = self.model(
             inputs
         )
-
+        if self.recon_type == 'swapped' or self.recon_type == 'hybrid':
+            swapped_recon = self.calc_swapped_recon(z, scores, bs, inputs)
+            if self.recon_type == 'swapped':
+                recon = swapped_recon
+            else:
+                recon = 0.8*recon + 0.2*swapped_recon
         z_norm = z.norm(dim=1).mean()
         proto_norm = self.model.get_prototypes().norm(dim=1).mean()
         # z, logits, cvae_loss, resp, propagation, sim = self.parse_model_output(outputs)
         z = z.detach()
-
-        if self.lambda_swav != 0:
-            (
-                swav_loss,
-                p_matched,
-                q_matched,
-                qproto_utilization,
-                p_uncertainty,
-                q_uncertainty,
-            ) = self.compute_swav_loss(logits, z, bs, ds_id, manifold_scores, None)
-        else:
-            (
-                swav_loss,
-                p_matched,
-                q_matched,
-                qproto_utilization,
-                p_uncertainty,
-                q_uncertainty,
-            ) = (0, 0, 0, 0, 0, 0)
-
-        assign_cnts = get_hard_assign_cnts(logits)
-        max_active = min(logits.size(0), logits.size(1))
-
+        (
+            swav_loss,
+            p_matched,
+            q_matched,
+            qproto_utilization,
+            p_uncertainty,
+            q_uncertainty,
+        ) = self.compute_swav_loss(scores, z, bs, ds_id, manifold_scores, None, sim=sim)
+        assign_cnts = get_hard_assign_cnts(scores)
+        max_active = min(scores.size(0), scores.size(1))
+        compactness, separation = self.calc_mc_quality(cell_ids, scores, split)
         return {
             "swav": swav_loss,
             "recon": recon,
             "kl": kl,
             "kl_balance": kl_balance,
-            "proto_loss": proto_loss,
-            "commitment_loss": commitment_loss,
+            "proto": proto_loss,
+            "commit": commitment_loss,
             "p_matched": p_matched,
             "q_matched": q_matched,
             "z_norm": z_norm,
@@ -461,8 +522,29 @@ class SCProtoTrainer(AdoptiveTrainer):
             "qproto_utilization": qproto_utilization,
             "p_uncertainty": p_uncertainty,
             "q_uncertainty": q_uncertainty,
+            'compactness': compactness,
+            'separation': separation
         }, assign_cnts
 
+    def calc_swapped_recon(self, z, scores, bs, inputs):
+        loss = 0
+        
+        for view_id in self.views_for_assign:
+            view_scores = scores[bs * view_id : bs * (view_id + 1)].detach()
+            view_codes = view_scores.argmax(dim=1)
+
+            # calc recon loss by closet proto to pos pairs
+            subloss = 0
+            aug_view_ids = np.delete(np.arange(np.sum(self.nmb_views)), view_id)
+            for v in aug_view_ids:
+                aug_z = z[bs * v : bs * (v + 1)]
+                aug_inputs = {k: inputs[k][bs * v : bs * (v + 1)] for k in inputs}
+                recon_loss, _, _ = self.model.quantized_recon_step(aug_z, view_codes, **aug_inputs)
+                subloss += recon_loss
+
+            loss += subloss / len(aug_view_ids)
+        return loss / len(self.views_for_assign)
+    
     def parse_model_output(self, outputs):
         if self.model_type == "gm":
             z_swav, _, logits, cvae_loss, (propagation, sim), resp = outputs
@@ -473,7 +555,9 @@ class SCProtoTrainer(AdoptiveTrainer):
 
         return z_swav, logits, cvae_loss, resp, propagation, sim
 
-    def compute_swav_loss(self, scores, z, bs, ds_id, manifold_scores=None, resp=None):
+    def compute_swav_loss(self, scores, z, bs, ds_id, manifold_scores=None, resp=None, sim=None):
+        if sim is None or self.weighted_kl == 0:
+            sim = torch.ones(z.size(0), device=z.device, dtype=z.dtype)
 
         loss, p_matched, q_matched, p_uncertainty, q_uncertainty, qproto_utilization = (
             0,
@@ -513,23 +597,38 @@ class SCProtoTrainer(AdoptiveTrainer):
                 p = F.softmax(view_scores / self.temperature, dim=1)
                 p_uncertainty -= (p * (p.clamp_min(1e-8)).log()).sum(dim=1).mean()
 
-            # check how consitent q is with other augmentations [cross entropy]
-            subloss = 0
-            vp_matched, vq_matched = 0, 0
             if self.hard_clustering == 1:
                 q = self.hard_clusters(q)
 
+            # check how consitent q is with other augmentations [cross entropy]
+            subloss = 0
+            vp_matched, vq_matched = 0, 0
             aug_view_ids = np.delete(np.arange(np.sum(self.nmb_views)), view_id)
             for v in aug_view_ids:
-                aug_scores = (
-                    scores[bs * v : bs * (v + 1)] / self.temperature
-                )  # logits for the v-th crop
+                aug_scores = scores[bs * v : bs * (v + 1)] / self.temperature
                 self.check_finit(aug_scores, "p")
-                log_probs = F.log_softmax(aug_scores, dim=1)
-                subloss -= torch.mean(torch.sum(q * log_probs, dim=1))
+
+                # p and log(p)
+                log_p = F.log_softmax(aug_scores, dim=1)
+                p = log_p.exp()  # numerically consistent with log_p
+
+                if self.div_type == "kl":
+                    # ----- KL(p‖q) variant -----
+                    # Only clamp q to avoid log(0)
+                    log_q = q.clamp_min(1e-8).log()
+                    # KL(p||q) = sum_i p_i * (log p_i - log q_i)
+                    kl = torch.sum(p * (log_p - log_q), dim=1) * sim[bs * v : bs * (v + 1)]
+                    subloss += kl.mean()
+                else:
+                    # ----- default CE (≈ KL(q‖p)) -----
+                    # CE = -∑ q_i * log p_i
+                    ce = -torch.sum(q * log_p, dim=1) * sim[bs * v : bs * (v + 1)]
+                    subloss += ce.mean()  # add (no explicit minus outside loop)
 
                 vp_matched += get_matched_pairs_ratio(view_scores, aug_scores)
                 vq_matched += get_matched_pairs_ratio(q, aug_scores)
+
+
 
             loss += subloss / len(aug_view_ids)
             p_matched += vp_matched / len(aug_view_ids)
@@ -556,7 +655,7 @@ class SCProtoTrainer(AdoptiveTrainer):
                 meters = {"loss": AverageMeter()}
 
                 for ds_id in self.ds_ids:
-                    _, meters, _ = self.calc_ds_loss(inputs, ds_id, meters, bs)
+                    _, meters, _ = self.calc_ds_loss(inputs, ds_id, meters, bs, self.test_ds.adata, 'val')
         meters = {k: getattr(v, "avg", v) for k, v in meters.items()}
         return meters
 

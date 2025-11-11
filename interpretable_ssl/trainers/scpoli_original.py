@@ -55,7 +55,7 @@ class OriginalTrainer(AdoptiveTrainer):
         model.model.load_state_dict(torch.load(path)["model_state_dict"])
         return model
 
-    def encode_batch(self, model, batch, return_mapped=False, return_mapped_idx=False):
+    def encode_batch(self, model, batch, **kwargs):
         batch = self.dict_to_device(batch)
         scpoli_model = self.extract_scpoli(model)
         scpoli_model.to(self.device)

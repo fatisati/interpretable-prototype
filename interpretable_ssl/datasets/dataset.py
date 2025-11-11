@@ -24,9 +24,11 @@ class SingleCellDataset(Dataset):
         test_study_cnt=2,
         batch_key=None,
         label_key="cell_type",
+        use_counts=False,
         **kwargs
     ):
         # self.device = utils.get_device()
+        self.use_counts = use_counts
         self.name = name
         self.batch_key = batch_key
 
@@ -54,6 +56,9 @@ class SingleCellDataset(Dataset):
         self.study_list = None
         self.test_study_cnt = test_study_cnt
 
+    def get_dc_path(self):
+        return f'./dc/{self.name}{len(self.adata)}.csv'
+    
     def __str__(self) -> str:
         return self.name
 
@@ -82,12 +87,18 @@ class SingleCellDataset(Dataset):
         
         if self.adata.X.max() < 30:
             self.adata.layers["lognorm"] = self.adata.X.copy()
-            self.adata.X = self.adata.layers.get('counts', self.adata.X)
+            if self.use_counts:
+                self.adata.X = self.adata.layers.get('counts', self.adata.X)
+        # data is not normalized
         else:
+            # copy to calc lognorm data
             ad = self.adata.copy()
             sc.pp.normalize_total(ad, target_sum=1e4)
             sc.pp.log1p(ad)
             self.adata.layers["lognorm"] = ad.X.copy()
+            # if we do not want raw counts, update adata.X
+            if not self.use_counts: 
+                self.adata.X = ad.X
             
         # check if hvg not applied apply it
         if self.requires_hvg():

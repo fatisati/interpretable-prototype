@@ -1,4 +1,5 @@
 import torch
+import math
 
 def get_hard_assign_cnts(logits):
     assignments = logits.argmax(dim=1)
@@ -48,3 +49,11 @@ def get_matched_pairs_ratio(pt, ps):
     # Count number of matched prototype assignments
     matched = (pt_assign == ps_assign).sum().item() / len(pt_assign)
     return matched
+
+
+def kl_scheduler(step, warmup_steps=5000, max_lambda=0.02):
+    """Cosine warm-up for KL coefficient (λ_kl)."""
+    if step >= warmup_steps:
+        return max_lambda
+    # smooth start: almost 0 → max_lambda
+    return max_lambda * (1 - math.cos(math.pi * step / warmup_steps)) / 2

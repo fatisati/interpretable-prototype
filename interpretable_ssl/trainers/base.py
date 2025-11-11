@@ -9,7 +9,7 @@ from interpretable_ssl.model_name import generate_model_name
 from scarches.dataset.scpoli.anndata import MultiConditionAnnotatedDataset
 import scarches.trainers.scpoli._utils as scpoli_utils
 from torch.utils.data import DataLoader
-
+from interpretable_ssl.datasets.dataset_configs import DATASETS
 
 class TrainerBase:
     # @log_time('trainer base')
@@ -22,6 +22,7 @@ class TrainerBase:
     def init_attributes(self, **kwargs):
         params = get_defaults().copy()
         params.update(kwargs)
+        params.update(DATASETS[params['dataset_id']])
         for key, value in params.items():
             setattr(self, key, value)
         return params

@@ -3,6 +3,7 @@ from torch.utils.data import random_split
 from logging import getLogger
 from interpretable_ssl.utils import log_time
 from interpretable_ssl.trainers.cvae_trainer import CvaeTrainer
+from sklearn.neighbors import NearestNeighbors
 
 logger = getLogger()
 
@@ -90,7 +91,7 @@ class AdoptiveTrainer(Trainer):
 
     def save_checkpoint(self, epoch):
         pass
-    
+        
     def run(self):
         
         if not (self.debug==1):

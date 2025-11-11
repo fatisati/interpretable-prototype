@@ -29,7 +29,7 @@ def get_defaults():
         "views_for_assign": [0],  # swav specific
         "nmb_views": [4],  # swav specific
         
-        "sinkhorn_iterations": 0,  # swav specific
+        "sinkhorn_iterations": 3,  # swav specific
         "feat_dim": 8,  # swav specific
         
         "cvae_reg": 0,  # swav specific
@@ -122,8 +122,8 @@ def get_defaults():
         
         "hard_clustering": 0,
         
-        "temperature": 0.1,  # swav specific, lower make sharper assignment of z to protos, swav default 0.1
-        "epsilon": 0.05,  # swav specific, swav default: 0.05 
+        "temperature": 1.0,  # swav specific, lower make sharper assignment of z to protos, swav default 0.1
+        "epsilon": 0.5,  # swav specific, swav default: 0.05 
         
         "epoch_queue_starts": 0, # used to be 5
         "queue_length":  0,
@@ -150,12 +150,13 @@ def get_defaults():
         "model_type": 'vqvae',
         "l2norm": 0,
         
-        "version": 16,
+        "version": 18,
         "recon_update_target": 'encoder',
-        "description": '15: +softmax for pos sampling, no loss norm',
+        "description": '17: calc affinity on whole datase instead of batch wise',
         'recon_type': 'normal',
-        'normalize_loss': 0,
-        'div_type': 'ce'
+        'normalize_loss': 1,
+        'div_type': 'kl',
+        'weighted_kl': 1
         # change to dotp in future
     }
     return defaults

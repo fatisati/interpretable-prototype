@@ -24,13 +24,17 @@ from sklearn.model_selection import train_test_split
 
 from interpretable_ssl.evaluation.de_helper import *
 
+import math
+from filelock import FileLock, Timeout
+import time
+from sklearn.neighbors import NearestNeighbors
+
 
 class Trainer(TrainerBase):
     # @log_time('scpoli trainer')
     def __init__(self, dataset=None, ref_query=None, parser=None, **kwargs) -> None:
         parser_args = self.collect_parser_args(parser)
         kwargs.update(parser_args)
-        kwargs.update(DATASETS[kwargs['dataset_id']])
         self.dataset = dataset
         if "debug" not in kwargs:
             kwargs["debug"] = 0
@@ -46,17 +50,98 @@ class Trainer(TrainerBase):
         else:
             self.ref, self.query = ref_query
 
+        if self.study_id != "":
+            mask = self.ref.adata.obs[self.condition_key] == self.study_id
+            self.ref.adata = self.ref.adata[mask].copy()
+
         train_ind, val_ind = train_test_split(
             range(len(self.ref)), test_size=0.1, random_state=42
         )
         self.train_, self.val_ = self.ref._create_split_instance(
             train_ind
         ), self.ref._create_split_instance(val_ind)
+        self.calc_dataset_dc(self.train_)
+        self.calc_dataset_dc(self.val_)
+        self.dc_dict = {}
+        self.dc_path = {'train': self.train_.get_dc_path(), 'val': self.val_.get_dc_path()}
         self.condition_key = self.ref.batch_key
-        if self.study_id != "":
-            mask = self.ref.adata.obs[self.condition_key] == self.study_id
-            self.ref.adata = self.ref.adata[mask].copy()
+        self.mc_size = math.ceil(len(self.dataset) / self.num_prototypes)
 
+    def calc_dataset_dc(self, ds: SingleCellDataset):
+        
+        dc_path = ds.get_dc_path()
+        if os.path.exists(dc_path):
+            return
+        lock_path = dc_path + ".lock"
+
+        if not os.path.exists(lock_path):
+            print('calling calc dc...')
+            open(lock_path, "w").close()
+            ad_path = f"{dc_path.replace('.csv', '')}_tmp.h5ad"
+            ds.adata.write(ad_path)
+            subprocess.Popen(
+                [
+                    sys.executable,
+                    "-u",
+                    "-m",
+                    "interpretable_ssl.evaluation.diffusion",
+                    ad_path,
+                    dc_path,
+                    lock_path,  # pass lock path
+                    self.dataset.batch_key
+                ],
+                stdout=sys.stdout,
+                stderr=sys.stderr,
+            )
+        else:
+            print(f"Skip: {dc_path} already being processed.")
+    
+    def get_dc(self, split):
+        if split in self.dc_dict:
+            return self.dc_dict[split]
+        path = self.dc_path[split]
+        print(f'waiting for {path} to be generated...')
+        while not os.path.exists(path):
+            time.sleep(1)  # wait 5 seconds before checking again
+        self.dc_dict[split] = pd.read_csv(self.dc_path[split], index_col = 0)
+        print('done')
+        return self.dc_dict[split]
+    
+    def calc_mc_quality(self, cell_ids, scores, split, nth_nbr=1):
+        dc = self.get_dc(split).loc[cell_ids]
+        mc_labels = scores.argmax(axis=1).detach().cpu().numpy()
+
+        df = pd.DataFrame(dc.values, index=cell_ids)
+        df["mc"] = mc_labels
+
+        if split == "train":
+            df["batch"] = self.train_.adata.obs.loc[cell_ids, self.dataset.batch_key].values
+        else:
+            df["batch"] = self.val_.adata.obs.loc[cell_ids, self.dataset.batch_key].values
+
+        batch_metrics = []
+
+        for b, sub in df.groupby("batch"):
+            # --- Compactness ---
+            compactness = sub.groupby("mc").var(numeric_only=True).fillna(0).mean(axis=1).mean()
+
+            # --- Separation ---
+            mc_means = sub.groupby("mc").mean().drop(columns=["mc", "batch"], errors="ignore")
+            if len(mc_means) > nth_nbr:
+                nn = NearestNeighbors(n_neighbors=nth_nbr + 1, metric="euclidean").fit(mc_means)
+                dists, _ = nn.kneighbors(mc_means)
+                separation = dists[:, nth_nbr].mean()
+            else:
+                separation = np.nan
+
+            batch_metrics.append((compactness, separation))
+
+        compactness_mean = np.nanmean([c for c, _ in batch_metrics])
+        separation_mean = np.nanmean([s for _, s in batch_metrics])
+
+        return compactness_mean, separation_mean
+
+    
     def collect_parser_args(self, parser):
         if parser is not None:
             parser = self.add_parser_args(parser)
@@ -247,21 +332,22 @@ class Trainer(TrainerBase):
     def plot_umap(self, model, adata, split, save_plot=True, use_knn=True):
         z = self.encode_adata(adata, model, z_idx=1)
         prototypes = self.get_model_prototypes(model)
-        z_umap, prototype_umap = calculate_umap(z, prototypes)
+        z_umap, prototype_umap, proto_labels = calc_umap_v2(
+            z, prototypes, adata.obs[self.dataset.label_key], 5
+        )
         obs = adata.obs
-        if prototypes is not None:
-            # prototype_assignments = self.encode_adata(adata, model, True, False)
-            scores = self.get_proto_assignments(z, model)
-            proto_df = assign_prototype_labels(
-                adata,
-                scores,
-                self.num_prototypes,
-                cell_type_column=self.dataset.label_key,
-                use_knn=use_knn,
-            )
-            proto_labels = proto_df.prototype_label
-        else:
-            proto_labels = None
+        # if prototypes is not None:
+        #     # prototype_assignments = self.encode_adata(adata, model, True, False)
+        #     scores = self.get_proto_assignments(z, model)
+        #     proto_df = assign_prototype_labels(
+        #         adata,
+        #         scores,
+        #         self.num_prototypes,
+        #         cell_type_column=self.dataset.label_key,
+        #         use_knn=use_knn,
+        #     )
+        # proto_labels = proto_df.prototype_label
+
         if self.cell_w_mode != "uniform":
             w = adata.obs.get(self.cell_w_mode, None)
             w_label = self.cell_w_mode
@@ -307,12 +393,9 @@ class Trainer(TrainerBase):
     def save_metacell_metrics(self):
         ad = self.train_.adata.copy()
         mc_adata, sim = get_scproto_mc_adata(
-            self,
-            ad,
-            self.dataset.batch_key,
-            self.dataset.label_key,
+            self, ad, self.dataset.batch_key, self.dataset.label_key, self.model
         )
-        ad.X = ad.layers['lognorm']
+        ad.X = ad.layers["lognorm"]
         mc_scg, mc_scb = get_metacell_metrics(
             ad,
             mc_adata,
@@ -342,7 +425,7 @@ class Trainer(TrainerBase):
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
             print("Deleted:", tmp_path)
-        
+
         get_mc_jaccard(
             mc_adata,
             self.dataset.adata,
@@ -351,7 +434,7 @@ class Trainer(TrainerBase):
             0.05,
             self.get_model_name(),
         ).to_csv(self.get_dump_path() + "/de_jaccard_all.csv")
-        
+
         get_mc_jaccard(
             mc_adata,
             self.ref.adata,
@@ -365,7 +448,7 @@ class Trainer(TrainerBase):
         adata = add_trainer_emb(self, self.dataset.adata)
         if adata.X.max() > 50:
             adata = adata.copy()
-            adata.X = adata.layers['lognorm']
+            adata.X = adata.layers["lognorm"]
         params = (
             adata,
             [self.get_model_name()],
@@ -380,7 +463,9 @@ class Trainer(TrainerBase):
 
     def get_dataset(self, dataset_id):
         ds_params = DATASETS[dataset_id]
-        return SingleCellDataset(name=dataset_id, **ds_params)
+        return SingleCellDataset(
+            name=dataset_id, use_counts=self.recon_loss == "nb", **ds_params
+        )
 
     def init_wandb(self, path=None):
         if self.debug == 1:

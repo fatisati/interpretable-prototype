@@ -49,6 +49,7 @@ def compute_seacells(ad, n_SEACells, build_kernel_on="X_pca"):
 
 
 def avg_mc_quality_metrics(ad, bk, lk):
+    sc.tl.pca(ad)
     batch_res = {}
     for b in ad.obs[bk].unique():
         b_ad = ad[ad.obs[bk] == b]
@@ -99,8 +100,6 @@ def avg_mc_quality_metrics(ad, bk, lk):
 
 
 def mc_quality_metrics(ad, cell_type_key="celltype"):
-    print("calc pca for a batch")
-    sc.tl.pca(ad)
     purity = SEACells.evaluate.compute_celltype_purity(ad, cell_type_key)
     compactness = SEACells.evaluate.compactness(ad, "X_pca")
     separation = SEACells.evaluate.separation(ad, "X_pca", nth_nbr=1)
