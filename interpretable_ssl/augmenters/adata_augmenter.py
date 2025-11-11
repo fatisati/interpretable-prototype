@@ -60,7 +60,7 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         self.adata = sc_ds.adata
         self.k_neighbors = k_neighbors
         self.n_components = n_components
-        self.ds_affinities = None
+        self.aff = None
         self.affinity_type = affinity_type
         self.supervised_ratio = supervised_ratio
         self.use_bknn = use_bknn
@@ -107,9 +107,10 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
             self.data = torch.tensor(self.data, dtype=torch.float32)
 
         lock_path = self.save_path + ".lock"
-        with FileLock(lock_path):  # wait up to 10 minutes
-            if not self.affinities_exists():
-                self.ds_affinities = self.run_graph_generator()
+        if not self.affinities_exists():
+            with FileLock(lock_path):
+                self.aff = self.run_graph_generator(lock_path)
+
         self.set_affinities()
         self.use_manifold_weights = use_manifold_weights
         self.manifold = {}
@@ -195,7 +196,7 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         w = np.clip(w, clip[0], clip[1])
         return w, z, softmax(alpha * z)
 
-    def run_graph_generator(self):
+    def run_graph_generator(self, lock_path):
         print(f"[{os.getpid()}] Generating affinities...")
         self.adata.write(self.adata_path)
         args = (
@@ -218,6 +219,7 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
                 "interpretable_ssl.augmenters.graph_generator",
                 config_file,
                 self.save_path,
+                lock_path
             ],
             stdout=sys.stdout,  # pipe child stdout to parent stdout
             stderr=sys.stderr,  # pipe child stderr to parent stderr
@@ -227,7 +229,7 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
 
         # Load result
         with open(self.save_path, "rb") as f:
-            ds_affinities = pickle.load(f)
+            aff = pickle.load(f)
 
         # Cleanup temporary files
         try:
@@ -235,7 +237,7 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
             os.remove(self.adata_path)
         except FileNotFoundError:
             pass
-        return ds_affinities
+        return aff
 
     def __len__(self):
         return max(
@@ -249,13 +251,14 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         items = []
         for ds_id in self.dataset_index_map.keys():
             local_idx = index % len(self.dataset_index_map[ds_id])
-            pos_global_ids = self.get_positive_samples(local_idx, ds_id)
+            pos_global_ids, pos_probs = self.get_positive_samples(local_idx, ds_id)
             global_idx = self.dataset_index_map[ds_id][local_idx]
-            items.append(self.assemble_from_indices(pos_global_ids, global_idx))
+            items.append(self.assemble_from_indices(pos_global_ids, global_idx, pos_probs))
         return self.combine_augmented_data(items)
 
     def get_positive_samples(self, local_idx, ds_id):
-        row = self.ds_affinities[ds_id].getrow(local_idx)  # 1×N sparse row
+        global_idx = self.dataset_index_map[ds_id][local_idx]
+        row = self.aff.getrow(global_idx)  # 1×N sparse row
 
         # Extract indices and values of non-zero affinities
         cols = row.indices
@@ -277,32 +280,38 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         sampled_cols = np.random.choice(
             cols, size=self.n_augmentations - 1, replace=False, p=probs
         )
-        # --- NEW PART: sort sampled neighbors by similarity ---
-        sampled_vals = vals[np.isin(cols, sampled_cols)]
+
+         # --- sort sampled neighbors by similarity ---
+        mask = np.isin(cols, sampled_cols)
+        sampled_vals = vals[mask]
+        sampled_probs = probs[mask]
+        
         order = np.argsort(-sampled_vals)  # descending order
-        sampled_cols = sampled_cols[order]  # reorder by similarity
+        sampled_cols = sampled_cols[order]  # ensure order match
+        sampled_probs = sampled_probs[order]
 
-        pos_idx = np.insert(sampled_cols, 0, local_idx)
-        return [self.dataset_index_map[ds_id][i] for i in pos_idx]
+        pos_idx = np.insert(sampled_cols, 0, global_idx)
+        pos_probs = np.insert(sampled_probs, 0, 1.0)
+        return pos_idx, pos_probs
 
-    def assemble_from_indices(self, indices, sample_index):
+    def assemble_from_indices(self, indices, sample_index, pos_probs):
         items = [
-            super().__getitem__(i)
+            super().__getitem__(global_idx)
             # | ({self.label_key: self.adata.obs[self.label_key][i]} if self.return_label else {})
-            | ({k: self.manifold[k][i] for k in self.manifold.keys()})
+            | ({k: self.manifold[k][global_idx] for k in self.manifold.keys()})
             | (
-                {"index": np.array([i]), "sample_id": sample_index}
+                {"index": np.array([global_idx]), "sample_id": sample_index}
                 if self.return_idx
                 else {}
             )
-            | {'cell_idx': i}
-            for i in indices
+            | {'cell_idx': global_idx, "sim": torch.tensor(pos_probs[idx], dtype=torch.float32)}
+            for idx, global_idx in enumerate(indices)
         ]
         return self.combine_augmented_data(items)
 
     def set_affinities(self):
-        if self.ds_affinities is None:
-            self.ds_affinities = self.load_affinities()
+        if self.aff is None:
+            self.aff = self.load_affinities()
 
     def combine_augmented_data(self, augmented_data_list):
         """Combine the list of augmented data into a single batch."""
@@ -322,7 +331,8 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
             "wsigma",
             "zsigma",
             "ssigma",
-            'cell_idx'
+            'cell_idx',
+            'sim'
         ]
         combined_data = {}
         for key in keys_to_stack:
@@ -337,16 +347,11 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         return combined_data
 
     def load_affinities(self):
-        if os.path.exists(self.save_path):
-            a_dict = pkl.load(open(self.save_path, "rb"))
-            for k, A in a_dict.items():
-                if sp.issparse(A):
-                    A.setdiag(0)
-                else:
-                    np.fill_diagonal(A, 0)
-                a_dict[k] = A
-            return a_dict
-        return None
+        if not os.path.exists(self.save_path):
+            print('waiting for aff to be generated')
+        while not os.path.exists(self.save_path):
+            time.sleep(1)
+        return pkl.load(open(self.save_path, "rb"))
 
     def get_joint_pca_spatial_representation(self, w=10):
         # Get PCA features

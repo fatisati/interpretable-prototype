@@ -68,20 +68,13 @@ def generate_affinity(batch_ad, k, affinity_type="inverse_dist"):
 
 def compute_batch_affinities(adata_path, affinity_type, batch_key, n_comps, k):
     adata = sc.read_h5ad(adata_path)
-    ds_affinities = {}
-    for batch_id in adata.obs[batch_key].unique():
-        print(batch_id)
-        mask = adata.obs[batch_key] == batch_id
-        b_adata = adata[mask].copy()
-        sc.tl.pca(b_adata, n_comps=n_comps)
-        A = generate_affinity(b_adata, k, affinity_type)
-        if sp.issparse(A):
+    sc.tl.pca(adata, n_comps=n_comps)
+    A = generate_affinity(adata, k, affinity_type)
+    if sp.issparse(A):
             A.setdiag(0)
-        else:
-            np.fill_diagonal(A, 0)
-        ds_affinities[batch_id] = A
-
-    return ds_affinities
+    else:
+        np.fill_diagonal(A, 0)
+    return A
 
 
 import sys
@@ -89,15 +82,17 @@ import pickle
 import os
 
 if __name__ == "__main__":
-    config_file, save_path = sys.argv[1:3]
+    config_file, save_path, lock_path = sys.argv[1:4]
 
     with open(config_file, "rb") as f:
         args = pickle.load(f)
 
     # Unpack into build_graph
-    ds_affinities = compute_batch_affinities(*args)
+    aff = compute_batch_affinities(*args)
 
     tmp_path = save_path + ".tmp"
     with open(tmp_path, "wb") as f:
-        pickle.dump(ds_affinities, f)
+        pickle.dump(aff, f)
     os.replace(tmp_path, save_path)  # atomic swap
+    os.remove(lock_path)
+    print(f'{lock_path} removed')
