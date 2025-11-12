@@ -150,7 +150,7 @@ def get_defaults():
         "model_type": 'vqvae',
         "l2norm": 0,
         
-        "version": 18,
+        "version": 19, # change mse -> mean
         "recon_update_target": 'encoder',
         "description": '17: calc affinity on whole datase instead of batch wise',
         'recon_type': 'normal',
