@@ -319,13 +319,20 @@ def load_seacell(ds_id, normalize=True):
     return ad, mc_ad
 
 
-def get_metacell_metrics(
-    ad,
-    mc_ad,
-    obsm_keys,
-    bk,
-    lk,
-):
-    scb = get_scib(mc_ad, obsm_keys, bk, lk)
-    scg = get_mc_scg(ad, mc_ad, bk, lk, obsm_keys)
+def get_metacell_metrics(ad, mc_ad, obsm_keys, bk, lk):
+    # SCIB
+    try:
+        scb = get_scib(mc_ad, obsm_keys, bk, lk)
+    except Exception as e:
+        print("SCIB metric failed:", e)
+        scb = None
+
+    # SCG
+    try:
+        scg = get_mc_scg(ad, mc_ad, bk, lk, obsm_keys)
+    except Exception as e:
+        print("SCG metric failed:", e)
+        scg = None
+
     return scg, scb
+

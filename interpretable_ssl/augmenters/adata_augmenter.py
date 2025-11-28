@@ -197,7 +197,7 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         return w, z, softmax(alpha * z)
 
     def run_graph_generator(self, lock_path):
-        print(f"[{os.getpid()}] Generating affinities...")
+        print(f"[{os.getpid()}] Generating affinities..., saving data to: {self.adata_path}")
         self.adata.write(self.adata_path)
         args = (
             self.adata_path,

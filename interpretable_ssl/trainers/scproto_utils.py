@@ -51,9 +51,29 @@ def get_matched_pairs_ratio(pt, ps):
     return matched
 
 
-def kl_scheduler(step, warmup_steps=5000, max_lambda=0.02):
-    """Cosine warm-up for KL coefficient (λ_kl)."""
-    if step >= warmup_steps:
+def kl_scheduler(epoch, kl_start_epoch, n_epochs, warmup_ratio=0.3, max_lambda=1.0):
+    """
+    Linear warm-up for KL coefficient (λ_kl), with a start epoch.
+    KL stays 0 until kl_start_epoch, then warms up linearly.
+    """
+    # If KL never warms up, return final value immediately after start
+    warmup_epochs = int(n_epochs * warmup_ratio)
+
+    # Before KL starts → λ = 0
+    if epoch < kl_start_epoch:
+        return 0.0
+
+    # If warmup is 0 → jump to max immediately
+    if warmup_epochs == 0:
         return max_lambda
-    # smooth start: almost 0 → max_lambda
-    return max_lambda * (1 - math.cos(math.pi * step / warmup_steps)) / 2
+
+    # How many epochs have passed since KL started
+    passed = epoch - kl_start_epoch
+
+    # During warmup → linear increase
+    if passed < warmup_epochs:
+        return max_lambda * (passed / warmup_epochs)
+
+    # After warmup → fixed max
+    return max_lambda
+

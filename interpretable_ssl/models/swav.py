@@ -230,118 +230,6 @@ class SwavBase(nn.Module):
         # Stack all embeddings into a single tensor
         return torch.vstack(embeddings_list)
 
-    # def reconstruct_nb(self, decoder_outputs, mean_size_factor, batch):
-    #     """
-    #     Reconstruct gene expression data using a default size factor and batch.
-
-    #     Args:
-    #         decoder_outputs (tuple): Outputs from the decoder (dec_mean_gamma, y1).
-    #         mean_size_factor (float): Mean size factor to use for all cells.
-    #         batch (int): Batch/condition index to use for all cells.
-    #         model (torch.nn.Module): The model containing `theta` and other parameters.
-
-    #     Returns:
-    #         torch.Tensor: Reconstructed gene expression data.
-    #     """
-    #     # Unpack decoder outputs
-    #     dec_mean_gamma, _ = decoder_outputs
-
-    #     # Repeat mean_size_factor to match batch size
-    #     size_factors = torch.full(
-    #         (dec_mean_gamma.size(0),), mean_size_factor, device=dec_mean_gamma.device
-    #     )
-
-    #     # Expand size factors to match decoder output dimensions
-    #     size_factor_view = size_factors.unsqueeze(1).expand(
-    #         dec_mean_gamma.size(0), dec_mean_gamma.size(1)
-    #     )
-
-    #     # Compute the scaled mean (dec_mean)
-    #     dec_mean = dec_mean_gamma * size_factor_view
-
-    #     # Repeat batch index to match batch size
-    #     batch_indices = torch.full(
-    #         (dec_mean_gamma.size(0),),
-    #         batch,
-    #         dtype=torch.long,
-    #         device=dec_mean_gamma.device,
-    #     )
-
-    #     # Compute the dispersion (theta)
-    #     one_hot_batches = one_hot_encoder(
-    #         batch_indices, self.scpoli_cvae.n_conditions_combined
-    #     )
-    #     dispersion = F.linear(one_hot_batches, self.scpoli_cvae.theta)
-    #     dispersion = torch.exp(dispersion)  # Ensure positivity
-
-    #     # Define the Negative Binomial distribution
-    #     probs = dispersion / (dispersion + dec_mean)
-    #     nb_dist = NegativeBinomial(total_count=dispersion, probs=probs)
-
-    #     # Sample reconstructed gene expression data
-    #     reconstructed_data = nb_dist.sample()
-
-    #     return reconstructed_data
-
-    # def reconstruct_mse(self, outputs):
-    #     recon_x, y1 = outputs
-    #     reconstructed_input = torch.exp(recon_x) - 1
-    #     return reconstructed_input
-
-    # def decode(
-    #     self,
-    #     input_tensor,
-    #     recon_loss="nb",
-    #     use_avg_batch_embedding=False,
-    #     use_batch=None,
-    # ):
-    #     # Get all possible embeddings
-    #     batch_embeddings = (
-    #         self.get_all_batch_embeddings()
-    #     )  # Shape: (num_combinations, embedding_dim)
-
-    #     if use_avg_batch_embedding:
-    #         # Average all embeddings
-    #         avg_embedding = batch_embeddings.mean(dim=0)
-    #         batch_embeddings = [avg_embedding]
-
-    #     if use_batch is not None:
-    #         batch_embeddings = [batch_embeddings[use_batch]]
-    #     # Decode input tensor with each embedding and average results
-    #     decoded_results = []
-    #     for i, batch_embedding in enumerate(batch_embeddings):
-    #         # Repeat the embedding for the batch size
-    #         batch_embedding_repeated = batch_embedding.expand(input_tensor.size(0), -1)
-    #         # Decode using the input tensor and the batch embedding
-    #         output = self.scpoli_cvae.decoder(
-    #             input_tensor, batch_embedding_repeated
-    #         )  # Define decoder logic
-    #         if recon_loss == "nb":
-    #             size_factor = 520.0436341421945
-    #             decoded = self.reconstruct_nb(output, size_factor, i)
-    #         else:
-    #             decoded = self.reconstruct_mse(output)
-
-    #         decoded_results.append(decoded)
-
-    #     # Stack all decoded results and average along the "embedding" dimension
-    #     return torch.stack(decoded_results, dim=0).mean(dim=0)
-
-    # def decode_proto(
-    #     self, recon_loss="nb", use_avg_batch_embedding=False, use_batch=None
-    # ):
-    #     print("new decode")
-    #     """
-    #     Decode the input tensor with all possible batch embeddings, then average the results.
-    #     Args:
-    #         input_tensor (torch.Tensor): Input tensor to decode, shape (batch_size, input_dim).
-    #     Returns:
-    #         Averaged decoded tensor of shape (batch_size, output_dim).
-    #     """
-    #     # Move input tensor to GPU
-    #     input_tensor = self.get_prototypes()
-    #     return self.decode(input_tensor, recon_loss, use_avg_batch_embedding, use_batch)
-
     def freeze_batch_embedding(self):
         for name, p in self.named_parameters():
             if "scpoli_cvae.embeddings" in name:
@@ -392,7 +280,7 @@ class SwAVModel(SwavBase):
 
 
 class scProtoGMVAE(SwAVModel):
-    def __init__(self, temperature, beta, **kwargs):
+    def __init__(self, temperature, beta, kl_type = 'gm', **kwargs):
         # kwargs["recon_loss"] = "nb"
         super().__init__(**kwargs)
         # self.log_sigma2_p = torch.nn.Parameter(torch.tensor(-2.0))
@@ -409,7 +297,8 @@ class scProtoGMVAE(SwAVModel):
             torch.ones(self.nmb_prototypes, self.latent_dim)
         )
         self.gm_vparam = self.gm_vparam.to(self.get_prototypes().device)
-
+        self.kl_type = kl_type
+        
     def forward(self, batch):
         z, recon, kl, resp, kl_balance = self.calc_z_and_cvae_loss(**batch)
         propagation_sim = self.propagation_sim_loss(z)
@@ -454,10 +343,22 @@ class scProtoGMVAE(SwAVModel):
         resp = responsibilities(z_mu, gm_mu, gm_vparam, self.temperature)
         z_var = torch.exp(z_logvar)
         z_vparam = softplus_inverse(z_var)
-        kl, kl_dict = gm_kl(z_mu, z_vparam, gm_mu, gm_vparam, resp)
+        
+        if self.kl_type == 'gm':
+            kl, kl_dict = gm_kl(z_mu, z_vparam, gm_mu, gm_vparam, resp)
+        else:
+            kl = (
+                torch.distributions.kl_divergence(
+                    torch.distributions.Normal(z_mu, torch.sqrt(z_var)),
+                    torch.distributions.Normal(torch.zeros_like(z_mu), torch.ones_like(z_var)),
+                )
+                .sum(dim=1)
+                .mean()
+            )
+        
         # ---------- total ----------
         # loss = recon + self.beta * kl
-        return z_mu, recon, kl, resp, kl_dict["kl_balance"]
+        return z_mu, recon, kl, resp, kl
 
     def calc_recon(self, z, batch, x, **kwargs):
         if self.recon_loss == "nb":
@@ -508,7 +409,14 @@ class scProtoGMVAE(SwAVModel):
         elif self.assignment_metric == "neuc":
             protos = self.get_prototypes()
             return -torch.cdist(z, protos, p=2)
-        else:
+        elif self.assignment_metric == "sneuc": # stabel neuc
+            protos = self.get_prototypes()                        # (K, d)
+            d2 = torch.cdist(z, protos, p=2) ** 2                 # ||z - c||^2   (B, K)
+            s = -d2                                               # negative distance
+            s = s - s.max(dim=1, keepdim=True)[0]                 # row-wise stabilization
+            s = s.clamp(min=-75)
+            return s
+        else: # cos
             return F.cosine_similarity(
                 z.unsqueeze(1), self.prototypes.weight.unsqueeze(0), dim=-1
             )

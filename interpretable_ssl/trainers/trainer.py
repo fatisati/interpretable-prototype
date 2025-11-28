@@ -1,4 +1,3 @@
-from interpretable_ssl.models.scpoli import *
 from interpretable_ssl.loss_manager import *
 from scarches.models.scpoli import scPoli
 import numpy as np
@@ -29,6 +28,8 @@ from filelock import FileLock, Timeout
 import time
 from sklearn.neighbors import NearestNeighbors
 
+from sklearn.metrics import pairwise_distances
+from interpretable_ssl.evaluation.mc_metric_utils import *
 
 class Trainer(TrainerBase):
     # @log_time('scpoli trainer')
@@ -63,19 +64,22 @@ class Trainer(TrainerBase):
         self.calc_dataset_dc(self.train_)
         self.calc_dataset_dc(self.val_)
         self.dc_dict = {}
-        self.dc_path = {'train': self.train_.get_dc_path(), 'val': self.val_.get_dc_path()}
+        self.dc_path = {
+            "train": self.train_.get_dc_path(),
+            "val": self.val_.get_dc_path(),
+        }
         self.condition_key = self.ref.batch_key
         self.mc_size = math.ceil(len(self.dataset) / self.num_prototypes)
 
     def calc_dataset_dc(self, ds: SingleCellDataset):
-        
+
         dc_path = ds.get_dc_path()
         if os.path.exists(dc_path):
             return
         lock_path = dc_path + ".lock"
 
         if not os.path.exists(lock_path):
-            print('calling calc dc...')
+            print("calling calc dc...")
             open(lock_path, "w").close()
             ad_path = f"{dc_path.replace('.csv', '')}_tmp.h5ad"
             ds.adata.write(ad_path)
@@ -88,60 +92,70 @@ class Trainer(TrainerBase):
                     ad_path,
                     dc_path,
                     lock_path,  # pass lock path
-                    self.dataset.batch_key
+                    self.dataset.batch_key,
                 ],
                 stdout=sys.stdout,
                 stderr=sys.stderr,
             )
         else:
             print(f"Skip: {dc_path} already being processed.")
-    
+
     def get_dc(self, split):
         if split in self.dc_dict:
             return self.dc_dict[split]
         path = self.dc_path[split]
-        print(f'waiting for {path} to be generated...')
+        print(f"waiting for {path} to be generated...")
         while not os.path.exists(path):
             time.sleep(1)  # wait 5 seconds before checking again
-        self.dc_dict[split] = pd.read_csv(self.dc_path[split], index_col = 0)
-        print('done')
+        self.dc_dict[split] = pd.read_csv(self.dc_path[split], index_col=0)
+        print("done")
         return self.dc_dict[split]
-    
-    def calc_mc_quality(self, cell_ids, scores, split, nth_nbr=1):
+
+    def calc_mc_quality(self, cell_ids, scores, split):
         dc = self.get_dc(split).loc[cell_ids]
-        mc_labels = scores.argmax(axis=1).detach().cpu().numpy()
+        mc = scores.argmax(1).detach().cpu().numpy()
 
         df = pd.DataFrame(dc.values, index=cell_ids)
-        df["mc"] = mc_labels
+        df["mc"] = mc
 
-        if split == "train":
-            df["batch"] = self.train_.adata.obs.loc[cell_ids, self.dataset.batch_key].values
-        else:
-            df["batch"] = self.val_.adata.obs.loc[cell_ids, self.dataset.batch_key].values
+        obs = self.train_.adata.obs if split == "train" else self.val_.adata.obs
 
-        batch_metrics = []
+        bk = self.dataset.batch_key
+        lk = self.dataset.label_key
+        keys = [bk, lk, "niches_2D", "niches_3D"]
 
-        for b, sub in df.groupby("batch"):
-            # --- Compactness ---
-            compactness = sub.groupby("mc").var(numeric_only=True).fillna(0).mean(axis=1).mean()
+        for k in keys:
+            if k in obs.columns:
+                df[k] = obs.loc[cell_ids, k].values
 
-            # --- Separation ---
-            mc_means = sub.groupby("mc").mean().drop(columns=["mc", "batch"], errors="ignore")
-            if len(mc_means) > nth_nbr:
-                nn = NearestNeighbors(n_neighbors=nth_nbr + 1, metric="euclidean").fit(mc_means)
-                dists, _ = nn.kneighbors(mc_means)
-                separation = dists[:, nth_nbr].mean()
-            else:
-                separation = np.nan
+        niche_purity = calc_purity(df, 'niches_2D', 'mc')
+        niche_purity3d = calc_purity(df, 'niches_3D', 'mc')
+        cell_purity = calc_purity(df, lk, 'mc')
+        
+        comp = []
+        for _, sub in df.groupby("mc"):
+            X = sub.drop(columns=["mc"] + keys, errors="ignore").values
+            b = sub[bk].values
+            mu = {u: X[b == u].mean(0) for u in np.unique(b)}
+            Xc = np.vstack([X[b == u] - mu[u] for u in mu])
+            comp.append((Xc**2).sum() / (len(Xc)))
 
-            batch_metrics.append((compactness, separation))
+        F = df.columns.difference(["mc"] + keys)
+        X = df[F].values
+        b = df[bk].values
+        gmu = {u: X[b == u].mean(0) for u in np.unique(b)}
+        Xg = np.zeros_like(X)
+        for u in gmu:
+            Xg[b == u] = X[b == u] - gmu[u]
 
-        compactness_mean = np.nanmean([c for c, _ in batch_metrics])
-        separation_mean = np.nanmean([s for _, s in batch_metrics])
+        cent = {m: df.loc[df.mc == m, F].values.mean(0) for m in df.mc.unique()}
+        C = np.vstack(list(cent.values()))
+        nn = NearestNeighbors(n_neighbors=2).fit(C)
+        d, _ = nn.kneighbors(C)
+        sep = d[:, 1].mean()
 
-        return compactness_mean, separation_mean
+        return np.mean(comp), sep, cell_purity, niche_purity, niche_purity3d
 
-    
     def collect_parser_args(self, parser):
         if parser is not None:
             parser = self.add_parser_args(parser)
@@ -333,7 +347,7 @@ class Trainer(TrainerBase):
         z = self.encode_adata(adata, model, z_idx=1)
         prototypes = self.get_model_prototypes(model)
         z_umap, prototype_umap, proto_labels = calc_umap_v2(
-            z, prototypes, adata.obs[self.dataset.label_key], 5
+            z, prototypes, adata.obs[self.dataset.label_key], 5, metric=self.umap_metric
         )
         obs = adata.obs
         # if prototypes is not None:
@@ -354,11 +368,20 @@ class Trainer(TrainerBase):
         else:
             w = adata.obs.get("sigma", None)
             w_label = "pca_sigma"
+
+        if (
+            self.ref.adata.obs[self.ref.batch_key].nunique() == 1
+            and "niches_2D" in self.ref.adata.obs
+        ):
+            last_labels = obs["niches_2D"]
+        else:
+            last_labels = obs[self.ref.batch_key]
+
         return plot_3umaps(
             z_umap,
             prototype_umap,
             obs[self.dataset.label_key],
-            obs[self.ref.batch_key],
+            last_labels,
             proto_labels,
             save_plot,
             self.get_umap_path(split),
@@ -392,8 +415,9 @@ class Trainer(TrainerBase):
 
     def save_metacell_metrics(self):
         ad = self.train_.adata.copy()
+        
         mc_adata, sim = get_scproto_mc_adata(
-            self, ad, self.dataset.batch_key, self.dataset.label_key, self.model
+            self, ad, self.dataset.batch_key, self.dataset.label_key, model=self.model
         )
         ad.X = ad.layers["lognorm"]
         mc_scg, mc_scb = get_metacell_metrics(
@@ -407,6 +431,7 @@ class Trainer(TrainerBase):
         if mc_scb is not None:
             save_append(mc_scb, self.get_dump_path(), "scib")
         ad.obs["SEACell"] = sim.argmax(axis=1)
+        ad.obsm["dc"] = self.get_dc("train").values
         tmp_path = f"tmp_{uuid.uuid4().hex[:8]}.h5ad"
         ad.write(tmp_path)
         process = subprocess.Popen(

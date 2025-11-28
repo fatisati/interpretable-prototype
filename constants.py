@@ -91,9 +91,17 @@ ABBREVIATIONS = {
     'lambda_kl': 'kl',
     'lambda_balance': 'bal',
     'lambda_swav': 'lswav',
+    'lambda_p_uncertainty': 'lp', # l proto uncertainty
+    'lambda_proto_entropy': 'lu', # l usage
     'recon_update_target': 'vqrecon',
     'recon_type': 'rt',
     'normalize_loss': 'lnorm',
     'div_type': 'dt',
-    'weighted_kl': 'wkl'
+    'weighted_kl': 'wkl',
+    'kl_sched': 'ksc',
+    'swav_sched': 'ssc',
+    'recon_start_epoch': 'rse',
+    'kl_start_epoch': 'kse',
+    'opt': 'opt',
+    'umap_metric': 'um',
 }

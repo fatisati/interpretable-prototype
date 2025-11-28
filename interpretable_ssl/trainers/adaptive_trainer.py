@@ -62,7 +62,6 @@ class AdoptiveTrainer(Trainer):
         self.extract_scpoli(self.model, True).train(
             n_epochs=self.cvae_epochs,
             pretraining_epochs=self.cvae_epochs,
-            eta=5,
         )
 
     def init_prototypes(self):
@@ -101,8 +100,8 @@ class AdoptiveTrainer(Trainer):
         if self.cvae_epochs > 0:
             self.pretrain_encoder()
         
-        if hasattr(self.model, "freeze_batch_embedding"):
-            self.model.freeze_batch_embedding()
+        # if hasattr(self.model, "freeze_batch_embedding"):
+        #     self.model.freeze_batch_embedding()
         self.init_prototypes()
 
         if self.cvae_epochs > 0:

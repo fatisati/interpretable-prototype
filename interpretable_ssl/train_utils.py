@@ -1,7 +1,6 @@
 from interpretable_ssl.loss_manager import PrototypeLoss
 import torch
 import wandb
-from interpretable_ssl.models.scpoli import *
 from interpretable_ssl.datasets.utils import *
 
 

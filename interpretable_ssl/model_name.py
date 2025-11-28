@@ -49,5 +49,6 @@ def generate_model_name(defaults, params):
     
     # Join all parts to form the job name
     job_name = "_".join(job_name_parts)
-    job_name = f'{job_name}_v{defaults["version"]}'
+    version = params.get('version', defaults['version'])
+    job_name = f'{job_name}_v{version}'
     return job_name

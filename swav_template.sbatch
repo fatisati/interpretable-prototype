@@ -14,7 +14,7 @@ export TMPDIR=$HOME/tmp
 mkdir -p $TMPDIR
 
 source ~/.bashrc
-conda activate shiny-apex
+conda activate swav_knn
 python main.py {model} --num_prototypes {num_prototypes} --latent_dims {latent_dims} --batch_size {batch_size} \
 --augmentation_type {augmentation_type} --epsilon {epsilon} --cvae_loss_scaler {cvae_loss_scaler} \
 --prot_decoding_loss_scaler {prot_decoding_loss_scaler} --model_version {model_version} \
@@ -33,4 +33,6 @@ python main.py {model} --num_prototypes {num_prototypes} --latent_dims {latent_d
 --assignment_metric {assignment_metric} --study_id {study_id} --warmup_epochs {warmup_epochs} --base_lr {base_lr} --use_counts {use_counts} --knn_method {knn_method} \
 --epoch_queue_starts {epoch_queue_starts} --affinity_type {affinity_type} --cell_w_mode {cell_w_mode} --beta {beta} --lambda_align {lambda_align} \
 --lambda_l2 {lambda_l2} --lambda_recon {lambda_recon} --lambda_kl {lambda_kl} --lambda_balance {lambda_balance} --lambda_swav {lambda_swav} \
---recon_update_target {recon_update_target} --recon_type {recon_type} --normalize_loss {normalize_loss} --div_type {div_type} --weighted_kl {weighted_kl}
+--recon_update_target {recon_update_target} --recon_type {recon_type} --normalize_loss {normalize_loss} --div_type {div_type} --weighted_kl {weighted_kl} \
+--kl_sched {kl_sched} --swav_sched {swav_sched} --recon_start_epoch {recon_start_epoch} --kl_start_epoch {kl_start_epoch} --opt {opt} --start_warmup {start_warmup} \
+--wd {wd} --final_lr {final_lr} --umap_metric {umap_metric} --lambda_p_uncertainty {lambda_p_uncertainty} --lambda_proto_entropy {lambda_proto_entropy}

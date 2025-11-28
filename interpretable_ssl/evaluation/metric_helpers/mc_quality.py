@@ -6,9 +6,10 @@ if __name__ == "__main__":
     ad_path, bk, label_key, save_dir, model_name = sys.argv[1:6]
     ad = sc.read_h5ad(ad_path)
 
-    avg_metrics, _ = avg_mc_quality_metrics(
-        ad, bk, label_key
-    )
+    try:
+        avg_metrics, _ = avg_mc_quality_metrics(ad, bk, label_key)
+    except Exception as e:
+        print("avg_mc_quality_metrics failed:", e)
     summary = {}
 
     for col in avg_metrics.columns:

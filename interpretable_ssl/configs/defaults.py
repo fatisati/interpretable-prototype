@@ -27,9 +27,8 @@ def get_defaults():
         "min_scale_crops": [0.14],  # swav specific
         "max_scale_crops": [1],  # swav specific
         "views_for_assign": [0],  # swav specific
-        "nmb_views": [4],  # swav specific
+        "nmb_views": [2],  # swav specific
         
-        "sinkhorn_iterations": 3,  # swav specific
         "feat_dim": 8,  # swav specific
         
         "cvae_reg": 0,  # swav specific
@@ -101,19 +100,13 @@ def get_defaults():
         "use_rbf": 1,
         
         
-        "cvae_epochs": 50,
-        "pretraining_epochs": 100,
-        "ft_epochs": 20,
+        
         
         "cvae_loss_scaler": 0.01, # 0.01,  # swav specific, 0.0001
         
         "workers": 1,  # swav specific
         
-        "wd": 1e-6,  # swav specific
-        "base_lr": 4.8,  # swav specific
-        "final_lr": 0.0048,  # swav specific
-        "warmup_epochs": 10,  # swav specific
-        "start_warmup": 0.3,  # swav specific
+ 
         
         "batch_size": 1024,
         
@@ -122,8 +115,7 @@ def get_defaults():
         
         "hard_clustering": 0,
         
-        "temperature": 1.0,  # swav specific, lower make sharper assignment of z to protos, swav default 0.1
-        "epsilon": 0.5,  # swav specific, swav default: 0.05 
+
         
         "epoch_queue_starts": 0, # used to be 5
         "queue_length":  0,
@@ -141,22 +133,44 @@ def get_defaults():
         "lambda_l2": 0.0, # 1e-3
         
         "lambda_kl": 0.0,
-        "lambda_recon": 0.0, #0.01, 
+        "lambda_recon": 0.0, 
         'lambda_balance': 0.0,
         'lambda_swav': 0.0,
         "lambda_proto": 0.0, # 1,
         "lambda_commit": 0.0, # 0.25
-        'assignment_metric': 'dneuc',
-        "model_type": 'vqvae',
+        "lambda_p_uncertainty": 0.0,
+        'lambda_proto_entropy': 0.0,
+        'assignment_metric': 'sneuc',
+        "model_type": 'gm',
         "l2norm": 0,
         
-        "version": 19, # change mse -> mean
+        "version": 21,
         "recon_update_target": 'encoder',
         "description": '17: calc affinity on whole datase instead of batch wise',
         'recon_type': 'normal',
-        'normalize_loss': 1,
-        'div_type': 'kl',
-        'weighted_kl': 1
+        'normalize_loss': 0,
+        'div_type': 'ce',
+        
+        'kl_sched': 1,
+        'swav_sched': 0, # not used yet
+        'recon_start_epoch': 0,
+        'kl_start_epoch': 5,
+        "cvae_epochs": 0,
+        "pretraining_epochs": 100,
+        "ft_epochs": 20,
+        
+        'umap_metric': 'euclidean',
+        'opt': 'adam',
+        "wd": 1e-5,  # swav specific
+        "base_lr": 3e-4,  # swav specific
+        "final_lr": 1e-5,  # swav specific
+        "warmup_epochs": 5,  # swav specific
+        "start_warmup": 0.0,  # swav specific
         # change to dotp in future
+        
+        "temperature": 0.1,  # swav specific, lower make sharper assignment of z to protos, swav default 0.1
+        "epsilon": 0.05,  # swav specific, swav default: 0.05 
+        'weighted_kl': 1, # weighted swav loss
+        "sinkhorn_iterations": 3,  # swav specific
     }
     return defaults

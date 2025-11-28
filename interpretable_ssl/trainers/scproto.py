@@ -1,6 +1,8 @@
 import argparse
 import math
 import os
+import os
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
 import shutil
 import time
 from logging import getLogger
@@ -44,7 +46,7 @@ from interpretable_ssl.trainers.scproto_utils import *
 
 from interpretable_ssl.trainers.affinity import *
 from interpretable_ssl.trainers.scpoli_helpers import *
-
+from interpretable_ssl.evaluation.mc_metric_utils import *
 logger = getLogger()
 
 
@@ -80,6 +82,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             "proto",
             "commit",
         ]
+        self.log_hist = {}
 
     def setup(self):
         fix_random_seeds(self.seed)
@@ -116,7 +119,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             use_counts=(self.use_counts == 1),
             n_proto=self.nmb_prototypes,
             use_manifold_weights=(self.cell_w_mode != "uniform"),
-            mc_size = self.mc_size,
+            mc_size=self.mc_size,
             condition_encoders=scpoli_encoder.condition_encoders,
             conditions_combined_encoder=scpoli_encoder.conditions_combined_encoder,
             # cell_type_keys=[self.cell_type_key],
@@ -139,7 +142,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             batch_size=self.batch_size,
             num_workers=self.workers,
             pin_memory=True,
-            drop_last=drop_last,
+            # drop_last=drop_last,
             collate_fn=scpoli_utils.custom_collate,
             shuffle=True,
         )
@@ -194,8 +197,13 @@ class SCProtoTrainer(AdoptiveTrainer):
             "assignment_metric": self.assignment_metric,
         }
 
-        if self.model_type == "gm":
-            return scProtoGMVAE(temperature=self.temperature, beta=self.beta, **kwargs)
+        if self.model_type == "gm" or self.model_type == "normal":
+            return scProtoGMVAE(
+                temperature=self.temperature,
+                beta=self.beta,
+                kl_type=self.model_type,
+                **kwargs,
+            )
         if self.model_type == "vqvae":
             return scProtoVQVAE(
                 temperature=self.temperature,
@@ -209,46 +217,74 @@ class SCProtoTrainer(AdoptiveTrainer):
             return SwAVModel(**kwargs)
 
     def build_optimizer(self):
-        self.optimizer = torch.optim.SGD(
-            self.model.parameters(),
-            lr=self.base_lr,
-            momentum=0.9,
-            weight_decay=self.wd,
-        )
-        self.optimizer = LARC(
-            optimizer=self.optimizer, trust_coefficient=0.001, clip=False
+        opt_type = self.opt
+        print(opt_type)
+        # ---- Choose optimizer ----
+        if opt_type == "sgd":
+            optimizer = torch.optim.SGD(
+                self.model.parameters(),
+                lr=self.base_lr,
+                momentum=0.9,
+                weight_decay=self.wd,
+            )
+            # LARC only makes sense for SGD
+            optimizer = LARC(optimizer=optimizer, trust_coefficient=0.001, clip=False)
+
+        elif opt_type == "adam":
+            # optimizer = torch.optim.Adam(
+            #     self.model.parameters(),
+            #     lr=self.base_lr,
+            #     weight_decay=self.wd,
+            # )
+            
+            # ----- optimizer -----
+            params_embedding = []
+            params = []
+            for name, p in self.model.scpoli_cvae.named_parameters():
+                if p.requires_grad:
+                    if "embedding" in name:
+                        params_embedding.append(p)
+                    else:
+                        params.append(p)
+            
+            optimizer = torch.optim.Adam(
+                [
+                    {"params": params_embedding, "weight_decay": 0},
+                    {"params": params},
+                ],
+                lr=self.base_lr, #1e-3,
+                eps=0.01,
+                weight_decay=self.wd #0.04,
+            )
+
+        elif opt_type == "wadam":
+            optimizer = torch.optim.AdamW(  # usually better for weighted Adam
+                self.model.parameters(),
+                lr=self.base_lr,
+                weight_decay=self.wd,
+            )
+
+        else:
+            raise ValueError(f"Unknown optimizer: {opt_type}")
+
+        self.optimizer = optimizer
+
+        # ---- LR schedule (warmup → cosine) ----
+        total_iters = len(self.train_loader)
+
+        warmup_iters = total_iters * self.warmup_epochs
+        warmup_lr = np.linspace(self.start_warmup, self.base_lr, warmup_iters)
+
+        cosine_iters = total_iters * (self.pretraining_epochs - self.warmup_epochs)
+        t = np.arange(cosine_iters)
+
+        cosine_lr = self.final_lr + 0.5 * (self.base_lr - self.final_lr) * (
+            1 + np.cos(np.pi * t / cosine_iters)
         )
 
-        warmup_lr_schedule = np.linspace(
-            self.start_warmup,
-            self.base_lr,
-            len(self.train_loader) * self.warmup_epochs,
-        )
-        iters = np.arange(
-            len(self.train_loader) * (self.pretraining_epochs - self.warmup_epochs)
-        )
-        cosine_lr_schedule = np.array(
-            [
-                self.final_lr
-                + 0.5
-                * (self.base_lr - self.final_lr)
-                * (
-                    1
-                    + math.cos(
-                        math.pi
-                        * t
-                        / (
-                            len(self.train_loader)
-                            * (self.pretraining_epochs - self.warmup_epochs)
-                        )
-                    )
-                )
-                for t in iters
-            ]
-        )
-        self.lr_schedule = np.concatenate((warmup_lr_schedule, cosine_lr_schedule))
+        self.lr_schedule = np.concatenate((warmup_lr, cosine_lr))
 
-        logger.info("Building optimizer done.")
+        logger.info(f"Optimizer '{opt_type}' built successfully.")
 
     def get_checkpoint_file(self):
         if self.finetuning:
@@ -285,17 +321,21 @@ class SCProtoTrainer(AdoptiveTrainer):
         if not self.debug:
             wandb.log(log_dict)
         else:
+            for k in log_dict:
+                if k not in self.log_hist:
+                    self.log_hist[k] = []
+                self.log_hist[k].append(log_dict[k])
             print(log_dict)
 
     def train(self, epochs=None):
         self.lambda_loss = self.init_lambda_loss()
-        self.setup_scheduler()
+        # self.setup_scheduler()
         self.create_dump_path()
         self.build_optimizer()
         cudnn.benchmark = True
         if epochs is None:
             epochs = self.pretraining_epochs
-
+        self.n_epochs = epochs
         for epoch in range(epochs):
             logger.info(f"============ Starting epoch {epoch}============")
 
@@ -315,10 +355,15 @@ class SCProtoTrainer(AdoptiveTrainer):
             test_meters = self.test_epoch()
             test_meters = {f"test_{key}": val for key, val in test_meters.items()}
 
-            scores = self.encode_adata(self.train_.adata, self.model, z_idx=1)
+            scores = self.encode_adata(self.train_.adata, self.model, z_idx=2)
             cell_ids = self.train_.adata.obs_names
-            train_meters['overal_compactness'], train_meters['overal_separation'] = self.calc_mc_quality(cell_ids, scores, 'train')
-            
+            train_meters["overal_compactness"], train_meters["overal_separation"], train_meters["celltype_purity"], train_meters["niche_purity"], train_meters["niche_purity3d"] = (
+                self.calc_mc_quality(cell_ids, scores, "train")
+            )
+            ad = self.train_.adata
+            ad.obs['mc'] = scores.argmax(1).detach().cpu().numpy()
+            train_meters["spatial_compactness"] = spatial_compactness(ad, mc_key='mc').mean()
+
             self.log_wandb_loss(train_meters | test_meters, epoch)
             self.save_checkpoint(epoch)
 
@@ -329,42 +374,51 @@ class SCProtoTrainer(AdoptiveTrainer):
         return train_meters | test_meters
 
     def init_lambda_loss(self):
-        meters = {
-            "loss": AverageMeter(),
-        }
-        for it, inputs in enumerate(self.train_loader):
-            bs = inputs["x"].size(0)
-            inputs = {k: inputs[k].transpose(0, 1) for k in inputs.keys()}
 
-            for ds_id in self.ds_ids:
-                loss, meters, assign_cnts = self.calc_ds_loss(inputs, ds_id, meters, bs, self.train_ds.adata, 'train')
-        meters = {k: getattr(v, "avg", v) for k, v in meters.items()}
-        lambda_weight = {
+       
+        return {
             key: getattr(self, f"lambda_{key}")
             for key in self.loss_keys
             if hasattr(self, f"lambda_{key}")
         }
-        print("======>", lambda_weight)
-        lambda_loss = {}
-        for loss_key in self.loss_keys:
-            lambda_loss[loss_key] = lambda_weight[loss_key] / meters[loss_key]
-            if self.normalize_loss:
-                setattr(self, f"lambda_{loss_key}", lambda_loss[loss_key])
-        print(lambda_loss)
-        if self.normalize_loss:
-            return lambda_loss
-        else:
-            return lambda_weight
+        # meters = {
+        #     "loss": AverageMeter(),
+        # }
+        # for it, inputs in enumerate(self.train_loader):
+        #     bs = inputs["x"].size(0)
+        #     inputs = {k: inputs[k].transpose(0, 1) for k in inputs.keys()}
+
+        #     for ds_id in self.ds_ids:
+        #         loss, meters, assign_cnts = self.calc_ds_loss(
+        #             inputs, ds_id, meters, bs, self.train_ds.adata, "train"
+        #         )
+        # meters = {k: getattr(v, "avg", v) for k, v in meters.items()}
+        # lambda_loss = {key: getattr(self, f"lambda_{key}") / meters[key] for key in }
+        # for loss_key in self.loss_keys:
+        #         setattr(self, f"lambda_{loss_key}", lambda_loss[loss_key])
+        #         lambda_loss[loss_key] = 
+        # print(lambda_loss)
+        # if self.normalize_loss:
+        #     return lambda_loss
+        # else:
+        #     return lambda_weight
 
     def setup_scheduler(self):
         self.steps_per_epoch = len(self.train_loader)
         self.total_steps = self.pretraining_epochs * self.steps_per_epoch
         self.warmup_steps = int(0.2 * self.total_steps)
 
-    def update_lambda(self, itr):
+    def update_lambda(self, epoch):
         self.lambda_loss["kl"] = kl_scheduler(
-            itr, warmup_steps=self.warmup_steps, max_lambda=self.lambda_kl
+            epoch, self.kl_start_epoch, self.n_epochs, max_lambda=self.lambda_kl
         )
+        # self.lambda_loss['recon'] = kl_scheduler(
+        #     epoch, self.recon_start_epoch, self.n_epochs, max_lambda=self.lambda_recon
+        # )
+        # if epoch >= self.recon_start_epoch:
+        #     self.lambda_loss["recon"] = self.lambda_recon
+        # else:
+        #     self.lambda_loss["recon"] = 0
 
     def train_epoch(self, epoch):
         self.model.train()
@@ -380,7 +434,8 @@ class SCProtoTrainer(AdoptiveTrainer):
         ds_assign_cnts = {
             ds_id: np.zeros(self.nmb_prototypes, dtype=int) for ds_id in self.ds_ids
         }
-
+        if self.kl_sched == 1:
+            self.update_lambda(epoch)
         for it, inputs in enumerate(self.train_loader):
             meters["data_time"].update(time.time() - end)
             iteration = epoch * len(self.train_loader) + it
@@ -399,11 +454,16 @@ class SCProtoTrainer(AdoptiveTrainer):
             self.optimizer.zero_grad()
 
             for ds_id in self.ds_ids:
-                loss, meters, assign_cnts = self.calc_ds_loss(inputs, ds_id, meters, bs, self.train_ds.adata, 'train')
+                loss, meters, assign_cnts = self.calc_ds_loss(
+                    inputs, ds_id, meters, bs, self.train_ds.adata, "train"
+                )
                 ds_assign_cnts[ds_id] += assign_cnts.cpu().numpy()
                 loss.backward()
 
             self._handle_prototype_freezing(epoch)
+            if it % 5 == 0:
+                lr_gn = self.get_lr_grad()
+
             self.optimizer.step()
 
             meters["batch_time"].update(time.time() - end)
@@ -416,6 +476,7 @@ class SCProtoTrainer(AdoptiveTrainer):
                     f"Loss {meters['loss'].val:.4f} ({meters['loss'].avg:.4f}) "
                     f"Lr {self.optimizer.param_groups[0]['lr']:.4f}"
                 )
+                self.log_wandb_loss(lr_gn, epoch)
 
         meters = {k: getattr(v, "avg", v) for k, v in meters.items()}
         all_assign_cnts = sum(ds_assign_cnts[ds_id] for ds_id in ds_assign_cnts)
@@ -438,7 +499,8 @@ class SCProtoTrainer(AdoptiveTrainer):
             cos_sim.numel() - protos.size(0)
         )
         meters["proto_collapse"] = mean_off_diag.item()
-
+        meters["lambda_kl"] = self.lambda_loss["kl"]
+        meters["lambda_recon"] = self.lambda_loss["recon"]
         return meters
 
     def calc_ds_loss(self, inputs, ds_id, meters, bs, ad, split):
@@ -475,23 +537,25 @@ class SCProtoTrainer(AdoptiveTrainer):
     def _process_batch(self, inputs, ds_id, ad, split):
         bs = inputs["x"].size(0)
         inputs = self.dict_to_device(inputs)
-        inputs = reshape_and_reorder_dict(inputs)
+        # inputs = reshape_and_reorder_dict(inputs)
+        B, n_aug = inputs['x'].shape[:2]
+        inputs = {k: t.permute(1, 0, *range(2, t.ndim)).reshape(B * n_aug, *t.shape[2:]) for k, t in inputs.items()}
         # manifold_keys = ['sigma', '', 'heterogeneity', 'mf_score']
         manifold_keys = self.train_ds.manifold.keys()
         manifold_scores = {k: inputs.pop(k, None) for k in manifold_keys}
-        cell_idx = inputs.pop('cell_idx', None).cpu().numpy()
+        cell_idx = inputs.pop("cell_idx", None).cpu().numpy()
         cell_ids = [ad.obs.index[i] for i in cell_idx]
-        sim = inputs.pop('sim', None)
+        sim = inputs.pop("sim", None)
         # label = inputs.pop(self.dataset.label_key)
         z, _, scores, recon, (proto_loss, commitment_loss), kl, kl_balance = self.model(
             inputs
         )
-        if self.recon_type == 'swapped' or self.recon_type == 'hybrid':
+        if self.recon_type == "swapped" or self.recon_type == "hybrid":
             swapped_recon = self.calc_swapped_recon(z, scores, bs, inputs)
-            if self.recon_type == 'swapped':
+            if self.recon_type == "swapped":
                 recon = swapped_recon
             else:
-                recon = 0.8*recon + 0.2*swapped_recon
+                recon = 0.8 * recon + 0.2 * swapped_recon
         z_norm = z.norm(dim=1).mean()
         proto_norm = self.model.get_prototypes().norm(dim=1).mean()
         # z, logits, cvae_loss, resp, propagation, sim = self.parse_model_output(outputs)
@@ -503,10 +567,11 @@ class SCProtoTrainer(AdoptiveTrainer):
             qproto_utilization,
             p_uncertainty,
             q_uncertainty,
+            proto_entropy
         ) = self.compute_swav_loss(scores, z, bs, ds_id, manifold_scores, None, sim=sim)
         assign_cnts = get_hard_assign_cnts(scores)
         max_active = min(scores.size(0), scores.size(1))
-        compactness, separation = self.calc_mc_quality(cell_ids, scores, split)
+        compactness, separation, cp, np2d, np3d = self.calc_mc_quality(cell_ids, scores, split)
         return {
             "swav": swav_loss,
             "recon": recon,
@@ -522,13 +587,14 @@ class SCProtoTrainer(AdoptiveTrainer):
             "qproto_utilization": qproto_utilization,
             "p_uncertainty": p_uncertainty,
             "q_uncertainty": q_uncertainty,
-            'compactness': compactness,
-            'separation': separation
+            "compactness": compactness,
+            "separation": separation,
+            'proto_entropy': proto_entropy
         }, assign_cnts
 
     def calc_swapped_recon(self, z, scores, bs, inputs):
         loss = 0
-        
+
         for view_id in self.views_for_assign:
             view_scores = scores[bs * view_id : bs * (view_id + 1)].detach()
             view_codes = view_scores.argmax(dim=1)
@@ -539,12 +605,14 @@ class SCProtoTrainer(AdoptiveTrainer):
             for v in aug_view_ids:
                 aug_z = z[bs * v : bs * (v + 1)]
                 aug_inputs = {k: inputs[k][bs * v : bs * (v + 1)] for k in inputs}
-                recon_loss, _, _ = self.model.quantized_recon_step(aug_z, view_codes, **aug_inputs)
+                recon_loss, _, _ = self.model.quantized_recon_step(
+                    aug_z, view_codes, **aug_inputs
+                )
                 subloss += recon_loss
 
             loss += subloss / len(aug_view_ids)
         return loss / len(self.views_for_assign)
-    
+
     def parse_model_output(self, outputs):
         if self.model_type == "gm":
             z_swav, _, logits, cvae_loss, (propagation, sim), resp = outputs
@@ -555,17 +623,20 @@ class SCProtoTrainer(AdoptiveTrainer):
 
         return z_swav, logits, cvae_loss, resp, propagation, sim
 
-    def compute_swav_loss(self, scores, z, bs, ds_id, manifold_scores=None, resp=None, sim=None):
+    def compute_swav_loss(
+        self, scores, z, bs, ds_id, manifold_scores=None, resp=None, sim=None
+    ):
         if sim is None or self.weighted_kl == 0:
             sim = torch.ones(z.size(0), device=z.device, dtype=z.dtype)
 
-        loss, p_matched, q_matched, p_uncertainty, q_uncertainty, qproto_utilization = (
+        loss, p_matched, q_matched, p_uncertainty, q_uncertainty, qproto_utilization, proto_entropy = (
             0,
             0,
             0,
             0,
             0,
             0,
+            0
         )
 
         # each crop mean each augmentation, just caluclate q and loss for first crops_for_assign
@@ -573,7 +644,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             with torch.no_grad():
                 # outputs for 1 batch of data, [aug1s1, a1s2, a1s3, .., a1sb]
                 view_scores = scores[bs * view_id : bs * (view_id + 1)].detach()
-
+                # print(f'scores min, max: {view_scores.min()}, {view_scores.max()}')
                 # with torch.no_grad(): not nessecary because both funcion has no grad decorator
                 sinkhorn_input = self.prepare_sinkhorn_input(
                     view_idx, z, view_id, bs, view_scores, ds_id
@@ -592,10 +663,19 @@ class SCProtoTrainer(AdoptiveTrainer):
                 max_active = min(scores.size(0), scores.size(1))
                 qproto_utilization += (qassign_cnts != 0).sum().item() / max_active
                 q = q[-bs:]
+                # print(f'q min, max: {q.min()}, {q.max()}')
                 q_uncertainty -= (q * (q.clamp_min(1e-8)).log()).sum(dim=1).mean()
 
-                p = F.softmax(view_scores / self.temperature, dim=1)
-                p_uncertainty -= (p * (p.clamp_min(1e-8)).log()).sum(dim=1).mean()
+            view_scores = scores[bs * view_id : bs * (view_id + 1)]
+            p = F.softmax(view_scores / self.temperature, dim=1)
+            
+            # per-sample entropy (H_p > 0)
+            H_p = - (p * p.clamp_min(1e-8).log()).sum(dim=1).mean()
+            p_uncertainty += H_p
+            
+            usage = p.mean(dim=0)     # shape [K]
+            H_proto = - (usage * usage.clamp_min(1e-8).log()).sum()
+            proto_entropy += H_proto
 
             if self.hard_clustering == 1:
                 q = self.hard_clusters(q)
@@ -617,7 +697,10 @@ class SCProtoTrainer(AdoptiveTrainer):
                     # Only clamp q to avoid log(0)
                     log_q = q.clamp_min(1e-8).log()
                     # KL(p||q) = sum_i p_i * (log p_i - log q_i)
-                    kl = torch.sum(p * (log_p - log_q), dim=1) * sim[bs * v : bs * (v + 1)]
+                    kl = (
+                        torch.sum(p * (log_p - log_q), dim=1)
+                        * sim[bs * v : bs * (v + 1)]
+                    )
                     subloss += kl.mean()
                 else:
                     # ----- default CE (≈ KL(q‖p)) -----
@@ -627,8 +710,6 @@ class SCProtoTrainer(AdoptiveTrainer):
 
                 vp_matched += get_matched_pairs_ratio(view_scores, aug_scores)
                 vq_matched += get_matched_pairs_ratio(q, aug_scores)
-
-
 
             loss += subloss / len(aug_view_ids)
             p_matched += vp_matched / len(aug_view_ids)
@@ -641,7 +722,21 @@ class SCProtoTrainer(AdoptiveTrainer):
             qproto_utilization / len(self.views_for_assign),
             p_uncertainty / len(self.views_for_assign),
             q_uncertainty / len(self.views_for_assign),
+            proto_entropy / len(self.views_for_assign),
         )
+
+    def get_lr_grad(self):
+        # --- Monitor learning rate and gradient norm ---
+        lr = self.optimizer.param_groups[0]["lr"]
+
+        total_norm = 0.0
+        for p in self.model.parameters():
+            if p.grad is not None:
+                param_norm = p.grad.data.norm(2)
+                total_norm += param_norm.item() ** 2
+        grad_norm = total_norm**0.5
+
+        return {"lr": lr, "grad_norm": grad_norm}
 
     def test_epoch(self):
         self.model.eval()
@@ -655,7 +750,9 @@ class SCProtoTrainer(AdoptiveTrainer):
                 meters = {"loss": AverageMeter()}
 
                 for ds_id in self.ds_ids:
-                    _, meters, _ = self.calc_ds_loss(inputs, ds_id, meters, bs, self.test_ds.adata, 'val')
+                    _, meters, _ = self.calc_ds_loss(
+                        inputs, ds_id, meters, bs, self.test_ds.adata, "val"
+                    )
         meters = {k: getattr(v, "avg", v) for k, v in meters.items()}
         return meters
 
@@ -697,21 +794,25 @@ class SCProtoTrainer(AdoptiveTrainer):
         Q = torch.exp(
             out / self.epsilon
         ).t()  # Q is K-by-B for consistency with notations from our paper
+        
         B = Q.shape[1] * self.world_size  # number of samples to assign
         K = Q.shape[0]  # how many prototypes
 
         # make the matrix sums to 1
         sum_Q = torch.sum(Q)
+        # print(f'Q_sum {sum_Q}')
         Q /= sum_Q
 
         for it in range(self.sinkhorn_iterations):
             # normalize each row: total weight per prototype must be 1/K
             sum_of_rows = torch.sum(Q, dim=1, keepdim=True)
-            Q /= sum_of_rows
+            # print(f'row sum (proto) {sum_of_rows}')
+            Q /= (sum_of_rows + 1e-12)
             Q /= K
 
             # normalize each column: total weight per sample must be 1/B
-            Q /= torch.sum(Q, dim=0, keepdim=True)
+            # print(f'col sum (samples) {torch.sum(Q, dim=0, keepdim=True)}')
+            Q /= (torch.sum(Q, dim=0, keepdim=True) + 1e-12)
             Q /= B
 
         Q *= B  # the colomns must sum to 1 so that Q is an assignment

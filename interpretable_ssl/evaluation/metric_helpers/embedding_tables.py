@@ -1,5 +1,6 @@
 import pandas as pd
 import os
+from tqdm import tqdm
 
 def highlight_max_second(s):
     """
@@ -45,10 +46,10 @@ def load_tb(ds_id):
     def load_csv(p):
         if os.path.exists(p):
             return pd.read_csv(p, index_col = 0)
-        else:
-            print(p)
+        # else:
+        #     print(p)
     for key in ['scib', 'scgraph', 'mc_quality_summary', 'de_jaccard_ref', 'de_jaccard_all']:
-        key_dfs = [load_csv(f"{p}{fol}/{key}.csv") for fol in os.listdir(p)]
+        key_dfs = [load_csv(f"{p}{fol}/{key}.csv") for fol in tqdm(os.listdir(p))]
         key_dfs = [df for df in key_dfs if df is not None]  # remove None objects
         if len(key_dfs)>0:
             dfs[key] = pd.concat(key_dfs)

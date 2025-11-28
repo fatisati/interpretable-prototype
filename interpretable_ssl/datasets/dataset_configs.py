@@ -54,7 +54,18 @@ DATASETS = {
         "label_key": "celltypes",
         "label_encoder_path": "./data/NSCLC_3D_section_28.pkl",
         "num_prototypes": 700,
-        "batch_size": 2048,
+        "batch_size": 1024,
         "ft_epochs": 0,
     },
+    'nsc_2slides':
+        {
+        "path": Path(DATA_DIR) / "spatial/nsc_2slides.h5ad",
+        # "batch_key": "section",
+        "label_key": "celltypes",
+        "label_encoder_path": "./data/NSCLC_3D_section_28.pkl",
+        "num_prototypes": 1500,
+        "batch_size": 2048,
+        "ft_epochs": 0,
+    }
+        
 }
