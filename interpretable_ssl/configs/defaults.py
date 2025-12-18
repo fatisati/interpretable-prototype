@@ -156,7 +156,7 @@ def get_defaults():
         'recon_start_epoch': 0,
         'kl_start_epoch': 5,
         "cvae_epochs": 0,
-        "pretraining_epochs": 100,
+        "pretraining_epochs": 50,
         "ft_epochs": 20,
         
         'umap_metric': 'euclidean',
@@ -172,5 +172,10 @@ def get_defaults():
         "epsilon": 0.05,  # swav specific, swav default: 0.05 
         'weighted_kl': 1, # weighted swav loss
         "sinkhorn_iterations": 3,  # swav specific
+        "full_dataset_mode": 0,
+        'mode': 'train',
+        'adoptive_eps': 0, 
+        'p': 0.0,
+        'k_pos': 0
     }
     return defaults
