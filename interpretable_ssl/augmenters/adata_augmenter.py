@@ -52,6 +52,10 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         n_proto=None,
         use_manifold_weights=False,
         mc_size=100,
+        adoptive_eps=False,
+        p=0,
+        k_pos=0,
+        softm=False,
         **kwargs,
     ):
         self.sc_ds = sc_ds
@@ -119,12 +123,71 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         self.label_key = sc_ds.label_key
         self.return_label = True
         self.temperature = 0.05
-        self.softmax = True
-        self.k_pos = 10
-        # if self.affinity_type == 'coaff':
-        #     self.softmax = True
-        # else:
-        #     self.softmax = False
+
+        self.k_pos = k_pos  # used to be 10 in scproto_v5
+        self.p = p
+        if self.affinity_type == "coaff":
+            self.softmax = softm
+        else:
+            self.softmax = False
+        self.adoptive_eps = adoptive_eps
+        if self.adoptive_eps:
+            self.sigma = self.compute_sigma()
+        else:
+            self.sigma = None
+
+        self.normalize_aff()
+        
+    def normalize_aff(self):
+        aff = self.aff.tocsr(copy=True)
+
+        for i in range(aff.shape[0]):
+            start, end = aff.indptr[i], aff.indptr[i + 1]
+            if start == end:
+                continue
+
+            vals = aff.data[start:end]
+            idx = np.arange(start, end)
+
+            if self.p != 0:
+                scores = softmax(vals / self.temperature) if self.softmax else vals
+                order = np.argsort(scores)[::-1]
+                cum = np.cumsum(scores[order]) / scores.sum()
+                keep = order[cum <= self.p]
+                if len(keep) == 0:
+                    keep = order[:1]
+                idx = idx[keep]
+                vals = vals[keep]
+
+
+            if self.k_pos != 0 and len(vals) > self.k_pos:
+                k = np.argpartition(-vals, self.k_pos - 1)[: self.k_pos]
+                idx = idx[k]
+                vals = vals[k]
+
+            if self.softmax:
+                vals = softmax(vals / self.temperature)
+            else:
+                vals = vals / vals.sum()
+
+            mask = np.zeros(end - start, dtype=bool)
+            mask[idx - start] = True
+            aff.data[start:end][~mask] = 0
+            aff.data[idx] = vals
+
+        aff.eliminate_zeros()
+        self.aff = aff
+
+    def compute_sigma(self):
+        print("computing sigma...")
+        l = self.k_neighbors // 2
+        sc.tl.pca(self.adata)
+        X = self.adata.obsm["X_pca"].astype("float32")
+        index = faiss.IndexFlatL2(X.shape[1])
+        index.add(X)
+        dists, _ = index.search(X, l + 1)
+        print("---done----")
+        return np.sqrt(dists[:, l])
 
     def set_graph_name(self):
         self.graph_name = f"affinity_{str(self.sc_ds)}{len(self.sc_ds.adata)}_ncomp{self.n_components}_kneighbors{self.k_neighbors}_{self.affinity_type}"
@@ -197,7 +260,9 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         return w, z, softmax(alpha * z)
 
     def run_graph_generator(self, lock_path):
-        print(f"[{os.getpid()}] Generating affinities..., saving data to: {self.adata_path}")
+        print(
+            f"[{os.getpid()}] Generating affinities..., saving data to: {self.adata_path}"
+        )
         self.adata.write(self.adata_path)
         args = (
             self.adata_path,
@@ -219,7 +284,7 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
                 "interpretable_ssl.augmenters.graph_generator",
                 config_file,
                 self.save_path,
-                lock_path
+                lock_path,
             ],
             stdout=sys.stdout,  # pipe child stdout to parent stdout
             stderr=sys.stderr,  # pipe child stderr to parent stderr
@@ -253,10 +318,29 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
             local_idx = index % len(self.dataset_index_map[ds_id])
             pos_global_ids, pos_probs = self.get_positive_samples(local_idx, ds_id)
             global_idx = self.dataset_index_map[ds_id][local_idx]
-            items.append(self.assemble_from_indices(pos_global_ids, global_idx, pos_probs))
+            items.append(
+                self.assemble_from_indices(pos_global_ids, global_idx, pos_probs)
+            )
         return self.combine_augmented_data(items)
 
     def get_positive_samples(self, local_idx, ds_id):
+        global_idx = self.dataset_index_map[ds_id][local_idx]
+        row = self.aff.getrow(global_idx)
+
+        cols, probs = row.indices, row.data
+        
+        sampled_cols = np.random.choice(
+            cols, size=self.n_augmentations - 1, replace=False, p=probs
+        )
+
+        prob_map = dict(zip(cols, probs))
+        sampled_probs = np.array([prob_map[c] for c in sampled_cols])
+
+        pos_idx = np.insert(sampled_cols, 0, global_idx)
+        pos_probs = np.insert(sampled_probs, 0, 1.0)
+        return pos_idx, pos_probs
+
+    def get_positive_samples_v0(self, local_idx, ds_id):
         global_idx = self.dataset_index_map[ds_id][local_idx]
         row = self.aff.getrow(global_idx)  # 1×N sparse row
 
@@ -265,7 +349,7 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         vals = row.data
 
         # --- NEW: restrict to Top-K neighbors ---
-        if len(vals) > self.k_pos:
+        if self.k_pos is not None and len(vals) > self.k_pos:
             top_idx = np.argpartition(-vals, self.k_pos - 1)[: self.k_pos]
             cols = cols[top_idx]
             vals = vals[top_idx]
@@ -281,11 +365,11 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
             cols, size=self.n_augmentations - 1, replace=False, p=probs
         )
 
-         # --- sort sampled neighbors by similarity ---
+        # --- sort sampled neighbors by similarity ---
         mask = np.isin(cols, sampled_cols)
         sampled_vals = vals[mask]
         sampled_probs = probs[mask]
-        
+
         order = np.argsort(-sampled_vals)  # descending order
         sampled_cols = sampled_cols[order]  # ensure order match
         sampled_probs = sampled_probs[order]
@@ -296,15 +380,28 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
 
     def assemble_from_indices(self, indices, sample_index, pos_probs):
         items = [
-            super().__getitem__(global_idx)
-            # | ({self.label_key: self.adata.obs[self.label_key][i]} if self.return_label else {})
-            | ({k: self.manifold[k][global_idx] for k in self.manifold.keys()})
-            | (
-                {"index": np.array([global_idx]), "sample_id": sample_index}
-                if self.return_idx
-                else {}
+            (
+                super().__getitem__(global_idx)
+                # | ({self.label_key: self.adata.obs[self.label_key][i]} if self.return_label else {})
+                | ({k: self.manifold[k][global_idx] for k in self.manifold.keys()})
+                | (
+                    {"index": np.array([global_idx]), "sample_id": sample_index}
+                    if self.return_idx
+                    else {}
+                )
+                | (
+                    {
+                        "cell_idx": global_idx,
+                        "sim": torch.tensor(pos_probs[idx], dtype=torch.float32),
+                        # "sim": torch.tensor(1.0, dtype=torch.float32)
+                    }
+                )
+                | (
+                    {"sigma": float(self.sigma[global_idx])}
+                    if self.adoptive_eps
+                    else {}
+                )
             )
-            | {'cell_idx': global_idx, "sim": torch.tensor(pos_probs[idx], dtype=torch.float32)}
             for idx, global_idx in enumerate(indices)
         ]
         return self.combine_augmented_data(items)
@@ -325,14 +422,14 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
             # "celltypes",
             "index",
             "sample_id",
-            "sigma",
             "heterogeneity",
             "mf_score",
             "wsigma",
             "zsigma",
             "ssigma",
-            'cell_idx',
-            'sim'
+            "cell_idx",
+            "sim",
+            "sigma",
         ]
         combined_data = {}
         for key in keys_to_stack:
@@ -348,7 +445,7 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
 
     def load_affinities(self):
         if not os.path.exists(self.save_path):
-            print('waiting for aff to be generated')
+            print("waiting for aff to be generated")
         while not os.path.exists(self.save_path):
             time.sleep(1)
         return pkl.load(open(self.save_path, "rb"))

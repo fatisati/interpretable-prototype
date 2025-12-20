@@ -2,6 +2,7 @@ import argparse
 import math
 import os
 import os
+
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 import shutil
 import time
@@ -47,6 +48,7 @@ from interpretable_ssl.trainers.scproto_utils import *
 from interpretable_ssl.trainers.affinity import *
 from interpretable_ssl.trainers.scpoli_helpers import *
 from interpretable_ssl.evaluation.mc_metric_utils import *
+
 logger = getLogger()
 
 
@@ -81,6 +83,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             "kl",
             "proto",
             "commit",
+            'aff'
         ]
         self.log_hist = {}
 
@@ -94,7 +97,8 @@ class SCProtoTrainer(AdoptiveTrainer):
         self.build_model()
         self.build_data()
         self.build_optimizer()
-
+        self._temperature0 = float(self.temperature)
+        self._epsilon0 = float(self.epsilon)
         # self.load_checkpoint()
 
     def build_data(self):
@@ -120,6 +124,10 @@ class SCProtoTrainer(AdoptiveTrainer):
             n_proto=self.nmb_prototypes,
             use_manifold_weights=(self.cell_w_mode != "uniform"),
             mc_size=self.mc_size,
+            adoptive_eps=(self.adoptive_eps == 1),
+            p = self.p,
+            k_pos = self.k_pos,
+            softm = (self.softm == 1),
             condition_encoders=scpoli_encoder.condition_encoders,
             conditions_combined_encoder=scpoli_encoder.conditions_combined_encoder,
             # cell_type_keys=[self.cell_type_key],
@@ -152,7 +160,7 @@ class SCProtoTrainer(AdoptiveTrainer):
 
     def load_model(self):
         model = self.get_model()
-        if self.ft_epochs > 0:
+        if self.ft_epochs > 0 and self.full_dataset_mode == 0:
             model = self.adapt_model(model, self.query.adata)
         checkpoint_path = self.get_model_path()
         checkpoint = torch.load(checkpoint_path)
@@ -236,7 +244,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             #     lr=self.base_lr,
             #     weight_decay=self.wd,
             # )
-            
+
             # ----- optimizer -----
             params_embedding = []
             params = []
@@ -246,15 +254,15 @@ class SCProtoTrainer(AdoptiveTrainer):
                         params_embedding.append(p)
                     else:
                         params.append(p)
-            
+
             optimizer = torch.optim.Adam(
                 [
                     {"params": params_embedding, "weight_decay": 0},
                     {"params": params},
                 ],
-                lr=self.base_lr, #1e-3,
+                lr=self.base_lr,  # 1e-3,
                 eps=0.01,
-                weight_decay=self.wd #0.04,
+                weight_decay=self.wd,  # 0.04,
             )
 
         elif opt_type == "wadam":
@@ -320,12 +328,12 @@ class SCProtoTrainer(AdoptiveTrainer):
         log_dict["epoch"] = epoch
         if not self.debug:
             wandb.log(log_dict)
-        else:
-            for k in log_dict:
-                if k not in self.log_hist:
-                    self.log_hist[k] = []
-                self.log_hist[k].append(log_dict[k])
-            print(log_dict)
+        # else:
+        #     for k in log_dict:
+        #         if k not in self.log_hist:
+        #             self.log_hist[k] = []
+        #         self.log_hist[k].append(log_dict[k])
+        #     print(log_dict)
 
     def train(self, epochs=None):
         self.lambda_loss = self.init_lambda_loss()
@@ -352,17 +360,28 @@ class SCProtoTrainer(AdoptiveTrainer):
                     self.init_queue(ds_id)
 
             train_meters = self.train_epoch(epoch)
-            test_meters = self.test_epoch()
-            test_meters = {f"test_{key}": val for key, val in test_meters.items()}
+            #
+            if self.full_dataset_mode == 1:
+                test_meters = {}
+            else:
+                test_meters = self.test_epoch()
+                test_meters = {f"test_{key}": val for key, val in test_meters.items()}
 
             scores = self.encode_adata(self.train_.adata, self.model, z_idx=2)
             cell_ids = self.train_.adata.obs_names
-            train_meters["overal_compactness"], train_meters["overal_separation"], train_meters["celltype_purity"], train_meters["niche_purity"], train_meters["niche_purity3d"] = (
-                self.calc_mc_quality(cell_ids, scores, "train")
-            )
+            (
+                train_meters["overal_compactness"],
+                train_meters["overal_separation"],
+                train_meters["celltype_purity"],
+                train_meters["niche_purity"],
+                train_meters["niche_purity3d"],
+            ) = self.calc_mc_quality(cell_ids, scores, "train")
             ad = self.train_.adata
-            ad.obs['mc'] = scores.argmax(1).detach().cpu().numpy()
-            train_meters["spatial_compactness"] = spatial_compactness(ad, mc_key='mc').mean()
+            ad.obs["mc"] = scores.argmax(1).detach().cpu().numpy()
+            if "spatial" in ad.obsm:
+                train_meters["spatial_compactness"] = spatial_compactness(
+                    ad, mc_key="mc", bk=self.dataset.batch_key
+                ).mean()
 
             self.log_wandb_loss(train_meters | test_meters, epoch)
             self.save_checkpoint(epoch)
@@ -375,7 +394,6 @@ class SCProtoTrainer(AdoptiveTrainer):
 
     def init_lambda_loss(self):
 
-       
         return {
             key: getattr(self, f"lambda_{key}")
             for key in self.loss_keys
@@ -396,7 +414,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         # lambda_loss = {key: getattr(self, f"lambda_{key}") / meters[key] for key in }
         # for loss_key in self.loss_keys:
         #         setattr(self, f"lambda_{loss_key}", lambda_loss[loss_key])
-        #         lambda_loss[loss_key] = 
+        #         lambda_loss[loss_key] =
         # print(lambda_loss)
         # if self.normalize_loss:
         #     return lambda_loss
@@ -421,6 +439,10 @@ class SCProtoTrainer(AdoptiveTrainer):
         #     self.lambda_loss["recon"] = 0
 
     def train_epoch(self, epoch):
+        self.update_temp_eps(epoch)
+        logger.info(
+            f"epoch {epoch} | temp={self.temperature:.4f}, eps={self.epsilon:.4f}"
+        )
         self.model.train()
         self.use_the_queue = 0
 
@@ -538,18 +560,34 @@ class SCProtoTrainer(AdoptiveTrainer):
         bs = inputs["x"].size(0)
         inputs = self.dict_to_device(inputs)
         # inputs = reshape_and_reorder_dict(inputs)
-        B, n_aug = inputs['x'].shape[:2]
-        inputs = {k: t.permute(1, 0, *range(2, t.ndim)).reshape(B * n_aug, *t.shape[2:]) for k, t in inputs.items()}
+        B, n_aug = inputs["x"].shape[:2]
+        inputs = {
+            k: t.permute(1, 0, *range(2, t.ndim)).reshape(B * n_aug, *t.shape[2:])
+            for k, t in inputs.items()
+        }
         # manifold_keys = ['sigma', '', 'heterogeneity', 'mf_score']
         manifold_keys = self.train_ds.manifold.keys()
         manifold_scores = {k: inputs.pop(k, None) for k in manifold_keys}
         cell_idx = inputs.pop("cell_idx", None).cpu().numpy()
         cell_ids = [ad.obs.index[i] for i in cell_idx]
+        sigma = inputs.pop("sigma").cpu().numpy() if "sigma" in inputs else None
+
+        def sigma_to_eps(sigma, eps_min=0.02, eps_max=0.05):
+            s_lo, s_hi = np.percentile(sigma, [5, 95])
+            s = np.clip(sigma, s_lo, s_hi)
+            s = (s - s_lo) / (s_hi - s_lo)
+            return eps_min + s * (eps_max - eps_min)
+        if sigma is not None:
+            adoptive_eps = sigma_to_eps(sigma, 0.5*self.epsilon, self.epsilon)
+        else:
+            adoptive_eps = None
         sim = inputs.pop("sim", None)
         # label = inputs.pop(self.dataset.label_key)
         z, _, scores, recon, (proto_loss, commitment_loss), kl, kl_balance = self.model(
             inputs
         )
+        
+        loss_aff = self.calc_aff_loss(scores[:bs], cell_idx[:bs])
         if self.recon_type == "swapped" or self.recon_type == "hybrid":
             swapped_recon = self.calc_swapped_recon(z, scores, bs, inputs)
             if self.recon_type == "swapped":
@@ -567,11 +605,22 @@ class SCProtoTrainer(AdoptiveTrainer):
             qproto_utilization,
             p_uncertainty,
             q_uncertainty,
-            proto_entropy
-        ) = self.compute_swav_loss(scores, z, bs, ds_id, manifold_scores, None, sim=sim)
+            proto_entropy,
+        ) = self.compute_swav_loss(
+            scores,
+            z,
+            bs,
+            ds_id,
+            manifold_scores,
+            None,
+            sim=sim,
+            adoptive_eps=adoptive_eps,
+        )
         assign_cnts = get_hard_assign_cnts(scores)
         max_active = min(scores.size(0), scores.size(1))
-        compactness, separation, cp, np2d, np3d = self.calc_mc_quality(cell_ids, scores, split)
+        compactness, separation, cp, np2d, np3d = self.calc_mc_quality(
+            cell_ids, scores, split
+        )
         return {
             "swav": swav_loss,
             "recon": recon,
@@ -589,8 +638,30 @@ class SCProtoTrainer(AdoptiveTrainer):
             "q_uncertainty": q_uncertainty,
             "compactness": compactness,
             "separation": separation,
-            'proto_entropy': proto_entropy
+            "proto_entropy": proto_entropy,
+            'aff': loss_aff
         }, assign_cnts
+
+    def calc_aff_loss(self, scores, cell_idx):
+        if torch.is_tensor(cell_idx):
+            cell_idx = cell_idx.detach().cpu().numpy()
+        cell_idx = np.asarray(cell_idx, dtype=np.int64)
+
+        P = F.softmax(scores / self.temperature, dim=1)
+        S = P @ P.T
+
+        A = self.train_ds.aff[cell_idx][:, cell_idx]
+        A = A.maximum(A.T)
+
+        A = torch.as_tensor(A.toarray(), device=S.device, dtype=S.dtype)
+
+        diff = S - A
+        if self.two_sided == 0:
+            diff = torch.clamp(diff, min=0.0)
+
+        mask = ~torch.eye(S.size(0), device=S.device, dtype=torch.bool)
+        return (diff[mask] ** 2).mean()
+
 
     def calc_swapped_recon(self, z, scores, bs, inputs):
         loss = 0
@@ -624,20 +695,28 @@ class SCProtoTrainer(AdoptiveTrainer):
         return z_swav, logits, cvae_loss, resp, propagation, sim
 
     def compute_swav_loss(
-        self, scores, z, bs, ds_id, manifold_scores=None, resp=None, sim=None
+        self,
+        scores,
+        z,
+        bs,
+        ds_id,
+        manifold_scores=None,
+        resp=None,
+        sim=None,
+        adoptive_eps=None,
     ):
         if sim is None or self.weighted_kl == 0:
             sim = torch.ones(z.size(0), device=z.device, dtype=z.dtype)
 
-        loss, p_matched, q_matched, p_uncertainty, q_uncertainty, qproto_utilization, proto_entropy = (
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0
-        )
+        (
+            loss,
+            p_matched,
+            q_matched,
+            p_uncertainty,
+            q_uncertainty,
+            qproto_utilization,
+            proto_entropy,
+        ) = (0, 0, 0, 0, 0, 0, 0)
 
         # each crop mean each augmentation, just caluclate q and loss for first crops_for_assign
         for view_idx, view_id in enumerate(self.views_for_assign):
@@ -656,7 +735,15 @@ class SCProtoTrainer(AdoptiveTrainer):
                 else:
                     cell_weights = None  # uniform
                 if self.sinkhorn_iterations == 0:
-                    q = F.softmax(view_scores / self.epsilon, dim=1)
+                    if adoptive_eps is not None:
+                        eps = torch.as_tensor(
+                            adoptive_eps[bs * view_id : bs * (view_id + 1)],
+                            device=view_scores.device,
+                            dtype=view_scores.dtype,
+                        )
+                        q = F.softmax(view_scores / eps[:, None], dim=1)
+                    else:
+                        q = F.softmax(view_scores / self.epsilon, dim=1)
                 else:
                     q = self.sinkhorn(sinkhorn_input, cell_weights)
                 qassign_cnts = get_hard_assign_cnts(q)
@@ -668,13 +755,13 @@ class SCProtoTrainer(AdoptiveTrainer):
 
             view_scores = scores[bs * view_id : bs * (view_id + 1)]
             p = F.softmax(view_scores / self.temperature, dim=1)
-            
+
             # per-sample entropy (H_p > 0)
-            H_p = - (p * p.clamp_min(1e-8).log()).sum(dim=1).mean()
+            H_p = -(p * p.clamp_min(1e-8).log()).sum(dim=1).mean()
             p_uncertainty += H_p
-            
-            usage = p.mean(dim=0)     # shape [K]
-            H_proto = - (usage * usage.clamp_min(1e-8).log()).sum()
+
+            usage = p.mean(dim=0)  # shape [K]
+            H_proto = -(usage * usage.clamp_min(1e-8).log()).sum()
             proto_entropy += H_proto
 
             if self.hard_clustering == 1:
@@ -794,7 +881,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         Q = torch.exp(
             out / self.epsilon
         ).t()  # Q is K-by-B for consistency with notations from our paper
-        
+
         B = Q.shape[1] * self.world_size  # number of samples to assign
         K = Q.shape[0]  # how many prototypes
 
@@ -807,12 +894,12 @@ class SCProtoTrainer(AdoptiveTrainer):
             # normalize each row: total weight per prototype must be 1/K
             sum_of_rows = torch.sum(Q, dim=1, keepdim=True)
             # print(f'row sum (proto) {sum_of_rows}')
-            Q /= (sum_of_rows + 1e-12)
+            Q /= sum_of_rows + 1e-12
             Q /= K
 
             # normalize each column: total weight per sample must be 1/B
             # print(f'col sum (samples) {torch.sum(Q, dim=0, keepdim=True)}')
-            Q /= (torch.sum(Q, dim=0, keepdim=True) + 1e-12)
+            Q /= torch.sum(Q, dim=0, keepdim=True) + 1e-12
             Q /= B
 
         Q *= B  # the colomns must sum to 1 so that Q is an assignment
@@ -884,6 +971,24 @@ class SCProtoTrainer(AdoptiveTrainer):
             self.queue_length,  # // divide by wprld size
             self.latent_dims,
         ).cuda()
+
+    def update_temp_eps(self, epoch):
+        if self.sched_temp_eps == 0:
+            return
+
+        t = epoch / max(1, self.n_epochs - 1)
+
+        # cosine decay with floor
+        self.temperature = max(
+            self.temperature_min,
+            self._temperature0 * 0.5 * (1 + np.cos(np.pi * t)),
+        )
+
+        self.epsilon = max(
+            self.epsilon_min,
+            self._epsilon0 * 0.5 * (1 + np.cos(np.pi * t)),
+        )
+
 
 
 if __name__ == "__main__":

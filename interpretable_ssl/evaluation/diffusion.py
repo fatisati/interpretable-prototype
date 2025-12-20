@@ -3,6 +3,7 @@ import scanpy as sc
 import pandas as pd
 import sys
 import os
+import traceback
 
 def calc_dc(ad):
     sc.tl.pca(ad)
@@ -12,15 +13,24 @@ def calc_dc(ad):
     return dc
 
 if __name__ == "__main__":
-    ad_path, save_path, lock_path, bk = sys.argv[1:5]
-    print(f"calc dc for {ad_path}, {save_path}")
-    ad = sc.read_h5ad(ad_path)
-    dc = calc_dc(ad)
-    dc.to_csv(save_path)
-    print("done")
+    ad_path, out_path, lock_path, bk = sys.argv[1:5]
+    tmp = out_path + ".tmp"
+    
     try:
-        os.remove(ad_path)
-        os.remove(lock_path)
-        print('both files removed')
-    except FileNotFoundError:
-        print(f'couldnt remove files, {ad_path}, {lock_path}')
+        print(f"calc dc for {ad_path}, {out_path}")
+        ad = sc.read_h5ad(ad_path)
+        dc = calc_dc(ad)
+        
+        dc.to_csv(tmp)
+        os.rename(tmp, out_path)
+
+    except Exception:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        if os.path.exists(out_path):
+            os.remove(out_path)
+        raise
+
+    finally:
+        if os.path.exists(lock_path):
+            os.remove(lock_path)

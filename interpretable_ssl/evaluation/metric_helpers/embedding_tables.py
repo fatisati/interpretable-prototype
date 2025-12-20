@@ -40,24 +40,36 @@ def show_tb(df, show_cols = ['Batch correction', 'Bio conservation', 'Total', 'R
     return df.style.apply(highlight_max_second, axis=0).format("{:.3f}")
 
 def load_tb(ds_id):
-    p = f'/home/icb/fatemehs.hashemig/models/{ds_id}/'
+    p = f"/home/icb/fatemehs.hashemig/models/{ds_id}/"
     dfs = {}
 
-    def load_csv(p):
-        if os.path.exists(p):
-            return pd.read_csv(p, index_col = 0)
-        # else:
-        #     print(p)
-    for key in ['scib', 'scgraph', 'mc_quality_summary', 'de_jaccard_ref', 'de_jaccard_all']:
-        key_dfs = [load_csv(f"{p}{fol}/{key}.csv") for fol in tqdm(os.listdir(p))]
-        key_dfs = [df for df in key_dfs if df is not None]  # remove None objects
-        if len(key_dfs)>0:
-            dfs[key] = pd.concat(key_dfs)
-        else:
-            dfs[key] = None
-    scib_df, scgraph_df, mc_df = dfs['scib'], dfs['scgraph'], dfs['mc_quality_summary']
+    def load_csv(fp):
+        return pd.read_csv(fp, index_col=0) if os.path.exists(fp) else None
+
+    for fol in tqdm(os.listdir(p)):
+        fol_path = os.path.join(p, fol)
+        if not os.path.isdir(fol_path):
+            continue
+
+        for fn in os.listdir(fol_path):
+            if not fn.endswith(".csv"):
+                continue
+
+            key = fn.replace(".csv", "")
+            df = load_csv(os.path.join(fol_path, fn))
+            if df is None:
+                continue
+
+            dfs.setdefault(key, []).append(df)
+
+    dfs = {k: pd.concat(v) for k, v in dfs.items()}
+
+    scib_df = dfs.get("scib")
+    scgraph_df = dfs.get("scgraph")
+
     try:
         df = pd.concat([scib_df, scgraph_df], axis=1)
     except:
         df = (scib_df, scgraph_df)
+
     return df, dfs

@@ -20,6 +20,9 @@ res_dir = "/home/icb/fatemehs.hashemig/models/"
 
 
 def save_append(df, save_dir, name, append=True, name_postfix=None):
+    if df is None:
+        print(f'df is none, {save_dir}/{name} not saved')
+        return
     os.makedirs(os.path.dirname(save_dir), exist_ok=True)
     if name_postfix is not None:
         name = f"{name}_{name_postfix}"
@@ -58,18 +61,15 @@ def get_scgraph(
     **kwargs,
 ):
     tmp_path = f"tmp_{uuid.uuid4().hex[:8]}.h5ad"
-
     adata.write(tmp_path)
-    scgraph = scGraph(
-        adata_path=tmp_path, batch_key=batch_key, label_key=label_key, **kwargs
-    )
-    scgr_res = scgraph.main(_obsm_list=obsm_keys)
-    if os.path.exists(tmp_path):
-        os.remove(tmp_path)
-        print("Deleted:", tmp_path)
-    else:
-        print(f'could not remove {tmp_path}')
-    return scgr_res
+    try:
+        scgraph = scGraph(
+            adata_path=tmp_path, batch_key=batch_key, label_key=label_key, **kwargs
+        )
+        return scgraph.main(_obsm_list=obsm_keys)
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
     # save_path = f"{res_dir}/{dataset_name}/"
     # return save_append(scgr_res, save_path, "scgraph", name_postfix=name_postfix)
 
@@ -216,18 +216,18 @@ def save_pca_harmoney_metrics(
     )
 
 
-def get_seacell_metrics(SEACell_ad, adata, bk, lk, ds, postfix=None, **scgraph_kwargs):
-    # Normalize cells, log transform and compute highly variable genes
-    sc.pp.normalize_per_cell(SEACell_ad)
-    sc.pp.log1p(SEACell_ad)
-    # sc.pp.highly_variable_genes(ad, n_top_genes=1500)
+# def get_seacell_metrics(SEACell_ad, adata, bk, lk, ds, postfix=None, **scgraph_kwargs):
+#     # Normalize cells, log transform and compute highly variable genes
+#     sc.pp.normalize_per_cell(SEACell_ad)
+#     sc.pp.log1p(SEACell_ad)
+#     # sc.pp.highly_variable_genes(ad, n_top_genes=1500)
 
-    # SEACell_ad = agg_obs(SEACell_ad, adata, bk)
-    # SEACell_ad = agg_obs(SEACell_ad, adata, lk)
+#     # SEACell_ad = agg_obs(SEACell_ad, adata, bk)
+#     # SEACell_ad = agg_obs(SEACell_ad, adata, lk)
 
-    return save_pca_harmoney_metrics(
-        SEACell_ad, bk, lk, ds, "seacell_pca", postfix=postfix, **scgraph_kwargs
-    )
+#     return save_pca_harmoney_metrics(
+#         SEACell_ad, bk, lk, ds, "seacell_pca", postfix=postfix, **scgraph_kwargs
+#     )
 
 
 def calc_adata_metrics(dataset, ds_conf):
@@ -242,8 +242,25 @@ def calc_adata_metrics(dataset, ds_conf):
         ds_conf["label_key"],
     )
 
+def compute_similarity(z, proto):
+    z = z.detach()
+    proto = proto.detach()
+    Z = torch.cat([z, proto], dim=0)
 
-def get_scproto_mc_adata(t, adata, bk, lk, use_mean=False, use_max=True, model=None):
+    k = 50
+    d = torch.cdist(Z, Z)
+    knn_dist = d.topk(k + 1, largest=False).values[:, 1:]
+    sigma = knn_dist.median(dim=1).values
+
+    sigma_z = sigma[: z.shape[0]].unsqueeze(1)          # (N, 1)
+    sigma_p = sigma[z.shape[0]:].unsqueeze(0)           # (1, P)
+
+    z_d = torch.cdist(z, proto)                          # (N, P)
+
+    sim = torch.exp(-2.0 * (z_d ** 2) / (sigma_z * sigma_p))
+    return sim
+
+def get_scproto_mc_adata(t, adata, bk, lk, use_mean=False, use_max=True, model=None, similarity = 'normal'):
     import torch.nn as nn
 
     if model is None:
@@ -285,8 +302,13 @@ def get_scproto_mc_adata(t, adata, bk, lk, use_mean=False, use_max=True, model=N
     else:
         metacells = model.decode(protos, batch)
     z_vae = t.encode_adata(adata, model, z_idx=1)
-    # z_swav = t.encode_adata(adata, model)
-    sample_proto_sim = t.get_proto_assignments(z_vae, model)
+
+    # sample_proto_sim = t.get_proto_assignments(z_vae, model)
+    if similarity == 'normal':
+        sample_proto_sim = -torch.cdist(z_vae.detach(), protos.detach(), p=2).cpu().numpy()
+    else:
+        sample_proto_sim = compute_similarity(z_vae, protos).detach().cpu().numpy()
+    
     proto_labels = extract_proto_labels(adata, sample_proto_sim, [bk, lk])
     metacells_adata = generate_metacell_adata(metacells, proto_labels)
     if metacells_adata.X.max() > 50:
@@ -313,13 +335,13 @@ def load_seacell(ds_id, normalize=True):
     home = "/home/icb/fatemehs.hashemig/"
     ad = sc.read_h5ad(f"{home}/models/{ds_id}/seacell/seacell_sc.h5ad")
     mc_ad = sc.read_h5ad(f"{home}/models/{ds_id}/seacell/seacell_agg.h5ad")
-    if normalize:
+    if normalize and ad.X.max() > 20:
         sc.pp.normalize_total(mc_ad, target_sum=1e4)
         sc.pp.log1p(mc_ad)
     return ad, mc_ad
 
 
-def get_metacell_metrics(ad, mc_ad, obsm_keys, bk, lk):
+def get_metacell_metrics(ad, mc_ad, obsm_keys, bk, lk, save_path=None):
     # SCIB
     try:
         scb = get_scib(mc_ad, obsm_keys, bk, lk)
@@ -333,6 +355,9 @@ def get_metacell_metrics(ad, mc_ad, obsm_keys, bk, lk):
     except Exception as e:
         print("SCG metric failed:", e)
         scg = None
-
+    if save_path is not None:
+        scg.to_csv(save_path + '/scgraph.csv')
+        if scb is not None:
+            scb.to_csv(save_path + '/scib.csv')
     return scg, scb
 

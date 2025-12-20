@@ -132,19 +132,19 @@ def get_defaults():
         
         "lambda_l2": 0.0, # 1e-3
         
-        "lambda_kl": 0.0,
-        "lambda_recon": 0.0, 
+        "lambda_kl": 0.1,
+        "lambda_recon": 1.0, 
         'lambda_balance': 0.0,
-        'lambda_swav': 0.0,
+        'lambda_swav': 1.0,
         "lambda_proto": 0.0, # 1,
         "lambda_commit": 0.0, # 0.25
-        "lambda_p_uncertainty": 0.0,
+        "lambda_p_uncertainty": 0.1,
         'lambda_proto_entropy': 0.0,
         'assignment_metric': 'sneuc',
         "model_type": 'gm',
         "l2norm": 0,
         
-        "version": 21,
+        "version": 22,
         "recon_update_target": 'encoder',
         "description": '17: calc affinity on whole datase instead of batch wise',
         'recon_type': 'normal',
@@ -155,7 +155,7 @@ def get_defaults():
         'swav_sched': 0, # not used yet
         'recon_start_epoch': 0,
         'kl_start_epoch': 5,
-        "cvae_epochs": 0,
+        "cvae_epochs": 50,
         "pretraining_epochs": 50,
         "ft_epochs": 20,
         
@@ -171,11 +171,18 @@ def get_defaults():
         "temperature": 0.1,  # swav specific, lower make sharper assignment of z to protos, swav default 0.1
         "epsilon": 0.05,  # swav specific, swav default: 0.05 
         'weighted_kl': 1, # weighted swav loss
-        "sinkhorn_iterations": 3,  # swav specific
-        "full_dataset_mode": 0,
+        "sinkhorn_iterations": 0,  # swav specific
+        "full_dataset_mode": 1,
         'mode': 'train',
-        'adoptive_eps': 0, 
+        'adoptive_eps': 1, 
         'p': 0.0,
-        'k_pos': 0
+        'k_pos': 0,
+        'softm': 0,
+        'lambda_aff': 0.0,
+        'two_sided': 0,
+        'temperature_min': 0.04,
+        'epsilon_min': 0.02,
+        'sched_temp_eps': 1
+        
     }
     return defaults

@@ -30,6 +30,8 @@ from sklearn.neighbors import NearestNeighbors
 
 from sklearn.metrics import pairwise_distances
 from interpretable_ssl.evaluation.mc_metric_utils import *
+from interpretable_ssl.evaluation.dropout_recovery import *
+
 
 class Trainer(TrainerBase):
     # @log_time('scpoli trainer')
@@ -47,7 +49,11 @@ class Trainer(TrainerBase):
             self.dataset = self.get_dataset(self.dataset_id)
         self.input_dim = self.dataset.x_dim
         if ref_query is None:
-            self.ref, self.query = self.dataset.get_train_test()
+            if self.full_dataset_mode:
+                self.ref = self.dataset
+                self.query = None
+            else:
+                self.ref, self.query = self.dataset.get_train_test()
         else:
             self.ref, self.query = ref_query
 
@@ -55,9 +61,13 @@ class Trainer(TrainerBase):
             mask = self.ref.adata.obs[self.condition_key] == self.study_id
             self.ref.adata = self.ref.adata[mask].copy()
 
-        train_ind, val_ind = train_test_split(
-            range(len(self.ref)), test_size=0.1, random_state=42
-        )
+        if self.full_dataset_mode == 1:
+            train_ind = range(len(self.ref))
+            val_ind = range(len(self.ref))
+        else:
+            train_ind, val_ind = train_test_split(
+                range(len(self.ref)), test_size=0.1, random_state=42
+            )
         self.train_, self.val_ = self.ref._create_split_instance(
             train_ind
         ), self.ref._create_split_instance(val_ind)
@@ -107,9 +117,19 @@ class Trainer(TrainerBase):
         print(f"waiting for {path} to be generated...")
         while not os.path.exists(path):
             time.sleep(1)  # wait 5 seconds before checking again
-        self.dc_dict[split] = pd.read_csv(self.dc_path[split], index_col=0)
+        size = -1
+        while True:
+            new_size = os.path.getsize(path)
+            if new_size == size and new_size > 0:
+                break
+            size = new_size
+            time.sleep(0.5)
+
+        df = pd.read_csv(path, index_col=0)
+        self.dc_dict[split] = df
+
         print("done")
-        return self.dc_dict[split]
+        return df
 
     def calc_mc_quality(self, cell_ids, scores, split):
         dc = self.get_dc(split).loc[cell_ids]
@@ -128,10 +148,10 @@ class Trainer(TrainerBase):
             if k in obs.columns:
                 df[k] = obs.loc[cell_ids, k].values
 
-        niche_purity = calc_purity(df, 'niches_2D', 'mc')
-        niche_purity3d = calc_purity(df, 'niches_3D', 'mc')
-        cell_purity = calc_purity(df, lk, 'mc')
-        
+        niche_purity = calc_purity(df, "niches_2D", "mc")
+        niche_purity3d = calc_purity(df, "niches_3D", "mc")
+        cell_purity = calc_purity(df, lk, "mc")
+
         comp = []
         for _, sub in df.groupby("mc"):
             X = sub.drop(columns=["mc"] + keys, errors="ignore").values
@@ -343,11 +363,20 @@ class Trainer(TrainerBase):
         scores = model.proto_soft_assignments(z)
         return scores.detach().cpu().numpy()
 
-    def plot_umap(self, model, adata, split, save_plot=True, use_knn=True):
+    def plot_umap(
+        self, model, adata, split, save_plot=True, use_knn=True, assign_by_mc=False, k=5
+    ):
+        if adata.n_obs > 50000:
+            idx = np.random.choice(adata.n_obs, 50000, replace=False)
+            adata = adata[idx].copy()
         z = self.encode_adata(adata, model, z_idx=1)
         prototypes = self.get_model_prototypes(model)
         z_umap, prototype_umap, proto_labels = calc_umap_v2(
-            z, prototypes, adata.obs[self.dataset.label_key], 5, metric=self.umap_metric
+            z,
+            prototypes,
+            adata.obs[self.dataset.label_key],
+            k,
+            metric=self.umap_metric,
         )
         obs = adata.obs
         # if prototypes is not None:
@@ -415,59 +444,26 @@ class Trainer(TrainerBase):
 
     def save_metacell_metrics(self):
         ad = self.train_.adata.copy()
-        
-        mc_adata, sim = get_scproto_mc_adata(
+
+        mc_ad, sim = get_scproto_mc_adata(
             self, ad, self.dataset.batch_key, self.dataset.label_key, model=self.model
         )
-        ad.X = ad.layers["lognorm"]
-        mc_scg, mc_scb = get_metacell_metrics(
-            ad,
-            mc_adata,
-            [f"{self.get_model_name()}_mc_pca", f"{self.get_model_name()}_mc_proto"],
-            self.dataset.batch_key,
-            self.dataset.label_key,
-        )
-        save_append(mc_scg, self.get_dump_path(), "scgraph")
-        if mc_scb is not None:
-            save_append(mc_scb, self.get_dump_path(), "scib")
         ad.obs["SEACell"] = sim.argmax(axis=1)
+        
+        protos = self.model.get_prototypes()
+        sample_protos = protos[ad.obs['SEACell']]
+        batch = self.train_ds.conditions.to('cuda')
+        ad.layers['metacell'] = self.model.decode(sample_protos, batch).detach().cpu().numpy()
+        
         ad.obsm["dc"] = self.get_dc("train").values
-        tmp_path = f"tmp_{uuid.uuid4().hex[:8]}.h5ad"
-        ad.write(tmp_path)
-        process = subprocess.Popen(
-            [
-                sys.executable,
-                "-m",
-                "interpretable_ssl.evaluation.metric_helpers.mc_quality",
-                tmp_path,
-                self.dataset.batch_key,
-                self.dataset.label_key,
-                self.get_dump_path(),
-                self.get_model_name(),
-            ]
+        save_all_mc_metrics(
+            ad,
+            mc_ad,
+            self.dataset.label_key,
+            self.dataset.batch_key,
+            self.get_dump_path(),
+            name=self.get_model_name(),
         )
-        process.wait()  # ✅ wait for the subprocess to finish
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
-            print("Deleted:", tmp_path)
-
-        get_mc_jaccard(
-            mc_adata,
-            self.dataset.adata,
-            self.dataset.label_key,
-            self.dataset.batch_key,
-            0.05,
-            self.get_model_name(),
-        ).to_csv(self.get_dump_path() + "/de_jaccard_all.csv")
-
-        get_mc_jaccard(
-            mc_adata,
-            self.ref.adata,
-            self.dataset.label_key,
-            self.dataset.batch_key,
-            0.05,
-            self.get_model_name(),
-        ).to_csv(self.get_dump_path() + "/de_jaccard_ref.csv")
 
     def save_metrics(self):
         adata = add_trainer_emb(self, self.dataset.adata)
@@ -480,6 +476,13 @@ class Trainer(TrainerBase):
             self.dataset.batch_key,
             self.dataset.label_key,
         )
+        adata.obs[self.dataset.label_key] = adata.obs[self.dataset.label_key].astype(
+            "category"
+        )
+        adata.obs[self.dataset.batch_key] = adata.obs[self.dataset.batch_key].astype(
+            "category"
+        )
+
         scg, scb = get_metrics(*params)
         scg.to_csv(self.get_dump_path() + "/scgraph.csv")
         if scb is not None:

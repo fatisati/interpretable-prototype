@@ -13,9 +13,27 @@
 export TMPDIR=$HOME/tmp
 mkdir -p $TMPDIR
 
-source ~/.bashrc
+# clean environment
+unset PYTHONPATH
+unset LD_LIBRARY_PATH
+
+# activate conda properly
+source $HOME/miniconda3/etc/profile.d/conda.sh
 conda activate swav_knn
-python main.py {model} --num_prototypes {num_prototypes} --latent_dims {latent_dims} --batch_size {batch_size} \
+
+# source ~/.bashrc
+# conda activate swav_knn
+
+# export TMPDIR=$HOME/tmp
+# mkdir -p $TMPDIR
+
+# # 🔥 THE IMPORTANT CHANGE:
+# source /etc/profile
+# export PATH="$HOME/miniconda3/bin:$PATH"
+# conda deactivate 2>/dev/null
+# conda activate swav_knn
+
+python main.py {model} {dataset_id} {mode} --mode {mode} --num_prototypes {num_prototypes} --latent_dims {latent_dims} --batch_size {batch_size} \
 --augmentation_type {augmentation_type} --epsilon {epsilon} --cvae_loss_scaler {cvae_loss_scaler} \
 --prot_decoding_loss_scaler {prot_decoding_loss_scaler} --model_version {model_version} \
 --dimensionality_reduction {dimensionality_reduction} --k_neighbors {k_neighbors} --experiment_name {experiment_name} \
@@ -35,4 +53,6 @@ python main.py {model} --num_prototypes {num_prototypes} --latent_dims {latent_d
 --lambda_l2 {lambda_l2} --lambda_recon {lambda_recon} --lambda_kl {lambda_kl} --lambda_balance {lambda_balance} --lambda_swav {lambda_swav} \
 --recon_update_target {recon_update_target} --recon_type {recon_type} --normalize_loss {normalize_loss} --div_type {div_type} --weighted_kl {weighted_kl} \
 --kl_sched {kl_sched} --swav_sched {swav_sched} --recon_start_epoch {recon_start_epoch} --kl_start_epoch {kl_start_epoch} --opt {opt} --start_warmup {start_warmup} \
---wd {wd} --final_lr {final_lr} --umap_metric {umap_metric} --lambda_p_uncertainty {lambda_p_uncertainty} --lambda_proto_entropy {lambda_proto_entropy}
+--wd {wd} --final_lr {final_lr} --umap_metric {umap_metric} --lambda_p_uncertainty {lambda_p_uncertainty} --lambda_proto_entropy {lambda_proto_entropy} \
+--full_dataset_mode {full_dataset_mode} --adoptive_eps {adoptive_eps} --p {p} --k_pos {k_pos} --softm {softm} --lambda_aff {lambda_aff} \
+--two_sided {two_sided}

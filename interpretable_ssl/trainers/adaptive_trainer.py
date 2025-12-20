@@ -44,7 +44,11 @@ class AdoptiveTrainer(Trainer):
 
         # pretrain
         self.dataset = self.get_dataset(self.pretrain_dataset_id)
-        self.ref, self.query = self.dataset.get_train_test()
+        if self.full_dataset_mode == 1:
+            self.ref = self.dataset
+            self.query = None
+        else:
+            self.ref, self.query = self.dataset.get_train_test()
         self.setup()
         self.train()
 
@@ -93,6 +97,12 @@ class AdoptiveTrainer(Trainer):
         
     def run(self):
         
+        if self.mode == 'eval':
+            self.setup()
+            self.model = self.load_model()
+            self.save_metrics()
+            return
+        
         if not (self.debug==1):
             self.set_job_name(self.dump_path)
             self.init_wandb(self.dump_path)
@@ -108,7 +118,7 @@ class AdoptiveTrainer(Trainer):
             self.plot_umap(self.model, self.ref.adata, "pretrained-ref")
         self.train()
         
-        if self.ft_epochs > 0:
+        if self.ft_epochs > 0 and (self.full_dataset_mode == 0):
             self.model = self.adapt_model(self.model, self.query.adata, self.ft_epochs)
             self.save_checkpoint(self.pretraining_epochs + self.ft_epochs)
         

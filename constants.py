@@ -104,4 +104,11 @@ ABBREVIATIONS = {
     'kl_start_epoch': 'kse',
     'opt': 'opt',
     'umap_metric': 'um',
+    'full_dataset_mode': 'fdm',
+    'adoptive_eps': 'aeps',
+    'p': 'p',
+    'k_pos': 'kp',
+    'softm': 'sm',
+    'lambda_aff': 'laff',
+    'two_sided': 'ts'
 }

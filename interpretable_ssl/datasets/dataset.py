@@ -86,7 +86,8 @@ class SingleCellDataset(Dataset):
             self.adata.obs['batch'] = ['b0'] * len(self.adata)
         
         if self.adata.X.max() < 30:
-            self.adata.layers["lognorm"] = self.adata.X.copy()
+            if 'lognorm' not in self.adata.layers:
+                self.adata.layers["lognorm"] = self.adata.X.copy()
             if self.use_counts:
                 self.adata.X = self.adata.layers.get('counts', self.adata.X)
         # data is not normalized
@@ -95,7 +96,9 @@ class SingleCellDataset(Dataset):
             ad = self.adata.copy()
             sc.pp.normalize_total(ad, target_sum=1e4)
             sc.pp.log1p(ad)
-            self.adata.layers["lognorm"] = ad.X.copy()
+            # this should be false, only in dropout setup, which we want to keep correct lognorm values
+            if 'lognorm' not in self.adata.layers:
+                self.adata.layers["lognorm"] = ad.X.copy()
             # if we do not want raw counts, update adata.X
             if not self.use_counts: 
                 self.adata.X = ad.X

@@ -23,19 +23,18 @@ def generate_affinity(ad, k, bk, affinity_type="inverse_dist"):
         inv_dist = 1.0 / (dist + 1e-8)  # avoid div by zero
         return inv_dist
 
-    elif affinity_type in ["arbf", "coaff", "ncoaff", "sym-coaff"]:
+    elif affinity_type in ["arbf", "coaff", "ncoaff", "icoaff", 'iarbf']:
         import SEACells
 
         print("calculating seacell affinity")
         kernel_model = SEACells.build_graph.SEACellGraph(ad, "X_pca", verbose=True)
-        if affinity_type.startswith("sym"):
+        if affinity_type.startswith("i"):
             graph_construction = "intersect"
         else:
             graph_construction = "union"
         M = kernel_model.rbf(k, graph_construction=graph_construction)
-        if affinity_type == "coaff":
-            return M @ M.T
-        elif affinity_type == "ncoaff":
+        
+        if affinity_type == "ncoaff":
             # --- L2 normalize rows to remove degree bias ---
             row_norms = np.sqrt(M.multiply(M).sum(axis=1)).A1  # vector of ||M_i||
             row_norms[row_norms == 0] = 1e-12  # avoid division by 0
@@ -44,6 +43,8 @@ def generate_affinity(ad, k, bk, affinity_type="inverse_dist"):
             # --- compute normalized co-affinity (cosine between rows of M) ---
             C = M_norm @ M_norm.T  # still sparse
             return C
+        elif affinity_type.endswith("coaff"):
+            return M @ M.T
         else:  # arbf
             return M
 
