@@ -77,14 +77,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         else:
             ds_cnt = 1
         self.ds_ids = range(ds_cnt)
-        self.loss_keys = [
-            "swav",
-            "recon",
-            "kl",
-            "proto",
-            "commit",
-            'aff'
-        ]
+        self.loss_keys = ["swav", "recon", "kl", "proto", "commit", "aff"]
         self.log_hist = {}
 
     def setup(self):
@@ -125,9 +118,9 @@ class SCProtoTrainer(AdoptiveTrainer):
             use_manifold_weights=(self.cell_w_mode != "uniform"),
             mc_size=self.mc_size,
             adoptive_eps=(self.adoptive_eps == 1),
-            p = self.p,
-            k_pos = self.k_pos,
-            softm = (self.softm == 1),
+            p=self.p,
+            k_pos=self.k_pos,
+            softm=(self.softm == 1),
             condition_encoders=scpoli_encoder.condition_encoders,
             conditions_combined_encoder=scpoli_encoder.conditions_combined_encoder,
             # cell_type_keys=[self.cell_type_key],
@@ -577,8 +570,9 @@ class SCProtoTrainer(AdoptiveTrainer):
             s = np.clip(sigma, s_lo, s_hi)
             s = (s - s_lo) / (s_hi - s_lo)
             return eps_min + s * (eps_max - eps_min)
+
         if sigma is not None:
-            adoptive_eps = sigma_to_eps(sigma, 0.5*self.epsilon, self.epsilon)
+            adoptive_eps = sigma_to_eps(sigma, 0.5 * self.epsilon, self.epsilon)
         else:
             adoptive_eps = None
         sim = inputs.pop("sim", None)
@@ -586,7 +580,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         z, _, scores, recon, (proto_loss, commitment_loss), kl, kl_balance = self.model(
             inputs
         )
-        
+
         loss_aff = self.calc_aff_loss(scores[:bs], cell_idx[:bs])
         if self.recon_type == "swapped" or self.recon_type == "hybrid":
             swapped_recon = self.calc_swapped_recon(z, scores, bs, inputs)
@@ -639,7 +633,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             "compactness": compactness,
             "separation": separation,
             "proto_entropy": proto_entropy,
-            'aff': loss_aff
+            "aff": loss_aff,
         }, assign_cnts
 
     def calc_aff_loss(self, scores, cell_idx):
@@ -647,7 +641,13 @@ class SCProtoTrainer(AdoptiveTrainer):
             cell_idx = cell_idx.detach().cpu().numpy()
         cell_idx = np.asarray(cell_idx, dtype=np.int64)
 
-        P = F.softmax(scores / self.temperature, dim=1)
+        # P = F.softmax(scores / self.temperature, dim=1)
+        P_soft = torch.softmax(scores / self.epsilon, dim=1)
+        P_hard = F.one_hot(
+            P_soft.argmax(dim=1),
+            num_classes=P_soft.size(1),
+        ).to(P_soft.dtype)
+        P = P_hard + (P_soft - P_soft.detach())
         S = P @ P.T
 
         A = self.train_ds.aff[cell_idx][:, cell_idx]
@@ -661,7 +661,6 @@ class SCProtoTrainer(AdoptiveTrainer):
 
         mask = ~torch.eye(S.size(0), device=S.device, dtype=torch.bool)
         return (diff[mask] ** 2).mean()
-
 
     def calc_swapped_recon(self, z, scores, bs, inputs):
         loss = 0
@@ -988,7 +987,6 @@ class SCProtoTrainer(AdoptiveTrainer):
             self.epsilon_min,
             self._epsilon0 * 0.5 * (1 + np.cos(np.pi * t)),
         )
-
 
 
 if __name__ == "__main__":

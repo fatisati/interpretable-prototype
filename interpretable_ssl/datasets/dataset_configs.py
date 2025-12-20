@@ -20,14 +20,6 @@ DATASETS = {
         "test_studies": ["Freytag", "Villani"],
         "num_prototypes": 300,
     },
-    "mpbmc-immune": {
-        "path": Path(DATA_DIR) / "scpoli/immune_hvg_markers.h5ad",
-        "batch_key": "study",
-        "label_key": "final_annotation",
-        "label_encoder_path": "./data/pbmc_immune_label_encoder.pkl",
-        "test_studies": ["Freytag", "Villani"],
-        "num_prototypes": 300,
-    },
     "bmpbmc-immune": {
         "path": Path(DATA_DIR) / "scpoli/bmpbmc-immune.h5ad",
         "batch_key": "study",
@@ -44,6 +36,31 @@ DATASETS = {
         "test_studies": ["Freytag", "Villani"],
         "num_prototypes": 300,
     },
+    "mpbmc-immune": {
+        "path": Path(DATA_DIR) / "scpoli/immune_hvg_markers.h5ad",
+        "batch_key": "study",
+        "label_key": "final_annotation",
+        "label_encoder_path": "./data/pbmc_immune_label_encoder.pkl",
+        "test_studies": ["Freytag", "Villani"],
+        "num_prototypes": 300,
+    },
+    ".1mpbmc-immune": {
+        "path": Path(DATA_DIR) / "scpoli/.1mpbmc-immune.h5ad",
+        "batch_key": "study",
+        "label_key": "final_annotation",
+        "label_encoder_path": "./data/pbmc_immune_label_encoder.pkl",
+        "test_studies": ["Freytag", "Villani"],
+        "num_prototypes": 300,
+    },
+    "bmmpbmc-immune": {
+        "path": Path(DATA_DIR) / "scpoli/bmmpbmc-immune.h5ad",
+        "batch_key": "study",
+        "label_key": "final_annotation",
+        "label_encoder_path": "./data/pbmc_immune_label_encoder.pkl",
+        "test_studies": ["Freytag", "Villani"],
+        "num_prototypes": 300,
+    },
+    
     "pancreas": {
         "path": Path(DATA_DIR) / "pancreas_hvg.h5ad",
         "batch_key": "tech",
