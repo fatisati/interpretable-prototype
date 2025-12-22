@@ -642,12 +642,12 @@ class SCProtoTrainer(AdoptiveTrainer):
         cell_idx = np.asarray(cell_idx, dtype=np.int64)
 
         # P = F.softmax(scores / self.temperature, dim=1)
-        P_soft = torch.softmax(scores / self.epsilon, dim=1)
-        P_hard = F.one_hot(
-            P_soft.argmax(dim=1),
-            num_classes=P_soft.size(1),
-        ).to(P_soft.dtype)
-        P = P_hard + (P_soft - P_soft.detach())
+        P = torch.softmax(scores / self.epsilon, dim=1)
+        # P_hard = F.one_hot(
+        #     P_soft.argmax(dim=1),
+        #     num_classes=P_soft.size(1),
+        # ).to(P_soft.dtype)
+        # P = P_hard + (P_soft - P_soft.detach())
         S = P @ P.T
 
         A = self.train_ds.aff[cell_idx][:, cell_idx]

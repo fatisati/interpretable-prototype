@@ -3,6 +3,8 @@ import pandas as pd
 import scanpy as sc
 from anndata import AnnData
 from tqdm import tqdm
+from interpretable_ssl.datasets.dataset_configs import *
+import scipy.sparse as sp
 
 
 def pseudobulk_sc(ad, lk, bk):
@@ -46,7 +48,7 @@ def scanpy_markers(ad, group_key="ct", pval_thr=0.01, logfc_thr=0.5):
 
 def mask_dropout(X, labels, cell_frac=0.1, alpha=1.0, beta=1.0, seed=0, markers=None):
     rng = np.random.default_rng(seed)
-    libs = X.sum(axis=1)
+    libs = np.asarray(X.sum(axis=1)).ravel()
     libs_norm = libs / libs.mean()
     expr = np.log1p(X)
 
@@ -64,7 +66,7 @@ def mask_dropout(X, labels, cell_frac=0.1, alpha=1.0, beta=1.0, seed=0, markers=
         w = w / w.sum()
         chosen = rng.choice(idx, size=k, replace=False, p=w)
 
-        expr_sel = expr[chosen]
+        expr_sel = expr[chosen].toarray() if sp.issparse(expr) else expr[chosen]   
         libs_sel = libs_norm[chosen]
 
         # dropout probability
@@ -78,7 +80,7 @@ def mask_dropout(X, labels, cell_frac=0.1, alpha=1.0, beta=1.0, seed=0, markers=
                 p_sel[:, ~gene_mask] = 0
 
         # ensure zero-count genes can never be masked
-        p_sel[X[chosen] == 0] = 0
+        p_sel[expr_sel == 0] = 0
 
         # sample Bernoulli mask
         M = rng.random(p_sel.shape) < p_sel
@@ -108,6 +110,7 @@ def mask_dropout(X, labels, cell_frac=0.1, alpha=1.0, beta=1.0, seed=0, markers=
     )
 
     return X_masked, df, out
+
 
 # maybe correct in future, for now taking too much time, and not that much important
 # maybe also for each batch, yu find ct markers, and mask is for each batch separte
@@ -178,3 +181,57 @@ def plot_heatmap(df):
     plt.yticks(range(df.shape[0]), df.index)
     plt.colorbar()
     plt.show()
+
+
+def normalize_if_needed(ad):
+    if ad.X.max() > 20:
+        sc.pp.normalize_total(ad)
+        sc.pp.log1p(ad)
+    return ad
+
+
+def save_gt(ad):
+    ad.layers["counts_gt"] = ad.layers["counts"].copy()
+    ad = normalize_if_needed(ad)
+    ad.layers["lognorm_gt"] = ad.X.copy()
+
+
+def save_masked(ad):
+    ad.layers["counts"] = ad.X.copy()
+    sc.pp.normalize_total(ad)
+    sc.pp.log1p(ad)
+    ad.layers["lognorm"] = ad.X.copy()
+
+
+def report(ad):
+    print(ad.layers["counts_gt"].max(), ad.layers["lognorm_gt"].max())
+    print(ad.layers["counts"].max(), ad.layers["lognorm"].max())
+
+
+def apply_mask(ds_id, save_path=None):
+    ad, bk, lk, n = load_ds(ds_id)
+    save_gt(ad)
+    X_masked, df, out = mask_dropout(ad.layers["counts"], ad.obs[lk])
+    ad.X = X_masked
+    save_masked(ad)
+    report(ad)
+    ad.write(save_path)
+    return out
+
+
+def apply_batch_mask(ds_id, b, save_path=None):
+    ad, bk, lk, n = load_ds(ds_id)
+    save_gt(ad)
+    mask_idx = ad.obs[bk] == b
+    b_ad = ad[mask_idx]
+    X_masked, df, out = mask_dropout(b_ad.layers["counts"], b_ad.obs[lk])
+
+    X = ad.X.toarray()  # dense
+    X[mask_idx] = X_masked.toarray() if sp.issparse(X_masked) else X_masked
+    ad.X = sp.csr_matrix(X)
+
+    save_masked(ad)
+
+    report(ad)
+    ad.write(save_path)
+    return out

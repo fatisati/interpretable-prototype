@@ -124,7 +124,7 @@ def masked_f1(ad, y_true, y_pred, name):
         gt = ad.layers["lognorm_gt"]
         obs = ad.X
 
-        gene_mask = (gt > 0).multiply(obs == 0)
+        gene_mask = make_mask(gt, obs)
         cell_mask = np.asarray(gene_mask.sum(axis=1)).ravel() > 0
 
         if cell_mask.sum() > 0:

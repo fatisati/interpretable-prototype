@@ -276,13 +276,16 @@ def save_all_mc_metrics(ad, mc_ad, lk, bk, save_path, mc_key="SEACell", name="se
 
 
     # I feel maybe this hsould be like so i can pass sim when i had it (maybe from scproto)
-    eval_mc_labeling(ad, lk, name, path=save_path)
     dropout_recovery(ad, mc_ad, mc_key, name, lk, save_path)
+    eval_mc_labeling(ad, lk, name, path=save_path)
+    
+    mc_ad = mc_ad[mc_ad.obs[lk].notna()].copy()
+    
     if f"{name}_mc_pca" not in mc_ad.obsm:
         sc.tl.pca(mc_ad)
         mc_ad.obsm[f"{name}_mc_pca"] = mc_ad.obsm["X_pca"]
     obsm_keys = [f"{name}_mc_pca"]
-
+    
     if name == "seacell":
         sce.pp.harmony_integrate(
             mc_ad,
@@ -291,6 +294,7 @@ def save_all_mc_metrics(ad, mc_ad, lk, bk, save_path, mc_key="SEACell", name="se
             adjusted_basis=f"{name}_mc_pca_harmoney",  # where to store corrected PCs
         )
         obsm_keys.append(f"{name}_mc_pca_harmoney")
+    
     get_metacell_metrics(ad, mc_ad, obsm_keys, bk, lk, save_path)
     if "dc" not in ad.obsm:
         ad.obsm["dc"] = compute_dc(ad, bk).values

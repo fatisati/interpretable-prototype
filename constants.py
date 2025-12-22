@@ -110,5 +110,6 @@ ABBREVIATIONS = {
     'k_pos': 'kp',
     'softm': 'sm',
     'lambda_aff': 'laff',
-    'two_sided': 'ts'
+    'two_sided': 'ts',
+    'lsim': 'lsim'
 }

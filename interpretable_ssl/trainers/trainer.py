@@ -446,7 +446,7 @@ class Trainer(TrainerBase):
         ad = self.train_.adata.copy()
 
         mc_ad, sim = get_scproto_mc_adata(
-            self, ad, self.dataset.batch_key, self.dataset.label_key, model=self.model
+            self, ad, self.dataset.batch_key, self.dataset.label_key, self.epsilon, model=self.model, similarity=self.lsim
         )
         ad.obs["SEACell"] = sim.argmax(axis=1)
         

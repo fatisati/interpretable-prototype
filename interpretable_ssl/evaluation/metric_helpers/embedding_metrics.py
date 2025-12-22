@@ -260,7 +260,7 @@ def compute_similarity(z, proto):
     sim = torch.exp(-2.0 * (z_d ** 2) / (sigma_z * sigma_p))
     return sim
 
-def get_scproto_mc_adata(t, adata, bk, lk, use_mean=False, use_max=True, model=None, similarity = 'normal'):
+def get_scproto_mc_adata(t, adata, bk, lk, epsilon, use_mean=False, use_max=True, model=None, similarity = 'normal'):
     import torch.nn as nn
 
     if model is None:
@@ -304,12 +304,12 @@ def get_scproto_mc_adata(t, adata, bk, lk, use_mean=False, use_max=True, model=N
     z_vae = t.encode_adata(adata, model, z_idx=1)
 
     # sample_proto_sim = t.get_proto_assignments(z_vae, model)
-    if similarity == 'normal':
+    if similarity == 'normal' or similarity == 'v12':
         sample_proto_sim = -torch.cdist(z_vae.detach(), protos.detach(), p=2).cpu().numpy()
     else:
         sample_proto_sim = compute_similarity(z_vae, protos).detach().cpu().numpy()
     
-    proto_labels = extract_proto_labels(adata, sample_proto_sim, [bk, lk])
+    proto_labels = extract_proto_labels(adata, sample_proto_sim, [bk, lk], epsilon = epsilon, similarity=similarity)
     metacells_adata = generate_metacell_adata(metacells, proto_labels)
     if metacells_adata.X.max() > 50:
         metacells_adata = metacells_adata.copy()
