@@ -182,7 +182,8 @@ def get_defaults():
         'two_sided': 0,
         'temperature_min': 0.04,
         'epsilon_min': 0.02,
-        'sched_temp_eps': 1
+        'sched_temp_eps': 1,
+        'lsim': 'v12'
         
     }
     return defaults
