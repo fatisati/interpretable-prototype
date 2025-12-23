@@ -117,11 +117,40 @@ def spatial_affinity(ad, k):
 def st_affinity(ad, k=50):
     return build_seacell_kernel(ad.obsm["spatial"], ad.obsm["X_pca"], k=k)
 
+from sklearn.neighbors import radius_neighbors_graph
 
-def build_seacell_kernel(X_knn, X_aff, k=50, graph_construction="union"):
-    nn = NearestNeighbors(n_neighbors=k).fit(X_knn)
-    _, idxs = nn.kneighbors(X_knn)  # (n, k)
+def build_graph(x, radius = None, k = None, mode='knn'):
+    n = x.shape[0]
+    if mode == 'knn':
+        X_knn = x
+        nn = NearestNeighbors(n_neighbors=k).fit(X_knn)
+        _, idxs = nn.kneighbors(X_knn)  # (n, k)
+        return idxs
+    elif mode == "radius":
+        G = radius_neighbors_graph(
+            x, radius=radius, mode="connectivity", include_self=False
+        ).tocsr()
 
+        idxs = np.zeros((n, k), dtype=int)
+
+        for i in range(n):
+            neigh = G.indices[G.indptr[i] : G.indptr[i + 1]]
+            if len(neigh) == 0:
+                idxs[i] = i
+            elif len(neigh) >= k:
+                idxs[i] = neigh[:k]
+            else:
+                idxs[i] = np.pad(neigh, (0, k - len(neigh)), constant_values=neigh[0])
+
+        return idxs
+
+    else:
+        raise ValueError
+        
+    
+def build_seacell_kernel(x_graph, X_aff, k=50, radius = 50.0, graph_mode = 'knn', graph_construction="union"):
+    
+    idxs = build_graph(x_graph, radius, k, graph_mode)
     diff = X_aff[:, None, :] - X_aff[idxs]  # (n, k, d)
     dists = np.linalg.norm(diff, axis=2)  # (n, k)
 
@@ -136,10 +165,10 @@ def build_seacell_kernel(X_knn, X_aff, k=50, graph_construction="union"):
 
     A_vals = np.exp(-(dists**2) / sigma_prod)  # (n,k)
 
-    rows = np.repeat(np.arange(len(X_knn)), k)
+    rows = np.repeat(np.arange(len(x_graph)), k)
     cols = idxs.reshape(-1)
     A = sp.csr_matrix(
-        (A_vals.reshape(-1), (rows, cols)), shape=(len(X_knn), len(X_knn))
+        (A_vals.reshape(-1), (rows, cols)), shape=(len(x_graph), len(x_graph))
     )
 
     if graph_construction == "union":

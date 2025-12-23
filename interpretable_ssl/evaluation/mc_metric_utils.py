@@ -137,6 +137,7 @@ def get_rare(ad, label_key, thr=0.25):
     rare = freq[freq < thr].index.tolist()
     return rare
 
+
 def summarize_metacell_quality(ad, bk, label_key, save_dir, model_name):
     avg_metrics, _ = avg_mc_quality_metrics(ad, bk, label_key)
 
@@ -231,14 +232,13 @@ def compute_dc(ad, batch_key, out_dir="./"):
             )
         except FileExistsError:
             proc = None
-    
+
         while True:
             if os.path.exists(dc_path):
                 break
             if proc is not None and proc.poll() is not None and proc.returncode != 0:
                 raise RuntimeError("Diffusion failed")
             time.sleep(0.1)
-    
 
     df = pd.read_csv(dc_path, index_col=0)
 
@@ -260,32 +260,27 @@ def save_all_mc_metrics(ad, mc_ad, lk, bk, save_path, mc_key="SEACell", name="se
         if k in ad.obs:
             mc_label_purity(ad, k, mc_key, name, save_path)
 
-    if 'metacell' in ad.layers:
+    if "metacell" in ad.layers:
         de_mc = ad.copy()
-        de_mc.X = ad.layers['metacell']
+        de_mc.X = ad.layers["metacell"]
     else:
         de_mc = mc_ad
-    compute_dge_consistency(
-        de_mc,
-        ad,
-        lk,
-        bk,
-        name = name,
-        save_path=save_path
-    )
-
+    compute_dge_consistency(de_mc, ad, lk, bk, name=name, save_path=save_path)
 
     # I feel maybe this hsould be like so i can pass sim when i had it (maybe from scproto)
     dropout_recovery(ad, mc_ad, mc_key, name, lk, save_path)
     eval_mc_labeling(ad, lk, name, path=save_path)
-    
+
     mc_ad = mc_ad[mc_ad.obs[lk].notna()].copy()
-    
+
+    if "spatial" in ad.obsm:
+        evaluate_markers(ad, mc_ad, lk, name, mc_key, save_path)
+
     if f"{name}_mc_pca" not in mc_ad.obsm:
         sc.tl.pca(mc_ad)
         mc_ad.obsm[f"{name}_mc_pca"] = mc_ad.obsm["X_pca"]
     obsm_keys = [f"{name}_mc_pca"]
-    
+
     if name == "seacell":
         sce.pp.harmony_integrate(
             mc_ad,
@@ -294,10 +289,8 @@ def save_all_mc_metrics(ad, mc_ad, lk, bk, save_path, mc_key="SEACell", name="se
             adjusted_basis=f"{name}_mc_pca_harmoney",  # where to store corrected PCs
         )
         obsm_keys.append(f"{name}_mc_pca_harmoney")
-    
+
     get_metacell_metrics(ad, mc_ad, obsm_keys, bk, lk, save_path)
     if "dc" not in ad.obsm:
         ad.obsm["dc"] = compute_dc(ad, bk).values
     summarize_metacell_quality(ad, bk, lk, save_path, name)
-    if 'spatial' in ad.obsm:
-        evaluate_markers(ad, mc_ad, lk, name, mc_key, save_path)

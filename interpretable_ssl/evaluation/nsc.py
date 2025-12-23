@@ -30,9 +30,9 @@ celltype_markers_mapped = {
 }
 
 
-def marker_expression_coverage(ad, lk):
+def marker_expression_coverage(ad, lk, layer = None):
     rows = {}
-    X = ad.X
+    X = ad.layers[layer] if layer is not None else ad.X
     genes = ad.var_names.to_numpy()
     labels = ad.obs[lk].to_numpy()
 
@@ -68,6 +68,8 @@ def marker_f1_wide(
 
         X = ad[:, genes].layers[layer]
         y = (ad.obs[ct_key].values == ct).astype(int)
+        if y.sum() < 2 or y.sum() == len(y):
+            continue
 
         if batch_key is not None and train_batches is not None:
             tr = ad.obs[batch_key].isin(train_batches).values
@@ -93,6 +95,14 @@ def marker_f1_wide(
 
     return pd.DataFrame([vals], columns=vals.keys())
 
+def get_rare(ad=None, label_key=None, thr=0.25, labels=None):
+    if labels is None:
+        labels = ad.obs[label_key]
+    labels = labels.astype(str)
+    freq = labels.value_counts(normalize=True)
+    thr = freq.quantile(0.25)
+    rare = freq[freq < thr].index.tolist()
+    return rare
 
 def evaluate_markers(
     ad,
@@ -108,13 +118,18 @@ def evaluate_markers(
 
     mc_ids = ad.obs[mc_key].values
     idx = mc_ad.obs_names.get_indexer(mc_ids)
-    ad.X = mc_ad.X[idx]
-    sample_cov = marker_expression_coverage(ad, lk)
+    ad.layers["mc"] = mc_ad.X[idx]
+    sample_cov = marker_expression_coverage(ad, lk, layer = 'mc')
     ad.layers["lognorm"] = ad.X
-    sample_f1 = marker_f1_wide(ad, celltype_markers_mapped, lk)
+    sample_f1 = marker_f1_wide(ad, celltype_markers_mapped, lk, layer = 'mc')
     dfs = [mc_covarage, mc_f1, sample_cov, sample_f1]
     for df in dfs:
         df.index = [name]
+        df["global avg"] = df.mean(axis=1)
+        rare_ct = get_rare(labels = ad.obs[lk])
+        df["rare avg"] = df[
+            [col for col in df.columns if any(ct in col for ct in rare_ct)]
+        ].mean(axis=1)
 
     if save_path is not None:
         mc_covarage.to_csv(save_path + "/mc_marker_coverage.csv")
