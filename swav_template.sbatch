@@ -9,7 +9,7 @@
 #SBATCH --partition={partition}
 #SBATCH --qos={qos}
 #SBATCH --gres={gres}
-#SBATCH --exclude=gpusrv36
+#SBATCH --exclude=gpusrv36,gpusrv60
 
 echo "Running on node(s): $SLURM_NODELIST"
 echo "Job ID: $SLURM_JOB_ID"
@@ -60,4 +60,4 @@ python main.py {model} {dataset_id} {mode} --mode {mode} --num_prototypes {num_p
 --kl_sched {kl_sched} --swav_sched {swav_sched} --recon_start_epoch {recon_start_epoch} --kl_start_epoch {kl_start_epoch} --opt {opt} --start_warmup {start_warmup} \
 --wd {wd} --final_lr {final_lr} --umap_metric {umap_metric} --lambda_p_uncertainty {lambda_p_uncertainty} --lambda_proto_entropy {lambda_proto_entropy} \
 --full_dataset_mode {full_dataset_mode} --adoptive_eps {adoptive_eps} --p {p} --k_pos {k_pos} --softm {softm} --lambda_aff {lambda_aff} \
---two_sided {two_sided} --lsim {lsim}
+--two_sided {two_sided} --lsim {lsim} --graph_mode {graph_mode}

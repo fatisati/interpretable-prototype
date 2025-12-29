@@ -45,7 +45,7 @@ def marker_expression_coverage(ad, lk, layer = None):
         valid_markers = [m for m in markers if m in genes]
         print(ct, valid_markers)
         if len(valid_markers) == 0:
-            rows[ct] = -1
+            rows[ct] = 0
             continue
 
         m_idx = np.isin(genes, valid_markers)
@@ -54,9 +54,8 @@ def marker_expression_coverage(ad, lk, layer = None):
 
     return pd.DataFrame([rows])
 
-
 def marker_f1_wide(
-    ad, markers, ct_key, layer="lognorm", batch_key=None, train_batches=None
+    ad, markers, ct_key, layer="lognorm"
 ):
     vals = {}
     cols = {}
@@ -71,15 +70,12 @@ def marker_f1_wide(
         if y.sum() < 2 or y.sum() == len(y):
             continue
 
-        if batch_key is not None and train_batches is not None:
-            tr = ad.obs[batch_key].isin(train_batches).values
-            te = ~tr
-        else:
-            rng = np.random.default_rng(0)
-            idx = rng.permutation(len(y))
-            k = int(0.8 * len(y))
-            tr = idx[:k]
-            te = idx[k:]
+        
+        rng = np.random.default_rng(0)
+        idx = rng.permutation(len(y))
+        k = int(0.8 * len(y))
+        tr = idx[:k]
+        te = idx[k:]
 
         clf = make_pipeline(
             StandardScaler(with_mean=False),
@@ -104,6 +100,41 @@ def get_rare(ad=None, label_key=None, thr=0.25, labels=None):
     rare = freq[freq < thr].index.tolist()
     return rare
 
+def marker_enrichment_df(mc_ad, markers, label_key, rare_ct, layer="lognorm"):
+    scores = {}
+
+    for ct, genes in markers.items():
+        genes = [g for g in genes if g in mc_ad.var_names]
+        if len(genes) == 0:
+            scores[ct] = 0.0
+            continue
+
+        X = mc_ad[:, genes].layers.get(layer, mc_ad.X)
+        y = mc_ad.obs[label_key].values == ct
+
+        if y.sum() == 0:
+            scores[ct] = 0.0
+            continue
+
+        in_ct = X[y].mean()
+        out_ct = X[~y].mean() + 1e-8
+        scores[ct] = float(np.log2((in_ct + 1e-8) / out_ct))
+
+    df = pd.DataFrame([scores])
+    ct_cols = df.columns.tolist()
+
+    df["global avg"] = df[ct_cols].mean(axis=1)
+    df["global %>0"] = (df[ct_cols] > 0).mean(axis=1)
+
+    rare_cols = [c for c in ct_cols if c in rare_ct]
+    df["rare avg"] = df[rare_cols].mean(axis=1) if rare_cols else 0.0
+    df["rare %>0"] = (df[rare_cols] > 0).mean(axis=1) if rare_cols else 0.0
+    # ---- minimal additions end here ----
+
+    return df
+
+
+
 def evaluate_markers(
     ad,
     mc_ad,
@@ -115,7 +146,11 @@ def evaluate_markers(
     mc_covarage = marker_expression_coverage(mc_ad, lk)
     mc_ad.layers["lognorm"] = mc_ad.X
     mc_f1 = marker_f1_wide(mc_ad, celltype_markers_mapped, lk)
-
+    rare_ct = get_rare(labels=ad.obs[lk])
+    mc_enrichment_score = marker_enrichment_df(mc_ad, celltype_markers_mapped, lk, rare_ct)
+    mc_enrichment_score.index = [name]
+    mc_enrichment_score.to_csv(save_path + '/mc_mes.csv')
+    
     mc_ids = ad.obs[mc_key].values
     idx = mc_ad.obs_names.get_indexer(mc_ids)
     ad.layers["mc"] = mc_ad.X[idx]

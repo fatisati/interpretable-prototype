@@ -6,6 +6,8 @@ from tqdm import tqdm
 from interpretable_ssl.datasets.dataset_configs import *
 import scipy.sparse as sp
 
+from sklearn.neighbors import BallTree
+
 
 def pseudobulk_sc(ad, lk, bk):
     X = ad.layers["counts"] if "counts" in ad.layers else ad.X
@@ -62,11 +64,19 @@ def mask_dropout(X, labels, cell_frac=0.1, alpha=1.0, beta=1.0, seed=0, markers=
         k = max(1, int(len(idx) * cell_frac))
 
         # weight: low-lib cells get masked more often
-        w = 1 / libs[idx]
-        w = w / w.sum()
-        chosen = rng.choice(idx, size=k, replace=False, p=w)
+        valid = libs[idx] > 0
+        idx_valid = idx[valid]
 
-        expr_sel = expr[chosen].toarray() if sp.issparse(expr) else expr[chosen]   
+        if len(idx_valid) == 0:
+            continue
+
+        w = 1.0 / libs[idx_valid]
+        w = w / w.sum()
+
+        k_eff = min(k, len(idx_valid))
+        chosen = rng.choice(idx_valid, size=k_eff, replace=False, p=w)
+
+        expr_sel = expr[chosen].toarray() if sp.issparse(expr) else expr[chosen]
         libs_sel = libs_norm[chosen]
 
         # dropout probability
@@ -190,17 +200,29 @@ def normalize_if_needed(ad):
     return ad
 
 
-def save_gt(ad):
+def save_gt_v0(ad):
     ad.layers["counts_gt"] = ad.layers["counts"].copy()
     ad = normalize_if_needed(ad)
     ad.layers["lognorm_gt"] = ad.X.copy()
 
 
+def save_gt(ad):
+    X_obs = ad.layers["counts"].copy()
+    ad.layers["counts_gt"] = X_obs
+    ad_obs = ad.copy()
+    ad_obs.X = X_obs
+    sc.pp.normalize_total(ad_obs, target_sum=1e4)
+    sc.pp.log1p(ad_obs)
+    ad.layers["lognorm_gt"] = ad_obs.X.copy()
+
+
 def save_masked(ad):
-    ad.layers["counts"] = ad.X.copy()
-    sc.pp.normalize_total(ad)
-    sc.pp.log1p(ad)
-    ad.layers["lognorm"] = ad.X.copy()
+    X_obs = ad.layers["counts"].copy()
+    ad_obs = ad.copy()
+    ad_obs.X = X_obs
+    sc.pp.normalize_total(ad_obs, target_sum=1e4)
+    sc.pp.log1p(ad_obs)
+    ad.layers["lognorm"] = ad_obs.X.copy()
 
 
 def report(ad):
@@ -208,14 +230,31 @@ def report(ad):
     print(ad.layers["counts"].max(), ad.layers["lognorm"].max())
 
 
-def apply_mask(ds_id, save_path=None):
-    ad, bk, lk, n = load_ds(ds_id)
+def compute_markers(input_ad, lk, min_genes=20, pval=0.01, logfc=0.5):
+    ad = input_ad.copy()
+    ad.X = ad.layers['lognorm_gt']
+    # sc.pp.normalize_total(ad)
+    # sc.pp.log1p(ad)
+    sc.tl.rank_genes_groups(ad, groupby=lk, method="t-test", key_added="dge")
+    df = sc.get.rank_genes_groups_df(ad, group=None, key="dge")
+    df = df[(df.pvals_adj < pval) & (df.logfoldchanges > logfc)]
+    gene_to_idx = {g: i for i, g in enumerate(ad.var_names)}
+    out = {}
+    for ct, g in df.groupby("group"):
+        genes = [gene_to_idx[x] for x in g.names if x in gene_to_idx]
+        if len(genes) >= min_genes:
+            out[ct] = genes
+    return out
+
+def apply_dropout(ad, lk, save_path=None, **kwargs):
     save_gt(ad)
-    X_masked, df, out = mask_dropout(ad.layers["counts"], ad.obs[lk])
-    ad.X = X_masked
+    
+    X_masked, df, out = mask_dropout(ad.layers["counts"], ad.obs[lk], **kwargs)
+    ad.layers["counts"] = X_masked
     save_masked(ad)
     report(ad)
-    ad.write(save_path)
+    if save_path is not None:
+        ad.write(save_path)
     return out
 
 
@@ -228,10 +267,104 @@ def apply_batch_mask(ds_id, b, save_path=None):
 
     X = ad.X.toarray()  # dense
     X[mask_idx] = X_masked.toarray() if sp.issparse(X_masked) else X_masked
-    ad.X = sp.csr_matrix(X)
+    ad.layers["counts"] = sp.csr_matrix(X)
 
     save_masked(ad)
 
     report(ad)
     ad.write(save_path)
     return out
+
+
+def sample_spill_cells(X, coords, radius, thr=0.1):
+
+    # X = adata.X.toarray()
+    n = X.shape[0]
+
+    tree = BallTree(coords)
+    neighbors = tree.query_radius(coords, r=radius, count_only=False)
+    neighbor_count = np.array([len(nei) - 1 for nei in neighbors])
+    crowding = neighbor_count / (neighbor_count.max() + 1e-12)
+
+    lib = X.sum(1)
+    low_rna = np.percentile(lib, 30) - lib
+    low_rna = np.clip(low_rna, 0, None)
+    low_rna = low_rna / (low_rna.max() + 1e-12)
+
+    risk = 0.7 * crowding + 0.3 * low_rna
+    risk[lib == 0] = 0.0
+    spillover_prob = (risk + 1e-6) / (risk.sum() + 1e-12)
+    spillover_prob = spillover_prob / spillover_prob.sum()
+    # adata.obs["spillover_risk"] = risk
+    # adata.obs["spillover_prob"] = spillover_prob
+    m = int(thr * n)
+
+    spill_cells = np.random.choice(n, size=m, replace=False, p=spillover_prob)
+    return spill_cells
+
+
+def get_spill_cnt(X, coords, radius, spill_cells):
+
+    alpha = 0.1
+
+    tree = BallTree(coords)
+    neighbors = tree.query_radius(coords, r=radius)
+
+    Xn = X.copy()
+
+    no_nei = 0
+
+    for i in spill_cells:
+        nei = neighbors[i]
+        if len(nei) == 1:
+            no_nei += 1
+            continue
+        d = np.linalg.norm(coords[nei] - coords[i], axis=1)
+        w = np.exp(-(d**2) / (np.median(d) ** 2 + 1e-12))
+        w = w / w.sum()
+        Xn[i] = (1 - alpha) * X[i] + alpha * (w @ X[nei])
+
+    lib = X.sum(1).astype(int)
+    Xn_int = X.copy()
+
+    for i in spill_cells:
+        nei = neighbors[i]
+        nei = nei[nei != i]
+        if len(nei) == 0:
+            continue
+        p = Xn[i].astype(np.float64)
+        p = np.clip(p, 0, None)
+        p = p / (p.sum() + 1e-12)
+        s = p[:-1].sum()
+        if s >= 1.0:
+            p[:-1] = p[:-1] / (s + 1e-12)
+            p[-1] = 0.0
+        else:
+            p[-1] = 1.0 - s
+        Xn_int[i] = np.random.multinomial(lib[i], p)
+
+    Xn = Xn_int
+
+    # adata.layers["neighbor_spillover"] = Xn
+    delta_l1 = np.abs(Xn - X).sum(1) / (X.sum(1) + 1e-12)
+    spill_mask = np.zeros(X.shape[0], dtype=bool)
+    spill_mask[spill_cells] = True
+    print(no_nei, delta_l1[spill_mask].mean(), delta_l1[~spill_mask].mean())
+    return Xn
+
+
+def get_counts(adata):
+    X = adata.layers["counts"]
+    return X.toarray() if hasattr(X, "toarray") else X
+
+
+def apply_spill(ad, save_path):
+    save_gt(ad)
+    coords = ad.obsm["spatial"][:, :2]
+    radius = np.percentile(BallTree(coords).query(coords, k=2)[0][:, 1], 70)
+    X = get_counts(ad)
+    spill_cells = sample_spill_cells(X, coords, radius)
+    ad.layers["counts"] = get_spill_cnt(X, coords, radius, spill_cells)
+    save_masked(ad)
+    report(ad)
+    ad.write(save_path)

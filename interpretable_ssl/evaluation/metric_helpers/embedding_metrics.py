@@ -21,7 +21,7 @@ res_dir = "/home/icb/fatemehs.hashemig/models/"
 
 def save_append(df, save_dir, name, append=True, name_postfix=None):
     if df is None:
-        print(f'df is none, {save_dir}/{name} not saved')
+        print(f"df is none, {save_dir}/{name} not saved")
         return
     os.makedirs(os.path.dirname(save_dir), exist_ok=True)
     if name_postfix is not None:
@@ -75,7 +75,10 @@ def get_scgraph(
 
 
 def get_mc_scg(ad, mc_adata, bk, lk, _obsm_list):
-    scg, tmp_path = get_scg_obj(ad, bk, lk)
+    # thres_batch=100, thres_celltype=10
+    scg, tmp_path = get_scg_obj(
+        ad, bk, lk, trim_rate=0.05, thres_batch=50, thres_celltype=5
+    )
     scg.preprocess()
     scg.process_batches()
     scg.calculate_consensus()
@@ -105,7 +108,9 @@ def get_mc_scg(ad, mc_adata, bk, lk, _obsm_list):
         os.remove(tmp_path)
         print("Deleted:", tmp_path)
     else:
-        print(f'could not remove {tmp_path}')
+        print(f"could not remove {tmp_path}")
+    coverage = mc_adata.obs[lk].nunique() / ad.obs[lk].nunique()
+    res_df["covarage"] = coverage
     return res_df
 
 
@@ -242,6 +247,7 @@ def calc_adata_metrics(dataset, ds_conf):
         ds_conf["label_key"],
     )
 
+
 def compute_similarity(z, proto):
     z = z.detach()
     proto = proto.detach()
@@ -252,15 +258,26 @@ def compute_similarity(z, proto):
     knn_dist = d.topk(k + 1, largest=False).values[:, 1:]
     sigma = knn_dist.median(dim=1).values
 
-    sigma_z = sigma[: z.shape[0]].unsqueeze(1)          # (N, 1)
-    sigma_p = sigma[z.shape[0]:].unsqueeze(0)           # (1, P)
+    sigma_z = sigma[: z.shape[0]].unsqueeze(1)  # (N, 1)
+    sigma_p = sigma[z.shape[0] :].unsqueeze(0)  # (1, P)
 
-    z_d = torch.cdist(z, proto)                          # (N, P)
+    z_d = torch.cdist(z, proto)  # (N, P)
 
-    sim = torch.exp(-2.0 * (z_d ** 2) / (sigma_z * sigma_p))
+    sim = torch.exp(-2.0 * (z_d**2) / (sigma_z * sigma_p))
     return sim
 
-def get_scproto_mc_adata(t, adata, bk, lk, epsilon, use_mean=False, use_max=True, model=None, similarity = 'normal'):
+
+def get_scproto_mc_adata(
+    t,
+    adata,
+    bk,
+    lk,
+    epsilon,
+    use_mean=False,
+    use_max=True,
+    model=None,
+    similarity="normal",
+):
     import torch.nn as nn
 
     if model is None:
@@ -304,12 +321,16 @@ def get_scproto_mc_adata(t, adata, bk, lk, epsilon, use_mean=False, use_max=True
     z_vae = t.encode_adata(adata, model, z_idx=1)
 
     # sample_proto_sim = t.get_proto_assignments(z_vae, model)
-    if similarity == 'normal' or similarity == 'v12':
-        sample_proto_sim = -torch.cdist(z_vae.detach(), protos.detach(), p=2).cpu().numpy()
+    if similarity == "normal" or similarity == "v12":
+        sample_proto_sim = (
+            -torch.cdist(z_vae.detach(), protos.detach(), p=2).cpu().numpy()
+        )
     else:
         sample_proto_sim = compute_similarity(z_vae, protos).detach().cpu().numpy()
-    
-    proto_labels = extract_proto_labels(adata, sample_proto_sim, [bk, lk], epsilon = epsilon, similarity=similarity)
+
+    proto_labels = extract_proto_labels(
+        adata, sample_proto_sim, [bk, lk], epsilon=epsilon, similarity=similarity
+    )
     metacells_adata = generate_metacell_adata(metacells, proto_labels)
     if metacells_adata.X.max() > 50:
         metacells_adata = metacells_adata.copy()
@@ -335,7 +356,7 @@ def load_seacell(ds_id, normalize=True):
     home = "/home/icb/fatemehs.hashemig/"
     ad = sc.read_h5ad(f"{home}/models/{ds_id}/seacell/seacell_sc.h5ad")
     mc_ad = sc.read_h5ad(f"{home}/models/{ds_id}/seacell/seacell_agg.h5ad")
-    if normalize and ad.X.max() > 20:
+    if normalize and mc_ad.X.max() > 20:
         sc.pp.normalize_total(mc_ad, target_sum=1e4)
         sc.pp.log1p(mc_ad)
     return ad, mc_ad
@@ -356,8 +377,7 @@ def get_metacell_metrics(ad, mc_ad, obsm_keys, bk, lk, save_path=None):
         print("SCG metric failed:", e)
         scg = None
     if save_path is not None:
-        scg.to_csv(save_path + '/scgraph.csv')
+        scg.to_csv(save_path + "/scgraph.csv")
         if scb is not None:
-            scb.to_csv(save_path + '/scib.csv')
+            scb.to_csv(save_path + "/scib.csv")
     return scg, scb
-

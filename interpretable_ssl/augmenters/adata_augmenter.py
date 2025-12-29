@@ -56,8 +56,10 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         p=0,
         k_pos=0,
         softm=False,
+        graph_mode = 'knn',
         **kwargs,
     ):
+        self.graph_mode = graph_mode
         self.sc_ds = sc_ds
         self.n_proto = n_proto
         self.n_augmentations = n_augmentations
@@ -196,6 +198,8 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
             self.graph_name += "_spatial"
         if self.sc_ds.fold != 0:
             self.graph_name += f"_fold{self.sc_ds.fold}"
+        if self.graph_mode != 'knn':
+            self.graph_name += f'_{self.graph_mode}'
         self.graph_name += ".pkl"
         self.save_path = os.path.join(self.save_dir, self.graph_name)
 
@@ -270,6 +274,7 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
             self.batch_key,
             self.n_components,
             self.k_neighbors,
+            self.graph_mode
         )
         # Spawn g_hand with input + output arguments
         config_file = self.save_path + ".inputs.pkl"

@@ -156,14 +156,55 @@ DATASETS = {
         "batch_size": 1024,
         "umap_checkpoint_freq": 10,
     },
+    "test": {
+        "path": Path(DATA_DIR) / "spatial/test.h5ad",
+        "batch_key": "section",
+        "label_key": "celltypes",
+        "label_encoder_path": "./data/NSCLC_3D.pkl",
+        "test_studies": ["section_4", "section_10"],
+        "num_prototypes": 400,
+        "batch_size": 1024,
+        "umap_checkpoint_freq": 10,
+    },
     "s28nsc": {
         "path": Path(DATA_DIR) / "spatial/NSCLC_3D_section_28.h5ad",
-        # "batch_key": "section",
+        "batch_key": "section",
         "label_key": "celltypes",
         "label_encoder_path": "./data/NSCLC_3D_section_28.pkl",
         "num_prototypes": 700,
         "batch_size": 1024,
         "ft_epochs": 0,
+        "batch_key": "section",
+    },
+    "ss28nsc": {
+        "path": Path(DATA_DIR) / "spatial/ss28nsc.h5ad",
+        "batch_key": "section",
+        "label_key": "celltypes",
+        "label_encoder_path": "./data/NSCLC_3D_section_28.pkl",
+        "num_prototypes": 700,
+        "batch_size": 1024,
+        "ft_epochs": 0,
+        "batch_key": "section",
+    },
+    "bms28nsc": { # but in reality, its 0.1 with some new probs
+        "path": Path(DATA_DIR) / "spatial/bms28nsc_v1.h5ad",
+        "batch_key": "section",
+        "label_key": "celltypes",
+        "label_encoder_path": "./data/NSCLC_3D_section_28.pkl",
+        "num_prototypes": 700,
+        "batch_size": 1024,
+        "ft_epochs": 0,
+        "batch_key": "section",
+    },
+    ".1s28nsc": {
+        "path": Path(DATA_DIR) / "spatial/.1s28nsc.h5ad",
+        "batch_key": "section",
+        "label_key": "celltypes",
+        "label_encoder_path": "./data/NSCLC_3D_section_28.pkl",
+        "num_prototypes": 700,
+        "batch_size": 1024,
+        "ft_epochs": 0,
+        "batch_key": "section",
     },
     'nsc_2slides':
         {
@@ -202,4 +243,4 @@ DATASETS = {
 def load_ds(ds_id):
     import scanpy as sc
     conf = DATASETS[ds_id]
-    return sc.read_h5ad(conf['path']), conf['batch_key'], conf['label_key'], conf['num_prototypes']
+    return sc.read_h5ad(conf['path']), conf.get('batch_key', None), conf['label_key'], conf['num_prototypes']

@@ -111,5 +111,6 @@ ABBREVIATIONS = {
     'softm': 'sm',
     'lambda_aff': 'laff',
     'two_sided': 'ts',
-    'lsim': 'lsim'
+    'lsim': 'lsim',
+    'graph_mode': 'grm'
 }

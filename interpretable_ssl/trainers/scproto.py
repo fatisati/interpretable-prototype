@@ -121,6 +121,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             p=self.p,
             k_pos=self.k_pos,
             softm=(self.softm == 1),
+            graph_mode = self.graph_mode,
             condition_encoders=scpoli_encoder.condition_encoders,
             conditions_combined_encoder=scpoli_encoder.conditions_combined_encoder,
             # cell_type_keys=[self.cell_type_key],

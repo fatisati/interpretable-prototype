@@ -10,7 +10,7 @@ def load_dataset(ds_id):
     conf = DATASETS[ds_id]
     return (
         sc.read_h5ad(conf["path"]),
-        conf["batch_key"],
+        conf.get('batch_key', None),
         conf["label_key"],
         conf["num_prototypes"],
     )
@@ -36,12 +36,15 @@ def train_seacell(ds_id, mode):
         sc.tl.pca(ad)
         ad, SEACell_ad, model = compute_seacells(ad, n_proto)
         agg_obs(SEACell_ad, ad, lk)
-        agg_obs(SEACell_ad, ad, bk)
+        if bk is not None:
+            agg_obs(SEACell_ad, ad, bk)
         save_seacell(ad, SEACell_ad, ds_id)
     else:
         print("eval mode, seacell file founded.")
-        bk, lk = DATASETS[ds_id]["batch_key"], DATASETS[ds_id]["label_key"]
+        bk, lk = DATASETS[ds_id].get('batch_key', None), DATASETS[ds_id]["label_key"]
         ad, SEACell_ad = load_seacell(ds_id)
+        if bk not in SEACell_ad.obs and ad.obs[bk].nunique() == 1:
+            SEACell_ad.obs[bk] = ad[0].obs[bk].item()
     if SEACell_ad.X.max() > 20:
         sc.pp.normalize_total(SEACell_ad)
         sc.pp.log1p(SEACell_ad)

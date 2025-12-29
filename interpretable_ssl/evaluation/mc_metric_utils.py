@@ -15,7 +15,7 @@ import subprocess
 from interpretable_ssl.evaluation.dropout_recovery import *
 from interpretable_ssl.evaluation.nsc import *
 import os, sys, uuid
-
+spatial_labels = ["niches_2D", "niches_3D", 'fibroblast_subclusters', 'EMT_niche']
 
 def spatial_compactness(
     ad, spatial_key="spatial", mc_key="SEACell", bk="batch", return_size=False
@@ -177,7 +177,7 @@ def avg_mc_quality_metrics(ad, bk, lk):
     batches = ad.obs[bk].values
     out = {}
 
-    keys = [lk, "niches_2D", "niches_3D"]
+    keys = [lk] + spatial_labels
     for k in keys:
         if k in ad.obs:
             out[f"{k}_purity"], out[k] = calc_purity(
@@ -207,17 +207,18 @@ def avg_mc_quality_metrics(ad, bk, lk):
     return df, out
 
 
-def compute_dc(ad, batch_key, out_dir="./"):
-    base = f"{out_dir}/{len(ad)}_{os.getpid()}_{uuid.uuid4().hex[:8]}"
+def compute_dc(ad, batch_key, out_dir="./", base = None, remove_dc = True):
+    if base is None:
+        base = f"{out_dir}/{len(ad)}_{os.getpid()}_{uuid.uuid4().hex[:8]}"
     ad_path, dc_path, lock_path = base + ".h5ad", base + ".csv", base + ".lock"
 
     ad.write(ad_path)
     have_lock = False
     if not os.path.exists(dc_path):
         try:
-            have_lock = True
             fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             os.close(fd)
+            have_lock = True
             proc = subprocess.Popen(
                 [
                     sys.executable,
@@ -242,9 +243,11 @@ def compute_dc(ad, batch_key, out_dir="./"):
 
     df = pd.read_csv(dc_path, index_col=0)
 
-    for p in (ad_path, dc_path):
-        if os.path.exists(p):
-            os.remove(p)
+    if have_lock and os.path.exists(ad_path):
+            os.remove(ad_path)
+    if remove_dc:
+        if os.path.exists(dc_path):
+            os.remove(dc_path)
     if have_lock and os.path.exists(lock_path):
         os.remove(lock_path)
 
@@ -256,7 +259,7 @@ def get_seacell_path(ds_id):
 
 
 def save_all_mc_metrics(ad, mc_ad, lk, bk, save_path, mc_key="SEACell", name="seacell"):
-    for k in [lk, "niche_2D", "niche_3D"]:
+    for k in [lk] + spatial_labels:
         if k in ad.obs:
             mc_label_purity(ad, k, mc_key, name, save_path)
 
@@ -265,23 +268,26 @@ def save_all_mc_metrics(ad, mc_ad, lk, bk, save_path, mc_key="SEACell", name="se
         de_mc.X = ad.layers["metacell"]
     else:
         de_mc = mc_ad
-    compute_dge_consistency(de_mc, ad, lk, bk, name=name, save_path=save_path)
+    if bk is not None and ad.obs[bk].nunique() > 1:
+        compute_dge_consistency(de_mc, ad, lk, bk, name=name, save_path=save_path)
 
     # I feel maybe this hsould be like so i can pass sim when i had it (maybe from scproto)
-    dropout_recovery(ad, mc_ad, mc_key, name, lk, save_path)
+    gene_recovery(ad, mc_ad, mc_key, name, lk, save_path)
     eval_mc_labeling(ad, lk, name, path=save_path)
 
     mc_ad = mc_ad[mc_ad.obs[lk].notna()].copy()
 
     if "spatial" in ad.obsm:
+        celltype_niche_dge(ad, mc_ad, lk, name, save_path)
         evaluate_markers(ad, mc_ad, lk, name, mc_key, save_path)
+        
 
     if f"{name}_mc_pca" not in mc_ad.obsm:
         sc.tl.pca(mc_ad)
         mc_ad.obsm[f"{name}_mc_pca"] = mc_ad.obsm["X_pca"]
     obsm_keys = [f"{name}_mc_pca"]
 
-    if name == "seacell":
+    if name == "seacell" and bk is not None and mc_ad.obs[bk].nunique() > 1:
         sce.pp.harmony_integrate(
             mc_ad,
             key=bk,  # your batch column

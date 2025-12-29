@@ -220,3 +220,55 @@ def compute_dge_consistency(
     if "lognorm_gt" in ad.layers:
         ad.X = ad.layers["lognorm"]
     return df_rbo, df_kt, df_jac
+
+def topk_per_niche(ad, k=10):
+    groups = ad.uns["rank_genes_groups"]["names"].dtype.names
+    return {
+        g: sc.get.rank_genes_groups_df(ad, group=g)["names"].head(k).tolist()
+        for g in groups
+    }
+def get_niche_markers(ad, ct, ct_key, niche_key, k=50):
+    ad_ct = ad[ad.obs[ct_key] == ct].copy()
+    ad_ct = ad_ct[ad_ct.obs[niche_key] != "Excluded"].copy()
+
+    valid = ad_ct.obs[niche_key].value_counts()
+    valid = valid[valid > 1].index.tolist()
+
+    if len(valid) == 0:
+        return {}
+
+    sc.tl.rank_genes_groups(
+        ad_ct,
+        groupby=niche_key,
+        groups=valid,
+        reference="rest",
+        method="wilcoxon",
+        use_raw=False,
+    )
+
+    return topk_per_niche(ad_ct, niche_key, k)
+
+
+def summerize_dict(d, thr):
+    # , np.mean(np.array(list(d.values())))
+    return np.mean(np.array(list(d.values())) > thr)
+    
+def compare_niche_dge(ad, mc_ad, lk, ct, thr):
+    sc_markers = get_niche_markers(ad, ct, lk, 'niches_2D')
+    mc_markers = get_niche_markers(mc_ad, ct, lk, 'niches_2D')
+    rbo_dict = {n: rbo(sc_markers[n], mc_markers.get(n, []), p=0.95) for n in sc_markers}
+    jaccard_dict = {n: jaccard(sc_markers[n], mc_markers.get(n, [])) for n in sc_markers}
+    return summerize_dict(rbo_dict, thr), summerize_dict(jaccard_dict, thr)
+    
+def celltype_niche_dge(ad, mc_ad, lk, name, save_path):
+    r_df = pd.DataFrame(index=["rbo"])
+    j_df = pd.DataFrame(index=["jaccard"])
+
+    for ct in ad.obs[lk].unique():
+        r, j = compare_niche_dge(ad, mc_ad, ct, 0.01)
+        r_df[ct] = r
+        j_df[ct] = j
+    r_df.index = [name]
+    j_df.index = [name]
+    r_df.to_csv(save_path + '/ct_niche_rbo.csv')
+    j_df.to_csv(save_path + '/ct_niche_jaccard.csv')

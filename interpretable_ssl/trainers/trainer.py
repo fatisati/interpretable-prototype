@@ -86,44 +86,47 @@ class Trainer(TrainerBase):
         dc_path = ds.get_dc_path()
         if os.path.exists(dc_path):
             return
-        lock_path = dc_path + ".lock"
-
-        if not os.path.exists(lock_path):
-            print("calling calc dc...")
-            open(lock_path, "w").close()
-            ad_path = f"{dc_path.replace('.csv', '')}_tmp.h5ad"
-            ds.adata.write(ad_path)
-            subprocess.Popen(
-                [
-                    sys.executable,
-                    "-u",
-                    "-m",
-                    "interpretable_ssl.evaluation.diffusion",
-                    ad_path,
-                    dc_path,
-                    lock_path,  # pass lock path
-                    self.dataset.batch_key,
-                ],
-                stdout=sys.stdout,
-                stderr=sys.stderr,
-            )
         else:
-            print(f"Skip: {dc_path} already being processed.")
+            dc_df = compute_dc(ds.adata, ds.batch_key, base = dc_path, remove_dc=False)
+            dc_df.to_csv(dc_path)
+        # lock_path = dc_path + ".lock"
+
+        # if not os.path.exists(lock_path):
+        #     print("calling calc dc...")
+        #     open(lock_path, "w").close()
+        #     ad_path = f"{dc_path.replace('.csv', '')}_tmp.h5ad"
+        #     ds.adata.write(ad_path)
+        #     subprocess.Popen(
+        #         [
+        #             sys.executable,
+        #             "-u",
+        #             "-m",
+        #             "interpretable_ssl.evaluation.diffusion",
+        #             ad_path,
+        #             dc_path,
+        #             lock_path,  # pass lock path
+        #             self.dataset.batch_key,
+        #         ],
+        #         stdout=sys.stdout,
+        #         stderr=sys.stderr,
+        #     )
+        # else:
+        #     print(f"Skip: {dc_path} already being processed.")
 
     def get_dc(self, split):
         if split in self.dc_dict:
             return self.dc_dict[split]
         path = self.dc_path[split]
-        print(f"waiting for {path} to be generated...")
-        while not os.path.exists(path):
-            time.sleep(1)  # wait 5 seconds before checking again
-        size = -1
-        while True:
-            new_size = os.path.getsize(path)
-            if new_size == size and new_size > 0:
-                break
-            size = new_size
-            time.sleep(0.5)
+        # print(f"waiting for {path} to be generated...")
+        # while not os.path.exists(path):
+        #     time.sleep(1)  # wait 5 seconds before checking again
+        # size = -1
+        # while True:
+        #     new_size = os.path.getsize(path)
+        #     if new_size == size and new_size > 0:
+        #         break
+        #     size = new_size
+        #     time.sleep(0.5)
 
         df = pd.read_csv(path, index_col=0)
         self.dc_dict[split] = df

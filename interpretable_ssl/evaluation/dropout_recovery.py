@@ -28,6 +28,19 @@ def masked_corr_per_ct(X_true, X_hat, labels, mask, name):
     df = pd.DataFrame([out], index=[name])
 
     df["rare avg"] = df[rare_ct].mean(axis=1)
+
+    # ---- micro-average (all cells together) ----
+    m_all = mask > 0
+    if m_all.any():
+        t_all = X_true[m_all]
+        h_all = X_hat[m_all]
+        if t_all.std() == 0 or h_all.std() == 0:
+            micro_avg = np.nan
+        else:
+            micro_avg = np.corrcoef(t_all, h_all)[0, 1]
+    else:
+        micro_avg = np.nan
+    df["micro avg"] = micro_avg
     return df
 
 
@@ -45,25 +58,47 @@ import numpy as np
 import scipy.sparse as sp
 
 
-def make_mask(X_gt, X_obs):
+def dropout_mask(X_gt, X_obs):
+    # ensure same representation
     if sp.issparse(X_gt) or sp.issparse(X_obs):
-        gt_pos = X_gt > 0
-        obs_zero = X_obs == 0
-        return gt_pos.multiply(obs_zero)
+        X_gt = X_gt.tocsr() if sp.issparse(X_gt) else sp.csr_matrix(X_gt)
+        X_obs = X_obs.tocsr() if sp.issparse(X_obs) else sp.csr_matrix(X_obs)
+
+        return (X_gt > 0).multiply(X_obs == 0)
+
     else:
         return (X_gt > 0) & (X_obs == 0)
+
+
+def changed_mask(X_gt, X_obs):
+    if sp.issparse(X_gt) or sp.issparse(X_obs):
+        X_gt = X_gt.tocsr() if sp.issparse(X_gt) else sp.csr_matrix(X_gt)
+        X_obs = X_obs.tocsr() if sp.issparse(X_obs) else sp.csr_matrix(X_obs)
+
+        return X_gt != X_obs
+
+    else:
+        return X_gt != X_obs
 
 
 def to_dense(X):
     return X.toarray() if sp.issparse(X) else X
 
 
-def dropout_recovery(
-    masked_ad, mc_ad, mc_key, name, lk, save_path=None, gt_layer="lognorm_gt"
+def gene_recovery(
+    masked_ad,
+    mc_ad,
+    mc_key,
+    name,
+    lk,
+    save_path=None,
+    gt_layer="lognorm_gt",
 ):
     if gt_layer not in masked_ad.layers:
+        print("no gt layer")
         return
-    mask = make_mask(masked_ad.layers[gt_layer], masked_ad.X)
+
+    mask = changed_mask(masked_ad.layers["counts_gt"], masked_ad.layers["counts"])
 
     if mask.sum() == 0:
         return
@@ -73,17 +108,19 @@ def dropout_recovery(
         idx = mc_ad.obs_names.get_indexer(mc_ids)
         X_hat = mc_ad.X[idx]
     else:
-        print("usingobsm key")
+        print("using obsm key")
         X_hat = masked_ad.layers["metacell"]
 
+    
     X_true = to_dense(masked_ad.layers[gt_layer])
     X_hat = to_dense(X_hat)
     mask = to_dense(mask).astype(bool)
-
+    snr_corr_df(masked_ad, X_true, X_hat, [lk, "niches_2D", "niches_3D", 'fibroblast_subclusters', 'EMT_niche'], name, save_path)
+    
     df = masked_corr_per_ct(X_true, X_hat, masked_ad.obs[lk], mask, name)
     if save_path is None:
         return df
-    df.to_csv(save_path + "/dropout_recovery.csv")
+    df.to_csv(save_path + f"/gene_recovery.csv")
 
 
 def mc_label_majority_assigned(ad, mc_assign, lk, n_mc):
@@ -120,11 +157,8 @@ def f1_per_ct_df(y_true, y_pred, name):
 
 
 def masked_f1(ad, y_true, y_pred, name):
-    if "lognorm_gt" in ad.layers:
-        gt = ad.layers["lognorm_gt"]
-        obs = ad.X
-
-        gene_mask = make_mask(gt, obs)
+    if "counts_gt" in ad.layers:
+        gene_mask = dropout_mask(ad.layers["counts_gt"], ad.layers["counts"])
         cell_mask = np.asarray(gene_mask.sum(axis=1)).ravel() > 0
 
         if cell_mask.sum() > 0:
@@ -134,7 +168,6 @@ def masked_f1(ad, y_true, y_pred, name):
                 name,
             )
     return None
-
 
 
 def eval_mc_labeling(ad, lk, name, sim=None, path=None, mc_key="SEACell", k=10):
@@ -165,3 +198,76 @@ def eval_mc_labeling(ad, lk, name, sim=None, path=None, mc_key="SEACell", k=10):
         if masked_df is not None:
             masked_df.to_csv(path + "/masked_f1.csv")
     return assign_majority, topk_majority
+
+
+def calc_snr_per_cell_masked(gt, pred, mask):
+    if sp.issparse(gt):
+        gt = gt.toarray()
+    if sp.issparse(pred):
+        pred = pred.toarray()
+    mask = np.asarray(mask)
+
+    out = np.full(gt.shape[0], np.nan)
+    for i in range(gt.shape[0]):
+        m = mask[i]
+        if not m.any():
+            continue
+        diff = gt[i, m] - pred[i, m]
+        signal = np.mean(gt[i, m] ** 2)
+        noise = np.mean(diff**2)
+        out[i] = 10 * np.log10(signal / (noise + 1e-12))
+    return out
+
+
+def corr_per_cell(gt, pred):
+    gt = gt.toarray() if sp.issparse(gt) else gt
+    pred = pred.toarray() if sp.issparse(pred) else pred
+
+    return np.array([
+        np.corrcoef(gt[i], pred[i])[0, 1]
+        if gt[i].std() > 0 and pred[i].std() > 0 else np.nan
+        for i in range(gt.shape[0])
+    ])
+
+
+def snr_corr_df(ad, gt, pred, lks, name, path=None):
+    mask = changed_mask(ad.layers["counts_gt"], ad.layers["counts"])
+    changed = np.asarray(mask.sum(axis=1)).ravel() > 0
+
+    snr = calc_snr_per_cell_masked(gt, pred, mask.toarray())
+    corr = corr_per_cell(gt[changed], pred[changed])
+
+    dfs = {}
+
+    for lk in lks:
+        if lk not in ad.obs:
+            continue
+
+        labels_all = ad.obs[lk].values
+        labels_corr = labels_all[changed]
+
+        for metric, vals, labels in [
+            ("snr", snr, labels_all),
+            ("corr", corr, labels_corr),
+        ]:
+            df = pd.DataFrame({metric: vals, lk: labels}).dropna()
+
+            grp = df.groupby(lk)[metric].mean()
+            micro_avg = np.nanmean(vals)
+            macro_avg = grp.mean()
+            rare_ct = get_rare(ad, lk)
+            rare_avg = grp.loc[grp.index.isin(rare_ct)].mean()
+
+            out = grp.to_frame().T
+            out["micro_avg"] = micro_avg
+            out["macro_avg"] = macro_avg
+            out["rare_avg"] = rare_avg
+            out.index = [name]
+
+            dfs[f'{lk}_{metric}'] = out
+
+            if path is not None:
+                out.to_csv(f"{path}/{lk}_{metric}.csv")
+
+    return dfs
+
