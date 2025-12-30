@@ -11,8 +11,8 @@ def get_rare(ad=None, label_key=None, thr=0.25, labels=None):
         labels = ad.obs[label_key]
 
     freq = labels.value_counts(normalize=True)
-    thr = freq.quantile(0.25)
-    rare = freq[freq < thr].index.tolist()
+    cutoff_thr = freq.quantile(thr)
+    rare = freq[freq < cutoff_thr].index.tolist()
     return rare
 
 
@@ -20,7 +20,7 @@ def get_gene_map(ad):
     return ad.var["feature_name"].to_dict()
 
 
-def calc_dge(ad, label_key, filter_thr=0.05):
+def calc_dge_filtered(ad, label_key, filter_thr=0.05):
     group_cnt = ad.obs[label_key].value_counts()
     valid_groups = group_cnt[group_cnt > 1].index
     ad_valid = ad[ad.obs[label_key].isin(valid_groups)]
@@ -61,11 +61,11 @@ def get_mc_jaccard(mc_adata, ad, lk, bk, thr, name=None):
     if ad.X.max() > 20:
         ad = ad.copy()
         ad.X = ad.layers["lognorm"]
-    mc_de = calc_dge(mc_adata, lk, thr)
+    mc_de = calc_dge_filtered(mc_adata, lk, thr)
     batch_de_dict = {}
     for b in ad.obs[bk].unique():
         b_ad = ad[ad.obs[bk] == b].copy()
-        batch_de_dict[b] = calc_dge(b_ad, lk, thr)
+        batch_de_dict[b] = calc_dge_filtered(b_ad, lk, thr)
     return calculate_avg_jaccard(mc_de, batch_de_dict, name)
 
 
@@ -221,12 +221,15 @@ def compute_dge_consistency(
         ad.X = ad.layers["lognorm"]
     return df_rbo, df_kt, df_jac
 
+
 def topk_per_niche(ad, k=10):
     groups = ad.uns["rank_genes_groups"]["names"].dtype.names
     return {
         g: sc.get.rank_genes_groups_df(ad, group=g)["names"].head(k).tolist()
         for g in groups
     }
+
+
 def get_niche_markers(ad, ct, ct_key, niche_key, k=50):
     ad_ct = ad[ad.obs[ct_key] == ct].copy()
     ad_ct = ad_ct[ad_ct.obs[niche_key] != "Excluded"].copy()
@@ -246,29 +249,36 @@ def get_niche_markers(ad, ct, ct_key, niche_key, k=50):
         use_raw=False,
     )
 
-    return topk_per_niche(ad_ct, niche_key, k)
+    return topk_per_niche(ad_ct, k)
 
 
 def summerize_dict(d, thr):
     # , np.mean(np.array(list(d.values())))
     return np.mean(np.array(list(d.values())) > thr)
-    
+
+
 def compare_niche_dge(ad, mc_ad, lk, ct, thr):
-    sc_markers = get_niche_markers(ad, ct, lk, 'niches_2D')
-    mc_markers = get_niche_markers(mc_ad, ct, lk, 'niches_2D')
-    rbo_dict = {n: rbo(sc_markers[n], mc_markers.get(n, []), p=0.95) for n in sc_markers}
-    jaccard_dict = {n: jaccard(sc_markers[n], mc_markers.get(n, [])) for n in sc_markers}
+    sc_markers = get_niche_markers(ad, ct, lk, "niches_2D")
+    mc_markers = get_niche_markers(mc_ad, ct, lk, "niches_2D")
+    rbo_dict = {
+        n: rbo(sc_markers[n], mc_markers.get(n, []), p=0.95) for n in sc_markers
+    }
+    jaccard_dict = {
+        n: jaccard(sc_markers[n], mc_markers.get(n, [])) for n in sc_markers
+    }
     return summerize_dict(rbo_dict, thr), summerize_dict(jaccard_dict, thr)
-    
+
+
 def celltype_niche_dge(ad, mc_ad, lk, name, save_path):
     r_df = pd.DataFrame(index=["rbo"])
     j_df = pd.DataFrame(index=["jaccard"])
 
     for ct in ad.obs[lk].unique():
-        r, j = compare_niche_dge(ad, mc_ad, ct, 0.01)
+        r, j = compare_niche_dge(ad, mc_ad, lk, ct, 0.01)
         r_df[ct] = r
         j_df[ct] = j
     r_df.index = [name]
     j_df.index = [name]
-    r_df.to_csv(save_path + '/ct_niche_rbo.csv')
-    j_df.to_csv(save_path + '/ct_niche_jaccard.csv')
+    r_df.to_csv(save_path + "/ct_niche_rbo.csv")
+    j_df.to_csv(save_path + "/ct_niche_jaccard.csv")
+    return r_df, j_df

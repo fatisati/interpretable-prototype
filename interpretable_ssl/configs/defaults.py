@@ -184,6 +184,8 @@ def get_defaults():
         'epsilon_min': 0.02,
         'sched_temp_eps': 1,
         'lsim': 'normal',
-        
+        # proto labeling version
+        'pl_version': 1,
+        'graph_mode': 'knn'
     }
     return defaults

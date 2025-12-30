@@ -274,7 +274,8 @@ def save_all_mc_metrics(ad, mc_ad, lk, bk, save_path, mc_key="SEACell", name="se
     # I feel maybe this hsould be like so i can pass sim when i had it (maybe from scproto)
     gene_recovery(ad, mc_ad, mc_key, name, lk, save_path)
     eval_mc_labeling(ad, lk, name, path=save_path)
-
+    eval_mc_labeling_v2(ad, mc_ad, lk, name, save_path)
+    
     mc_ad = mc_ad[mc_ad.obs[lk].notna()].copy()
 
     if "spatial" in ad.obsm:

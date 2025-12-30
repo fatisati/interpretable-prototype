@@ -111,12 +111,18 @@ def gene_recovery(
         print("using obsm key")
         X_hat = masked_ad.layers["metacell"]
 
-    
     X_true = to_dense(masked_ad.layers[gt_layer])
     X_hat = to_dense(X_hat)
     mask = to_dense(mask).astype(bool)
-    snr_corr_df(masked_ad, X_true, X_hat, [lk, "niches_2D", "niches_3D", 'fibroblast_subclusters', 'EMT_niche'], name, save_path)
-    
+    snr_corr_df(
+        masked_ad,
+        X_true,
+        X_hat,
+        [lk, "niches_2D", "niches_3D", "fibroblast_subclusters", "EMT_niche"],
+        name,
+        save_path,
+    )
+
     df = masked_corr_per_ct(X_true, X_hat, masked_ad.obs[lk], mask, name)
     if save_path is None:
         return df
@@ -223,11 +229,16 @@ def corr_per_cell(gt, pred):
     gt = gt.toarray() if sp.issparse(gt) else gt
     pred = pred.toarray() if sp.issparse(pred) else pred
 
-    return np.array([
-        np.corrcoef(gt[i], pred[i])[0, 1]
-        if gt[i].std() > 0 and pred[i].std() > 0 else np.nan
-        for i in range(gt.shape[0])
-    ])
+    return np.array(
+        [
+            (
+                np.corrcoef(gt[i], pred[i])[0, 1]
+                if gt[i].std() > 0 and pred[i].std() > 0
+                else np.nan
+            )
+            for i in range(gt.shape[0])
+        ]
+    )
 
 
 def snr_corr_df(ad, gt, pred, lks, name, path=None):
@@ -264,10 +275,92 @@ def snr_corr_df(ad, gt, pred, lks, name, path=None):
             out["rare_avg"] = rare_avg
             out.index = [name]
 
-            dfs[f'{lk}_{metric}'] = out
+            dfs[f"{lk}_{metric}"] = out
 
             if path is not None:
                 out.to_csv(f"{path}/{lk}_{metric}.csv")
 
     return dfs
 
+
+def save_df(df, name, path, save_name):
+    df.index = [name]
+    if path is None:
+        return
+    df.to_csv(f"{path}/{save_name}")
+
+
+def proto_f1(ad, mc_ad, lk, name, save_path):
+    mc_idx = ad.obs["mc_idx"].values
+    proto_labels = mc_ad.obs[lk].values
+    pred = proto_labels[mc_idx]
+    gt = ad.obs[lk].values
+    classes = np.unique(np.concatenate([gt, pred]))
+
+    f1_per_class = f1_score(gt, pred, labels=classes, average=None, zero_division=0)
+
+    out = {c: f for c, f in zip(classes, f1_per_class)}
+
+    out["f1_micro"] = f1_score(gt, pred, average="micro", zero_division=0)
+    out["f1_macro"] = f1_score(gt, pred, average="macro", zero_division=0)
+    # out["f1_weighted"] = f1_score(gt, pred, average="weighted", zero_division=0)
+
+    df = pd.DataFrame([out])
+    save_df(df, name, save_path, f"{lk}_f1.csv")
+    return f"{lk}_f1", df
+
+
+def niche_macro_f1_per_celltype(
+    ad,
+    mc_ad,
+    name,
+    save_path,
+    exclude_niches=None,
+):
+    mc_idx = ad.obs["mc_idx"].values
+    if exclude_niches is None:
+        exclude_niches = []
+
+    # prototype → niche labels
+    proto_niche = mc_ad.obs["niches_2D"].values
+    pred_niche = proto_niche[mc_idx]
+
+    gt_niche = ad.obs["niches_2D"].values
+    gt_ct = ad.obs["celltypes"].values
+
+    out = {}
+
+    for ct in np.unique(gt_ct):
+        # cell-type subset
+        mask = gt_ct == ct
+
+        # exclude GT niche labels
+        if exclude_niches:
+            mask &= ~np.isin(gt_niche, exclude_niches)
+
+        if mask.sum() < 2:
+            continue
+
+        out[ct] = f1_score(
+            gt_niche[mask],
+            pred_niche[mask],
+            average="macro",
+            zero_division=0,
+        )
+    df = pd.DataFrame([out])
+    df["avg"] = df.mean(axis=1)
+    save_df(df, name, save_path, "ct_niche_f1.csv")
+    return "ct_niche_f1", df
+
+
+def eval_mc_labeling_v2(ad, mc_ad, lk, name, save_path):
+    dfs = {}
+    labels = [lk, "niches_2D", "niches_3D", "fibroblast_subclusters", "EMT_niche"]
+    for lk in labels:
+        if lk in ad.obs and lk in mc_ad.obs:
+            k, df = proto_f1(ad, mc_ad, lk, name, save_path)
+            dfs[k] = df
+    if "spatial" in ad.obsm:
+        k, df = niche_macro_f1_per_celltype(ad, mc_ad, name, save_path, ["Excluded"])
+        dfs[k] = df
+    return dfs

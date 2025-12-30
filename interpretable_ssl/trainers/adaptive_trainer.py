@@ -99,10 +99,13 @@ class AdoptiveTrainer(Trainer):
         
         if self.mode == 'eval':
             self.setup()
-            self.model = self.load_model()
-            self.save_metrics()
-            return
-        
+            try:
+                self.model = self.load_model()
+                self.save_metrics()
+                return
+            except:
+                print('no model found, training...')
+            
         if not (self.debug==1):
             self.set_job_name(self.dump_path)
             self.init_wandb(self.dump_path)

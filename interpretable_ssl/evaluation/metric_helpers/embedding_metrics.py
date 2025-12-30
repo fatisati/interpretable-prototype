@@ -277,6 +277,7 @@ def get_scproto_mc_adata(
     use_max=True,
     model=None,
     similarity="normal",
+    pl_version = 3,
 ):
     import torch.nn as nn
 
@@ -327,10 +328,12 @@ def get_scproto_mc_adata(
         )
     else:
         sample_proto_sim = compute_similarity(z_vae, protos).detach().cpu().numpy()
-
-    proto_labels = extract_proto_labels(
-        adata, sample_proto_sim, [bk, lk], epsilon=epsilon, similarity=similarity
-    )
+    if pl_version == 2:
+        proto_labels = extract_proto_labels(
+            adata, sample_proto_sim, [bk, lk], epsilon=epsilon, similarity=similarity
+        )
+    else:
+        proto_labels = soft_proto_labels_balanced(sample_proto_sim, adata.obs, [bk, lk, 'niches_2D'], epsilon)
     metacells_adata = generate_metacell_adata(metacells, proto_labels)
     if metacells_adata.X.max() > 50:
         metacells_adata = metacells_adata.copy()

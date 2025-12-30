@@ -48,4 +48,5 @@ def train_seacell(ds_id, mode):
     if SEACell_ad.X.max() > 20:
         sc.pp.normalize_total(SEACell_ad)
         sc.pp.log1p(SEACell_ad)
+    ad.obs['mc_idx'] = [int(i.split('-')[-1]) for i in ad.obs["SEACell"].values]
     save_all_mc_metrics(ad, SEACell_ad, lk, bk, get_seacell_path(ds_id))

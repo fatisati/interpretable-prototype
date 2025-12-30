@@ -1,6 +1,30 @@
 from collections import Counter
 import numpy as np
 from scipy.special import softmax
+import pandas as pd
+
+def soft_proto_labels_balanced(sim, labels, label_keys, tau=1.0):
+    proto_to_label = {k: [] for k in label_keys}
+
+    z = sim / tau
+    z = z - z.max(axis=1, keepdims=True)
+    w = np.exp(z)  # (N, P)
+
+    for k in label_keys:
+        if k not in labels:
+            continue
+        lbl = pd.Categorical(labels[k])
+        onehot = pd.get_dummies(lbl)
+        counts = onehot.sum(axis=0).to_numpy()
+        onehot = onehot / counts
+
+        scores = onehot.to_numpy().T @ w  # (L, P)
+        winner = scores.argmax(axis=0)
+        proto_labels = onehot.columns.to_numpy()[winner]
+
+        proto_to_label[k] = list(proto_labels)
+
+    return proto_to_label
 
 def extract_proto_labels(
     adata, sample_proto_sim, label_keys, epsilon, similarity = 'normal'
