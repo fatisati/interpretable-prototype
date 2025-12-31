@@ -140,6 +140,8 @@ def get_defaults():
         "lambda_commit": 0.0, # 0.25
         "lambda_p_uncertainty": 0.0,
         'lambda_proto_entropy': 0.0,
+        
+        "lambda_proto_recon": 0.0,
         'assignment_metric': 'sneuc',
         "model_type": 'gm',
         "l2norm": 0,

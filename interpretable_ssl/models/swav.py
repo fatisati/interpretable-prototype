@@ -306,13 +306,14 @@ class scProtoGMVAE(SwAVModel):
         self.kl_type = kl_type
 
     def forward(self, bs, batch):
-        z, recon, kl, resp, kl_balance = self.calc_z_and_cvae_loss(bs, **batch)
+        z, recon, kl, resp, kl_balance, proto_recon = self.calc_z_and_cvae_loss(bs, **batch)
         propagation_sim = self.propagation_sim_loss(z)
         return (
             z,
             z,
             self.proto_soft_assignments(z),
             recon,
+            proto_recon,
             propagation_sim,
             kl,
             kl_balance,
@@ -339,7 +340,14 @@ class scProtoGMVAE(SwAVModel):
         if self.l2norm:
             z_mu = nn.functional.normalize(z_mu, dim=1, p=2)
 
-        
+        scores = torch.softmax(self.proto_soft_assignments(z_mu) / self.temperature, dim=1)  # (B, K)
+        z_proto = scores @ self.get_prototypes()                                            # (B, D)
+        proto_recon = self.calc_recon(
+            z_proto, batch, x, bs,
+            sizefactor=sizefactor,
+            combined_batch=combined_batch,
+        )
+
         z = self.scpoli_cvae.sampling(z_mu, z_logvar)
         recon = self.calc_recon(
             z, batch, x, bs, sizefactor=sizefactor, combined_batch=combined_batch
@@ -368,7 +376,7 @@ class scProtoGMVAE(SwAVModel):
 
         # ---------- total ----------
         # loss = recon + self.beta * kl
-        return z_mu, recon, kl, resp, kl
+        return z_mu, recon, kl, resp, kl, proto_recon
 
     def calc_recon(self, z, batch, x, bs, **kwargs):
         if self.recon_v > 1:

@@ -558,7 +558,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             adoptive_eps = None
         sim = inputs.pop("sim", None)
         # label = inputs.pop(self.dataset.label_key)
-        z, _, scores, recon, (proto_loss, commitment_loss), kl, kl_balance = self.model(bs,
+        z, _, scores, recon, proto_recon, (proto_loss, commitment_loss), kl, kl_balance = self.model(bs,
             inputs
         )
 
@@ -599,6 +599,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         return {
             "swav": swav_loss,
             "recon": recon,
+            'proto_recon': proto_recon,
             "kl": kl,
             "kl_balance": kl_balance,
             "proto": proto_loss,
