@@ -121,7 +121,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             p=self.p,
             k_pos=self.k_pos,
             softm=(self.softm == 1),
-            graph_mode = self.graph_mode,
+            graph_mode=self.graph_mode,
             condition_encoders=scpoli_encoder.condition_encoders,
             conditions_combined_encoder=scpoli_encoder.conditions_combined_encoder,
             # cell_type_keys=[self.cell_type_key],
@@ -197,6 +197,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             "batch_key": self.train_.batch_key,
             "l2norm": self.l2norm,
             "assignment_metric": self.assignment_metric,
+            "recon_v": self.recon_v,
         }
 
         if self.model_type == "gm" or self.model_type == "normal":
@@ -393,27 +394,6 @@ class SCProtoTrainer(AdoptiveTrainer):
             for key in self.loss_keys
             if hasattr(self, f"lambda_{key}")
         }
-        # meters = {
-        #     "loss": AverageMeter(),
-        # }
-        # for it, inputs in enumerate(self.train_loader):
-        #     bs = inputs["x"].size(0)
-        #     inputs = {k: inputs[k].transpose(0, 1) for k in inputs.keys()}
-
-        #     for ds_id in self.ds_ids:
-        #         loss, meters, assign_cnts = self.calc_ds_loss(
-        #             inputs, ds_id, meters, bs, self.train_ds.adata, "train"
-        #         )
-        # meters = {k: getattr(v, "avg", v) for k, v in meters.items()}
-        # lambda_loss = {key: getattr(self, f"lambda_{key}") / meters[key] for key in }
-        # for loss_key in self.loss_keys:
-        #         setattr(self, f"lambda_{loss_key}", lambda_loss[loss_key])
-        #         lambda_loss[loss_key] =
-        # print(lambda_loss)
-        # if self.normalize_loss:
-        #     return lambda_loss
-        # else:
-        #     return lambda_weight
 
     def setup_scheduler(self):
         self.steps_per_epoch = len(self.train_loader)
@@ -578,7 +558,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             adoptive_eps = None
         sim = inputs.pop("sim", None)
         # label = inputs.pop(self.dataset.label_key)
-        z, _, scores, recon, (proto_loss, commitment_loss), kl, kl_balance = self.model(
+        z, _, scores, recon, (proto_loss, commitment_loss), kl, kl_balance = self.model(bs,
             inputs
         )
 

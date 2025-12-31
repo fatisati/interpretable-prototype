@@ -15,6 +15,8 @@ import subprocess
 from interpretable_ssl.evaluation.dropout_recovery import *
 from interpretable_ssl.evaluation.nsc import *
 import os, sys, uuid
+from interpretable_ssl.evaluation.niche_recovery import *
+
 spatial_labels = ["niches_2D", "niches_3D", 'fibroblast_subclusters', 'EMT_niche']
 
 def spatial_compactness(
@@ -281,7 +283,7 @@ def save_all_mc_metrics(ad, mc_ad, lk, bk, save_path, mc_key="SEACell", name="se
     if "spatial" in ad.obsm:
         celltype_niche_dge(ad, mc_ad, lk, name, save_path)
         evaluate_markers(ad, mc_ad, lk, name, mc_key, save_path)
-        
+        eval_niches(mc_ad, lk, 'niches_2D', name, save_path)
 
     if f"{name}_mc_pca" not in mc_ad.obsm:
         sc.tl.pca(mc_ad)

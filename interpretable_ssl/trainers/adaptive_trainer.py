@@ -104,6 +104,7 @@ class AdoptiveTrainer(Trainer):
                 self.save_metrics()
                 return
             except:
+                return
                 print('no model found, training...')
             
         if not (self.debug==1):

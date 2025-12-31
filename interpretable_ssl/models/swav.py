@@ -32,6 +32,8 @@ class SwavBase(nn.Module):
         np2=None,
         l2norm=1,
         assignment_metric="dotp",
+        recon_v = 2,
+        bs = None
     ):
         super().__init__()
         self.scpoli_cvae = scpoli_cvae
@@ -44,6 +46,8 @@ class SwavBase(nn.Module):
         self.nmb_prototypes = nmb_prototypes
         self.assignment_metric = assignment_metric
         self.latent_dim = latent_dim
+        self.recon_v = recon_v
+        self.bs = bs
         # self.propagation_reg = propagation_reg
         # self.prot_emb_sim_reg = prot_emb_sim_reg
 
@@ -161,7 +165,7 @@ class SwavBase(nn.Module):
         return self.propagation(z), self.z_commit(z)
 
     def encode(self, batch):
-        out = self.forward(batch)
+        out = self.forward(1, batch)
         return out[:3]
 
     def get_prototypes(self):
@@ -250,6 +254,7 @@ class SwAVModel(SwavBase):
         batch_key="study",
         l2norm=1,
         assignment_metric="dot-product",
+        **kwargs
     ):  # , propagation_reg=0.5, prot_emb_sim_reg=0.5
         # self.cell_type_key = "cell_type"
         self.condition_key = batch_key
@@ -263,6 +268,7 @@ class SwAVModel(SwavBase):
             np2,
             l2norm,
             assignment_metric,
+            **kwargs
         )  # , propagation_reg, prot_emb_sim_reg
 
     def init_scpoli(self, adata, latent_dim, recon_loss="nb"):
@@ -280,7 +286,7 @@ class SwAVModel(SwavBase):
 
 
 class scProtoGMVAE(SwAVModel):
-    def __init__(self, temperature, beta, kl_type = 'gm', **kwargs):
+    def __init__(self, temperature, beta, kl_type="gm", **kwargs):
         # kwargs["recon_loss"] = "nb"
         super().__init__(**kwargs)
         # self.log_sigma2_p = torch.nn.Parameter(torch.tensor(-2.0))
@@ -298,9 +304,9 @@ class scProtoGMVAE(SwAVModel):
         )
         self.gm_vparam = self.gm_vparam.to(self.get_prototypes().device)
         self.kl_type = kl_type
-        
-    def forward(self, batch):
-        z, recon, kl, resp, kl_balance = self.calc_z_and_cvae_loss(**batch)
+
+    def forward(self, bs, batch):
+        z, recon, kl, resp, kl_balance = self.calc_z_and_cvae_loss(bs, **batch)
         propagation_sim = self.propagation_sim_loss(z)
         return (
             z,
@@ -314,6 +320,7 @@ class scProtoGMVAE(SwAVModel):
 
     def calc_z_and_cvae_loss(
         self,
+        bs,
         x=None,
         batch=None,
         combined_batch=None,
@@ -332,9 +339,10 @@ class scProtoGMVAE(SwAVModel):
         if self.l2norm:
             z_mu = nn.functional.normalize(z_mu, dim=1, p=2)
 
+        
         z = self.scpoli_cvae.sampling(z_mu, z_logvar)
         recon = self.calc_recon(
-            z, batch, x, sizefactor=sizefactor, combined_batch=combined_batch
+            z, batch, x, bs, sizefactor=sizefactor, combined_batch=combined_batch
         )
 
         gm_mu = self.get_gm_mu()
@@ -343,24 +351,30 @@ class scProtoGMVAE(SwAVModel):
         resp = responsibilities(z_mu, gm_mu, gm_vparam, self.temperature)
         z_var = torch.exp(z_logvar)
         z_vparam = softplus_inverse(z_var)
-        
-        if self.kl_type == 'gm':
+
+        if self.kl_type == "gm":
             kl, kl_dict = gm_kl(z_mu, z_vparam, gm_mu, gm_vparam, resp)
         else:
             kl = (
                 torch.distributions.kl_divergence(
                     torch.distributions.Normal(z_mu, torch.sqrt(z_var)),
-                    torch.distributions.Normal(torch.zeros_like(z_mu), torch.ones_like(z_var)),
+                    torch.distributions.Normal(
+                        torch.zeros_like(z_mu), torch.ones_like(z_var)
+                    ),
                 )
                 .sum(dim=1)
                 .mean()
             )
-        
+
         # ---------- total ----------
         # loss = recon + self.beta * kl
         return z_mu, recon, kl, resp, kl
 
-    def calc_recon(self, z, batch, x, **kwargs):
+    def calc_recon(self, z, batch, x, bs, **kwargs):
+        if self.recon_v > 1:
+            z = z[:bs]
+            batch = batch[:bs]
+            x = x[:bs]
         if self.recon_loss == "nb":
             return self.nb_recon(z, batch, x=x, **kwargs)
         else:  # mse
@@ -409,14 +423,14 @@ class scProtoGMVAE(SwAVModel):
         elif self.assignment_metric == "neuc":
             protos = self.get_prototypes()
             return -torch.cdist(z, protos, p=2)
-        elif self.assignment_metric == "sneuc": # stabel neuc
-            protos = self.get_prototypes()                        # (K, d)
-            d2 = torch.cdist(z, protos, p=2) ** 2                 # ||z - c||^2   (B, K)
-            s = -d2                                               # negative distance
-            s = s - s.max(dim=1, keepdim=True)[0]                 # row-wise stabilization
+        elif self.assignment_metric == "sneuc":  # stabel neuc
+            protos = self.get_prototypes()  # (K, d)
+            d2 = torch.cdist(z, protos, p=2) ** 2  # ||z - c||^2   (B, K)
+            s = -d2  # negative distance
+            s = s - s.max(dim=1, keepdim=True)[0]  # row-wise stabilization
             s = s.clamp(min=-75)
             return s
-        else: # cos
+        else:  # cos
             return F.cosine_similarity(
                 z.unsqueeze(1), self.prototypes.weight.unsqueeze(0), dim=-1
             )

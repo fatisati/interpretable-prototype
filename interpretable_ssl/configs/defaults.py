@@ -144,7 +144,7 @@ def get_defaults():
         "model_type": 'gm',
         "l2norm": 0,
         
-        "version": 23,
+
         "recon_update_target": 'encoder',
         "description": '17: calc affinity on whole datase instead of batch wise',
         'recon_type': 'normal',
@@ -165,7 +165,7 @@ def get_defaults():
         "base_lr": 3e-4,  # swav specific
         "final_lr": 1e-5,  # swav specific
         "warmup_epochs": 5,  # swav specific
-        "start_warmup": 0.0,  # swav specific
+        "start_warmup": 0.0,  # swav specific, 1e-6
         # change to dotp in future
         
         "temperature": 0.1,  # swav specific, lower make sharper assignment of z to protos, swav default 0.1
@@ -186,6 +186,11 @@ def get_defaults():
         'lsim': 'normal',
         # proto labeling version
         'pl_version': 1,
-        'graph_mode': 'knn'
+        'graph_mode': 'knn',
+        'recon_v': 2,
+        
+        
+        
+        "version": 24,
     }
     return defaults
