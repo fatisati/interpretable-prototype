@@ -152,7 +152,8 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
             idx = np.arange(start, end)
 
             if self.p != 0:
-                scores = softmax(vals / self.temperature) if self.softmax else vals
+                # scores = softmax(vals / self.temperature) if self.softmax else vals
+                scores = vals / vals.sum()
                 order = np.argsort(scores)[::-1]
                 cum = np.cumsum(scores[order]) / scores.sum()
                 keep = order[cum <= self.p]

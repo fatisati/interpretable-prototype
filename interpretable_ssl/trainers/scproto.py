@@ -202,7 +202,7 @@ class SCProtoTrainer(AdoptiveTrainer):
 
         if self.model_type == "gm" or self.model_type == "normal":
             return scProtoGMVAE(
-                temperature=self.temperature,
+                temperature=self.epsilon,
                 beta=self.beta,
                 kl_type=self.model_type,
                 **kwargs,
@@ -969,7 +969,8 @@ class SCProtoTrainer(AdoptiveTrainer):
             self.epsilon_min,
             self._epsilon0 * 0.5 * (1 + np.cos(np.pi * t)),
         )
-
+        if hasattr(self.model, "temperature"):
+            self.model.temperature = self.epsilon
 
 if __name__ == "__main__":
     swav = SCProtoTrainer()

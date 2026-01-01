@@ -388,11 +388,19 @@ class scProtoGMVAE(SwAVModel):
         else:  # mse
             return self.mse_recon(z, batch, x)
 
-    def mse_recon(self, z, batch, x):
+    def mse_recon(self, z, batch, x, reduction="all", q=0.25):
         recon_x = self.decode(z, batch)
         mse_loss = torch.nn.functional.mse_loss(recon_x, x, reduction="none")
-        recon_loss = mse_loss.sum(dim=-1).mean()
+        per_cell_loss = mse_loss.sum(dim=-1)  # (N,)
+
+        if reduction == "lowerq":
+            thr = torch.quantile(per_cell_loss, q)
+            recon_loss = per_cell_loss[per_cell_loss <= thr].mean()
+        else:
+            recon_loss = per_cell_loss.mean()
+
         return recon_loss
+
 
     # same as scpoli nb loss
     def nb_recon(self, z, batch, sizefactor, combined_batch, x):

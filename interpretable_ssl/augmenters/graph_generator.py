@@ -86,7 +86,16 @@ def generate_affinity(ad, k, bk, affinity_type="inverse_dist", graph_mode=None):
         inv_dist = 1.0 / (dist + 1e-8)  # avoid div by zero
         return inv_dist
 
-    elif affinity_type in ["arbf", "coaff", "ncoaff", "icoaff", "iarbf", "sg", 'sarbf', 'scoaff']:
+    elif affinity_type in [
+        "arbf",
+        "coaff",
+        "ncoaff",
+        "icoaff",
+        "iarbf",
+        "sg",
+        "sarbf",
+        "scoaff",
+    ]:
         import SEACells
 
         print("calculating seacell affinity")
@@ -104,13 +113,13 @@ def generate_affinity(ad, k, bk, affinity_type="inverse_dist", graph_mode=None):
             return A
         else:
             M = kernel_model.rbf(k, graph_construction=graph_construction)
-        
+
         if affinity_type == "sarbf":
             return spatial_context_aff(ad, M)
-        
+
         if affinity_type == "scoaff":
             return spatial_context_aff(ad, M @ M.T)
-        
+
         if affinity_type == "ncoaff":
             # --- L2 normalize rows to remove degree bias ---
             row_norms = np.sqrt(M.multiply(M).sum(axis=1)).A1  # vector of ||M_i||
