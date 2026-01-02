@@ -340,14 +340,23 @@ class scProtoGMVAE(SwAVModel):
         if self.l2norm:
             z_mu = nn.functional.normalize(z_mu, dim=1, p=2)
 
-        scores = torch.softmax(self.proto_soft_assignments(z_mu) / self.temperature, dim=1)  # (B, K)
-        z_proto = scores @ self.get_prototypes()                                            # (B, D)
-        proto_recon = self.calc_recon(
-            z_proto, batch, x, bs,
-            sizefactor=sizefactor,
-            combined_batch=combined_batch,
+        
+        scores = torch.softmax(
+            self.proto_soft_assignments(z_mu[:bs]) / self.temperature,
+            dim=1
+        ).detach()  # (B, K)
+        protos = self.get_prototypes()  # (K, D)
+        proto_vec = protos.unsqueeze(0).expand(bs, -1, -1)        # (B, K, D)
+        batch_vec = batch[:bs].unsqueeze(1).expand(bs, protos.size(0), -1)
+        recon_x = self.decode(
+            proto_vec.reshape(bs * protos.size(0), -1),
+            batch_vec.reshape(bs * protos.size(0), -1),
         )
+        recon_x = recon_x.view(bs, protos.size(0), -1)            # (B, K, G)
+        mse = (recon_x - x[:bs].unsqueeze(1)).pow(2).sum(dim=-1)       # (B, K)
+        proto_recon = (scores * mse).sum(dim=1).mean()
 
+            
         z = self.scpoli_cvae.sampling(z_mu, z_logvar)
         recon = self.calc_recon(
             z, batch, x, bs, sizefactor=sizefactor, combined_batch=combined_batch

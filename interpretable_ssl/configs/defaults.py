@@ -191,8 +191,7 @@ def get_defaults():
         'graph_mode': 'knn',
         'recon_v': 2,
         
-        
         # in this version we pass self.epsilon instead of self.tempreture for kl and proto recon
-        "version": 25,
+        "version": 26, # changed proto recon
     }
     return defaults

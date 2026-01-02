@@ -142,7 +142,8 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
         
     def normalize_aff(self):
         aff = self.aff.tocsr(copy=True)
-
+        aff.setdiag(0)
+        aff.eliminate_zeros()
         for i in range(aff.shape[0]):
             start, end = aff.indptr[i], aff.indptr[i + 1]
             if start == end:
