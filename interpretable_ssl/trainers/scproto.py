@@ -204,6 +204,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             return scProtoGMVAE(
                 temperature=self.epsilon,
                 beta=self.beta,
+                recon_version=self.version,
                 kl_type=self.model_type,
                 **kwargs,
             )

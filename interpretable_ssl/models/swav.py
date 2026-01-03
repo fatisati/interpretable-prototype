@@ -286,7 +286,7 @@ class SwAVModel(SwavBase):
 
 
 class scProtoGMVAE(SwAVModel):
-    def __init__(self, temperature, beta, kl_type="gm", **kwargs):
+    def __init__(self, temperature, beta, recon_version, kl_type="gm", **kwargs):
         # kwargs["recon_loss"] = "nb"
         super().__init__(**kwargs)
         # self.log_sigma2_p = torch.nn.Parameter(torch.tensor(-2.0))
@@ -304,7 +304,7 @@ class scProtoGMVAE(SwAVModel):
         )
         self.gm_vparam = self.gm_vparam.to(self.get_prototypes().device)
         self.kl_type = kl_type
-
+        self.recon_version = recon_version
     def forward(self, bs, batch):
         z, recon, kl, resp, kl_balance, proto_recon = self.calc_z_and_cvae_loss(bs, **batch)
         propagation_sim = self.propagation_sim_loss(z)
@@ -345,17 +345,24 @@ class scProtoGMVAE(SwAVModel):
             self.proto_soft_assignments(z_mu[:bs]) / self.temperature,
             dim=1
         ).detach()  # (B, K)
+
         protos = self.get_prototypes()  # (K, D)
-        proto_vec = protos.unsqueeze(0).expand(bs, -1, -1)        # (B, K, D)
+        proto_vec = protos.unsqueeze(0).expand(bs, -1, -1)
         batch_vec = batch[:bs].unsqueeze(1).expand(bs, protos.size(0), -1)
+
         recon_x = self.decode(
             proto_vec.reshape(bs * protos.size(0), -1),
             batch_vec.reshape(bs * protos.size(0), -1),
-        )
-        recon_x = recon_x.view(bs, protos.size(0), -1)            # (B, K, G)
-        mse = (recon_x - x[:bs].unsqueeze(1)).pow(2).sum(dim=-1)       # (B, K)
-        proto_recon = (scores * mse).sum(dim=1).mean()
+        ).view(bs, protos.size(0), -1)  # (B, K, G)
 
+        if self.recon_version == 26:
+            mse = (recon_x - x[:bs].unsqueeze(1)).pow(2).sum(dim=-1)
+            proto_recon = (scores * mse).sum(dim=1).mean()
+        else:
+            recon_x = (scores.unsqueeze(-1) * recon_x).sum(dim=1)
+            proto_recon = torch.nn.functional.mse_loss(
+                recon_x, x[:bs], reduction="none"
+            ).sum(dim=-1).mean()
             
         z = self.scpoli_cvae.sampling(z_mu, z_logvar)
         recon = self.calc_recon(

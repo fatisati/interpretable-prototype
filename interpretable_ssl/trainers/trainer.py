@@ -87,7 +87,7 @@ class Trainer(TrainerBase):
         if os.path.exists(dc_path):
             return
         else:
-            dc_df = compute_dc(ds.adata, ds.batch_key, base = dc_path, remove_dc=False)
+            dc_df = compute_dc(ds.adata, ds.batch_key, base=dc_path, remove_dc=False)
             dc_df.to_csv(dc_path)
         # lock_path = dc_path + ".lock"
 
@@ -449,15 +449,24 @@ class Trainer(TrainerBase):
         ad = self.train_.adata.copy()
 
         mc_ad, sim = get_scproto_mc_adata(
-            self, ad, self.dataset.batch_key, self.dataset.label_key, self.epsilon, model=self.model, similarity=self.lsim, pl_version = self.pl_version
+            self,
+            ad,
+            self.dataset.batch_key,
+            self.dataset.label_key,
+            self.epsilon,
+            model=self.model,
+            similarity=self.lsim,
+            pl_version=self.pl_version,
         )
         ad.obs["SEACell"] = sim.argmax(axis=1)
-        ad.obs['mc_idx'] = ad.obs["SEACell"].values
+        ad.obs["mc_idx"] = ad.obs["SEACell"].values
         protos = self.model.get_prototypes()
-        sample_protos = protos[ad.obs['SEACell']]
-        batch = self.train_ds.conditions.to('cuda')
-        ad.layers['metacell'] = self.model.decode(sample_protos, batch).detach().cpu().numpy()
-        
+        sample_protos = protos[ad.obs["SEACell"]]
+        batch = self.train_ds.conditions.to("cuda")
+        ad.layers["metacell"] = (
+            self.model.decode(sample_protos, batch).detach().cpu().numpy()
+        )
+
         ad.obsm["dc"] = self.get_dc("train").values
         save_all_mc_metrics(
             ad,
@@ -465,8 +474,14 @@ class Trainer(TrainerBase):
             self.dataset.label_key,
             self.dataset.batch_key,
             self.get_dump_path(),
+            epsilon=self.epsilon,
             name=self.get_model_name(),
         )
+        # for seacell, g in ad.obs.groupby("SEACell"):
+        #     idx = mc_ad.obs.index == f"proto_{seacell}"
+        #     for k in spatial_labels + []:
+
+        #         mc_ad.obs.loc[idx, k] = g[k].value_counts().idxmax()
 
     def save_metrics(self):
         adata = add_trainer_emb(self, self.dataset.adata)

@@ -17,7 +17,8 @@ from interpretable_ssl.evaluation.nsc import *
 import os, sys, uuid
 from interpretable_ssl.evaluation.niche_recovery import *
 
-spatial_labels = ["niches_2D", "niches_3D", 'fibroblast_subclusters', 'EMT_niche']
+spatial_labels = ["niches_2D", "niches_3D", "fibroblast_subclusters", "EMT_niche"]
+
 
 def spatial_compactness(
     ad, spatial_key="spatial", mc_key="SEACell", bk="batch", return_size=False
@@ -209,7 +210,7 @@ def avg_mc_quality_metrics(ad, bk, lk):
     return df, out
 
 
-def compute_dc(ad, batch_key, out_dir="./", base = None, remove_dc = True):
+def compute_dc(ad, batch_key, out_dir="./", base=None, remove_dc=True):
     if base is None:
         base = f"{out_dir}/{len(ad)}_{os.getpid()}_{uuid.uuid4().hex[:8]}"
     ad_path, dc_path, lock_path = base + ".h5ad", base + ".csv", base + ".lock"
@@ -246,7 +247,7 @@ def compute_dc(ad, batch_key, out_dir="./", base = None, remove_dc = True):
     df = pd.read_csv(dc_path, index_col=0)
 
     if have_lock and os.path.exists(ad_path):
-            os.remove(ad_path)
+        os.remove(ad_path)
     if remove_dc:
         if os.path.exists(dc_path):
             os.remove(dc_path)
@@ -260,7 +261,55 @@ def get_seacell_path(ds_id):
     return f"/ictstr01/home/icb/fatemehs.hashemig/models/{ds_id}/seacell/"
 
 
-def save_all_mc_metrics(ad, mc_ad, lk, bk, save_path, mc_key="SEACell", name="seacell"):
+def save_df(df, save_path, append=False):
+    if append and os.path.exists(save_path):
+        df_ = pd.read_csv(save_path, index_col=0)
+        df_ = pd.concat([df_, df], axis=0)
+    else:
+        df_ = df
+    df_.to_csv(save_path)
+
+
+def save_mc_stats(ad, mc_ad, lk, bk, name, save_path, epsilon, append=False):
+    res = pd.DataFrame(index=[name])
+    res["epsilon"] = epsilon
+    unused = len(mc_ad) - ad.obs["SEACell"].nunique()
+    res["unused_proto"] = unused
+    res["unused_proto_ratio"] = unused / len(mc_ad)
+    def merge_labels(adata, l1, l2):
+        adata.obs[f"{l1}_{l2}"] = (
+            adata.obs[l1].astype(str) + "_" + adata.obs[l2].astype(str)
+        )
+
+    if "niches_2D" in ad.obs:
+        merge_labels(ad, lk, "niches_2D")
+        merge_labels(mc_ad, lk, "niches_2D")
+
+    for k in spatial_labels + [lk, bk, f"{lk}_niches_2D"]:
+        if k in ad.obs and k in mc_ad.obs:
+            res[f"cov_{k}"] = (
+                len(
+                    set(mc_ad.obs[k].dropna().unique())
+                    & set(ad.obs[k].dropna().unique())
+                )
+                / ad.obs[k].nunique()
+            )
+    if save_path is not None:
+        save_df(res, f"{save_path}/stats.csv", append)
+    return res
+
+def save_all_mc_metrics(
+    ad,
+    mc_ad,
+    lk,
+    bk,
+    save_path,
+    epsilon=None,
+    mc_key="SEACell",
+    name="seacell",
+    append=False,
+):
+    save_mc_stats(ad, mc_ad, lk, bk, name, save_path, epsilon, append)
     for k in [lk] + spatial_labels:
         if k in ad.obs:
             mc_label_purity(ad, k, mc_key, name, save_path)
@@ -277,13 +326,13 @@ def save_all_mc_metrics(ad, mc_ad, lk, bk, save_path, mc_key="SEACell", name="se
     gene_recovery(ad, mc_ad, mc_key, name, lk, save_path)
     eval_mc_labeling(ad, lk, name, path=save_path)
     eval_mc_labeling_v2(ad, mc_ad, lk, name, save_path)
-    
+
     mc_ad = mc_ad[mc_ad.obs[lk].notna()].copy()
 
     if "spatial" in ad.obsm:
         celltype_niche_dge(ad, mc_ad, lk, name, save_path)
         evaluate_markers(ad, mc_ad, lk, name, mc_key, save_path)
-        eval_niches(mc_ad, lk, 'niches_2D', name, save_path)
+        eval_niches(mc_ad, lk, "niches_2D", name, save_path)
 
     if f"{name}_mc_pca" not in mc_ad.obsm:
         sc.tl.pca(mc_ad)
