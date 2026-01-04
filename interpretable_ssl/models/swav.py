@@ -344,9 +344,9 @@ class scProtoGMVAE(SwAVModel):
         scores = torch.softmax(
             self.proto_soft_assignments(z_mu[:bs]) / self.temperature,
             dim=1
-        ).detach()  # (B, K)
+        )#.detach()  # (B, K) v28
 
-        protos = self.get_prototypes()  # (K, D)
+        protos = self.get_prototypes().detach()  # (K, D) detach is in version 28
         proto_vec = protos.unsqueeze(0).expand(bs, -1, -1)
         batch_vec = batch[:bs].unsqueeze(1).expand(bs, protos.size(0), -1)
 

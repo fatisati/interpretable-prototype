@@ -77,7 +77,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         else:
             ds_cnt = 1
         self.ds_ids = range(ds_cnt)
-        self.loss_keys = ["swav", "recon", "kl", "proto", "commit", "aff"]
+        self.loss_keys = ["swav", "recon", "kl", "proto", "commit", "aff", 'proto_recon']
         self.log_hist = {}
 
     def setup(self):
@@ -559,10 +559,10 @@ class SCProtoTrainer(AdoptiveTrainer):
             adoptive_eps = None
         sim = inputs.pop("sim", None)
         # label = inputs.pop(self.dataset.label_key)
-        z, _, scores, recon, proto_recon, (proto_loss, commitment_loss), kl, kl_balance = self.model(bs,
+        z, _, scores, recon, proto_recon, propagation_sim, kl, kl_balance = self.model(bs,
             inputs
         )
-
+        (proto_loss, commitment_loss) = propagation_sim
         loss_aff = self.calc_aff_loss(scores[:bs], cell_idx[:bs])
         if self.recon_type == "swapped" or self.recon_type == "hybrid":
             swapped_recon = self.calc_swapped_recon(z, scores, bs, inputs)

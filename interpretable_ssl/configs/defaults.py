@@ -192,6 +192,6 @@ def get_defaults():
         'recon_v': 2,
         
         # in this version we pass self.epsilon instead of self.tempreture for kl and proto recon
-        "version": 27, # changed proto recon
+        "version": 28, # changed proto recon
     }
     return defaults
