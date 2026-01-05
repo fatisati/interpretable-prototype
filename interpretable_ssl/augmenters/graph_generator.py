@@ -60,7 +60,9 @@ def spatial_context_aff(ad, pca_aff, beta=0.5):
     sp_model = SEACells.build_graph.SEACellGraph(ad, "spatial", verbose=True)
     sp_aff = sp_model.rbf(50)
 
-    sp_aff = sp_aff.multiply(pca_aff > 0)
+    # sp_aff = sp_aff.multiply(pca_aff > 0)
+    pca_aff.setdiag(0)
+    sp_aff.setdiag(0)
     sp_aff.eliminate_zeros()
 
     pca_aff = normalize(pca_aff, norm="l1", axis=1)

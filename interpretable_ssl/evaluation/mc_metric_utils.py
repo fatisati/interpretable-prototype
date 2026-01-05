@@ -298,6 +298,23 @@ def save_mc_stats(ad, mc_ad, lk, bk, name, save_path, epsilon, append=False):
         save_df(res, f"{save_path}/stats.csv", append)
     return res
 
+def purity_stats(ad, label_keys, save_path, name):
+    stats = {}
+
+    for lk in label_keys:
+        if lk not in ad.obs:
+            continue
+        tab = pd.crosstab(ad.obs['SEACell'], ad.obs[lk])
+        purity = tab.div(tab.sum(axis=1), axis=0).max(axis=1)
+
+        stats[f'{lk}_mean']   = purity.mean()
+        stats[f'{lk}_median'] = purity.median()
+        stats[f'{lk}_std']    = purity.std()
+
+    df = pd.DataFrame([stats])
+    df.index = [name]
+    df.to_csv(save_path + '/purity_stats.csv')
+    
 def save_all_mc_metrics(
     ad,
     mc_ad,
@@ -309,6 +326,8 @@ def save_all_mc_metrics(
     name="seacell",
     append=False,
 ):
+    
+    purity_stats(ad, spatial_labels + [lk], save_path, name)
     save_mc_stats(ad, mc_ad, lk, bk, name, save_path, epsilon, append)
     for k in [lk] + spatial_labels:
         if k in ad.obs:
