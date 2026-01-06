@@ -309,3 +309,118 @@ def macro_scores_by_ct(
     save_df(df_f1, name, save_path, "/ct_niche_macrof1.csv")
     save_df(df_pur, name, save_path, "/ct_niche_macro_pur.csv")
     return df
+
+def ct_purity_per_mc(ad, ct_key, mc_key="SEACell"):
+    tab = pd.crosstab(ad.obs[mc_key], ad.obs[ct_key])
+    purity = tab.div(tab.sum(1), axis=0).max(1)
+    return {
+        "mean": purity.mean(),
+        "median": purity.median(),
+        "std": purity.std(),
+    }
+
+def niche_purity_within_ct(ad, ct_key, niche_key, mc_key="SEACell"):
+    out = {}
+    for ct, ad_ct in ad.obs.groupby(ct_key):
+        tab = pd.crosstab(ad_ct[mc_key], ad_ct[niche_key])
+        pur = tab.div(tab.sum(1), axis=0).max(1)
+        out[ct] = pur
+    return out
+
+def niche_purity_tables(ad, ct_key, niche_key, mc_key="SEACell"):
+    rows = []
+    for ct, ad_ct in ad.obs.groupby(ct_key):
+        tab = pd.crosstab(ad_ct[mc_key], ad_ct[niche_key])
+        frac = tab.div(tab.sum(1), axis=0)
+        for niche in frac.columns:
+            rows.append({
+                "celltype": ct,
+                "niche": niche,
+                "macro": frac[niche].mean(),
+                "micro": (tab[niche].sum() / tab.sum().sum()),
+            })
+    df = pd.DataFrame(rows)
+    macro = df.pivot(index="niche", columns="celltype", values="macro")
+    micro = df.pivot(index="niche", columns="celltype", values="micro")
+    macro.loc["__macro_avg__"] = macro.mean(0)
+    micro.loc["__micro_avg__"] = micro.mean(0)
+    return macro, micro
+
+def joint_purity(ad, ct_key, niche_key, mc_key="SEACell"):
+    joint = ad.obs[ct_key].astype(str) + "|" + ad.obs[niche_key].astype(str)
+    tab = pd.crosstab(ad.obs[mc_key], joint)
+    purity = tab.div(tab.sum(1), axis=0).max(1)
+    return {
+        "mean": purity.mean(),
+        "median": purity.median(),
+        "std": purity.std(),
+    }
+    
+    
+def all_purities(ad, lk, name, save_path, mc_key="SEACell"):
+    row = {}
+
+    # niche purity per cell type (median)
+    for ct in ad.obs[lk].unique():
+        ct_ad = ad[ad.obs[lk] == ct]
+        purity = (
+            ct_ad.obs.groupby(mc_key)["niches_2D"]
+            .apply(lambda x: x.value_counts(normalize=True).max())
+        )
+        row[f"{ct}_npur"] = purity.median()
+
+    # cell type purity (overall, median across MCs)
+    ct_purity = (
+        ad.obs.groupby(mc_key)[lk]
+        .apply(lambda x: x.value_counts(normalize=True).max())
+    )
+    row["celltype_purity"] = ct_purity.mean()
+
+    # joint purity (ct + niche, median across MCs)
+    joint = ad.obs[lk].astype(str) + "|" + ad.obs["niches_2D"].astype(str)
+    joint_purity = (
+        joint.groupby(ad.obs[mc_key])
+        .apply(lambda x: x.value_counts(normalize=True).max())
+    )
+    row["joint_purity"] = joint_purity.mean()
+
+    df = pd.DataFrame([row])
+    save_df(df, name, save_path, 'all_purities.csv')
+    return df
+
+from sklearn.metrics import silhouette_score
+
+def niche_ct_silhouette_df(X, niche, celltype, name, save_path, tau=0.1):
+    out = {}
+    avg = {}
+
+    for ct in np.unique(celltype):
+        ct_idx = celltype == ct
+        niches_ct = niche[ct_idx]
+
+        if len(np.unique(niches_ct)) < 2:
+            avg[ct] = np.nan
+            continue
+
+        X_ct = X[ct_idx]
+        vals = []
+
+        for nk in np.unique(niches_ct):
+            if nk == 'Excluded':
+                continue
+            y = (niches_ct == nk).astype(int)
+            if y.sum() < 2 or y.sum() == len(y):
+                v = np.nan
+            else:
+                v = silhouette_score(X_ct, y, metric="euclidean")
+
+            out[f"{nk}|{ct}"] = v
+            if v >= tau:
+                vals.append(v)
+
+        avg[ct] = np.mean(vals) if len(vals) else 0.0
+
+    df1, df2 = pd.DataFrame([out]), pd.DataFrame([avg])
+    save_df(df1, name, save_path, 'ct_niche_sill_micro.csv')
+    save_df(df2, name, save_path, 'ct_niche_sill.csv')
+    return df1, df2

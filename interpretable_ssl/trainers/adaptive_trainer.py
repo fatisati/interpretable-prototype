@@ -103,9 +103,10 @@ class AdoptiveTrainer(Trainer):
                 self.model = self.load_model()
                 self.save_metrics()
                 return
-            except:
+            except Exception as e:
+                print(e, self.get_dump_path())
                 return
-                print('no model found, training...')
+                
             
         if not (self.debug==1):
             self.set_job_name(self.dump_path)

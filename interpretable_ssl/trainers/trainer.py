@@ -448,7 +448,7 @@ class Trainer(TrainerBase):
     def save_metacell_metrics(self):
         ad = self.train_.adata.copy()
 
-        mc_ad, sim = get_scproto_mc_adata(
+        mc_ad, sim, z = get_scproto_mc_adata(
             self,
             ad,
             self.dataset.batch_key,
@@ -476,6 +476,7 @@ class Trainer(TrainerBase):
             self.get_dump_path(),
             epsilon=self.epsilon,
             name=self.get_model_name(),
+            z = z.detach().cpu().numpy()
         )
         # for seacell, g in ad.obs.groupby("SEACell"):
         #     idx = mc_ad.obs.index == f"proto_{seacell}"

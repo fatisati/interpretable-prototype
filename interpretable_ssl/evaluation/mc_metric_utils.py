@@ -325,6 +325,7 @@ def save_all_mc_metrics(
     mc_key="SEACell",
     name="seacell",
     append=False,
+    z = None
 ):
     
     purity_stats(ad, spatial_labels + [lk], save_path, name)
@@ -349,6 +350,9 @@ def save_all_mc_metrics(
     mc_ad = mc_ad[mc_ad.obs[lk].notna()].copy()
 
     if "spatial" in ad.obsm:
+        if z is not None:
+            niche_ct_silhouette_df(z, ad.obs['niches_2D'], ad.obs[lk], name, save_path)
+        all_purities(ad, lk, name, save_path, mc_key)
         celltype_niche_dge(ad, mc_ad, lk, name, save_path)
         evaluate_markers(ad, mc_ad, lk, name, mc_key, save_path)
         eval_niches(mc_ad, lk, "niches_2D", name, save_path)

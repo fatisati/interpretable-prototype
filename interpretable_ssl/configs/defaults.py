@@ -180,11 +180,11 @@ def get_defaults():
         'p': 0.5,
         'k_pos': 0,
         'softm': 0,
-        'lambda_aff': 0.1,
+        'lambda_aff': 0.0,
         'two_sided': 0,
         'temperature_min': 0.04,
         'epsilon_min': 0.02,
-        'sched_temp_eps': 1,
+        'sched_temp_eps': 0,
         'lsim': 'normal',
         # proto labeling version
         'pl_version': 1,
@@ -192,6 +192,6 @@ def get_defaults():
         'recon_v': 2,
         
         # in this version we pass self.epsilon instead of self.tempreture for kl and proto recon
-        "version": 28, # changed proto recon
+        "version": 29, # changed proto recon
     }
     return defaults

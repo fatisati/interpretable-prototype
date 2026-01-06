@@ -343,13 +343,13 @@ def get_scproto_mc_adata(
     metacells_adata.obsm[f"{t.get_model_name()}_mc_pca"] = metacells_adata.obsm["X_pca"]
     metacells_adata.var_names = adata.var_names
     metacells_adata.obsm[f"{t.get_model_name()}_mc_proto"] = protos.cpu().numpy()
-    return metacells_adata, sample_proto_sim
+    return metacells_adata, sample_proto_sim, z_vae
 
 
 def get_scproto_metacell_metrics(
     t, adata, ds, bk, lk, name_postfix=None, **scgraph_kwargs
 ):
-    metacells_adata, sim = get_scproto_mc_adata(t, adata, bk, lk)
+    metacells_adata, sim, z = get_scproto_mc_adata(t, adata, bk, lk)
     return save_metrics(
         metacells_adata, ["scProto_mc_pca"], ds, bk, lk, name_postfix, **scgraph_kwargs
     )
