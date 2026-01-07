@@ -359,7 +359,7 @@ class scProtoGMVAE(SwAVModel):
             mse = (recon_x - x[:bs].unsqueeze(1)).pow(2).sum(dim=-1)
             proto_recon = (scores * mse).sum(dim=1).mean()
         else:
-            recon_x = (scores.unsqueeze(-1) * recon_x).sum(dim=1)
+            recon_x = (scores.detach().unsqueeze(-1) * recon_x).sum(dim=1)
             proto_recon = torch.nn.functional.mse_loss(
                 recon_x, x[:bs], reduction="none"
             ).sum(dim=-1).mean()
