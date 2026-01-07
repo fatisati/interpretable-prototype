@@ -377,13 +377,13 @@ class scProtoGMVAE(SwAVModel):
         z_vparam = softplus_inverse(z_var)
 
         if self.kl_type == "gm":
-            kl, kl_dict = gm_kl(z_mu, z_vparam, gm_mu, gm_vparam, resp)
+            kl, kl_dict = gm_kl(z_mu[:bs], z_vparam[:bs], gm_mu, gm_vparam, resp[:bs])
         else:
             kl = (
                 torch.distributions.kl_divergence(
-                    torch.distributions.Normal(z_mu, torch.sqrt(z_var)),
+                    torch.distributions.Normal(z_mu[:bs], torch.sqrt(z_var[:bs])),
                     torch.distributions.Normal(
-                        torch.zeros_like(z_mu), torch.ones_like(z_var)
+                        torch.zeros_like(z_mu[:bs]), torch.ones_like(z_var[:bs])
                     ),
                 )
                 .sum(dim=1)
@@ -461,6 +461,19 @@ class scProtoGMVAE(SwAVModel):
             s = -d2  # negative distance
             s = s - s.max(dim=1, keepdim=True)[0]  # row-wise stabilization
             s = s.clamp(min=-75)
+            return s
+        elif self.assignment_metric == "nneuc":
+            protos = self.get_prototypes()
+            d2 = torch.cdist(z, protos, p=2).pow(2)
+            # z: (B, D), protos: (K, D)
+            if not hasattr(self, "cell_scale"):
+                self.cell_scale = (
+                    d2.median(dim=1, keepdim=True).values
+                    .detach()
+                    .clamp_min(1e-8)
+                )
+            # Scale by median distance for stability
+            s = -d2 / self.cell_scale
             return s
         else:  # cos
             return F.cosine_similarity(

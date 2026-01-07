@@ -77,7 +77,15 @@ class SCProtoTrainer(AdoptiveTrainer):
         else:
             ds_cnt = 1
         self.ds_ids = range(ds_cnt)
-        self.loss_keys = ["swav", "recon", "kl", "proto", "commit", "aff", 'proto_recon']
+        self.loss_keys = [
+            "swav",
+            "recon",
+            "kl",
+            "proto",
+            "commit",
+            "aff",
+            "proto_recon",
+        ]
         self.log_hist = {}
 
     def setup(self):
@@ -102,7 +110,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         # why nmb_crops is a list? i used fisrt element but not change it in case needed in furure
         scpoli_encoder = self.model.scpoli_cvae
         common_dataset_kwargs = dict(
-            n_augmentations=self.nmb_views[0],
+            n_augmentations=self.nmb_views,
             affinity_type=self.affinity_type,
             k_neighbors=self.k_neighbors,
             n_components=self.n_components,
@@ -559,8 +567,8 @@ class SCProtoTrainer(AdoptiveTrainer):
             adoptive_eps = None
         sim = inputs.pop("sim", None)
         # label = inputs.pop(self.dataset.label_key)
-        z, _, scores, recon, proto_recon, propagation_sim, kl, kl_balance = self.model(bs,
-            inputs
+        z, _, scores, recon, proto_recon, propagation_sim, kl, kl_balance = self.model(
+            bs, inputs
         )
         (proto_loss, commitment_loss) = propagation_sim
         loss_aff = self.calc_aff_loss(scores[:bs], cell_idx[:bs])
@@ -582,6 +590,8 @@ class SCProtoTrainer(AdoptiveTrainer):
             p_uncertainty,
             q_uncertainty,
             proto_entropy,
+            q_effk,  # ADD
+            p_effk,  # ADD
         ) = self.compute_swav_loss(
             scores,
             z,
@@ -600,7 +610,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         return {
             "swav": swav_loss,
             "recon": recon,
-            'proto_recon': proto_recon,
+            "proto_recon": proto_recon,
             "kl": kl,
             "kl_balance": kl_balance,
             "proto": proto_loss,
@@ -617,6 +627,8 @@ class SCProtoTrainer(AdoptiveTrainer):
             "separation": separation,
             "proto_entropy": proto_entropy,
             "aff": loss_aff,
+            "q_effk": q_effk,  # ADD
+            "p_effk": p_effk,  # ADD
         }, assign_cnts
 
     def calc_aff_loss(self, scores, cell_idx):
@@ -654,7 +666,7 @@ class SCProtoTrainer(AdoptiveTrainer):
 
             # calc recon loss by closet proto to pos pairs
             subloss = 0
-            aug_view_ids = np.delete(np.arange(np.sum(self.nmb_views)), view_id)
+            aug_view_ids = np.delete(np.arange(self.nmb_views), view_id)
             for v in aug_view_ids:
                 aug_z = z[bs * v : bs * (v + 1)]
                 aug_inputs = {k: inputs[k][bs * v : bs * (v + 1)] for k in inputs}
@@ -699,7 +711,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             qproto_utilization,
             proto_entropy,
         ) = (0, 0, 0, 0, 0, 0, 0)
-
+        q_effk, p_effk = 0, 0
         # each crop mean each augmentation, just caluclate q and loss for first crops_for_assign
         for view_idx, view_id in enumerate(self.views_for_assign):
             with torch.no_grad():
@@ -737,6 +749,7 @@ class SCProtoTrainer(AdoptiveTrainer):
 
             view_scores = scores[bs * view_id : bs * (view_id + 1)]
             p = F.softmax(view_scores / self.temperature, dim=1)
+            p_effk += (-(p * p.clamp_min(1e-8).log()).sum(dim=1)).exp().median()  # ADD
 
             # per-sample entropy (H_p > 0)
             H_p = -(p * p.clamp_min(1e-8).log()).sum(dim=1).mean()
@@ -748,11 +761,11 @@ class SCProtoTrainer(AdoptiveTrainer):
 
             if self.hard_clustering == 1:
                 q = self.hard_clusters(q)
-
+            q_effk += (-(q * q.clamp_min(1e-8).log()).sum(dim=1)).exp().median()  # ADD
             # check how consitent q is with other augmentations [cross entropy]
             subloss = 0
             vp_matched, vq_matched = 0, 0
-            aug_view_ids = np.delete(np.arange(np.sum(self.nmb_views)), view_id)
+            aug_view_ids = np.delete(np.arange(self.nmb_views), view_id)
             for v in aug_view_ids:
                 aug_scores = scores[bs * v : bs * (v + 1)] / self.temperature
                 self.check_finit(aug_scores, "p")
@@ -792,6 +805,8 @@ class SCProtoTrainer(AdoptiveTrainer):
             p_uncertainty / len(self.views_for_assign),
             q_uncertainty / len(self.views_for_assign),
             proto_entropy / len(self.views_for_assign),
+            q_effk / len(self.views_for_assign),  # ADD
+            p_effk / len(self.views_for_assign),  # ADD
         )
 
     def get_lr_grad(self):
@@ -972,6 +987,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         )
         if hasattr(self.model, "temperature"):
             self.model.temperature = self.epsilon
+
 
 if __name__ == "__main__":
     swav = SCProtoTrainer()

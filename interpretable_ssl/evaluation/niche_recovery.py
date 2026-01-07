@@ -206,7 +206,9 @@ def eval_niches(mc_ad, lk, nk, name, save_path):
     res_df = metacell_niche_validation_df(
         mc_ad, sig_niches, celltype_key=lk, niche_key=nk, topk=50
     )
+    
     res_df = discovered_niches_df(res_df)
+    
     res_df.to_csv(f"{save_path}/enriched_niches.csv")
     dfs = niche_metrics_dfs(
         res_df,

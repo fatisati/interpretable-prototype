@@ -27,7 +27,7 @@ def get_defaults():
         "min_scale_crops": [0.14],  # swav specific
         "max_scale_crops": [1],  # swav specific
         "views_for_assign": [0],  # swav specific
-        "nmb_views": [2],  # swav specific
+        "nmb_views": 2,  # swav specific
         
         "feat_dim": 8,  # swav specific
         
@@ -192,6 +192,6 @@ def get_defaults():
         'recon_v': 2,
         
         # in this version we pass self.epsilon instead of self.tempreture for kl and proto recon
-        "version": 29, # changed proto recon
+        "version": 30 # changed proto recon, changed kl not to leak pos pair info
     }
     return defaults
