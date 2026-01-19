@@ -7,6 +7,7 @@ os.environ["OPENBLAS_NUM_THREADS"] = "1"
 import shutil
 import time
 from logging import getLogger
+from tqdm import tqdm
 
 import numpy as np
 import torch
@@ -449,7 +450,10 @@ class SCProtoTrainer(AdoptiveTrainer):
         }
         if self.kl_sched == 1:
             self.update_lambda(epoch)
-        for it, inputs in enumerate(self.train_loader):
+
+        # Use tqdm progress bar in debug mode for visibility
+        loader = tqdm(self.train_loader, desc=f"Epoch {epoch}", disable=not self.debug)
+        for it, inputs in enumerate(loader):
             meters["data_time"].update(time.time() - end)
             iteration = epoch * len(self.train_loader) + it
             self.update_learning_rate(iteration)
@@ -479,15 +483,17 @@ class SCProtoTrainer(AdoptiveTrainer):
             meters["batch_time"].update(time.time() - end)
             end = time.time()
 
-            # Log progress every 20 iterations (less frequent in debug for speed)
-            log_freq = 20 if self.debug else 5
-            if it % log_freq == 0:
-                logger.info(
-                    f"Epoch: [{epoch}][{it}/{len(self.train_loader)}] "
-                    f"Loss {meters['loss'].val:.4f} ({meters['loss'].avg:.4f}) "
-                    f"Lr {self.optimizer.param_groups[0]['lr']:.4f}"
-                )
-                if not self.debug:
+            # Update tqdm progress bar with loss in debug mode
+            if self.debug:
+                loader.set_postfix(loss=f"{meters['loss'].avg:.4f}")
+            else:
+                # Log to wandb every 5 iterations in non-debug mode
+                if it % 5 == 0:
+                    logger.info(
+                        f"Epoch: [{epoch}][{it}/{len(self.train_loader)}] "
+                        f"Loss {meters['loss'].val:.4f} ({meters['loss'].avg:.4f}) "
+                        f"Lr {self.optimizer.param_groups[0]['lr']:.4f}"
+                    )
                     lr_gn = self.get_lr_grad()
                     self.log_wandb_loss(lr_gn, epoch)
 
@@ -580,7 +586,11 @@ class SCProtoTrainer(AdoptiveTrainer):
             bs, inputs
         )
         (proto_loss, commitment_loss) = propagation_sim
-        loss_aff = self.calc_aff_loss(scores[:bs], cell_idx[:bs])
+        # Skip affinity loss computation in debug mode or if lambda_aff is 0
+        if self.debug or self.lambda_loss.get("aff", 0) == 0:
+            loss_aff = torch.tensor(0.0, device=scores.device)
+        else:
+            loss_aff = self.calc_aff_loss(scores[:bs], cell_idx[:bs])
         if self.recon_type == "swapped" or self.recon_type == "hybrid":
             swapped_recon = self.calc_swapped_recon(z, scores, bs, inputs)
             if self.recon_type == "swapped":
@@ -613,9 +623,14 @@ class SCProtoTrainer(AdoptiveTrainer):
         )
         assign_cnts = get_hard_assign_cnts(scores)
         max_active = min(scores.size(0), scores.size(1))
-        compactness, separation, cp, np2d, np3d = self.calc_mc_quality(
-            cell_ids, scores, split
-        )
+
+        # Skip expensive per-batch quality metrics in debug mode
+        if self.debug:
+            compactness, separation, cp, np2d, np3d = 0, 0, 0, 0, 0
+        else:
+            compactness, separation, cp, np2d, np3d = self.calc_mc_quality(
+                cell_ids, scores, split
+            )
         return {
             "swav": swav_loss,
             "recon": recon,
@@ -636,8 +651,8 @@ class SCProtoTrainer(AdoptiveTrainer):
             "separation": separation,
             "proto_entropy": proto_entropy,
             "aff": loss_aff,
-            "q_effk": q_effk,  # ADD
-            "p_effk": p_effk,  # ADD
+            "q_effk": q_effk,
+            "p_effk": p_effk,
         }, assign_cnts
 
     def calc_aff_loss(self, scores, cell_idx):
