@@ -82,7 +82,9 @@ class Trainer(TrainerBase):
         self.mc_size = math.ceil(len(self.dataset) / self.num_prototypes)
 
     def calc_dataset_dc(self, ds: SingleCellDataset):
-
+        # Skip DC computation in debug mode for faster init
+        if self.debug:
+            return
         dc_path = ds.get_dc_path()
         if os.path.exists(dc_path):
             return
