@@ -93,6 +93,7 @@ class CvaeTrainer(Trainer):
             # print(f"Epoch [{epoch + 1}/{num_epochs}], Loss: {avg_loss:.4f}")
         
         print("Training complete.")
-        self.save_metrics()
-        self.plot_umap(self.model, self.original_ref.adata, f"cvae-final")
+        if not self.debug:
+            self.save_metrics()
+            self.plot_umap(self.model, self.original_ref.adata, f"cvae-final")
         return self.model

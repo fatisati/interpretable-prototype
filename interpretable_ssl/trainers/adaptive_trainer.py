@@ -119,7 +119,7 @@ class AdoptiveTrainer(Trainer):
         #     self.model.freeze_batch_embedding()
         self.init_prototypes()
 
-        if self.cvae_epochs > 0:
+        if self.cvae_epochs > 0 and not self.debug:
             self.plot_umap(self.model, self.ref.adata, "pretrained-ref")
         self.train()
         
@@ -127,7 +127,9 @@ class AdoptiveTrainer(Trainer):
             self.model = self.adapt_model(self.model, self.query.adata, self.ft_epochs)
             self.save_checkpoint(self.pretraining_epochs + self.ft_epochs)
         
-        self.save_metrics()
-        self.ref = self.original_ref
-        self.plot_umap(self.model, self.original_ref.adata, "ref")
-        self.plot_umap(self.model, self.dataset.adata, "all", True)
+        # Skip expensive metrics and UMAP in debug mode
+        if not self.debug:
+            self.save_metrics()
+            self.ref = self.original_ref
+            self.plot_umap(self.model, self.original_ref.adata, "ref")
+            self.plot_umap(self.model, self.dataset.adata, "all", True)
