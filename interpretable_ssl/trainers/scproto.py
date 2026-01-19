@@ -13,8 +13,7 @@ import torch
 import torch.nn.functional as F
 import torch.backends.cudnn as cudnn
 import torch.optim
-import apex
-from apex.parallel.LARC import LARC
+from interpretable_ssl.configs.larc import LARC
 
 from swav.src.utils import (
     bool_flag,
@@ -308,7 +307,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         return checkpoint_file
 
     def save_checkpoint(self, epoch):
-        if self.debug or self.wandb_sweep == 1:
+        if self.wandb_sweep == 1:
             print("not saving checkpoint", self.debug, self.wandb_sweep)
             return
         save_dict = {
@@ -316,12 +315,13 @@ class SCProtoTrainer(AdoptiveTrainer):
             "state_dict": self.model.state_dict(),
             "optimizer": self.optimizer.state_dict(),
         }
-        if self.use_fp16:
-            save_dict["amp"] = apex.amp.state_dict()
+        # Note: fp16/amp state saving removed (was using apex.amp which is not available)
+        # If you need mixed precision, use torch.cuda.amp.GradScaler instead
 
         checkpoint_file = self.get_checkpoint_file()
         torch.save(save_dict, os.path.join(self.dump_path, checkpoint_file))
-        if epoch % self.checkpoint_freq == 0 or epoch == self.pretraining_epochs - 1:
+        # Skip epoch-specific copies in debug mode to save disk space
+        if not self.debug and (epoch % self.checkpoint_freq == 0 or epoch == self.pretraining_epochs - 1):
             shutil.copyfile(
                 os.path.join(self.dump_path, checkpoint_file),
                 os.path.join(self.dump_path, f"ckp-{epoch}.pth"),
@@ -351,7 +351,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         for epoch in range(epochs):
             logger.info(f"============ Starting epoch {epoch}============")
 
-            if (epoch % self.umap_checkpoint_freq == 10) and (self.wandb_sweep == 0):
+            if (epoch % self.umap_checkpoint_freq == 10) and (self.wandb_sweep == 0) and not self.debug:
                 self.plot_umap(self.model, self.train_ds.adata, f"train-e{epoch}")
 
             if (
@@ -364,31 +364,39 @@ class SCProtoTrainer(AdoptiveTrainer):
                     self.init_queue(ds_id)
 
             train_meters = self.train_epoch(epoch)
-            #
-            if self.full_dataset_mode == 1:
+
+            # Skip test_epoch and quality metrics in debug mode for faster training
+            if self.debug:
+                test_meters = {}
+            elif self.full_dataset_mode == 1:
                 test_meters = {}
             else:
                 test_meters = self.test_epoch()
                 test_meters = {f"test_{key}": val for key, val in test_meters.items()}
 
-            scores = self.encode_adata(self.train_.adata, self.model, z_idx=2)
-            cell_ids = self.train_.adata.obs_names
-            (
-                train_meters["overal_compactness"],
-                train_meters["overal_separation"],
-                train_meters["celltype_purity"],
-                train_meters["niche_purity"],
-                train_meters["niche_purity3d"],
-            ) = self.calc_mc_quality(cell_ids, scores, "train")
-            ad = self.train_.adata
-            ad.obs["mc"] = scores.argmax(1).detach().cpu().numpy()
-            if "spatial" in ad.obsm:
-                train_meters["spatial_compactness"] = spatial_compactness(
-                    ad, mc_key="mc", bk=self.dataset.batch_key
-                ).mean()
+            # Skip expensive per-epoch quality metrics in debug mode
+            if not self.debug:
+                scores = self.encode_adata(self.train_.adata, self.model, z_idx=2)
+                cell_ids = self.train_.adata.obs_names
+                (
+                    train_meters["overal_compactness"],
+                    train_meters["overal_separation"],
+                    train_meters["celltype_purity"],
+                    train_meters["niche_purity"],
+                    train_meters["niche_purity3d"],
+                ) = self.calc_mc_quality(cell_ids, scores, "train")
+                ad = self.train_.adata
+                ad.obs["mc"] = scores.argmax(1).detach().cpu().numpy()
+                if "spatial" in ad.obsm:
+                    train_meters["spatial_compactness"] = spatial_compactness(
+                        ad, mc_key="mc", bk=self.dataset.batch_key
+                    ).mean()
 
             self.log_wandb_loss(train_meters | test_meters, epoch)
             self.save_checkpoint(epoch)
+
+            # Print epoch summary for progress tracking
+            print(f">>> Epoch {epoch+1}/{epochs} done | Loss: {train_meters.get('loss', 0):.4f} | Proto unused: {train_meters.get('proto_unused', 0):.2%}")
 
         # if self.ft_epochs > 0:
         #     self.model = self.adapt_model(self.model, self.query.adata, self.ft_epochs)
@@ -466,22 +474,22 @@ class SCProtoTrainer(AdoptiveTrainer):
                 loss.backward()
 
             self._handle_prototype_freezing(epoch)
-            if it % 5 == 0:
-                lr_gn = self.get_lr_grad()
-
             self.optimizer.step()
 
             meters["batch_time"].update(time.time() - end)
             end = time.time()
-            if it % 5 == 0:
+
+            # Log progress every 20 iterations (less frequent in debug for speed)
+            log_freq = 20 if self.debug else 5
+            if it % log_freq == 0:
                 logger.info(
-                    f"Epoch: [{epoch}][{it}] "
-                    f"Time {meters['batch_time'].val:.3f} ({meters['batch_time'].avg:.3f}) "
-                    f"Data {meters['data_time'].val:.3f} ({meters['data_time'].avg:.3f}) "
+                    f"Epoch: [{epoch}][{it}/{len(self.train_loader)}] "
                     f"Loss {meters['loss'].val:.4f} ({meters['loss'].avg:.4f}) "
                     f"Lr {self.optimizer.param_groups[0]['lr']:.4f}"
                 )
-                self.log_wandb_loss(lr_gn, epoch)
+                if not self.debug:
+                    lr_gn = self.get_lr_grad()
+                    self.log_wandb_loss(lr_gn, epoch)
 
         meters = {k: getattr(v, "avg", v) for k, v in meters.items()}
         all_assign_cnts = sum(ds_assign_cnts[ds_id] for ds_id in ds_assign_cnts)
@@ -497,13 +505,14 @@ class SCProtoTrainer(AdoptiveTrainer):
         )  # normalized [0,1]
         meters["proto_utilization"] = norm_entropy.item()
 
-        # get proto collapse metric
-        protos = F.normalize(self.model.prototypes.weight, dim=1)
-        cos_sim = protos @ protos.T
-        mean_off_diag = (cos_sim.sum() - cos_sim.diag().sum()) / (
-            cos_sim.numel() - protos.size(0)
-        )
-        meters["proto_collapse"] = mean_off_diag.item()
+        # Skip proto collapse metric in debug mode (matrix multiplication overhead)
+        if not self.debug:
+            protos = F.normalize(self.model.prototypes.weight, dim=1)
+            cos_sim = protos @ protos.T
+            mean_off_diag = (cos_sim.sum() - cos_sim.diag().sum()) / (
+                cos_sim.numel() - protos.size(0)
+            )
+            meters["proto_collapse"] = mean_off_diag.item()
         meters["lambda_kl"] = self.lambda_loss["kl"]
         meters["lambda_recon"] = self.lambda_loss["recon"]
         return meters
