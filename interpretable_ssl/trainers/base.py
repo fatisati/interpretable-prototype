@@ -51,8 +51,6 @@ class TrainerBase:
         )
 
     def create_dump_path(self):
-        if self.debug == 1:
-            return
         self.dump_path = self.get_dump_path()
         # if not os.path.exists(self.dump_path):
         os.makedirs(self.dump_path, exist_ok=True)
