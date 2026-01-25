@@ -297,12 +297,17 @@ class SCProtoTrainer(AdoptiveTrainer):
             scores = self.encode_adata(ad, self.model, z_idx=2)
         assignments = scores.argmax(1).cpu().numpy()
 
-        # Compute per-proto stats (same as training log)
+        # Filter out excluded cells (same as training log's niche_macro_filt)
         from collections import Counter, defaultdict
+        valid_mask = ~np.isin(y, list(exclude_labels))
+        y_filt = y[valid_mask]
+        assignments_filt = assignments[valid_mask]
+
+        # Compute per-proto stats using filtered cells (same as training log)
         proto_stats = []
-        for p in np.unique(assignments):
-            mask_p = assignments == p
-            vc = Counter(y[mask_p])
+        for p in np.unique(assignments_filt):
+            mask_p = assignments_filt == p
+            vc = Counter(y_filt[mask_p])
             total = mask_p.sum()
             majority_label, majority_count = vc.most_common(1)[0]
             proto_stats.append({
@@ -364,7 +369,10 @@ class SCProtoTrainer(AdoptiveTrainer):
             delta_str = f"{r['knn_delta']:+.1%}"
             print(f"{r['niche']:<25} {r['n_cells']:>6} {r['n_protos']:>6} {r['purity']:>7.1%} {r['coverage']:>6.1%} {r['knn_pca']:>8.1%} {r['knn_z']:>7.1%} {delta_str:>7}")
         print("-" * 80)
-        print(f"{'MEAN':<25} {'':<6} {df['n_protos'].sum():>6} {df['purity'].mean():>7.1%} {df['coverage'].mean():>6.1%} {df['knn_pca'].mean():>8.1%} {df['knn_z'].mean():>7.1%} {df['knn_delta'].mean():+7.1%}")
+        # Only average purity over niches with ≥1 proto (same as training log)
+        df_with_protos = df[df['n_protos'] > 0]
+        mean_purity = df_with_protos['purity'].mean() if len(df_with_protos) > 0 else 0
+        print(f"{'MEAN':<25} {'':<6} {df['n_protos'].sum():>6} {mean_purity:>7.1%} {df['coverage'].mean():>6.1%} {df['knn_pca'].mean():>8.1%} {df['knn_z'].mean():>7.1%} {df['knn_delta'].mean():+7.1%}")
         print("=" * 80)
 
         return df
