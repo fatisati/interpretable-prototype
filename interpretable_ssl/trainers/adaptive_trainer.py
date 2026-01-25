@@ -119,6 +119,10 @@ class AdoptiveTrainer(Trainer):
         #     self.model.freeze_batch_embedding()
         self.init_prototypes()
 
+        # Auto-calibrate eps/tau after encoder pretrain + proto init
+        if getattr(self, 'auto_eps_tau', 0) == 1 and hasattr(self, 'calibrate_temperatures'):
+            self.calibrate_temperatures()
+
         if self.cvae_epochs > 0 and not self.debug:
             self.plot_umap(self.model, self.ref.adata, "pretrained-ref")
         self.train()

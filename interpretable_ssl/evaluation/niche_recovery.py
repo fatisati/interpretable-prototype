@@ -201,7 +201,9 @@ def save_df(df, name, path, save_name):
 
 
 def eval_niches(mc_ad, lk, nk, name, save_path):
-    p = "/home/icb/fatemehs.hashemig/data/spatial/nsc_sig_niches.csv"
+    import os
+    from interpretable_ssl.configs.paths import CODE_DIR
+    p = os.path.join(CODE_DIR, "files/celltype_niches.csv")
     sig_niches = pd.read_csv(p, index_col=0)
     res_df = metacell_niche_validation_df(
         mc_ad, sig_niches, celltype_key=lk, niche_key=nk, topk=50

@@ -3,7 +3,8 @@ import os
 import pandas as pd
 import sys
 
-sys.path.append("/home/icb/fatemehs.hashemig/Islander/src")
+from interpretable_ssl.configs.paths import ISLANDER_SRC, MODEL_DIR, get_seacell_model_dir
+sys.path.append(ISLANDER_SRC)
 from scGraph import *
 import scanpy as sc
 import scvi
@@ -15,7 +16,7 @@ from interpretable_ssl.scproto_metacells import *
 from interpretable_ssl.configs.defaults import get_defaults
 from sklearn.model_selection import train_test_split
 
-res_dir = "/home/icb/fatemehs.hashemig/models/"
+res_dir = MODEL_DIR
 # use this code to calculate scib and scgraph metrics for models [scProto, scPoli, scVI, pca, pca+harmoney, seacell]
 
 
@@ -129,12 +130,9 @@ def get_metrics(adata, emb_keys, bk, lk, **scgraph_kwargs):
 
 def save_metrics(adata, emb_keys, dataset, bk, lk, **scgraph_kwargs):
     scg_m, scib_m = get_metrics(adata, emb_keys, bk, lk, **scgraph_kwargs)
-    scib_m = save_append(
-        scib_m, f"/home/icb/fatemehs.hashemig/models/{dataset}/baselines/", "scib"
-    )
-    scg_m = save_append(
-        scg_m, f"/home/icb/fatemehs.hashemig/models/{dataset}/baselines/", "scgraph"
-    )
+    baselines_dir = os.path.join(MODEL_DIR, dataset, "baselines/")
+    scib_m = save_append(scib_m, baselines_dir, "scib")
+    scg_m = save_append(scg_m, baselines_dir, "scgraph")
     return scib_m, scg_m
 
 
@@ -356,9 +354,9 @@ def get_scproto_metacell_metrics(
 
 
 def load_seacell(ds_id, normalize=True):
-    home = "/home/icb/fatemehs.hashemig/"
-    ad = sc.read_h5ad(f"{home}/models/{ds_id}/seacell/seacell_sc.h5ad")
-    mc_ad = sc.read_h5ad(f"{home}/models/{ds_id}/seacell/seacell_agg.h5ad")
+    seacell_dir = get_seacell_model_dir(ds_id)
+    ad = sc.read_h5ad(os.path.join(seacell_dir, "seacell_sc.h5ad"))
+    mc_ad = sc.read_h5ad(os.path.join(seacell_dir, "seacell_agg.h5ad"))
     if normalize and mc_ad.X.max() > 20:
         sc.pp.normalize_total(mc_ad, target_sum=1e4)
         sc.pp.log1p(mc_ad)

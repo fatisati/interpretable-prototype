@@ -614,3 +614,112 @@ def plot_f1_scores_per_class(f1_scores_dict, class_names):
     plt.tight_layout()
     plt.show()
 
+
+def plot_latent_umap_with_protos(t, color_key='niches_2D', max_cells=50000,
+                                  use_model_assignments=True, joint_umap=True):
+    """
+    Plot UMAP of latent space with prototypes labeled by majority vote.
+
+    Args:
+        t: SCProtoTrainer object (after setup())
+        color_key: obs column to color by (default 'niches_2D')
+        max_cells: subsample if more cells than this
+        use_model_assignments: if True, use model's soft scores for assignment
+                               if False, use Euclidean distance
+        joint_umap: if True, compute UMAP on cells+protos together (protos on manifold)
+                    if False, place protos at centroid of assigned cells
+
+    Returns:
+        fig, z_umap, proto_umap, proto_labels
+    """
+    ad = t.train_ds.adata
+    model = t.model
+
+    if ad.n_obs > max_cells:
+        idx = np.random.choice(ad.n_obs, max_cells, replace=False)
+        ad = ad[idx].copy()
+
+    z = t.encode_adata(ad, model, z_idx=1).detach().cpu().numpy()
+    proto = model.get_prototypes().detach().cpu().numpy()
+    n_protos = proto.shape[0]
+
+    # Get model's actual assignments (scores -> argmax)
+    if use_model_assignments:
+        scores = t.encode_adata(ad, model, z_idx=2).detach().cpu().numpy()
+        assignments = scores.argmax(axis=1)
+    else:
+        dist = cdist(z, proto, metric='euclidean')
+        assignments = np.argmin(dist, axis=1)
+
+    if joint_umap:
+        # Joint UMAP: protos and cells together (protos live on same manifold)
+        combined = np.vstack([z, proto])
+        adata = sc.AnnData(combined)
+        sc.pp.neighbors(adata, use_rep='X', n_neighbors=15)
+        sc.tl.umap(adata)
+        z_umap = adata.obsm['X_umap'][:len(z)]
+        proto_umap = adata.obsm['X_umap'][len(z):]
+    else:
+        # Separate UMAP: place protos at centroid of assigned cells
+        adata = sc.AnnData(z)
+        sc.pp.neighbors(adata, use_rep='X', n_neighbors=15)
+        sc.tl.umap(adata)
+        z_umap = adata.obsm['X_umap']
+
+        proto_umap = np.zeros((n_protos, 2))
+        for p in range(n_protos):
+            mask = assignments == p
+            if mask.sum() > 0:
+                proto_umap[p] = z_umap[mask].mean(axis=0)
+            else:
+                dists = np.linalg.norm(z - proto[p], axis=1)
+                nearest = np.argmin(dists)
+                proto_umap[p] = z_umap[nearest]
+
+    # Label each prototype by majority vote of assigned cells
+    labels = ad.obs[color_key].values
+    proto_labels = []
+    proto_sizes = []
+    for p in range(n_protos):
+        assigned_mask = assignments == p
+        n_assigned = assigned_mask.sum()
+        proto_sizes.append(n_assigned)
+        if n_assigned == 0:
+            proto_labels.append(None)
+        else:
+            assigned_labels = labels[assigned_mask]
+            majority_label = Counter(assigned_labels).most_common(1)[0][0]
+            proto_labels.append(majority_label)
+
+    fig, ax = plt.subplots(figsize=(12, 10), dpi=100)
+
+    unique_labels = np.unique(labels)
+    cmap = plt.cm.get_cmap('tab10')
+    label_to_color = {lbl: cmap(i) for i, lbl in enumerate(unique_labels)}
+
+    for lbl in unique_labels:
+        mask = labels == lbl
+        ax.scatter(z_umap[mask, 0], z_umap[mask, 1],
+                   c=[label_to_color[lbl]], label=lbl, alpha=0.5, s=10)
+
+    # Plot prototypes - size proportional to n_cells, white if unused
+    for i, plbl in enumerate(proto_labels):
+        if plbl is None:
+            c = 'white'
+            size = 50
+        else:
+            c = label_to_color.get(plbl, 'white')
+            size = max(50, min(300, proto_sizes[i] // 2))
+        ax.scatter(proto_umap[i, 0], proto_umap[i, 1],
+                   c=[c], edgecolor='black', s=size, linewidth=1, zorder=10)
+        ax.annotate(str(i), (proto_umap[i, 0], proto_umap[i, 1]),
+                    fontsize=7, ha='center', va='center')
+
+    # Add stats to title
+    n_used = sum(1 for s in proto_sizes if s > 0)
+    umap_type = "joint" if joint_umap else "centroid"
+    ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=8)
+    ax.set_title(f'Latent UMAP ({umap_type}) with Prototypes ({n_used}/{n_protos} used)')
+    plt.tight_layout()
+    return fig, z_umap, proto_umap, proto_labels
+

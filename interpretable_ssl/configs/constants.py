@@ -1,1 +1,1 @@
-MODEL_DIR = "/home/icb/fatemehs.hashemig/models/"
+from interpretable_ssl.configs.paths import MODEL_DIR, HOME_DIR, DATA_DIR, CODE_DIR

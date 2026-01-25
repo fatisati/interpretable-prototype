@@ -455,12 +455,19 @@ class scProtoGMVAE(SwAVModel):
         elif self.assignment_metric == "neuc":
             protos = self.get_prototypes()
             return -torch.cdist(z, protos, p=2)
-        elif self.assignment_metric == "sneuc":  # stabel neuc
+        elif self.assignment_metric == "sneuc":  # stable neuc
             protos = self.get_prototypes()  # (K, d)
             d2 = torch.cdist(z, protos, p=2) ** 2  # ||z - c||^2   (B, K)
             s = -d2  # negative distance
             s = s - s.max(dim=1, keepdim=True)[0]  # row-wise stabilization
             s = s.clamp(min=-75)
+            return s
+        elif self.assignment_metric == "student":  # Student-t kernel (like t-SNE/UMAP)
+            protos = self.get_prototypes()  # (K, d)
+            d2 = torch.cdist(z, protos, p=2) ** 2  # ||z - c||^2   (B, K)
+            # Student-t with df=1: 1 / (1 + d²)
+            # Return log for numerical stability with softmax
+            s = -torch.log1p(d2)  # log(1 / (1 + d²)) = -log(1 + d²)
             return s
         elif self.assignment_metric == "nneuc":
             protos = self.get_prototypes()

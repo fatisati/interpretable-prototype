@@ -1,4 +1,6 @@
+import os
 from interpretable_ssl.datasets.dataset import SingleCellDataset
+from interpretable_ssl.configs.paths import CODE_DIR
 from pathlib import Path
 import scanpy as sc
 import numpy as np
@@ -7,7 +9,7 @@ from sklearn.neighbors import NearestNeighbors
 
 class MouseDataset(SingleCellDataset):
     def __init__(self, adata=None, original_idx=None):
-        self.data_home = '/ictstr01/home/icb/fatemehs.hashemig/codes/interpretable-ssl/notebooks/explore_datasets/'
+        self.data_home = os.path.join(CODE_DIR, 'notebooks/explore_datasets/')
         super().__init__("mouse-organoid", adata, f'{self.data_home}/mouse-organoid.pkl', original_idx)
         sc.pp.pca(self.adata, n_comps=20)
 

@@ -64,8 +64,9 @@ def agg_obs(SEACell_ad, adata, obs_key):
 
 
 def save_seacell(ad, SEACell_ad, ds_id):
-    home = "/home/icb/fatemehs.hashemig/"
-    print("saving to: ", f"{home}/models/{ds_id}/seacell")
-    os.makedirs(f"{home}/models/{ds_id}/seacell", exist_ok=True)
-    ad.write(f"{home}/models/{ds_id}/seacell/seacell_sc.h5ad")
-    SEACell_ad.write(f"{home}/models/{ds_id}/seacell/seacell_agg.h5ad")
+    from interpretable_ssl.configs.paths import get_seacell_model_dir
+    seacell_dir = get_seacell_model_dir(ds_id)
+    print("saving to: ", seacell_dir)
+    os.makedirs(seacell_dir, exist_ok=True)
+    ad.write(os.path.join(seacell_dir, "seacell_sc.h5ad"))
+    SEACell_ad.write(os.path.join(seacell_dir, "seacell_agg.h5ad"))

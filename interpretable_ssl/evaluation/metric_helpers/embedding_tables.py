@@ -40,7 +40,8 @@ def show_tb(df, show_cols = ['Batch correction', 'Bio conservation', 'Total', 'R
     return df.style.apply(highlight_max_second, axis=0).format("{:.3f}")
 
 def load_tb(ds_id):
-    p = f"/home/icb/fatemehs.hashemig/models/{ds_id}/"
+    from interpretable_ssl.configs.paths import get_dataset_model_dir
+    p = get_dataset_model_dir(ds_id)
     dfs = {}
 
     def load_csv(fp):

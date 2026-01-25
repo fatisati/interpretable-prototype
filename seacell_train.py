@@ -1,9 +1,10 @@
 from interpretable_ssl.evaluation.mc_metric_utils import *
 from interpretable_ssl.datasets.dataset_configs import *
+from interpretable_ssl.configs.paths import get_seacell_model_dir
 
 
 def get_seacell_path(ds_id):
-    return f"/ictstr01/home/icb/fatemehs.hashemig/models/{ds_id}/seacell/"
+    return get_seacell_model_dir(ds_id)
 
 
 def load_dataset(ds_id):

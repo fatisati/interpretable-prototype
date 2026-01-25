@@ -293,8 +293,8 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
                 self.save_path,
                 lock_path,
             ],
-            stdout=sys.stdout,  # pipe child stdout to parent stdout
-            stderr=sys.stderr,  # pipe child stderr to parent stderr
+            stdout=None,
+            stderr=None,
         )
         while not os.path.exists(self.save_path):
             time.sleep(1)

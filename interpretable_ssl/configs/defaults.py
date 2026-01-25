@@ -176,11 +176,13 @@ def get_defaults():
         "sinkhorn_iterations": 0,  # swav specific
         "full_dataset_mode": 1,
         'mode': 'train',
-        'adoptive_eps': 0, 
+        'adoptive_eps': 0,
+        'auto_eps_tau': 0,  # auto-calibrate eps/tau from affinity after init_prototypes
         'p': 0.5,
         'k_pos': 0,
         'softm': 0,
         'lambda_aff': 0.0,
+        'lambda_r1r2': 0.0,
         'two_sided': 0,
         'temperature_min': 0.04,
         'epsilon_min': 0.02,

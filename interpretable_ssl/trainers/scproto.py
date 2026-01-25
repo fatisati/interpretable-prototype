@@ -58,6 +58,69 @@ def get_gpu_type_torch():
     return [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())]
 
 
+def affinity_report(A):
+    """Report affinity matrix statistics."""
+    import scipy.sparse as sp
+    A = A.tocsr(copy=True)
+    A.setdiag(0)
+    A.eliminate_zeros()
+
+    nnz = np.diff(A.indptr)
+    mean_deg = nnz.mean()
+    med_deg = np.median(nnz)
+
+    ent = np.zeros(A.shape[0])
+    effk = np.zeros(A.shape[0])
+    for i in range(A.shape[0]):
+        s, e = A.indptr[i], A.indptr[i+1]
+        if s == e:
+            continue
+        p = A.data[s:e]
+        p = p / (p.sum() + 1e-12)
+        ent[i] = -(p * np.log(p + 1e-12)).sum()
+        effk[i] = np.exp(ent[i])
+
+    B = A.astype(bool)
+    mutual = (B.multiply(B.T)).sum()
+    total = B.sum()
+    mutual_ratio = float(mutual / (total + 1e-12))
+
+    return {
+        "mean_deg": float(mean_deg),
+        "med_deg": float(med_deg),
+        "effk_mean": float(effk.mean()),
+        "effk_med": float(np.median(effk)),
+        "mutual_ratio": mutual_ratio,
+        "frac_empty_rows": float((nnz == 0).mean()),
+    }
+
+
+def _med_effk_from_logits(logits, temp):
+    p = torch.softmax(logits / temp, dim=1)
+    effk = 1.0 / (p * p).sum(dim=1)
+    return torch.median(effk).item()
+
+
+def _solve_temp_for_target_effk(logits, target_effk, iters=40, lo=1e-3, hi=50.0):
+    for _ in range(iters):
+        mid = 0.5 * (lo + hi)
+        med = _med_effk_from_logits(logits, mid)
+        if med < target_effk:
+            lo = mid
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)
+
+
+def calibrate_eps_tau(model, z, effk_aff, student_factor=2.0):
+    """Calibrate epsilon and tau based on target effective neighbors."""
+    with torch.no_grad():
+        logits = model.proto_soft_assignments(z)
+    eps = _solve_temp_for_target_effk(logits, target_effk=effk_aff)
+    tau = _solve_temp_for_target_effk(logits, target_effk=student_factor * effk_aff)
+    return eps, tau
+
+
 class SCProtoTrainer(AdoptiveTrainer):
 
     # @log_time('swav')
@@ -85,6 +148,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             "commit",
             "aff",
             "proto_recon",
+            "r1r2",
         ]
         self.log_hist = {}
 
@@ -101,6 +165,209 @@ class SCProtoTrainer(AdoptiveTrainer):
         self._temperature0 = float(self.temperature)
         self._epsilon0 = float(self.epsilon)
         # self.load_checkpoint()
+
+    def calibrate_temperatures(self, effk_target=None, student_factor=2.0):
+        """Calibrate epsilon and tau from data based on affinity effective neighbors."""
+        if effk_target is None:
+            if hasattr(self, 'aff_stats'):
+                effk_target = self.aff_stats['effk_med']
+            else:
+                logger.warning("No affinity stats available, using default effk=10")
+                effk_target = 10.0
+
+        z = self.encode_adata(self.train_ds.adata, self.model, z_idx=1)
+        eps, tau = calibrate_eps_tau(self.model, z, effk_target, student_factor)
+
+        old_eps, old_tau = self.epsilon, self.temperature
+        self.epsilon = eps
+        self.temperature = tau
+        # Update initial values for scheduler
+        self._epsilon0 = float(eps)
+        self._temperature0 = float(tau)
+
+        logger.info(f"Calibrated: eps {old_eps:.4f} -> {eps:.4f}, tau {old_tau:.4f} -> {tau:.4f} (target effk={effk_target:.1f})")
+        print(f"🎯 Calibrated: eps={eps:.4f}, tau={tau:.4f} (from effk={effk_target:.1f})")
+        return eps, tau
+
+    def _quick_niche_metrics(self, exclude_labels=("Excluded",)):
+        """Quick niche purity metrics (micro/macro) for debug mode."""
+        ad = self.train_ds.adata
+        if "niches_2D" not in ad.obs.columns:
+            return None, None, None, None
+
+        with torch.no_grad():
+            scores = self.encode_adata(ad, self.model, z_idx=2)
+        mc = scores.argmax(1).detach().cpu().numpy()
+        labels = np.array(ad.obs["niches_2D"].values)
+
+        from collections import Counter, defaultdict
+
+        # Compute stats for all cells
+        mc_stats = []
+        for m in np.unique(mc):
+            mask = mc == m
+            vc = Counter(labels[mask])
+            total = mask.sum()
+            majority = vc.most_common(1)[0]
+            mc_stats.append({"purity": majority[1] / total, "label": majority[0], "n": total})
+
+        if not mc_stats:
+            return None, None, None, None
+
+        # Full metrics (all labels)
+        total_n = sum(s["n"] for s in mc_stats)
+        niche_micro = sum(s["purity"] * s["n"] for s in mc_stats) / total_n
+        label_purities = defaultdict(list)
+        for s in mc_stats:
+            label_purities[s["label"]].append(s["purity"])
+        niche_macro = np.mean([np.mean(p) for p in label_purities.values()])
+
+        # Filtered metrics (exclude labels)
+        valid_mask = ~np.isin(labels, list(exclude_labels))
+        if valid_mask.sum() == 0:
+            return niche_micro, niche_macro, None, None
+
+        mc_filt = mc[valid_mask]
+        labels_filt = labels[valid_mask]
+        mc_stats_filt = []
+        for m in np.unique(mc_filt):
+            mask = mc_filt == m
+            vc = Counter(labels_filt[mask])
+            total = mask.sum()
+            majority = vc.most_common(1)[0]
+            mc_stats_filt.append({"purity": majority[1] / total, "label": majority[0], "n": total})
+
+        total_n_filt = sum(s["n"] for s in mc_stats_filt)
+        niche_micro_filt = sum(s["purity"] * s["n"] for s in mc_stats_filt) / total_n_filt
+        label_purities_filt = defaultdict(list)
+        for s in mc_stats_filt:
+            label_purities_filt[s["label"]].append(s["purity"])
+        niche_macro_filt = np.mean([np.mean(p) for p in label_purities_filt.values()])
+
+        return niche_micro, niche_macro, niche_micro_filt, niche_macro_filt
+
+    def _niche_knn_acc(self, k=15):
+        """Compute KNN accuracy for niche prediction in latent space vs PCA."""
+        ad = self.train_ds.adata
+        if "niches_2D" not in ad.obs.columns:
+            return None, None
+
+        from sklearn.neighbors import KNeighborsClassifier
+        from sklearn.model_selection import cross_val_score
+
+        y = ad.obs["niches_2D"].values
+
+        # PCA baseline (compute once and cache)
+        if not hasattr(self, '_pca_knn_acc'):
+            X_pca = ad.obsm.get('X_pca', ad.X[:, :50] if hasattr(ad.X, 'toarray') else ad.X[:, :50])
+            if hasattr(X_pca, 'toarray'):
+                X_pca = X_pca.toarray()
+            self._pca_knn_acc = cross_val_score(KNeighborsClassifier(k), X_pca, y, cv=3).mean()
+
+        # Latent
+        with torch.no_grad():
+            z = self.encode_adata(ad, self.model, z_idx=1).detach().cpu().numpy()
+        acc_z = cross_val_score(KNeighborsClassifier(k), z, y, cv=3).mean()
+
+        return self._pca_knn_acc, acc_z
+
+    def niche_report(self, k=15, exclude_labels=("Excluded",)):
+        """Detailed per-niche diagnostic report."""
+        ad = self.train_ds.adata
+        if "niches_2D" not in ad.obs.columns:
+            print("No niches_2D in adata")
+            return None
+
+        from sklearn.neighbors import KNeighborsClassifier
+        from sklearn.metrics import f1_score
+        import pandas as pd
+
+        y = np.array(ad.obs["niches_2D"].values)
+        niches = [n for n in np.unique(y) if n not in exclude_labels]
+
+        # Get embeddings
+        X_pca = ad.obsm.get('X_pca')
+        if X_pca is None:
+            X_pca = ad.X.toarray() if hasattr(ad.X, 'toarray') else ad.X
+        with torch.no_grad():
+            z = self.encode_adata(ad, self.model, z_idx=1).detach().cpu().numpy()
+
+        # Get assignments
+        with torch.no_grad():
+            scores = self.encode_adata(ad, self.model, z_idx=2)
+        assignments = scores.argmax(1).cpu().numpy()
+
+        # Compute per-proto stats (same as training log)
+        from collections import Counter, defaultdict
+        proto_stats = []
+        for p in np.unique(assignments):
+            mask_p = assignments == p
+            vc = Counter(y[mask_p])
+            total = mask_p.sum()
+            majority_label, majority_count = vc.most_common(1)[0]
+            proto_stats.append({
+                "proto": p,
+                "label": majority_label,
+                "purity": majority_count / total,
+                "n": total
+            })
+
+        # Group protos by majority label
+        label_to_protos = defaultdict(list)
+        for ps in proto_stats:
+            label_to_protos[ps["label"]].append(ps)
+
+        # Fit KNN once (not per-niche)
+        knn_pca = KNeighborsClassifier(k).fit(X_pca, y)
+        knn_z = KNeighborsClassifier(k).fit(z, y)
+
+        # Per-niche metrics
+        rows = []
+        for niche in niches:
+            mask = y == niche
+            n_cells = mask.sum()
+
+            # Purity: avg purity of protos with this niche as majority label (same as training log)
+            protos_for_niche = label_to_protos.get(niche, [])
+            n_protos = len(protos_for_niche)
+            purity = np.mean([ps["purity"] for ps in protos_for_niche]) if protos_for_niche else 0
+
+            # Coverage: fraction of niche cells in protos with this majority label
+            cells_in_niche_protos = sum(ps["n"] for ps in protos_for_niche)
+            coverage = cells_in_niche_protos / n_cells if n_cells > 0 else 0
+
+            # KNN recall for this niche (PCA vs latent)
+            pred_pca = knn_pca.predict(X_pca[mask])
+            pred_z = knn_z.predict(z[mask])
+            recall_pca = (pred_pca == niche).mean()
+            recall_z = (pred_z == niche).mean()
+
+            rows.append({
+                "niche": niche,
+                "n_cells": n_cells,
+                "n_protos": n_protos,
+                "purity": purity,
+                "coverage": coverage,
+                "knn_pca": recall_pca,
+                "knn_z": recall_z,
+                "knn_delta": recall_z - recall_pca,
+            })
+
+        df = pd.DataFrame(rows).sort_values("knn_delta", ascending=False)
+
+        print("=" * 80)
+        print("PER-NICHE REPORT (sorted by KNN improvement)")
+        print("=" * 80)
+        print(f"{'Niche':<25} {'N':>6} {'#Proto':>6} {'Purity':>7} {'Cover':>6} {'KNN_pca':>8} {'KNN_z':>7} {'Delta':>7}")
+        print("-" * 80)
+        for _, r in df.iterrows():
+            delta_str = f"{r['knn_delta']:+.1%}"
+            print(f"{r['niche']:<25} {r['n_cells']:>6} {r['n_protos']:>6} {r['purity']:>7.1%} {r['coverage']:>6.1%} {r['knn_pca']:>8.1%} {r['knn_z']:>7.1%} {delta_str:>7}")
+        print("-" * 80)
+        print(f"{'MEAN':<25} {'':<6} {df['n_protos'].sum():>6} {df['purity'].mean():>7.1%} {df['coverage'].mean():>6.1%} {df['knn_pca'].mean():>8.1%} {df['knn_z'].mean():>7.1%} {df['knn_delta'].mean():+7.1%}")
+        print("=" * 80)
+
+        return df
 
     def build_data(self):
 
@@ -140,6 +407,12 @@ class SCProtoTrainer(AdoptiveTrainer):
             self.val_.adata, [self.train_.batch_key]
         )
         self.test_ds = MultiCropsDataset(self.val_, **common_dataset_kwargs)
+
+        # Print affinity report if available
+        if hasattr(self.train_ds, 'aff') and self.train_ds.aff is not None:
+            self.aff_stats = affinity_report(self.train_ds.aff)
+            logger.info(f"Affinity stats: {self.aff_stats}")
+            print(f"📊 Affinity: mean_deg={self.aff_stats['mean_deg']:.1f}, effk_med={self.aff_stats['effk_med']:.1f}, mutual={self.aff_stats['mutual_ratio']:.2%}")
 
         self.train_loader = self.get_data_laoder(self.train_ds)
         self.test_loader = self.get_data_laoder(self.test_ds, drop_last=False)
@@ -385,6 +658,8 @@ class SCProtoTrainer(AdoptiveTrainer):
                     train_meters["celltype_purity"],
                     train_meters["niche_purity"],
                     train_meters["niche_purity3d"],
+                    train_meters["niche_micro"],
+                    train_meters["niche_macro"],
                 ) = self.calc_mc_quality(cell_ids, scores, "train")
                 ad = self.train_.adata
                 ad.obs["mc"] = scores.argmax(1).detach().cpu().numpy()
@@ -392,17 +667,129 @@ class SCProtoTrainer(AdoptiveTrainer):
                     train_meters["spatial_compactness"] = spatial_compactness(
                         ad, mc_key="mc", bk=self.dataset.batch_key
                     ).mean()
+            else:
+                # Quick niche metrics in debug mode
+                (train_meters["niche_micro"], train_meters["niche_macro"],
+                 train_meters["niche_micro_filt"], train_meters["niche_macro_filt"]) = self._quick_niche_metrics()
+
+            # KNN accuracy diagnostic (every 2 epochs)
+            if epoch % 2 == 0 or epoch == epochs - 1:
+                pca_acc, z_acc = self._niche_knn_acc()
+                if pca_acc is not None:
+                    train_meters["knn_pca"] = pca_acc
+                    train_meters["knn_z"] = z_acc
 
             self.log_wandb_loss(train_meters | test_meters, epoch)
             self.save_checkpoint(epoch)
 
             # Print epoch summary for progress tracking
-            print(f">>> Epoch {epoch+1}/{epochs} done | Loss: {train_meters.get('loss', 0):.4f} | Proto unused: {train_meters.get('proto_unused', 0):.2%}")
+            nm = train_meters.get('niche_micro_filt') or train_meters.get('niche_micro')
+            nM = train_meters.get('niche_macro_filt') or train_meters.get('niche_macro')
+            nm_str = f"{nm:.3f}" if nm is not None else "-"
+            nM_str = f"{nM:.3f}" if nM is not None else "-"
+            knn_str = ""
+            if "knn_z" in train_meters:
+                knn_str = f" | KNN: {train_meters['knn_z']:.1%} (pca:{train_meters['knn_pca']:.1%})"
+            print(f">>> Epoch {epoch+1}/{epochs} | Loss: {train_meters.get('loss', 0):.4f} | niche_mi: {nm_str} | niche_Ma: {nM_str} | unused: {train_meters.get('proto_unused', 0):.1%}{knn_str}")
 
         # if self.ft_epochs > 0:
         #     self.model = self.adapt_model(self.model, self.query.adata, self.ft_epochs)
         #     self.save_checkpoint(epoch + self.ft_epochs)
 
+        self._total_epochs_trained = getattr(self, '_total_epochs_trained', 0) + epochs
+        return train_meters | test_meters
+
+    def continue_training(self, epochs):
+        """
+        Continue training for additional epochs without resetting optimizer or LR schedule.
+
+        Args:
+            epochs: number of additional epochs to train
+        """
+        if not hasattr(self, 'optimizer') or self.optimizer is None:
+            raise RuntimeError("No optimizer found. Call train() first.")
+
+        start_epoch = getattr(self, '_total_epochs_trained', 0)
+
+        # extend LR schedule if needed
+        total_iters_needed = (start_epoch + epochs) * len(self.train_loader)
+        if len(self.lr_schedule) < total_iters_needed:
+            # extend with final_lr
+            extra = total_iters_needed - len(self.lr_schedule)
+            self.lr_schedule = np.concatenate([
+                self.lr_schedule,
+                np.full(extra, self.final_lr)
+            ])
+
+        self.n_epochs = start_epoch + epochs
+
+        for epoch in range(start_epoch, start_epoch + epochs):
+            logger.info(f"============ Starting epoch {epoch} (continue) ============")
+
+            if (epoch % self.umap_checkpoint_freq == 10) and (self.wandb_sweep == 0) and not self.debug:
+                self.plot_umap(self.model, self.train_ds.adata, f"train-e{epoch}")
+
+            if (
+                self.queue_length > 0
+                and epoch >= self.epoch_queue_starts
+                and len(self.queue) == 0
+            ):
+                print(f"start using queue at epoch: {epoch}")
+                for ds_id in self.ds_ids:
+                    self.init_queue(ds_id)
+
+            train_meters = self.train_epoch(epoch)
+
+            if self.debug:
+                test_meters = {}
+            elif self.full_dataset_mode == 1:
+                test_meters = {}
+            else:
+                test_meters = self.test_epoch()
+                test_meters = {f"test_{key}": val for key, val in test_meters.items()}
+
+            if not self.debug:
+                scores = self.encode_adata(self.train_.adata, self.model, z_idx=2)
+                cell_ids = self.train_.adata.obs_names
+                (
+                    train_meters["overal_compactness"],
+                    train_meters["overal_separation"],
+                    train_meters["celltype_purity"],
+                    train_meters["niche_purity"],
+                    train_meters["niche_purity3d"],
+                    train_meters["niche_micro"],
+                    train_meters["niche_macro"],
+                ) = self.calc_mc_quality(cell_ids, scores, "train")
+                ad = self.train_.adata
+                ad.obs["mc"] = scores.argmax(1).detach().cpu().numpy()
+                if "spatial" in ad.obsm:
+                    train_meters["spatial_compactness"] = spatial_compactness(
+                        ad, mc_key="mc", bk=self.dataset.batch_key
+                    ).mean()
+            else:
+                (train_meters["niche_micro"], train_meters["niche_macro"],
+                 train_meters["niche_micro_filt"], train_meters["niche_macro_filt"]) = self._quick_niche_metrics()
+
+            # KNN accuracy diagnostic (every 2 epochs)
+            if epoch % 2 == 0 or epoch == start_epoch + epochs - 1:
+                pca_acc, z_acc = self._niche_knn_acc()
+                if pca_acc is not None:
+                    train_meters["knn_pca"] = pca_acc
+                    train_meters["knn_z"] = z_acc
+
+            self.log_wandb_loss(train_meters | test_meters, epoch)
+            self.save_checkpoint(epoch)
+
+            nm = train_meters.get('niche_micro_filt') or train_meters.get('niche_micro')
+            nM = train_meters.get('niche_macro_filt') or train_meters.get('niche_macro')
+            nm_str = f"{nm:.3f}" if nm is not None else "-"
+            nM_str = f"{nM:.3f}" if nM is not None else "-"
+            knn_str = ""
+            if "knn_z" in train_meters:
+                knn_str = f" | KNN: {train_meters['knn_z']:.1%} (pca:{train_meters['knn_pca']:.1%})"
+            print(f">>> Epoch {epoch+1}/{start_epoch + epochs} | Loss: {train_meters.get('loss', 0):.4f} | niche_mi: {nm_str} | niche_Ma: {nM_str} | unused: {train_meters.get('proto_unused', 0):.1%}{knn_str}")
+
+        self._total_epochs_trained = start_epoch + epochs
         return train_meters | test_meters
 
     def init_lambda_loss(self):
@@ -547,7 +934,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         # )
         if hasattr(self, "lambda_loss"):
             loss = torch.stack(
-                [metrics[k] * self.lambda_loss[k] for k in self.loss_keys]
+                [metrics[k] * self.lambda_loss[k] for k in self.lambda_loss.keys()]
             ).sum()
             meters["loss"].update(loss.item(), bs)
         else:  # when init lambda loss
@@ -586,8 +973,8 @@ class SCProtoTrainer(AdoptiveTrainer):
             bs, inputs
         )
         (proto_loss, commitment_loss) = propagation_sim
-        # Skip affinity loss computation in debug mode or if lambda_aff is 0
-        if self.debug or self.lambda_loss.get("aff", 0) == 0:
+        # Skip affinity loss if lambda_aff is 0
+        if self.lambda_loss.get("aff", 0) == 0:
             loss_aff = torch.tensor(0.0, device=scores.device)
         else:
             loss_aff = self.calc_aff_loss(scores[:bs], cell_idx[:bs])
@@ -631,6 +1018,19 @@ class SCProtoTrainer(AdoptiveTrainer):
             compactness, separation, cp, np2d, np3d = self.calc_mc_quality(
                 cell_ids, scores, split
             )
+        # Uniformity loss: encourage uniform prototype usage (anti-collapse)
+        P = F.softmax(scores[:bs] / self.epsilon, dim=1)  # (bs, K)
+        avg_proto_usage = P.mean(dim=0)  # (K,) average assignment per prototype
+        # Maximize entropy of usage distribution = minimize negative entropy
+        uniform_loss = (avg_proto_usage * (avg_proto_usage + 1e-8).log()).sum()  # negative entropy
+        # uniform_loss is negative (entropy is positive), so we ADD it to loss to maximize entropy
+
+        # R1/R2 loss: proto coverage
+        if self.lambda_loss.get("r1r2", 0) == 0:
+            r1r2_loss = torch.tensor(0.0, device=scores.device)
+        else:
+            r1r2_loss = self.calc_r1r2_loss(z[:bs])
+
         return {
             "swav": swav_loss,
             "recon": recon,
@@ -653,33 +1053,88 @@ class SCProtoTrainer(AdoptiveTrainer):
             "aff": loss_aff,
             "q_effk": q_effk,
             "p_effk": p_effk,
+            "uniform": uniform_loss,
+            "r1r2": r1r2_loss,
         }, assign_cnts
 
     def calc_aff_loss(self, scores, cell_idx):
+        """
+        Binary contrastive affinity loss.
+
+        - Positive pairs (A > 0): maximize S → pull to same proto
+        - Negative pairs (A = 0): minimize S → push to diff proto
+        """
         if torch.is_tensor(cell_idx):
             cell_idx = cell_idx.detach().cpu().numpy()
         cell_idx = np.asarray(cell_idx, dtype=np.int64)
 
-        # P = F.softmax(scores / self.temperature, dim=1)
+        # Soft assignments
         P = torch.softmax(scores / self.epsilon, dim=1)
-        # P_hard = F.one_hot(
-        #     P_soft.argmax(dim=1),
-        #     num_classes=P_soft.size(1),
-        # ).to(P_soft.dtype)
-        # P = P_hard + (P_soft - P_soft.detach())
-        S = P @ P.T
+        S = P @ P.T  # predicted similarity (0-1)
 
+        # Get affinity submatrix for this batch
         A = self.train_ds.aff[cell_idx][:, cell_idx]
-        A = A.maximum(A.T)
-
+        A = A.maximum(A.T)  # symmetrize
         A = torch.as_tensor(A.toarray(), device=S.device, dtype=S.dtype)
 
-        diff = S - A
-        if self.two_sided == 0:
-            diff = torch.clamp(diff, min=0.0)
-
+        # Mask diagonal
         mask = ~torch.eye(S.size(0), device=S.device, dtype=torch.bool)
-        return (diff[mask] ** 2).mean()
+        S_masked = S[mask]
+        A_masked = A[mask]
+
+        # Binary masks
+        pos_mask = A_masked > 0  # connected pairs (same niche)
+        neg_mask = A_masked == 0  # not connected
+
+        pos_loss = torch.tensor(0.0, device=S.device)
+        neg_loss = torch.tensor(0.0, device=S.device)
+
+        # Positive: maximize S (pull same-niche together)
+        if pos_mask.sum() > 0:
+            pos_loss = -torch.log(S_masked[pos_mask] + 1e-8).mean()
+
+        # Negative: minimize S (push diff-niche apart)
+        if neg_mask.sum() > 0:
+            neg_loss = -torch.log(1 - S_masked[neg_mask] + 1e-8).mean()
+
+        # two_sided=1: both, two_sided=0: neg only
+        if self.two_sided == 1:
+            return pos_loss + neg_loss
+        else:
+            return neg_loss
+
+    def calc_r1r2_loss(self, z):
+        """
+        Li et al. style R1/R2 prototype coverage losses.
+        Uses scores (same as assignment) to ensure consistency.
+
+        R1: each proto should be "best" for at least 1 cell → move proto
+        R2: each cell should have high score for at least 1 proto → move encoder
+
+        Ensures: no orphan protos, no uncovered cells.
+        """
+        protos = self.model.get_prototypes()  # (K, D)
+
+        # R1: move protos toward cells (detach z)
+        # Use same scoring as assignment
+        scores_r1 = self.model.proto_soft_assignments(z.detach())  # (B, K)
+        r1 = -scores_r1.max(dim=0).values.mean()  # max score per proto → minimize neg
+
+        # R2: move cells toward protos (detach protos)
+        # Recompute scores with detached protos
+        protos_detached = protos.detach()
+        if self.assignment_metric == 'sneuc':
+            d2 = torch.cdist(z, protos_detached, p=2) ** 2
+            scores_r2 = -d2
+            scores_r2 = scores_r2 - scores_r2.max(dim=1, keepdim=True)[0]
+            scores_r2 = scores_r2.clamp(min=-75)
+        elif self.assignment_metric == 'dotp':
+            scores_r2 = z @ protos_detached.T
+        else:  # fallback to negative euclidean
+            scores_r2 = -torch.cdist(z, protos_detached, p=2)
+        r2 = -scores_r2.max(dim=1).values.mean()  # max score per cell → minimize neg
+
+        return r1 + r2
 
     def calc_swapped_recon(self, z, scores, bs, inputs):
         loss = 0

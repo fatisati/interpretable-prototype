@@ -258,7 +258,8 @@ def compute_dc(ad, batch_key, out_dir="./", base=None, remove_dc=True):
 
 
 def get_seacell_path(ds_id):
-    return f"/ictstr01/home/icb/fatemehs.hashemig/models/{ds_id}/seacell/"
+    from interpretable_ssl.configs.paths import get_seacell_model_dir
+    return get_seacell_model_dir(ds_id)
 
 
 def save_df(df, save_path, append=False):

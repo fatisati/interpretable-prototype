@@ -4,6 +4,7 @@ import pickle as pkl
 from torch.utils.data import random_split
 import scanpy as sc
 
+from interpretable_ssl.configs.paths import get_home, get_model_dir
 
 import time
 import logging
@@ -41,8 +42,7 @@ def get_device():
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
-def get_home():
-    return "/home/icb/fatemehs.hashemig/"
+# get_home() is now imported from interpretable_ssl.configs.paths
 
 
 def save_model_checkpoint(model, epoch, save_path):
@@ -66,22 +66,31 @@ def save_model(model, path):
 
 
 def get_pancras_model_dir():
-    return get_home() + "/models/pancras/"
+    import os
+    return os.path.join(get_model_dir(), "pancras/")
 
 
 def fit_label_encoder(adata, save_path, label_key):
+    """Fit a label encoder and save it. Creates directory if it doesn't exist."""
+    import os
 
     # fit label encoder
     le = LabelEncoder()
     le.fit(adata.obs[label_key])
 
+    # create directory if it doesn't exist
+    save_dir = os.path.dirname(save_path)
+    if save_dir and not os.path.exists(save_dir):
+        os.makedirs(save_dir, exist_ok=True)
+        print(f"Created directory: {save_dir}")
+
     # save it
     pkl.dump(le, open(save_path, "wb"))
+    print(f"Saved label encoder to: {save_path}")
     return le
 
 
-def get_model_dir():
-    return get_home() + "models/"
+# get_model_dir() is now imported from interpretable_ssl.configs.paths
 
 
 def sample_dataset(dataset, sample_ratio):

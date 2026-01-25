@@ -1,8 +1,10 @@
+import os
 from interpretable_ssl.datasets.spatial import SpatialDataset
+from interpretable_ssl.configs.paths import DATA_DIR, CODE_DIR
 
 
 def get_label_encoder_path():
-    return "./data/merfish_le.pkl"
+    return os.path.join(CODE_DIR, "data/merfish_le.pkl")
 
 
 class MerfishDataset(SpatialDataset):
@@ -12,7 +14,7 @@ class MerfishDataset(SpatialDataset):
         super().__init__(**kwargs)
 
     def get_data_path(self):
-        return "/home/icb/fatemehs.hashemig/data/spatial/merfish-mouse-brain/adata.h5ad"
+        return os.path.join(DATA_DIR, "spatial/merfish-mouse-brain/adata.h5ad")
 
     def get_test_studies(self):
         return [

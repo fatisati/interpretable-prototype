@@ -157,6 +157,20 @@ class Trainer(TrainerBase):
         niche_purity3d = calc_purity(df, "niches_3D", "mc")
         cell_purity = calc_purity(df, lk, "mc")
 
+        # Niche micro/macro purity
+        niche_micro, niche_macro = None, None
+        if "niches_2D" in df.columns:
+            # Per-mc purity and majority label
+            mc_stats = []
+            for m, sub in df.groupby("mc"):
+                vc = sub["niches_2D"].value_counts(normalize=True)
+                mc_stats.append({"mc": m, "purity": vc.max(), "label": vc.idxmax(), "n": len(sub)})
+            mc_df = pd.DataFrame(mc_stats)
+            # Micro: weighted by n cells
+            niche_micro = (mc_df["purity"] * mc_df["n"]).sum() / mc_df["n"].sum()
+            # Macro: avg purity per niche label
+            niche_macro = mc_df.groupby("label")["purity"].mean().mean()
+
         comp = []
         for _, sub in df.groupby("mc"):
             X = sub.drop(columns=["mc"] + keys, errors="ignore").values
@@ -179,7 +193,7 @@ class Trainer(TrainerBase):
         d, _ = nn.kneighbors(C)
         sep = d[:, 1].mean()
 
-        return np.mean(comp), sep, cell_purity, niche_purity, niche_purity3d
+        return np.mean(comp), sep, cell_purity, niche_purity, niche_purity3d, niche_micro, niche_macro
 
     def collect_parser_args(self, parser):
         if parser is not None:
@@ -422,6 +436,82 @@ class Trainer(TrainerBase):
             w=w,
             w_label=w_label,
         )
+
+    def plot_umap_simple(self, adata=None, color_key=None, model=None, max_cells=50000, figsize=(6, 5), show_proto_nums=True):
+        """
+        Simple UMAP plot: cells colored by label, prototypes labeled by majority vote.
+        No density panel.
+
+        Args:
+            adata: AnnData to plot (default: self.dataset.adata or self.train_ds.adata)
+            color_key: obs column for coloring (default: self.dataset.label_key)
+            model: model to use (default: self.model)
+            max_cells: subsample if more cells
+
+        Returns:
+            fig, proto_labels
+        """
+        import matplotlib.pyplot as plt
+        from collections import Counter
+        from scipy.spatial.distance import cdist
+
+        if adata is None:
+            adata = getattr(self, 'train_ds', None)
+            adata = adata.adata if adata else self.dataset.adata
+        if model is None:
+            model = self.model
+        if color_key is None:
+            color_key = self.dataset.label_key
+
+        ad = adata.copy() if adata.n_obs <= max_cells else adata[np.random.choice(adata.n_obs, max_cells, replace=False)].copy()
+
+        z = self.encode_adata(ad, model, z_idx=1).detach().cpu().numpy()
+        proto = model.get_prototypes().detach().cpu().numpy()
+        n_protos = proto.shape[0]
+
+        # Assignment by closest proto (Euclidean)
+        assignments = np.argmin(cdist(z, proto), axis=1)
+
+        # Joint UMAP
+        combined = np.vstack([z, proto])
+        tmp_ad = sc.AnnData(combined)
+        sc.pp.neighbors(tmp_ad, use_rep='X', n_neighbors=15)
+        sc.tl.umap(tmp_ad)
+        z_umap = tmp_ad.obsm['X_umap'][:len(z)]
+        proto_umap = tmp_ad.obsm['X_umap'][len(z):]
+
+        # Majority vote labels
+        labels = ad.obs[color_key].values
+        proto_labels = []
+        proto_sizes = []
+        for p in range(n_protos):
+            mask = assignments == p
+            n = mask.sum()
+            proto_sizes.append(n)
+            proto_labels.append(Counter(labels[mask]).most_common(1)[0][0] if n > 0 else None)
+
+        # Plot
+        fig, ax = plt.subplots(figsize=figsize)
+        unique_labels = np.unique(labels)
+        cmap = plt.cm.get_cmap('tab20', len(unique_labels))
+        label_to_color = {lbl: cmap(i) for i, lbl in enumerate(unique_labels)}
+
+        for lbl in unique_labels:
+            mask = labels == lbl
+            ax.scatter(z_umap[mask, 0], z_umap[mask, 1], c=[label_to_color[lbl]], label=lbl, alpha=0.5, s=10)
+
+        for i, plbl in enumerate(proto_labels):
+            c = 'white' if plbl is None else label_to_color.get(plbl, 'white')
+            size = max(50, min(300, proto_sizes[i] // 2))
+            ax.scatter(proto_umap[i, 0], proto_umap[i, 1], c=[c], edgecolor='black', s=size, linewidth=1, zorder=10)
+            if show_proto_nums:
+                ax.annotate(str(i), (proto_umap[i, 0], proto_umap[i, 1]), fontsize=7, ha='center', va='center')
+
+        n_used = sum(1 for s in proto_sizes if s > 0)
+        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=8)
+        ax.set_title(f'UMAP with Prototypes ({n_used}/{n_protos} used)')
+        plt.tight_layout()
+        return fig, proto_labels
 
     def plot_ref_umap(self, save_plot=True, name_postfix=None, model=None):
 

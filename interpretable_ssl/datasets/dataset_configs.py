@@ -182,7 +182,7 @@ DATASETS = {
         "batch_key": "section",
         "label_key": "fibroblast_subclusters",
         "label_encoder_path": os.path.join(CODE_DIR, "data/s28f.pkl"),
-        "num_prototypes": 100,
+        "num_prototypes": 200,
         "batch_size": 512,
         "ft_epochs": 0,
     },
