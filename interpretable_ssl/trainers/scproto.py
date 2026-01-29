@@ -895,11 +895,22 @@ class SCProtoTrainer(AdoptiveTrainer):
 
                 # Get embeddings through scpoli encoder
                 # scpoli_cvae expects a dict with specific keys
-                batch_dict = {'x': X_batch}
-                # Add condition if needed
-                if hasattr(self.model, 'condition_key') and self.model.condition_key:
-                    # Use first condition (simplified)
-                    batch_dict['batch'] = torch.zeros(len(X_batch), dtype=torch.long, device=self.device)
+                # Get batch conditions from the dataset for these indices
+                n_samples = len(X_batch)
+
+                # Get conditions from train_ds (shape: [n_samples, n_conditions])
+                if hasattr(self.train_ds, 'conditions'):
+                    # Use actual conditions from the dataset
+                    batch_cond = self.train_ds.conditions[unique_idx.cpu()].to(self.device)
+                else:
+                    # Fallback: single condition, all zeros
+                    n_conds = len(self.model.scpoli_cvae.n_conditions)
+                    batch_cond = torch.zeros(n_samples, n_conds, dtype=torch.long, device=self.device)
+
+                batch_dict = {
+                    'x': X_batch,
+                    'batch': batch_cond,
+                }
 
                 # Forward through encoder to get latent
                 # encoder_out returns (x, recon_loss, kl_loss) - take only the latent
