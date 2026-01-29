@@ -801,23 +801,28 @@ class SCProtoTrainer(AdoptiveTrainer):
         self._total_epochs_trained = start_epoch + epochs
         return train_meters | test_meters
 
-    def train_umap_edges(self, epochs: int = None, verbose: bool = True):
+    def train_umap_edges(self, epochs: int = None, lambda_recon: float = None,
+                         lambda_kl: float = None, verbose: bool = True):
         """
         Train encoder using edge-centric parametric UMAP.
 
         This implements the official UMAP training scheme:
         - Sample edges (i, j) proportionally to their weight p_ij
         - For each positive edge, sample K negative edges
-        - Loss = attractive (positives) + repulsive (negatives)
+        - Loss = attractive (positives) + repulsive (negatives) + recon + kl
 
         Args:
             epochs: Number of training epochs (default: umap_edge_epochs)
+            lambda_recon: Weight for reconstruction loss (default: self.lambda_recon or 0)
+            lambda_kl: Weight for KL loss (default: self.lambda_kl or 0)
             verbose: Print progress
 
         Returns:
             Final training metrics
         """
         epochs = epochs or getattr(self, 'umap_edge_epochs', 200)
+        lambda_recon = lambda_recon if lambda_recon is not None else getattr(self, 'lambda_recon', 0.0)
+        lambda_kl = lambda_kl if lambda_kl is not None else getattr(self, 'lambda_kl', 0.0)
 
         # Get affinity matrix
         if hasattr(self.train_ds, 'aff_raw'):
@@ -840,6 +845,7 @@ class SCProtoTrainer(AdoptiveTrainer):
 
         print(f"🔄 Starting edge-centric UMAP training")
         print(f"   min_dist={min_dist}, spread={spread}, neg_rate={neg_rate}")
+        print(f"   lambda_recon={lambda_recon}, lambda_kl={lambda_kl}")
 
         # Create edge dataset
         edge_dataset = EdgeDataset(
@@ -876,7 +882,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             encoder.train()
             total_metrics = {
                 'loss': 0, 'q_pos': 0, 'q_neg': 0, 'margin': 0,
-                'loss_pos': 0, 'loss_neg': 0,
+                'loss_pos': 0, 'loss_neg': 0, 'recon': 0, 'kl': 0,
             }
             n_batches = 0
 
@@ -913,8 +919,8 @@ class SCProtoTrainer(AdoptiveTrainer):
                 }
 
                 # Forward through encoder to get latent
-                # encoder_out returns (x, recon_loss, kl_loss) - take only the latent
-                z_unique, _, _ = self.model.encoder_out(batch_dict)
+                # encoder_out returns (x, recon_loss, kl_loss)
+                z_unique, recon_loss, kl_loss = self.model.encoder_out(batch_dict)
 
                 # Map indices back
                 idx_map = {int(idx): i for i, idx in enumerate(unique_idx.cpu().numpy())}
@@ -930,8 +936,15 @@ class SCProtoTrainer(AdoptiveTrainer):
                 B, K = neg_samples.shape
                 z_neg = gather_z(neg_samples.flatten()).view(B, K, -1)
 
-                # Compute loss
-                loss, metrics = loss_fn(z_head, z_tail, z_neg, weights)
+                # Compute UMAP loss
+                umap_loss, metrics = loss_fn(z_head, z_tail, z_neg, weights)
+
+                # Total loss = UMAP + optional recon + optional KL
+                loss = umap_loss
+                if lambda_recon > 0:
+                    loss = loss + lambda_recon * recon_loss
+                if lambda_kl > 0:
+                    loss = loss + lambda_kl * kl_loss
 
                 # Backprop
                 optimizer.zero_grad()
@@ -940,6 +953,8 @@ class SCProtoTrainer(AdoptiveTrainer):
 
                 # Accumulate
                 total_metrics['loss'] += loss.item()
+                total_metrics['recon'] += recon_loss.item()
+                total_metrics['kl'] += kl_loss.item()
                 for k, v in metrics.items():
                     if k in total_metrics:
                         total_metrics[k] += v
@@ -958,11 +973,18 @@ class SCProtoTrainer(AdoptiveTrainer):
                     if pca_acc is not None:
                         knn_str = f" | KNN: {z_acc:.1%} (pca:{pca_acc:.1%})"
 
+                # Build extra loss string if recon/kl are used
+                extra_str = ""
+                if lambda_recon > 0:
+                    extra_str += f" | recon={total_metrics['recon']:.4f}"
+                if lambda_kl > 0:
+                    extra_str += f" | kl={total_metrics['kl']:.4f}"
+
                 print(f">>> Epoch {epoch+1}/{epochs} | "
                       f"loss={total_metrics['loss']:.4f} | "
                       f"q+={total_metrics['q_pos']:.3f} | "
                       f"q-={total_metrics['q_neg']:.3f} | "
-                      f"margin={total_metrics['margin']:.3f}{knn_str}")
+                      f"margin={total_metrics['margin']:.3f}{extra_str}{knn_str}")
 
             # Reshuffle dataset
             edge_dataset.reshuffle()
