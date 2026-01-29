@@ -902,7 +902,8 @@ class SCProtoTrainer(AdoptiveTrainer):
                     batch_dict['batch'] = torch.zeros(len(X_batch), dtype=torch.long, device=self.device)
 
                 # Forward through encoder to get latent
-                z_unique = self.model.encoder_out(batch_dict)
+                # encoder_out returns (x, recon_loss, kl_loss) - take only the latent
+                z_unique, _, _ = self.model.encoder_out(batch_dict)
 
                 # Map indices back
                 idx_map = {int(idx): i for i, idx in enumerate(unique_idx.cpu().numpy())}
