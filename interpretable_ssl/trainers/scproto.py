@@ -48,6 +48,7 @@ from interpretable_ssl.trainers.scproto_utils import *
 from interpretable_ssl.trainers.affinity import *
 from interpretable_ssl.trainers.scpoli_helpers import *
 from interpretable_ssl.evaluation.mc_metric_utils import *
+from interpretable_ssl.trainers.edge_umap import EdgeDataset, ParametricUMAPLoss, edge_collate_fn
 
 logger = getLogger()
 
@@ -799,6 +800,162 @@ class SCProtoTrainer(AdoptiveTrainer):
 
         self._total_epochs_trained = start_epoch + epochs
         return train_meters | test_meters
+
+    def train_umap_edges(self, epochs: int = None, verbose: bool = True):
+        """
+        Train encoder using edge-centric parametric UMAP.
+
+        This implements the official UMAP training scheme:
+        - Sample edges (i, j) proportionally to their weight p_ij
+        - For each positive edge, sample K negative edges
+        - Loss = attractive (positives) + repulsive (negatives)
+
+        Args:
+            epochs: Number of training epochs (default: umap_edge_epochs)
+            verbose: Print progress
+
+        Returns:
+            Final training metrics
+        """
+        epochs = epochs or getattr(self, 'umap_edge_epochs', 200)
+
+        # Get affinity matrix
+        if hasattr(self.train_ds, 'aff_raw'):
+            affinity = self.train_ds.aff_raw
+        else:
+            affinity = self.train_ds.aff
+
+        # Get data tensor
+        adata = self.train_ds.adata
+        if hasattr(adata.X, 'toarray'):
+            X = torch.tensor(adata.X.toarray(), dtype=torch.float32)
+        else:
+            X = torch.tensor(adata.X, dtype=torch.float32)
+        X = X.to(self.device)
+
+        # Get UMAP parameters
+        min_dist = getattr(self, 'umap_min_dist', 0.5)
+        spread = getattr(self, 'umap_spread', 1.0)
+        neg_rate = getattr(self, 'umap_neg_rate', 5)
+
+        print(f"🔄 Starting edge-centric UMAP training")
+        print(f"   min_dist={min_dist}, spread={spread}, neg_rate={neg_rate}")
+
+        # Create edge dataset
+        edge_dataset = EdgeDataset(
+            affinity,
+            n_epochs=epochs,
+            negative_sample_rate=neg_rate,
+        )
+
+        # Create loss function
+        loss_fn = ParametricUMAPLoss(
+            min_dist=min_dist,
+            spread=spread,
+            negative_sample_rate=neg_rate,
+        )
+
+        # Create data loader
+        loader = DataLoader(
+            edge_dataset,
+            batch_size=self.batch_size,
+            shuffle=True,
+            collate_fn=edge_collate_fn,
+            num_workers=0,
+            drop_last=True,
+        )
+
+        # Get encoder (the scpoli encoder)
+        encoder = self.model.scpoli_cvae
+
+        # Create optimizer
+        optimizer = torch.optim.Adam(encoder.parameters(), lr=self.base_lr)
+
+        # Training loop
+        for epoch in range(epochs):
+            encoder.train()
+            total_metrics = {
+                'loss': 0, 'q_pos': 0, 'q_neg': 0, 'margin': 0,
+                'loss_pos': 0, 'loss_neg': 0,
+            }
+            n_batches = 0
+
+            for batch in loader:
+                head = batch['head'].to(self.device)
+                tail = batch['tail'].to(self.device)
+                weights = batch['weight'].to(self.device)
+                neg_samples = batch['neg_samples'].to(self.device)
+
+                # Collect unique indices
+                all_idx = torch.cat([head, tail, neg_samples.flatten()])
+                unique_idx = torch.unique(all_idx)
+
+                # Encode unique nodes
+                X_batch = X[unique_idx]
+
+                # Get embeddings through scpoli encoder
+                # scpoli_cvae expects a dict with specific keys
+                batch_dict = {'x': X_batch}
+                # Add condition if needed
+                if hasattr(self.model, 'condition_key') and self.model.condition_key:
+                    # Use first condition (simplified)
+                    batch_dict['batch'] = torch.zeros(len(X_batch), dtype=torch.long, device=self.device)
+
+                # Forward through encoder to get latent
+                z_unique = self.model.encoder_out(batch_dict)
+
+                # Map indices back
+                idx_map = {int(idx): i for i, idx in enumerate(unique_idx.cpu().numpy())}
+
+                def gather_z(indices):
+                    mapped = torch.tensor([idx_map[int(i)] for i in indices.cpu().numpy()],
+                                          device=self.device, dtype=torch.long)
+                    return z_unique[mapped]
+
+                z_head = gather_z(head)
+                z_tail = gather_z(tail)
+
+                B, K = neg_samples.shape
+                z_neg = gather_z(neg_samples.flatten()).view(B, K, -1)
+
+                # Compute loss
+                loss, metrics = loss_fn(z_head, z_tail, z_neg, weights)
+
+                # Backprop
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+                # Accumulate
+                total_metrics['loss'] += loss.item()
+                for k, v in metrics.items():
+                    if k in total_metrics:
+                        total_metrics[k] += v
+                n_batches += 1
+
+            # Average metrics
+            for k in total_metrics:
+                total_metrics[k] /= max(n_batches, 1)
+
+            # Print progress
+            if verbose and ((epoch + 1) % 1 == 0 or epoch == 0):
+                # Also compute KNN accuracy occasionally
+                knn_str = ""
+                if (epoch + 1) % 5 == 0 or epoch == epochs - 1:
+                    pca_acc, z_acc = self._niche_knn_acc()
+                    if pca_acc is not None:
+                        knn_str = f" | KNN: {z_acc:.1%} (pca:{pca_acc:.1%})"
+
+                print(f">>> Epoch {epoch+1}/{epochs} | "
+                      f"loss={total_metrics['loss']:.4f} | "
+                      f"q+={total_metrics['q_pos']:.3f} | "
+                      f"q-={total_metrics['q_neg']:.3f} | "
+                      f"margin={total_metrics['margin']:.3f}{knn_str}")
+
+            # Reshuffle dataset
+            edge_dataset.reshuffle()
+
+        return total_metrics
 
     def init_lambda_loss(self):
 

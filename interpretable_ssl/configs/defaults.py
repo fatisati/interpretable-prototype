@@ -184,6 +184,11 @@ def get_defaults():
         'lambda_aff': 0.0,
         'lambda_r1r2': 0.0,
         'two_sided': 0,
+        # Edge-centric UMAP parameters
+        'umap_min_dist': 0.5,      # UMAP min_dist (scanpy default=0.5, umap default=0.1)
+        'umap_spread': 1.0,        # UMAP spread (default=1.0)
+        'umap_neg_rate': 5,        # Negative samples per positive edge
+        'umap_edge_epochs': 200,   # Epochs for edge sampling expansion
         'temperature_min': 0.04,
         'epsilon_min': 0.02,
         'sched_temp_eps': 0,
