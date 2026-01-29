@@ -110,8 +110,8 @@ class EdgeDataset(Dataset):
         """Build set of neighbors for each node (for negative sampling exclusion)."""
         adj_sets = {i: set() for i in range(self.n_cells)}
         aff_coo = affinity.tocoo()
-        for i, j in zip(aff_coo.row, aff_coo.col):
-            if aff_coo.data[aff_coo.row == i][aff_coo.col == j] > 0:
+        for i, j, w in zip(aff_coo.row, aff_coo.col, aff_coo.data):
+            if w > 0:
                 adj_sets[i].add(j)
         return adj_sets
 
