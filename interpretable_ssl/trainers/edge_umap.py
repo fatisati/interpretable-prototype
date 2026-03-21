@@ -60,6 +60,8 @@ class EdgeDataset(Dataset):
         n_epochs: int = 200,
         negative_sample_rate: int = 5,
         seed: int = 42,
+        cell_ds: Optional[np.ndarray] = None,
+        neg_ds_id: Optional[int] = None,
     ):
         """
         Args:
@@ -67,10 +69,23 @@ class EdgeDataset(Dataset):
             n_epochs: Number of epochs (controls how often edges are sampled)
             negative_sample_rate: Number of negative samples per positive edge
             seed: Random seed
+            cell_ds: Optional (n_cells,) int array mapping each cell to its dataset id.
+            neg_ds_id: If set, all negatives are sampled from this ds regardless of head's ds.
+                       If None and cell_ds is set, negatives are from head's own ds.
         """
         self.n_cells = affinity.shape[0]
         self.negative_sample_rate = negative_sample_rate
         self.rng = np.random.RandomState(seed)
+
+        # Build per-ds cell index arrays for restricted negative sampling
+        if cell_ds is not None:
+            self.cell_ds = cell_ds
+            ds_ids = np.unique(cell_ds)
+            self.ds_cells = {ds: np.where(cell_ds == ds)[0] for ds in ds_ids}
+        else:
+            self.cell_ds = None
+            self.ds_cells = None
+        self.neg_ds_id = neg_ds_id
 
         # Convert to COO for easy iteration
         aff_coo = affinity.tocoo()
@@ -138,18 +153,31 @@ class EdgeDataset(Dataset):
         weight = self.expanded_weights[idx]
 
         # Sample negatives (non-neighbors of head)
+        # candidates: fixed ds if neg_ds_id set, else head's own ds, else global
         neighbors = self.adj_sets[head]
+        if self.neg_ds_id is not None:
+            candidates = self.ds_cells[self.neg_ds_id]
+        elif self.cell_ds is not None:
+            candidates = self.ds_cells[self.cell_ds[head]]
+        else:
+            candidates = None
         neg_samples = []
         attempts = 0
         while len(neg_samples) < self.negative_sample_rate and attempts < 100:
-            neg = self.rng.randint(0, self.n_cells)
+            if candidates is not None:
+                neg = candidates[self.rng.randint(0, len(candidates))]
+            else:
+                neg = self.rng.randint(0, self.n_cells)
             if neg != head and neg not in neighbors:
                 neg_samples.append(neg)
             attempts += 1
 
         # Pad with random if not enough (shouldn't happen often)
         while len(neg_samples) < self.negative_sample_rate:
-            neg_samples.append(self.rng.randint(0, self.n_cells))
+            if candidates is not None:
+                neg_samples.append(candidates[self.rng.randint(0, len(candidates))])
+            else:
+                neg_samples.append(self.rng.randint(0, self.n_cells))
 
         return {
             'head': head,

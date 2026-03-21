@@ -1,6 +1,4 @@
-import argparse
 import math
-import os
 import os
 
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -8,47 +6,34 @@ import shutil
 import time
 from logging import getLogger
 from tqdm import tqdm
+from collections import Counter, defaultdict
 
 import numpy as np
 import torch
 import torch.nn.functional as F
-import torch.backends.cudnn as cudnn
 import torch.optim
+from torch.utils.data import DataLoader
+
+from swav.src.utils import initialize_exp, fix_random_seeds
+
 from interpretable_ssl.configs.larc import LARC
-
-from swav.src.utils import (
-    bool_flag,
-    initialize_exp,
-    restart_from_checkpoint,
-    fix_random_seeds,
-    AverageMeter,
-)
-
-from interpretable_ssl.trainers.adaptive_trainer import AdoptiveTrainer
-from interpretable_ssl.augmenters.adata_augmenter import *
-from scarches.models.scpoli import scPoli
-import scarches.trainers.scpoli._utils as scpoli_utils
-from interpretable_ssl.models.swav import *
-import wandb
-import multiprocessing as mp
-from interpretable_ssl.evaluation.visualization import *
-import torch
-from torch.utils.data import DataLoader, Subset
-import numpy as np
 from interpretable_ssl.configs.defaults import *
-import sys
 from interpretable_ssl.utils import *
-
-from interpretable_ssl.evaluation.prototype_metrics import *
-import torch
-from collections import Counter, defaultdict
-from interpretable_ssl.evaluation.cd4_marker import *
+from interpretable_ssl.trainers.adaptive_trainer import AdoptiveTrainer
 from interpretable_ssl.trainers.scproto_utils import *
-
 from interpretable_ssl.trainers.affinity import *
 from interpretable_ssl.trainers.scpoli_helpers import *
-from interpretable_ssl.evaluation.mc_metric_utils import *
 from interpretable_ssl.trainers.edge_umap import EdgeDataset, ParametricUMAPLoss, edge_collate_fn
+from interpretable_ssl.augmenters.adata_augmenter import *
+from interpretable_ssl.models.swav import *
+from interpretable_ssl.evaluation.visualization import *
+from interpretable_ssl.evaluation.prototype_metrics import *
+from interpretable_ssl.evaluation.cd4_marker import *
+from interpretable_ssl.evaluation.mc_metric_utils import *
+
+from scarches.models.scpoli import scPoli
+import scarches.trainers.scpoli._utils as scpoli_utils
+import wandb
 
 logger = getLogger()
 
@@ -152,6 +137,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             "r1r2",
         ]
         self.log_hist = {}
+        self._metrics_log = {}
 
     def setup(self):
         fix_random_seeds(self.seed)
@@ -189,194 +175,6 @@ class SCProtoTrainer(AdoptiveTrainer):
         logger.info(f"Calibrated: eps {old_eps:.4f} -> {eps:.4f}, tau {old_tau:.4f} -> {tau:.4f} (target effk={effk_target:.1f})")
         print(f"🎯 Calibrated: eps={eps:.4f}, tau={tau:.4f} (from effk={effk_target:.1f})")
         return eps, tau
-
-    def _quick_niche_metrics(self, exclude_labels=("Excluded",)):
-        """Quick niche purity metrics (micro/macro) for debug mode."""
-        ad = self.train_ds.adata
-        if "niches_2D" not in ad.obs.columns:
-            return None, None, None, None
-
-        with torch.no_grad():
-            scores = self.encode_adata(ad, self.model, z_idx=2)
-        mc = scores.argmax(1).detach().cpu().numpy()
-        labels = np.array(ad.obs["niches_2D"].values)
-
-        from collections import Counter, defaultdict
-
-        # Compute stats for all cells
-        mc_stats = []
-        for m in np.unique(mc):
-            mask = mc == m
-            vc = Counter(labels[mask])
-            total = mask.sum()
-            majority = vc.most_common(1)[0]
-            mc_stats.append({"purity": majority[1] / total, "label": majority[0], "n": total})
-
-        if not mc_stats:
-            return None, None, None, None
-
-        # Full metrics (all labels)
-        total_n = sum(s["n"] for s in mc_stats)
-        niche_micro = sum(s["purity"] * s["n"] for s in mc_stats) / total_n
-        label_purities = defaultdict(list)
-        for s in mc_stats:
-            label_purities[s["label"]].append(s["purity"])
-        niche_macro = np.mean([np.mean(p) for p in label_purities.values()])
-
-        # Filtered metrics (exclude labels)
-        valid_mask = ~np.isin(labels, list(exclude_labels))
-        if valid_mask.sum() == 0:
-            return niche_micro, niche_macro, None, None
-
-        mc_filt = mc[valid_mask]
-        labels_filt = labels[valid_mask]
-        mc_stats_filt = []
-        for m in np.unique(mc_filt):
-            mask = mc_filt == m
-            vc = Counter(labels_filt[mask])
-            total = mask.sum()
-            majority = vc.most_common(1)[0]
-            mc_stats_filt.append({"purity": majority[1] / total, "label": majority[0], "n": total})
-
-        total_n_filt = sum(s["n"] for s in mc_stats_filt)
-        niche_micro_filt = sum(s["purity"] * s["n"] for s in mc_stats_filt) / total_n_filt
-        label_purities_filt = defaultdict(list)
-        for s in mc_stats_filt:
-            label_purities_filt[s["label"]].append(s["purity"])
-        niche_macro_filt = np.mean([np.mean(p) for p in label_purities_filt.values()])
-
-        return niche_micro, niche_macro, niche_micro_filt, niche_macro_filt
-
-    def _niche_knn_acc(self, k=15):
-        """Compute KNN accuracy for niche prediction in latent space vs PCA."""
-        ad = self.train_ds.adata
-        if "niches_2D" not in ad.obs.columns:
-            return None, None
-
-        from sklearn.neighbors import KNeighborsClassifier
-        from sklearn.model_selection import cross_val_score
-
-        y = ad.obs["niches_2D"].values
-
-        # PCA baseline (compute once and cache)
-        if not hasattr(self, '_pca_knn_acc'):
-            X_pca = ad.obsm.get('X_pca', ad.X[:, :50] if hasattr(ad.X, 'toarray') else ad.X[:, :50])
-            if hasattr(X_pca, 'toarray'):
-                X_pca = X_pca.toarray()
-            self._pca_knn_acc = cross_val_score(KNeighborsClassifier(k), X_pca, y, cv=3).mean()
-
-        # Latent
-        with torch.no_grad():
-            z = self.encode_adata(ad, self.model, z_idx=1).detach().cpu().numpy()
-        acc_z = cross_val_score(KNeighborsClassifier(k), z, y, cv=3).mean()
-
-        return self._pca_knn_acc, acc_z
-
-    def niche_report(self, k=15, exclude_labels=("Excluded",)):
-        """Detailed per-niche diagnostic report."""
-        ad = self.train_ds.adata
-        if "niches_2D" not in ad.obs.columns:
-            print("No niches_2D in adata")
-            return None
-
-        from sklearn.neighbors import KNeighborsClassifier
-        from sklearn.metrics import f1_score
-        import pandas as pd
-
-        y = np.array(ad.obs["niches_2D"].values)
-        niches = [n for n in np.unique(y) if n not in exclude_labels]
-
-        # Get embeddings
-        X_pca = ad.obsm.get('X_pca')
-        if X_pca is None:
-            X_pca = ad.X.toarray() if hasattr(ad.X, 'toarray') else ad.X
-        with torch.no_grad():
-            z = self.encode_adata(ad, self.model, z_idx=1).detach().cpu().numpy()
-
-        # Get assignments
-        with torch.no_grad():
-            scores = self.encode_adata(ad, self.model, z_idx=2)
-        assignments = scores.argmax(1).cpu().numpy()
-
-        # Filter out excluded cells (same as training log's niche_macro_filt)
-        from collections import Counter, defaultdict
-        valid_mask = ~np.isin(y, list(exclude_labels))
-        y_filt = y[valid_mask]
-        assignments_filt = assignments[valid_mask]
-
-        # Compute per-proto stats using filtered cells (same as training log)
-        proto_stats = []
-        for p in np.unique(assignments_filt):
-            mask_p = assignments_filt == p
-            vc = Counter(y_filt[mask_p])
-            total = mask_p.sum()
-            majority_label, majority_count = vc.most_common(1)[0]
-            proto_stats.append({
-                "proto": p,
-                "label": majority_label,
-                "purity": majority_count / total,
-                "n": total
-            })
-
-        # Group protos by majority label
-        label_to_protos = defaultdict(list)
-        for ps in proto_stats:
-            label_to_protos[ps["label"]].append(ps)
-
-        # Fit KNN once (not per-niche)
-        knn_pca = KNeighborsClassifier(k).fit(X_pca, y)
-        knn_z = KNeighborsClassifier(k).fit(z, y)
-
-        # Per-niche metrics
-        rows = []
-        for niche in niches:
-            mask = y == niche
-            n_cells = mask.sum()
-
-            # Purity: avg purity of protos with this niche as majority label (same as training log)
-            protos_for_niche = label_to_protos.get(niche, [])
-            n_protos = len(protos_for_niche)
-            purity = np.mean([ps["purity"] for ps in protos_for_niche]) if protos_for_niche else 0
-
-            # Coverage: fraction of niche cells in protos with this majority label
-            cells_in_niche_protos = sum(ps["n"] for ps in protos_for_niche)
-            coverage = cells_in_niche_protos / n_cells if n_cells > 0 else 0
-
-            # KNN recall for this niche (PCA vs latent)
-            pred_pca = knn_pca.predict(X_pca[mask])
-            pred_z = knn_z.predict(z[mask])
-            recall_pca = (pred_pca == niche).mean()
-            recall_z = (pred_z == niche).mean()
-
-            rows.append({
-                "niche": niche,
-                "n_cells": n_cells,
-                "n_protos": n_protos,
-                "purity": purity,
-                "coverage": coverage,
-                "knn_pca": recall_pca,
-                "knn_z": recall_z,
-                "knn_delta": recall_z - recall_pca,
-            })
-
-        df = pd.DataFrame(rows).sort_values("knn_delta", ascending=False)
-
-        print("=" * 80)
-        print("PER-NICHE REPORT (sorted by KNN improvement)")
-        print("=" * 80)
-        print(f"{'Niche':<25} {'N':>6} {'#Proto':>6} {'Purity':>7} {'Cover':>6} {'KNN_pca':>8} {'KNN_z':>7} {'Delta':>7}")
-        print("-" * 80)
-        for _, r in df.iterrows():
-            delta_str = f"{r['knn_delta']:+.1%}"
-            print(f"{r['niche']:<25} {r['n_cells']:>6} {r['n_protos']:>6} {r['purity']:>7.1%} {r['coverage']:>6.1%} {r['knn_pca']:>8.1%} {r['knn_z']:>7.1%} {delta_str:>7}")
-        print("-" * 80)
-        # Only average purity over niches with ≥1 proto (same as training log)
-        df_with_protos = df[df['n_protos'] > 0]
-        mean_purity = df_with_protos['purity'].mean() if len(df_with_protos) > 0 else 0
-        print(f"{'MEAN':<25} {'':<6} {df['n_protos'].sum():>6} {mean_purity:>7.1%} {df['coverage'].mean():>6.1%} {df['knn_pca'].mean():>8.1%} {df['knn_z'].mean():>7.1%} {df['knn_delta'].mean():+7.1%}")
-        print("=" * 80)
-
-        return df
 
     def build_data(self):
 
@@ -563,7 +361,7 @@ class SCProtoTrainer(AdoptiveTrainer):
 
         self.optimizer = optimizer
 
-        # ---- LR schedule (warmup → cosine) ----
+        # ---- LR schedule (warmup -> cosine) ----
         total_iters = len(self.train_loader)
 
         warmup_iters = total_iters * self.warmup_epochs
@@ -622,693 +420,1129 @@ class SCProtoTrainer(AdoptiveTrainer):
         #         self.log_hist[k].append(log_dict[k])
         #     print(log_dict)
 
-    def train(self, epochs=None):
-        self.lambda_loss = self.init_lambda_loss()
-        # self.setup_scheduler()
-        self.create_dump_path()
-        self.build_optimizer()
-        cudnn.benchmark = True
-        if epochs is None:
-            epochs = self.pretraining_epochs
-        self.n_epochs = epochs
-        for epoch in range(epochs):
-            logger.info(f"============ Starting epoch {epoch}============")
+    # -- UMAP edge training: setup / epoch / public API ------------------
 
-            if (epoch % self.umap_checkpoint_freq == 10) and (self.wandb_sweep == 0) and not self.debug:
-                self.plot_umap(self.model, self.train_ds.adata, f"train-e{epoch}")
-
-            if (
-                self.queue_length > 0
-                and epoch >= self.epoch_queue_starts
-                and len(self.queue) == 0
-            ):
-                print(f"start using queue at epoch: {epoch}")
-                for ds_id in self.ds_ids:
-                    self.init_queue(ds_id)
-
-            train_meters = self.train_epoch(epoch)
-
-            # Skip test_epoch and quality metrics in debug mode for faster training
-            if self.debug:
-                test_meters = {}
-            elif self.full_dataset_mode == 1:
-                test_meters = {}
-            else:
-                test_meters = self.test_epoch()
-                test_meters = {f"test_{key}": val for key, val in test_meters.items()}
-
-            # Skip expensive per-epoch quality metrics in debug mode
-            if not self.debug:
-                scores = self.encode_adata(self.train_.adata, self.model, z_idx=2)
-                cell_ids = self.train_.adata.obs_names
-                (
-                    train_meters["overal_compactness"],
-                    train_meters["overal_separation"],
-                    train_meters["celltype_purity"],
-                    train_meters["niche_purity"],
-                    train_meters["niche_purity3d"],
-                    train_meters["niche_micro"],
-                    train_meters["niche_macro"],
-                ) = self.calc_mc_quality(cell_ids, scores, "train")
-                ad = self.train_.adata
-                ad.obs["mc"] = scores.argmax(1).detach().cpu().numpy()
-                if "spatial" in ad.obsm:
-                    train_meters["spatial_compactness"] = spatial_compactness(
-                        ad, mc_key="mc", bk=self.dataset.batch_key
-                    ).mean()
-            else:
-                # Quick niche metrics in debug mode
-                (train_meters["niche_micro"], train_meters["niche_macro"],
-                 train_meters["niche_micro_filt"], train_meters["niche_macro_filt"]) = self._quick_niche_metrics()
-
-            # KNN accuracy diagnostic (every 2 epochs)
-            if epoch % 2 == 0 or epoch == epochs - 1:
-                pca_acc, z_acc = self._niche_knn_acc()
-                if pca_acc is not None:
-                    train_meters["knn_pca"] = pca_acc
-                    train_meters["knn_z"] = z_acc
-
-            self.log_wandb_loss(train_meters | test_meters, epoch)
-            self.save_checkpoint(epoch)
-
-            # Print epoch summary for progress tracking
-            nm = train_meters.get('niche_micro_filt') or train_meters.get('niche_micro')
-            nM = train_meters.get('niche_macro_filt') or train_meters.get('niche_macro')
-            nm_str = f"{nm:.3f}" if nm is not None else "-"
-            nM_str = f"{nM:.3f}" if nM is not None else "-"
-            knn_str = ""
-            if "knn_z" in train_meters:
-                knn_str = f" | KNN: {train_meters['knn_z']:.1%} (pca:{train_meters['knn_pca']:.1%})"
-            print(f">>> Epoch {epoch+1}/{epochs} | Loss: {train_meters.get('loss', 0):.4f} | niche_mi: {nm_str} | niche_Ma: {nM_str} | unused: {train_meters.get('proto_unused', 0):.1%}{knn_str}")
-
-        # if self.ft_epochs > 0:
-        #     self.model = self.adapt_model(self.model, self.query.adata, self.ft_epochs)
-        #     self.save_checkpoint(epoch + self.ft_epochs)
-
-        self._total_epochs_trained = getattr(self, '_total_epochs_trained', 0) + epochs
-        return train_meters | test_meters
-
-    def continue_training(self, epochs):
-        """
-        Continue training for additional epochs without resetting optimizer or LR schedule.
-
-        Args:
-            epochs: number of additional epochs to train
-        """
-        if not hasattr(self, 'optimizer') or self.optimizer is None:
-            raise RuntimeError("No optimizer found. Call train() first.")
-
-        start_epoch = getattr(self, '_total_epochs_trained', 0)
-
-        # extend LR schedule if needed
-        total_iters_needed = (start_epoch + epochs) * len(self.train_loader)
-        if len(self.lr_schedule) < total_iters_needed:
-            # extend with final_lr
-            extra = total_iters_needed - len(self.lr_schedule)
-            self.lr_schedule = np.concatenate([
-                self.lr_schedule,
-                np.full(extra, self.final_lr)
-            ])
-
-        self.n_epochs = start_epoch + epochs
-
-        for epoch in range(start_epoch, start_epoch + epochs):
-            logger.info(f"============ Starting epoch {epoch} (continue) ============")
-
-            if (epoch % self.umap_checkpoint_freq == 10) and (self.wandb_sweep == 0) and not self.debug:
-                self.plot_umap(self.model, self.train_ds.adata, f"train-e{epoch}")
-
-            if (
-                self.queue_length > 0
-                and epoch >= self.epoch_queue_starts
-                and len(self.queue) == 0
-            ):
-                print(f"start using queue at epoch: {epoch}")
-                for ds_id in self.ds_ids:
-                    self.init_queue(ds_id)
-
-            train_meters = self.train_epoch(epoch)
-
-            if self.debug:
-                test_meters = {}
-            elif self.full_dataset_mode == 1:
-                test_meters = {}
-            else:
-                test_meters = self.test_epoch()
-                test_meters = {f"test_{key}": val for key, val in test_meters.items()}
-
-            if not self.debug:
-                scores = self.encode_adata(self.train_.adata, self.model, z_idx=2)
-                cell_ids = self.train_.adata.obs_names
-                (
-                    train_meters["overal_compactness"],
-                    train_meters["overal_separation"],
-                    train_meters["celltype_purity"],
-                    train_meters["niche_purity"],
-                    train_meters["niche_purity3d"],
-                    train_meters["niche_micro"],
-                    train_meters["niche_macro"],
-                ) = self.calc_mc_quality(cell_ids, scores, "train")
-                ad = self.train_.adata
-                ad.obs["mc"] = scores.argmax(1).detach().cpu().numpy()
-                if "spatial" in ad.obsm:
-                    train_meters["spatial_compactness"] = spatial_compactness(
-                        ad, mc_key="mc", bk=self.dataset.batch_key
-                    ).mean()
-            else:
-                (train_meters["niche_micro"], train_meters["niche_macro"],
-                 train_meters["niche_micro_filt"], train_meters["niche_macro_filt"]) = self._quick_niche_metrics()
-
-            # KNN accuracy diagnostic (every 2 epochs)
-            if epoch % 2 == 0 or epoch == start_epoch + epochs - 1:
-                pca_acc, z_acc = self._niche_knn_acc()
-                if pca_acc is not None:
-                    train_meters["knn_pca"] = pca_acc
-                    train_meters["knn_z"] = z_acc
-
-            self.log_wandb_loss(train_meters | test_meters, epoch)
-            self.save_checkpoint(epoch)
-
-            nm = train_meters.get('niche_micro_filt') or train_meters.get('niche_micro')
-            nM = train_meters.get('niche_macro_filt') or train_meters.get('niche_macro')
-            nm_str = f"{nm:.3f}" if nm is not None else "-"
-            nM_str = f"{nM:.3f}" if nM is not None else "-"
-            knn_str = ""
-            if "knn_z" in train_meters:
-                knn_str = f" | KNN: {train_meters['knn_z']:.1%} (pca:{train_meters['knn_pca']:.1%})"
-            print(f">>> Epoch {epoch+1}/{start_epoch + epochs} | Loss: {train_meters.get('loss', 0):.4f} | niche_mi: {nm_str} | niche_Ma: {nM_str} | unused: {train_meters.get('proto_unused', 0):.1%}{knn_str}")
-
-        self._total_epochs_trained = start_epoch + epochs
-        return train_meters | test_meters
-
-    def train_umap_edges(self, epochs: int = None, lambda_recon: float = None,
-                         lambda_kl: float = None, verbose: bool = True):
-        """
-        Train encoder using edge-centric parametric UMAP.
-
-        This implements the official UMAP training scheme:
-        - Sample edges (i, j) proportionally to their weight p_ij
-        - For each positive edge, sample K negative edges
-        - Loss = attractive (positives) + repulsive (negatives) + recon + kl
-
-        Args:
-            epochs: Number of training epochs (default: umap_edge_epochs)
-            lambda_recon: Weight for reconstruction loss (default: self.lambda_recon or 0)
-            lambda_kl: Weight for KL loss (default: self.lambda_kl or 0)
-            verbose: Print progress
-
-        Returns:
-            Final training metrics
-        """
+    def _setup_umap_edges(self, epochs: int = None, init_prototypes: bool = True):
+        """Build and cache all objects needed for edge-centric UMAP training."""
         epochs = epochs or getattr(self, 'umap_edge_epochs', 200)
-        lambda_recon = lambda_recon if lambda_recon is not None else getattr(self, 'lambda_recon', 0.0)
-        lambda_kl = lambda_kl if lambda_kl is not None else getattr(self, 'lambda_kl', 0.0)
 
-        # Get affinity matrix
-        if hasattr(self.train_ds, 'aff_raw'):
-            affinity = self.train_ds.aff_raw
-        else:
-            affinity = self.train_ds.aff
+        affinity = self.train_ds.aff_raw if hasattr(self.train_ds, 'aff_raw') else self.train_ds.aff
 
-        # Get data tensor
         adata = self.train_ds.adata
         if hasattr(adata.X, 'toarray'):
             X = torch.tensor(adata.X.toarray(), dtype=torch.float32)
         else:
             X = torch.tensor(adata.X, dtype=torch.float32)
-        X = X.to(self.device)
 
-        # Get UMAP parameters
         min_dist = getattr(self, 'umap_min_dist', 0.5)
         spread = getattr(self, 'umap_spread', 1.0)
         neg_rate = getattr(self, 'umap_neg_rate', 5)
+        umap_similarity = getattr(self, 'umap_similarity', 'embedding')
 
-        print(f"🔄 Starting edge-centric UMAP training")
+        if init_prototypes:
+            self.init_prototypes()
+
+        # Build cell -> ds_id mapping
+        if self.condition_key is not None:
+            batch_labels = self.train_ds.adata.obs[self.condition_key]
+            unique_batches = list(batch_labels.unique())
+            batch_to_id = {b: i for i, b in enumerate(unique_batches)}
+            cell_ds = np.array([batch_to_id[b] for b in batch_labels], dtype=np.int64)
+        else:
+            cell_ds = np.zeros(len(self.train_ds.adata), dtype=np.int64)
+
+        n_ds = len(np.unique(cell_ds))
+
+        # Build one EdgeDataset per ds (edges where head OR tail in ds)
+        # This guarantees every ds contributes to every weight update
+        aff_coo = affinity.tocoo()
+        head_ds = cell_ds[aff_coo.row]
+        tail_ds = cell_ds[aff_coo.col]
+        from scipy.sparse import csr_matrix as _csr
+        edge_datasets, loaders = [], []
+        for ds_id in range(n_ds):
+            mask = (head_ds == ds_id) | (tail_ds == ds_id)
+            ds_aff = _csr(
+                (aff_coo.data[mask], (aff_coo.row[mask], aff_coo.col[mask])),
+                shape=affinity.shape,
+            )
+            ds_ed = EdgeDataset(ds_aff, n_epochs=epochs, negative_sample_rate=neg_rate, cell_ds=cell_ds, neg_ds_id=ds_id)
+            edge_datasets.append(ds_ed)
+            edge_bs = min(self.batch_size, len(ds_ed))
+            loaders.append(DataLoader(
+                ds_ed, batch_size=edge_bs, shuffle=True,
+                collate_fn=edge_collate_fn, num_workers=0, drop_last=False,
+            ))
+
+        loss_fn = ParametricUMAPLoss(min_dist=min_dist, spread=spread, negative_sample_rate=neg_rate)
+
+        if umap_similarity == 'proto':
+            params = list(self.model.scpoli_cvae.parameters()) + list(self.model.prototypes.parameters())
+        else:
+            params = list(self.model.scpoli_cvae.parameters())
+        optimizer = torch.optim.Adam(params, lr=self.base_lr)
+
+        self._umap_state = {
+            'X': X.to(self.device),
+            'edge_datasets': edge_datasets,
+            'loss_fn': loss_fn,
+            'loaders': loaders,
+            'ds_iters': [iter(l) for l in loaders],
+            'optimizer': optimizer,
+            'epoch': 0,
+            'n_ds': n_ds,
+        }
+
+        print(f"Starting edge-centric UMAP training (similarity={umap_similarity})")
         print(f"   min_dist={min_dist}, spread={spread}, neg_rate={neg_rate}")
-        print(f"   lambda_recon={lambda_recon}, lambda_kl={lambda_kl}")
+        print(f"   lambda_umap={getattr(self, 'lambda_umap', 1.0)}, "
+              f"lambda_recon={self.lambda_recon}, lambda_kl={self.lambda_kl}, "
+              f"lambda_proto_recon={self.lambda_proto_recon}, lambda_r1r2={self.lambda_r1r2}")
 
-        # Create edge dataset
-        edge_dataset = EdgeDataset(
-            affinity,
-            n_epochs=epochs,
-            negative_sample_rate=neg_rate,
-        )
+    def _run_umap_epoch(self):
+        """Run a single UMAP edge training epoch. Returns metrics dict."""
+        s = self._umap_state
+        X = s['X']
+        loaders = s['loaders']
+        ds_iters = s['ds_iters']
+        loss_fn = s['loss_fn']
+        optimizer = s['optimizer']
+        n_ds = s['n_ds']
 
-        # Create loss function
-        loss_fn = ParametricUMAPLoss(
-            min_dist=min_dist,
-            spread=spread,
-            negative_sample_rate=neg_rate,
-        )
+        lambda_umap = getattr(self, 'lambda_umap', 1.0)
+        lambda_recon = self.lambda_recon
+        lambda_kl = self.lambda_kl
+        lambda_proto_recon = self.lambda_proto_recon
+        lambda_r1r2 = self.lambda_r1r2
+        use_proto_sim = getattr(self, 'umap_similarity', 'embedding') == 'proto'
+        proto_metric = getattr(self, 'umap_proto_metric', 'dotp')
 
-        # Create data loader
-        loader = DataLoader(
-            edge_dataset,
-            batch_size=self.batch_size,
-            shuffle=True,
-            collate_fn=edge_collate_fn,
-            num_workers=0,
-            drop_last=True,
-        )
-
-        # Get encoder (the scpoli encoder)
-        encoder = self.model.scpoli_cvae
-
-        # Create optimizer
-        optimizer = torch.optim.Adam(encoder.parameters(), lr=self.base_lr)
-
-        # Training loop
-        for epoch in range(epochs):
-            encoder.train()
-            total_metrics = {
-                'loss': 0, 'q_pos': 0, 'q_neg': 0, 'margin': 0,
-                'loss_pos': 0, 'loss_neg': 0, 'recon': 0, 'kl': 0,
-            }
-            n_batches = 0
-
-            for batch in loader:
-                head = batch['head'].to(self.device)
-                tail = batch['tail'].to(self.device)
-                weights = batch['weight'].to(self.device)
-                neg_samples = batch['neg_samples'].to(self.device)
-
-                # Collect unique indices
-                all_idx = torch.cat([head, tail, neg_samples.flatten()])
-                unique_idx = torch.unique(all_idx)
-
-                # Encode unique nodes
-                X_batch = X[unique_idx]
-
-                # Get embeddings through scpoli encoder
-                # scpoli_cvae expects a dict with specific keys
-                # Get batch conditions from the dataset for these indices
-                n_samples = len(X_batch)
-
-                # Get conditions from train_ds (shape: [n_samples, n_conditions])
-                if hasattr(self.train_ds, 'conditions'):
-                    # Use actual conditions from the dataset
-                    batch_cond = self.train_ds.conditions[unique_idx.cpu()].to(self.device)
-                else:
-                    # Fallback: single condition, all zeros
-                    n_conds = len(self.model.scpoli_cvae.n_conditions)
-                    batch_cond = torch.zeros(n_samples, n_conds, dtype=torch.long, device=self.device)
-
-                batch_dict = {
-                    'x': X_batch,
-                    'batch': batch_cond,
-                }
-
-                # Forward through encoder to get latent
-                # encoder_out returns (x, recon_loss, kl_loss)
-                z_unique, recon_loss, kl_loss = self.model.encoder_out(batch_dict)
-
-                # Map indices back
-                idx_map = {int(idx): i for i, idx in enumerate(unique_idx.cpu().numpy())}
-
-                def gather_z(indices):
-                    mapped = torch.tensor([idx_map[int(i)] for i in indices.cpu().numpy()],
-                                          device=self.device, dtype=torch.long)
-                    return z_unique[mapped]
-
-                z_head = gather_z(head)
-                z_tail = gather_z(tail)
-
-                B, K = neg_samples.shape
-                z_neg = gather_z(neg_samples.flatten()).view(B, K, -1)
-
-                # Compute UMAP loss
-                umap_loss, metrics = loss_fn(z_head, z_tail, z_neg, weights)
-
-                # Total loss = UMAP + optional recon + optional KL
-                loss = umap_loss
-                if lambda_recon > 0:
-                    loss = loss + lambda_recon * recon_loss
-                if lambda_kl > 0:
-                    loss = loss + lambda_kl * kl_loss
-
-                # Backprop
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-
-                # Accumulate
-                total_metrics['loss'] += loss.item()
-                total_metrics['recon'] += recon_loss.item()
-                total_metrics['kl'] += kl_loss.item()
-                for k, v in metrics.items():
-                    if k in total_metrics:
-                        total_metrics[k] += v
-                n_batches += 1
-
-            # Average metrics
-            for k in total_metrics:
-                total_metrics[k] /= max(n_batches, 1)
-
-            # Print progress
-            if verbose and ((epoch + 1) % 1 == 0 or epoch == 0):
-                # Also compute KNN accuracy occasionally
-                knn_str = ""
-                if (epoch + 1) % 5 == 0 or epoch == epochs - 1:
-                    pca_acc, z_acc = self._niche_knn_acc()
-                    if pca_acc is not None:
-                        knn_str = f" | KNN: {z_acc:.1%} (pca:{pca_acc:.1%})"
-
-                # Build extra loss string if recon/kl are used
-                extra_str = ""
-                if lambda_recon > 0:
-                    extra_str += f" | recon={total_metrics['recon']:.4f}"
-                if lambda_kl > 0:
-                    extra_str += f" | kl={total_metrics['kl']:.4f}"
-
-                print(f">>> Epoch {epoch+1}/{epochs} | "
-                      f"loss={total_metrics['loss']:.4f} | "
-                      f"q+={total_metrics['q_pos']:.3f} | "
-                      f"q-={total_metrics['q_neg']:.3f} | "
-                      f"margin={total_metrics['margin']:.3f}{extra_str}{knn_str}")
-
-            # Reshuffle dataset
-            edge_dataset.reshuffle()
-
-        return total_metrics
-
-    def init_lambda_loss(self):
-
-        return {
-            key: getattr(self, f"lambda_{key}")
-            for key in self.loss_keys
-            if hasattr(self, f"lambda_{key}")
-        }
-
-    def setup_scheduler(self):
-        self.steps_per_epoch = len(self.train_loader)
-        self.total_steps = self.pretraining_epochs * self.steps_per_epoch
-        self.warmup_steps = int(0.2 * self.total_steps)
-
-    def update_lambda(self, epoch):
-        self.lambda_loss["kl"] = kl_scheduler(
-            epoch, self.kl_start_epoch, self.n_epochs, max_lambda=self.lambda_kl
-        )
-        # self.lambda_loss['recon'] = kl_scheduler(
-        #     epoch, self.recon_start_epoch, self.n_epochs, max_lambda=self.lambda_recon
-        # )
-        # if epoch >= self.recon_start_epoch:
-        #     self.lambda_loss["recon"] = self.lambda_recon
-        # else:
-        #     self.lambda_loss["recon"] = 0
-
-    def train_epoch(self, epoch):
-        self.update_temp_eps(epoch)
-        logger.info(
-            f"epoch {epoch} | temp={self.temperature:.4f}, eps={self.epsilon:.4f}"
-        )
         self.model.train()
-        self.use_the_queue = 0
-
-        meters = {
-            "loss": AverageMeter(),
-            "batch_time": AverageMeter(),
-            "data_time": AverageMeter(),
+        total_metrics = {
+            'loss': 0, 'umap': 0, 'q_pos': 0, 'q_neg': 0, 'margin': 0,
+            'loss_pos': 0, 'loss_neg': 0, 'recon': 0, 'kl': 0,
+            'proto_recon': 0, 'r1r2': 0,
         }
+        n_batches = 0
+        n_iters = max(len(l) for l in loaders)
 
-        end = time.time()
-        ds_assign_cnts = {
-            ds_id: np.zeros(self.nmb_prototypes, dtype=int) for ds_id in self.ds_ids
-        }
-        if self.kl_sched == 1:
-            self.update_lambda(epoch)
-
-        # Use tqdm progress bar in debug mode for visibility
-        loader = tqdm(self.train_loader, desc=f"Epoch {epoch}", disable=not self.debug)
-        for it, inputs in enumerate(loader):
-            meters["data_time"].update(time.time() - end)
-            iteration = epoch * len(self.train_loader) + it
-            self.update_learning_rate(iteration)
-            # self.update_lambda(iteration)
-            # normalize prototypes
+        from tqdm import tqdm
+        for _ in tqdm(range(n_iters), desc='edges'):
             if self.l2norm == 1:
                 with torch.no_grad():
                     self.model.normalize_prototypes()
 
-            bs = inputs["x"].size(0)
-            inputs = {
-                k: inputs[k].transpose(0, 1) for k in inputs.keys()
-            }  # bring dataset in first to calc loss per dataset
+            optimizer.zero_grad()
+            umap_loss = torch.tensor(0.0, device=self.device)
+            metrics = {'q_pos': 0, 'q_neg': 0, 'margin': 0, 'loss_pos': 0, 'loss_neg': 0}
+            proto_recon_loss = torch.tensor(0.0, device=self.device)
+            r1r2_loss = torch.tensor(0.0, device=self.device)
 
-            self.optimizer.zero_grad()
+            # Step 1: collect one batch per ds
+            ds_batches = []
+            for ds_id in range(n_ds):
+                try:
+                    batch = next(ds_iters[ds_id])
+                except StopIteration:
+                    ds_iters[ds_id] = iter(loaders[ds_id])
+                    batch = next(ds_iters[ds_id])
+                ds_batches.append({k: v.to(self.device) for k, v in batch.items()})
 
-            for ds_id in self.ds_ids:
-                loss, meters, assign_cnts = self.calc_ds_loss(
-                    inputs, ds_id, meters, bs, self.train_ds.adata, "train"
-                )
-                ds_assign_cnts[ds_id] += assign_cnts.cpu().numpy()
-                loss.backward()
+            # Step 2: pool all unique nodes across all ds batches — single forward pass
+            all_idx = torch.cat([
+                torch.cat([b['head'], b['tail'], b['neg_samples'].flatten()])
+                for b in ds_batches
+            ])
+            unique_idx = torch.unique(all_idx)
+            X_batch = X[unique_idx]
+            n_samples = len(X_batch)
 
-            self._handle_prototype_freezing(epoch)
-            self.optimizer.step()
-
-            meters["batch_time"].update(time.time() - end)
-            end = time.time()
-
-            # Update tqdm progress bar with loss in debug mode
-            if self.debug:
-                loader.set_postfix(loss=f"{meters['loss'].avg:.4f}")
+            if hasattr(self.train_ds, 'conditions'):
+                batch_cond = self.train_ds.conditions[unique_idx.cpu()].to(self.device)
             else:
-                # Log to wandb every 5 iterations in non-debug mode
-                if it % 5 == 0:
-                    logger.info(
-                        f"Epoch: [{epoch}][{it}/{len(self.train_loader)}] "
-                        f"Loss {meters['loss'].val:.4f} ({meters['loss'].avg:.4f}) "
-                        f"Lr {self.optimizer.param_groups[0]['lr']:.4f}"
-                    )
-                    lr_gn = self.get_lr_grad()
-                    self.log_wandb_loss(lr_gn, epoch)
+                n_conds = len(self.model.scpoli_cvae.n_conditions)
+                batch_cond = torch.zeros(n_samples, n_conds, dtype=torch.long, device=self.device)
 
-        meters = {k: getattr(v, "avg", v) for k, v in meters.items()}
-        all_assign_cnts = sum(ds_assign_cnts[ds_id] for ds_id in ds_assign_cnts)
-        meters["proto_unused"] = (
-            all_assign_cnts == 0
-        ).sum().item() / self.nmb_prototypes
+            z_unique, recon_loss, kl_loss = self.model.encoder_out({'x': X_batch, 'batch': batch_cond})
 
-        # all_assign_cnts: shape [n_prototypes], each value = number of assigned samples
-        p = all_assign_cnts / all_assign_cnts.sum()  # normalize to probabilities
-        entropy = -(p * np.log(np.clip(p, 1e-8, None))).sum()
-        norm_entropy = entropy / torch.log(
-            torch.tensor(len(p), dtype=torch.float)
-        )  # normalized [0,1]
-        meters["proto_utilization"] = norm_entropy.item()
+            # Build global index map once
+            unique_idx_cpu = unique_idx.cpu().numpy()
+            idx_map = {int(idx): i for i, idx in enumerate(unique_idx_cpu)}
 
-        # Skip proto collapse metric in debug mode (matrix multiplication overhead)
-        if not self.debug:
-            protos = F.normalize(self.model.prototypes.weight, dim=1)
-            cos_sim = protos @ protos.T
-            mean_off_diag = (cos_sim.sum() - cos_sim.diag().sum()) / (
-                cos_sim.numel() - protos.size(0)
-            )
-            meters["proto_collapse"] = mean_off_diag.item()
-        meters["lambda_kl"] = self.lambda_loss["kl"]
-        meters["lambda_recon"] = self.lambda_loss["recon"]
-        return meters
+            def _gather(indices):
+                return torch.tensor([idx_map[int(i)] for i in indices.cpu().numpy()],
+                                    device=self.device, dtype=torch.long)
 
-    def calc_ds_loss(self, inputs, ds_id, meters, bs, ad, split):
-        ds_inputs = {k: inputs[k][ds_id] for k in inputs.keys()}
-        metrics, assign_cnts = self._process_batch(ds_inputs, ds_id, ad, split)
-        # averaged = self._average_metrics(metrics)
-        # Update meters
-        for key in metrics:
-            if key not in meters:
-                meters[key] = AverageMeter()
-            value = (
-                metrics[key].item() if hasattr(metrics[key], "item") else metrics[key]
-            )
-            meters[key].update(value, bs)
-        # loss = (
-        #     metrics["swav"] * self.lambda_swav
-        #     + metrics["recon"] * self.lambda_recon
-        #     + metrics["kl"] * self.lambda_kl
-        #     + metrics["kl_balance"] * self.lambda_balance
-        #     + metrics["proto_loss"] * self.lambda_proto
-        #     + metrics["commitment_loss"] * self.lambda_commit
-        #     + metrics["z_norm"] * self.lambda_l2
-        #     + metrics["proto_norm"] * self.lambda_l2
-        # )
-        if hasattr(self, "lambda_loss"):
-            loss = torch.stack(
-                [metrics[k] * self.lambda_loss[k] for k in self.lambda_loss.keys()]
-            ).sum()
-            meters["loss"].update(loss.item(), bs)
-        else:  # when init lambda loss
-            loss = -1
-        return loss, meters, assign_cnts
+            # Compute proto assignments once if needed
+            if use_proto_sim:
+                logits = self.model.prototypes(z_unique)
+                soft_assign = F.softmax(logits / self.epsilon, dim=1)
+                with torch.no_grad():
+                    sa_effk = (1.0 / (soft_assign * soft_assign).sum(dim=1))
+                    total_metrics['effk'] = total_metrics.get('effk', 0) + sa_effk.median().item()
 
-    def _process_batch(self, inputs, ds_id, ad, split):
-        bs = inputs["x"].size(0)
-        inputs = self.dict_to_device(inputs)
-        # inputs = reshape_and_reorder_dict(inputs)
-        B, n_aug = inputs["x"].shape[:2]
-        inputs = {
-            k: t.permute(1, 0, *range(2, t.ndim)).reshape(B * n_aug, *t.shape[2:])
-            for k, t in inputs.items()
+            # Step 3: per-ds loss using slices of shared z_unique
+            for ds_id, batch in enumerate(ds_batches):
+                head = batch['head']; tail = batch['tail']
+                weights = batch['weight']; neg_samples = batch['neg_samples']
+                B, neg_K = neg_samples.shape
+
+                if use_proto_sim:
+                    s_head = soft_assign[_gather(head)]
+                    s_tail = soft_assign[_gather(tail)]
+                    s_neg = soft_assign[_gather(neg_samples.flatten())].view(B, neg_K, -1)
+                    _eps = 1e-4
+                    if proto_metric == 'cosine':
+                        s_head_n = F.normalize(s_head, dim=-1, p=2)
+                        s_tail_n = F.normalize(s_tail, dim=-1, p=2)
+                        s_neg_n = F.normalize(s_neg, dim=-1, p=2)
+                        q_pos = (s_head_n * s_tail_n).sum(dim=-1).clamp(_eps, 1.0 - _eps)
+                        q_neg = (s_head_n.unsqueeze(1) * s_neg_n).sum(dim=-1).clamp(_eps, 1.0 - _eps)
+                    else:
+                        q_pos = (s_head * s_tail).sum(dim=-1).clamp(_eps, 1.0 - _eps)
+                        q_neg = (s_head.unsqueeze(1) * s_neg).sum(dim=-1).clamp(_eps, 1.0 - _eps)
+                    loss_pos = -(weights * torch.log(q_pos)).mean()
+                    loss_neg = -torch.log(1.0 - q_neg).sum(dim=1).mean()
+                    umap_loss_ds = loss_pos + loss_neg
+                    metrics = {
+                        'q_pos': q_pos.mean().item(), 'q_neg': q_neg.mean().item(),
+                        'margin': (q_pos.mean() - q_neg.mean()).item(),
+                        'loss_pos': loss_pos.item(), 'loss_neg': loss_neg.item(),
+                    }
+                else:
+                    z_head = z_unique[_gather(head)]
+                    z_tail = z_unique[_gather(tail)]
+                    z_neg = z_unique[_gather(neg_samples.flatten())].view(B, neg_K, -1)
+                    umap_loss_ds, metrics = loss_fn(z_head, z_tail, z_neg, weights)
+
+                umap_loss = umap_loss + umap_loss_ds
+
+            umap_loss = umap_loss / n_ds
+
+            # Auxiliary losses computed once on the shared batch (not per-ds)
+            if lambda_proto_recon > 0:
+                scores = soft_assign if use_proto_sim else F.softmax(self.model.prototypes(z_unique) / self.epsilon, dim=1)
+                protos = self.model.get_prototypes()
+                K = protos.size(0)
+                n_genes = X_batch.size(1)
+                unique_conds, inverse_idx = torch.unique(batch_cond, dim=0, return_inverse=True)
+                n_unique_conds = unique_conds.size(0)
+                proto_expanded = protos.unsqueeze(0).expand(n_unique_conds, -1, -1).reshape(-1, protos.size(1))
+                cond_expanded = unique_conds.unsqueeze(1).expand(-1, K, -1).reshape(-1, unique_conds.size(1))
+                decoded_all = self.model.decode(proto_expanded, cond_expanded).view(n_unique_conds, K, n_genes)
+                recon_x_agg = torch.zeros(n_samples, n_genes, device=self.device)
+                for c in range(n_unique_conds):
+                    cmask = inverse_idx == c
+                    if cmask.any():
+                        recon_x_agg[cmask] = scores[cmask].detach() @ decoded_all[c]
+                proto_recon_loss = F.mse_loss(recon_x_agg, X_batch, reduction="none").sum(dim=-1).mean()
+
+            if lambda_r1r2 > 0:
+                r1r2_loss = self.calc_r1r2_loss(z_unique)
+
+            loss = lambda_umap * umap_loss
+            if lambda_recon > 0:
+                loss = loss + lambda_recon * recon_loss
+            if lambda_kl > 0:
+                loss = loss + lambda_kl * kl_loss
+            if lambda_proto_recon > 0:
+                loss = loss + lambda_proto_recon * proto_recon_loss
+            if lambda_r1r2 > 0:
+                loss = loss + lambda_r1r2 * r1r2_loss
+
+            loss.backward()
+            optimizer.step()
+
+            total_metrics['loss'] += loss.item()
+            total_metrics['umap'] += umap_loss.item()
+            total_metrics['recon'] += recon_loss.item()
+            total_metrics['kl'] += kl_loss.item()
+            total_metrics['r1r2'] += r1r2_loss.item()
+            total_metrics['proto_recon'] += proto_recon_loss.item()
+            for k, v in metrics.items():
+                if k in total_metrics:
+                    total_metrics[k] += v
+            n_batches += 1
+
+        for k in total_metrics:
+            total_metrics[k] /= max(n_batches, 1)
+
+        for ed in s['edge_datasets']:
+            ed.reshuffle()
+        s['epoch'] += 1
+        return total_metrics
+
+    def _print_umap_epoch(self, epoch, total_epochs, metrics):
+        """Print one line of UMAP training progress."""
+        extra = ""
+        if self.lambda_recon > 0:
+            extra += f" | recon={metrics['recon']:.4f}"
+        if self.lambda_kl > 0:
+            extra += f" | kl={metrics['kl']:.4f}"
+        if self.lambda_proto_recon > 0:
+            extra += f" | proto_recon={metrics['proto_recon']:.4f}"
+        if self.lambda_r1r2 > 0:
+            extra += f" | r1r2={metrics['r1r2']:.4f}"
+        effk_str = f" | effk={metrics['effk']:.1f}" if 'effk' in metrics else ""
+
+        knn_str = ""
+        # if epoch % 5 == 0 or epoch == total_epochs:
+        #     pca_acc, z_acc = self._niche_knn_acc()
+        #     if pca_acc is not None:
+        #         knn_str = f" | KNN: {z_acc:.1%} (pca:{pca_acc:.1%})"
+
+        print(f">>> Epoch {epoch}/{total_epochs} | "
+              f"loss={metrics['loss']:.4f} | "
+              f"q+={metrics['q_pos']:.3f} | "
+              f"q-={metrics['q_neg']:.3f} | "
+              f"margin={metrics['margin']:.3f}{effk_str}{extra}{knn_str}")
+
+    def train_umap_edges(self, epochs: int = None, verbose: bool = True):
+        """Train encoder using edge-centric parametric UMAP (fresh start)."""
+        epochs = epochs or getattr(self, 'pretraining_epochs', 200)
+        self._setup_umap_edges(epochs)
+        metrics = self.continue_train_umap_edges(epochs, verbose)
+        self.save_clusters()
+        return metrics
+
+    def continue_train_umap_edges(self, epochs: int = 50, verbose: bool = True):
+        """Continue UMAP edge training from current model state for more epochs.
+
+        Rebuilds optimizer/loader/edge_dataset if needed (e.g. after code reload),
+        but never touches model weights or prototypes.
+        """
+        if not hasattr(self, '_umap_state'):
+            # Rebuild training objects without reinitializing model/prototypes
+            self._setup_umap_edges(epochs, init_prototypes=False)
+
+        start = self._umap_state['epoch']
+        for i in range(epochs):
+            metrics = self._run_umap_epoch()
+            if verbose:
+                self._print_umap_epoch(start + i + 1, start + epochs, metrics)
+        return metrics
+
+    def save_umap_checkpoint(self, path=None):
+        """Save model + optimizer state so training can resume after Colab restart."""
+        if path is None:
+            path = os.path.join(self.get_dump_path(), 'umap_checkpoint.pth')
+        state = {
+            'model_state_dict': self.model.state_dict(),
+            'epoch': self._umap_state['epoch'] if hasattr(self, '_umap_state') else 0,
+            'optimizer_state_dict': self._umap_state['optimizer'].state_dict() if hasattr(self, '_umap_state') else None,
         }
-        # manifold_keys = ['sigma', '', 'heterogeneity', 'mf_score']
-        manifold_keys = self.train_ds.manifold.keys()
-        manifold_scores = {k: inputs.pop(k, None) for k in manifold_keys}
-        cell_idx = inputs.pop("cell_idx", None).cpu().numpy()
-        cell_ids = [ad.obs.index[i] for i in cell_idx]
-        sigma = inputs.pop("sigma").cpu().numpy() if "sigma" in inputs else None
+        torch.save(state, path)
+        print(f"Saved UMAP checkpoint to {path} (epoch {state['epoch']})")
+        return path
 
-        def sigma_to_eps(sigma, eps_min=0.02, eps_max=0.05):
-            s_lo, s_hi = np.percentile(sigma, [5, 95])
-            s = np.clip(sigma, s_lo, s_hi)
-            s = (s - s_lo) / (s_hi - s_lo)
-            return eps_min + s * (eps_max - eps_min)
+    def load_umap_checkpoint(self, path=None):
+        """Load model weights and rebuild UMAP training state for continue_train_umap_edges.
 
-        if sigma is not None:
-            adoptive_eps = sigma_to_eps(sigma, 0.5 * self.epsilon, self.epsilon)
-        else:
-            adoptive_eps = None
-        sim = inputs.pop("sim", None)
-        # label = inputs.pop(self.dataset.label_key)
-        z, _, scores, recon, proto_recon, propagation_sim, kl, kl_balance = self.model(
-            bs, inputs
-        )
-        (proto_loss, commitment_loss) = propagation_sim
-        # Skip affinity loss if lambda_aff is 0
-        if self.lambda_loss.get("aff", 0) == 0:
-            loss_aff = torch.tensor(0.0, device=scores.device)
-        else:
-            loss_aff = self.calc_aff_loss(scores[:bs], cell_idx[:bs])
-        if self.recon_type == "swapped" or self.recon_type == "hybrid":
-            swapped_recon = self.calc_swapped_recon(z, scores, bs, inputs)
-            if self.recon_type == "swapped":
-                recon = swapped_recon
+        Usage in Colab after restart:
+            t = SCProtoTrainer(dataset=ds, ...)
+            t.setup()
+            t.load_umap_checkpoint()
+            t.continue_train_umap_edges(epochs=50)
+        """
+        if path is None:
+            path = os.path.join(self.get_dump_path(), 'umap_checkpoint.pth')
+        checkpoint = torch.load(path, map_location=self.device)
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.model.to(self.device)
+
+        # Rebuild training objects (dataset, loader, loss_fn, optimizer)
+        self._setup_umap_edges()
+        self._umap_state['epoch'] = checkpoint['epoch']
+
+        if checkpoint.get('optimizer_state_dict') is not None:
+            self._umap_state['optimizer'].load_state_dict(checkpoint['optimizer_state_dict'])
+
+        print(f"Loaded UMAP checkpoint from {path} (resuming from epoch {checkpoint['epoch']})")
+
+    def _log_metric(self, name, value):
+        """Store a scalar or dict metric value in the internal log and flush to disk."""
+        self._metrics_log[name] = value
+        self._save_metrics()
+
+    def _save_metrics(self):
+        """Flush current metrics log to a small JSON file on disk."""
+        import json
+        try:
+            # When running inside _eval_baseline, write to baseline folder
+            if hasattr(self, '_baseline_save_dir'):
+                save_dir = self._baseline_save_dir
             else:
-                recon = 0.8 * recon + 0.2 * swapped_recon
-        z_norm = z.norm(dim=1).mean()
-        proto_norm = self.model.get_prototypes().norm(dim=1).mean()
-        # z, logits, cvae_loss, resp, propagation, sim = self.parse_model_output(outputs)
-        z = z.detach()
-        (
-            swav_loss,
-            p_matched,
-            q_matched,
-            qproto_utilization,
-            p_uncertainty,
-            q_uncertainty,
-            proto_entropy,
-            q_effk,  # ADD
-            p_effk,  # ADD
-        ) = self.compute_swav_loss(
-            scores,
-            z,
-            bs,
-            ds_id,
-            manifold_scores,
-            None,
-            sim=sim,
-            adoptive_eps=adoptive_eps,
+                save_dir = self.get_dump_path()
+            path = os.path.join(save_dir, 'metrics.json')
+            with open(path, 'w') as f:
+                json.dump(self._metrics_log, f, indent=2)
+        except Exception:
+            pass  # don't break metric computation if save fails
+
+    def save_clusters(self, assignments=None, label='proto', path=None):
+        """Save cluster assignments and all accumulated metrics to disk.
+
+        Saves a .npz file with:
+          - assignments: int array (n_cells,)
+          - label: assignment method name
+          - metrics: dict of all scalar metrics recorded so far
+
+        Args:
+            assignments: cluster labels, or None to auto-resolve.
+            label: assignment method name.
+            path: save path. Defaults to <dump_path>/clusters.npz.
+
+        Returns:
+            path where file was saved.
+        """
+        import json
+
+        assignments, label = self._get_assignments(assignments, label)
+
+        if path is None:
+            path = os.path.join(self.get_dump_path(), 'clusters.npz')
+
+        # Use smallest int dtype that fits
+        max_val = int(assignments.max()) if len(assignments) else 0
+        if max_val < 128:
+            dtype = np.int8
+        elif max_val < 32768:
+            dtype = np.int16
+        else:
+            dtype = np.int32
+
+        # Serialise metrics to JSON string (np.savez doesn't handle nested dicts)
+        metrics_json = json.dumps(self._metrics_log)
+
+        np.savez_compressed(
+            path,
+            assignments=assignments.astype(dtype),
+            label=np.array(label),
+            metrics_json=np.array(metrics_json),
         )
-        assign_cnts = get_hard_assign_cnts(scores)
-        max_active = min(scores.size(0), scores.size(1))
+        print(f"Saved clusters ({len(assignments)} cells, label='{label}') "
+              f"and {len(self._metrics_log)} metrics to {path}")
+        return path
 
-        # Skip expensive per-batch quality metrics in debug mode
-        if self.debug:
-            compactness, separation, cp, np2d, np3d = 0, 0, 0, 0, 0
-        else:
-            compactness, separation, cp, np2d, np3d = self.calc_mc_quality(
-                cell_ids, scores, split
-            )
-        # Uniformity loss: encourage uniform prototype usage (anti-collapse)
-        P = F.softmax(scores[:bs] / self.epsilon, dim=1)  # (bs, K)
-        avg_proto_usage = P.mean(dim=0)  # (K,) average assignment per prototype
-        # Maximize entropy of usage distribution = minimize negative entropy
-        uniform_loss = (avg_proto_usage * (avg_proto_usage + 1e-8).log()).sum()  # negative entropy
-        # uniform_loss is negative (entropy is positive), so we ADD it to loss to maximize entropy
+    @staticmethod
+    def load_metrics(path):
+        """Load cluster assignments and metrics saved by save_clusters.
 
-        # R1/R2 loss: proto coverage
-        if self.lambda_loss.get("r1r2", 0) == 0:
-            r1r2_loss = torch.tensor(0.0, device=scores.device)
+        Args:
+            path: path to .npz file saved by save_clusters.
+
+        Returns:
+            dict with 'assignments', 'label', 'metrics'.
+        """
+        import json
+
+        data = np.load(path, allow_pickle=True)
+        metrics = json.loads(str(data['metrics_json']))
+        return {
+            'assignments': data['assignments'],
+            'label': str(data['label']),
+            'metrics': metrics,
+        }
+
+    def _get_assignments(self, assignments=None, label=None):
+        """Resolve cluster assignments and label.
+
+        If assignments is None:
+          - if prototypes were trained (umap_similarity == 'proto'), use argmax
+          - otherwise, run k-means on the embedding space
+
+        Returns:
+            (assignments, label) — numpy int array and string label.
+        """
+        from sklearn.cluster import KMeans
+
+        with torch.no_grad():
+            z = self.encode_adata(self.train_ds.adata, self.model, z_idx=1)
+
+        if assignments is None:
+            proto_trained = getattr(self, 'umap_similarity', 'embedding') == 'proto'
+            protos = self.model.get_prototypes()
+            if proto_trained and protos is not None and protos.shape[0] > 0:
+                scores = self.model.prototypes(z)
+                assignments = scores.argmax(dim=1).cpu().numpy()
+                label = label or 'proto'
+            else:
+                z_np = z.cpu().numpy()
+                K = self.nmb_prototypes
+                km = KMeans(n_clusters=K, n_init=3, random_state=42).fit(z_np)
+                assignments = km.labels_
+                label = label or 'kmeans'
         else:
-            r1r2_loss = self.calc_r1r2_loss(z[:bs])
+            label = label or 'custom'
+
+        return assignments, label
+
+    def clustering_score(self, assignments=None, label='proto'):
+        """Compute weighted same-cluster rate for a given assignment.
+
+        Args:
+            assignments: np.ndarray of integer cluster labels (n_cells,), or None for auto.
+            label: name for this assignment (used in printing).
+
+        Returns:
+            dict with score, expected_random, ratio, per_cluster scores, assignments.
+        """
+        assignments, label = self._get_assignments(assignments, label)
+
+        A = self.train_ds.aff_raw if hasattr(self.train_ds, 'aff_raw') else self.train_ds.aff
+        A_coo = A.tocoo()
+
+        # Weighted same-cluster rate
+        heads, tails, weights = A_coo.row, A_coo.col, A_coo.data.astype(np.float64)
+        same = (assignments[heads] == assignments[tails])
+        score = (weights * same).sum() / weights.sum()
+
+        # Expected random baseline: Sigma_k (n_k / n)^2
+        _, counts = np.unique(assignments, return_counts=True)
+        n = len(assignments)
+        expected = ((counts / n) ** 2).sum()
+
+        # Per-cluster: fraction of member affinity that stays within cluster
+        cluster_ids = np.unique(assignments)
+        per_cluster = {}
+        for c in cluster_ids:
+            mask = assignments[heads] == c
+            if mask.sum() == 0:
+                continue
+            c_weights = weights[mask]
+            c_same = assignments[tails[mask]] == c
+            per_cluster[c] = (c_weights * c_same).sum() / c_weights.sum()
+
+        print(f"[{label}] weighted same-cluster rate: {score:.4f} "
+              f"(random baseline: {expected:.4f}, ratio: {score/expected:.1f}x)")
+
+        self._log_metric('clustering_score', score)
+        self._log_metric('clustering_score/ratio', score / expected)
+        self._log_metric('clustering_score/per_cluster', {int(k): float(v) for k, v in per_cluster.items()})
 
         return {
-            "swav": swav_loss,
-            "recon": recon,
-            "proto_recon": proto_recon,
-            "kl": kl,
-            "kl_balance": kl_balance,
-            "proto": proto_loss,
-            "commit": commitment_loss,
-            "p_matched": p_matched,
-            "q_matched": q_matched,
-            "z_norm": z_norm,
-            "proto_norm": proto_norm,
-            "pproto_utilization": (assign_cnts != 0).sum().item() / max_active,
-            "qproto_utilization": qproto_utilization,
-            "p_uncertainty": p_uncertainty,
-            "q_uncertainty": q_uncertainty,
-            "compactness": compactness,
-            "separation": separation,
-            "proto_entropy": proto_entropy,
-            "aff": loss_aff,
-            "q_effk": q_effk,
-            "p_effk": p_effk,
-            "uniform": uniform_loss,
-            "r1r2": r1r2_loss,
-        }, assign_cnts
+            'score': score,
+            'expected_random': expected,
+            'ratio': score / expected,
+            'per_cluster': per_cluster,
+            'assignments': assignments,
+            'label': label,
+        }
 
-    def calc_aff_loss(self, scores, cell_idx):
+    def modularity(self, assignments=None, label='proto'):
+        """Compute weighted Newman modularity for a given assignment.
+
+        Q = (1/2m) * sum_k [ e_k - d_k^2 / (2m) ]
+
+        where e_k = sum of edge weights within cluster k,
+              d_k = sum of degrees of nodes in cluster k,
+              2m  = total edge weight.
+
+        Args:
+            assignments: np.ndarray of integer cluster labels (n_cells,), or None for auto.
+            label: name for this assignment (used in printing).
+
+        Returns:
+            dict with modularity, assignments, label, per_cluster_contribution.
         """
-        Binary contrastive affinity loss.
+        import scipy.sparse as sp
 
-        - Positive pairs (A > 0): maximize S → pull to same proto
-        - Negative pairs (A = 0): minimize S → push to diff proto
+        assignments, label = self._get_assignments(assignments, label)
+
+        A = self.train_ds.aff_raw if hasattr(self.train_ds, 'aff_raw') else self.train_ds.aff
+        A = sp.csr_matrix(A)
+        A = (A + A.T) / 2
+
+        # Degree vector and total weight
+        degrees = np.array(A.sum(axis=1)).ravel()
+        two_m = degrees.sum()
+
+        if two_m == 0:
+            print(f"[{label}] weighted modularity: 0.0000 (no edges)")
+            return {
+                'modularity': 0.0,
+                'assignments': assignments,
+                'label': label,
+                'per_cluster_contribution': {},
+            }
+
+        # Per-cluster modularity contribution
+        cluster_ids = np.unique(assignments)
+        per_cluster = {}
+        Q = 0.0
+        for c in cluster_ids:
+            mask = (assignments == c)
+            # e_k: sum of edge weights within cluster k (both directions counted)
+            A_sub = A[mask][:, mask]
+            e_k = A_sub.sum()
+            # d_k: sum of degrees of nodes in cluster k
+            d_k = degrees[mask].sum()
+            contrib = (e_k - d_k * d_k / two_m) / two_m
+            per_cluster[int(c)] = float(contrib)
+            Q += contrib
+
+        Q = float(Q)
+        print(f"[{label}] weighted modularity: {Q:.4f}")
+
+        self._log_metric('modularity', Q)
+        self._log_metric('modularity/per_cluster', per_cluster)
+
+        return {
+            'modularity': Q,
+            'assignments': assignments,
+            'label': label,
+            'per_cluster_contribution': per_cluster,
+        }
+
+    def ncut(self, assignments=None, label='proto'):
+        """Compute weighted normalized cut for a given assignment.
+
+        NCut = sum_k  cut(C_k, V\\C_k) / vol(C_k)
+
+        where cut(C_k, V\\C_k) = sum of edge weights crossing cluster k,
+              vol(C_k)          = sum of degrees of nodes in cluster k.
+
+        Lower is better.
+
+        Args:
+            assignments: np.ndarray of integer cluster labels (n_cells,), or None for auto.
+            label: name for this assignment (used in printing).
+
+        Returns:
+            dict with ncut, assignments, label, per_cluster_contribution.
         """
-        if torch.is_tensor(cell_idx):
-            cell_idx = cell_idx.detach().cpu().numpy()
-        cell_idx = np.asarray(cell_idx, dtype=np.int64)
+        import scipy.sparse as sp
 
-        # Soft assignments
-        P = torch.softmax(scores / self.epsilon, dim=1)
-        S = P @ P.T  # predicted similarity (0-1)
+        assignments, label = self._get_assignments(assignments, label)
 
-        # Get affinity submatrix for this batch
-        A = self.train_ds.aff[cell_idx][:, cell_idx]
-        A = A.maximum(A.T)  # symmetrize
-        A = torch.as_tensor(A.toarray(), device=S.device, dtype=S.dtype)
+        A = self.train_ds.aff_raw if hasattr(self.train_ds, 'aff_raw') else self.train_ds.aff
+        A = sp.csr_matrix(A)
+        # Symmetrise — NCut formula assumes undirected graph
+        A = (A + A.T) / 2
 
-        # Mask diagonal
-        mask = ~torch.eye(S.size(0), device=S.device, dtype=torch.bool)
-        S_masked = S[mask]
-        A_masked = A[mask]
+        degrees = np.array(A.sum(axis=1)).ravel()
 
-        # Binary masks
-        pos_mask = A_masked > 0  # connected pairs (same niche)
-        neg_mask = A_masked == 0  # not connected
+        cluster_ids = np.unique(assignments)
+        per_cluster = {}
+        ncut_val = 0.0
+        for c in cluster_ids:
+            mask = (assignments == c)
+            vol_k = degrees[mask].sum()
+            if vol_k == 0:
+                continue
+            # Intra-cluster edge weight
+            e_k = A[mask][:, mask].sum()
+            # cut = vol_k - e_k  (edges leaving cluster = total degree - internal edges)
+            cut_k = vol_k - e_k
+            contrib = cut_k / vol_k
+            per_cluster[int(c)] = float(contrib)
+            ncut_val += contrib
 
-        pos_loss = torch.tensor(0.0, device=S.device)
-        neg_loss = torch.tensor(0.0, device=S.device)
+        ncut_val = float(ncut_val)
+        print(f"[{label}] weighted normalized cut: {ncut_val:.4f}")
 
-        # Positive: maximize S (pull same-niche together)
-        if pos_mask.sum() > 0:
-            pos_loss = -torch.log(S_masked[pos_mask] + 1e-8).mean()
+        self._log_metric('ncut', ncut_val)
+        self._log_metric('ncut/per_cluster', per_cluster)
 
-        # Negative: minimize S (push diff-niche apart)
-        if neg_mask.sum() > 0:
-            neg_loss = -torch.log(1 - S_masked[neg_mask] + 1e-8).mean()
+        return {
+            'ncut': ncut_val,
+            'assignments': assignments,
+            'label': label,
+            'per_cluster_contribution': per_cluster,
+        }
 
-        # two_sided=1: both, two_sided=0: neg only
-        if self.two_sided == 1:
-            return pos_loss + neg_loss
+    def metacell_f1(self, assignments=None, label='proto'):
+        """Compute F1 score treating clusters as metacells with majority-vote labels.
+
+        Each cluster is assigned the majority ground-truth label of its member
+        cells. Every cell then inherits its cluster's majority label as its
+        prediction. F1 is computed between ground-truth and predicted labels.
+
+        Evaluates on each available label key:
+          - self.dataset.label_key (e.g. "celltype", "final_annotation")
+          - "niches_2D" (if present in obs)
+
+        Args:
+            assignments: np.ndarray of integer cluster labels (n_cells,), or None for auto.
+            label: name for this assignment (used in printing).
+
+        Returns:
+            dict with label, assignments, and results per label key containing
+            per_class_f1, macro_f1, weighted_f1.
+        """
+        from sklearn.metrics import f1_score
+
+        assignments, label = self._get_assignments(assignments, label)
+        obs = self.train_ds.adata.obs
+
+        # Gather label keys to evaluate
+        keys_to_eval = []
+        lk = self.dataset.label_key
+        if lk in obs.columns:
+            keys_to_eval.append(lk)
+        if "niches_2D" in obs.columns:
+            keys_to_eval.append("niches_2D")
+
+        if not keys_to_eval:
+            print(f"[{label}] metacell_f1: no label keys found in obs "
+                  f"(checked '{lk}', 'niches_2D')")
+            return {'label': label, 'assignments': assignments, 'results': {}}
+
+        results = {}
+        for key in keys_to_eval:
+            gt = obs[key].values
+            cluster_ids = np.unique(assignments)
+
+            # Majority-vote label per cluster
+            cluster_label = {}
+            for c in cluster_ids:
+                member_labels = gt[assignments == c]
+                vals, counts = np.unique(member_labels, return_counts=True)
+                cluster_label[c] = vals[counts.argmax()]
+
+            # Predicted label for each cell = its cluster's majority label
+            pred = np.array([cluster_label[c] for c in assignments])
+
+            # Unique classes present in ground truth
+            classes = np.unique(gt)
+
+            per_class = {}
+            f1_per = f1_score(gt, pred, labels=classes, average=None, zero_division=0)
+            for cls, f in zip(classes, f1_per):
+                per_class[cls] = float(f)
+
+            macro = float(f1_score(gt, pred, labels=classes, average='macro', zero_division=0))
+            weighted = float(f1_score(gt, pred, labels=classes, average='weighted', zero_division=0))
+
+            results[key] = {
+                'per_class_f1': per_class,
+                'macro_f1': macro,
+                'weighted_f1': weighted,
+            }
+
+            self._log_metric(f'f1_macro/{key}', macro)
+            self._log_metric(f'f1_weighted/{key}', weighted)
+            self._log_metric(f'f1_per_class/{key}', {str(k): float(v) for k, v in per_class.items()})
+
+            print(f"[{label} | {key}] macro_f1: {macro:.4f}  weighted_f1: {weighted:.4f}")
+
+        return {
+            'label': label,
+            'assignments': assignments,
+            'results': results,
+        }
+
+    def spectral_assignments(self, n_clusters=None):
+        """Run spectral clustering on the affinity graph.
+
+        Args:
+            n_clusters: number of clusters. Defaults to self.nmb_prototypes.
+
+        Returns:
+            np.ndarray of integer cluster labels (n_cells,).
+        """
+        from sklearn.cluster import SpectralClustering
+        import scipy.sparse as sp
+
+        if n_clusters is None:
+            n_clusters = self.nmb_prototypes
+
+        A = self.train_ds.aff_raw if hasattr(self.train_ds, 'aff_raw') else self.train_ds.aff
+        A = sp.csr_matrix(A)
+
+        # Symmetrise just in case
+        A = (A + A.T) / 2
+
+        sc = SpectralClustering(
+            n_clusters=n_clusters,
+            affinity='precomputed',
+            assign_labels='kmeans',
+            random_state=42,
+            n_init=3,
+        )
+        return sc.fit_predict(A)
+
+    def _run_metrics(self, assignments, label):
+        """Run all four metrics on given assignments. Returns results dict."""
+        cs = self.clustering_score(assignments=assignments, label=label)
+        mod = self.modularity(assignments=assignments, label=label)
+        nc = self.ncut(assignments=assignments, label=label)
+        f1 = self.metacell_f1(assignments=assignments, label=label)
+        return {
+            'clustering_score': cs,
+            'modularity': mod,
+            'ncut': nc,
+            'metacell_f1': f1,
+        }
+
+    def eval_all(self, assignments=None, label=None):
+        """Run all metrics, save clusters and metrics to disk.
+
+        Args:
+            assignments: cluster labels, or None for auto (proto/kmeans).
+            label: name for the primary assignment. Auto-detected if None.
+
+        Returns:
+            dict with clustering_score, modularity, ncut, metacell_f1,
+            assignments, label.
+        """
+        assignments, label = self._get_assignments(assignments, label)
+
+        # Save model info for comparison tables
+        self._log_metric('_info/umap_similarity', getattr(self, 'umap_similarity', 'embedding'))
+        self._log_metric('_info/assignment_method', label)
+        self._log_metric('_info/n_clusters', int(len(np.unique(assignments))))
+
+        results = self._run_metrics(assignments, label)
+
+        self.save_clusters(assignments=assignments, label=label)
+
+        return {
+            **results,
+            'assignments': assignments,
+            'label': label,
+        }
+
+    def _eval_baseline(self, assignments, name, n_clusters):
+        """Evaluate a baseline and save to its own folder under get_save_dir().
+
+        Args:
+            assignments: np.ndarray of integer cluster labels.
+            name: baseline name (used as folder name and label).
+            n_clusters: number of clusters (for info logging).
+
+        Returns:
+            dict of metric results.
+        """
+        import json
+
+        save_dir = os.path.join(self.get_save_dir(), name)
+        os.makedirs(save_dir, exist_ok=True)
+
+        # Swap metrics log AND disable auto-flush to model's folder
+        orig_log = self._metrics_log
+        self._metrics_log = {}
+        self._baseline_save_dir = save_dir  # redirect _save_metrics
+
+        self._log_metric('_info/assignment_method', name)
+        self._log_metric('_info/n_clusters', int(n_clusters))
+
+        results = self._run_metrics(assignments, name)
+
+        # Write clusters.npz
+        max_val = int(assignments.max()) if len(assignments) else 0
+        dtype = np.int8 if max_val < 128 else (np.int16 if max_val < 32768 else np.int32)
+        np.savez_compressed(
+            os.path.join(save_dir, 'clusters.npz'),
+            assignments=assignments.astype(dtype),
+            label=np.array(name),
+            metrics_json=np.array(json.dumps(self._metrics_log)),
+        )
+
+        print(f"Saved {name} baseline to {save_dir}")
+
+        # Restore
+        del self._baseline_save_dir
+        self._metrics_log = orig_log
+        return results
+
+    def eval_spectral(self, n_clusters=None):
+        """Evaluate spectral clustering baseline and save to its own folder.
+
+        Args:
+            n_clusters: number of clusters. Defaults to self.nmb_prototypes.
+
+        Returns:
+            dict of metric results.
+        """
+        if n_clusters is None:
+            n_clusters = self.nmb_prototypes
+        assignments = self.spectral_assignments(n_clusters)
+        return self._eval_baseline(assignments, f'spectral_K{n_clusters}', n_clusters)
+
+    def eval_seacells(self, n_clusters=None, max_iter=100):
+        """Run SEACells archetypal analysis on our affinity and evaluate.
+
+        Steps:
+          1. Load affinity matrix, cast to symmetric CSR kernel
+          2. Initialize SEACells model + archetypes
+          3. Run archetypal analysis (fit)
+          4. Extract hard assignments
+          5. Save clustering + compute metrics for comparison
+
+        Args:
+            n_clusters: number of archetypes. Defaults to self.nmb_prototypes.
+            max_iter: max fitting iterations.
+
+        Returns:
+            dict of metric results.
+        """
+        import SEACells.core
+        import scipy.sparse as sp
+
+        if n_clusters is None:
+            n_clusters = self.nmb_prototypes
+
+        # 1. Load affinity, cast to symmetric kernel
+        A = self.train_ds.aff_raw if hasattr(self.train_ds, 'aff_raw') else self.train_ds.aff
+        K = sp.csr_matrix(A)
+        K = (K + K.T) / 2
+
+        # 2. Init model with our kernel
+        ad = self.train_ds.adata
+        model = SEACells.core.SEACells(
+            ad,
+            build_kernel_on='X_pca',  # ignored when precomputed
+            n_SEACells=n_clusters,
+            use_gpu=False,
+            verbose=True,
+        )
+        model.add_precomputed_kernel_matrix(K)
+
+        # 3. Run archetypal analysis — random init (skip PCA-based waypoints)
+        init_idx = np.random.choice(K.shape[0], n_clusters, replace=False)
+        model.fit(max_iter=max_iter, initial_archetypes=init_idx)
+
+        # 4. Hard assignments (A_: shape k x n → argmax per cell)
+        assignments = np.array(model.A_.argmax(axis=0)).ravel()
+        n_unique = len(np.unique(assignments))
+        print(f"SEACells: {n_unique} unique clusters from {n_clusters} archetypes, "
+              f"A_ shape={model.A_.shape}, RSS={getattr(model, 'RSS_iters', ['?'])[-1]}")
+
+        # 5. Save + metrics
+        return self._eval_baseline(assignments, f'seacells_K{n_clusters}', n_clusters)
+
+    def eval_seacells_native(self, n_clusters=None, n_waypoint_eigs=10, max_iter=100):
+        """Run SEACells with its own affinity computation (native mode).
+
+        Unlike eval_seacells which uses our precomputed affinity, this runs
+        SEACells end-to-end with its own kernel built from X_pca.
+
+        Args:
+            n_clusters: number of archetypes. Defaults to self.nmb_prototypes.
+            n_waypoint_eigs: number of eigenvectors for waypoint initialization.
+            max_iter: max fitting iterations.
+
+        Returns:
+            dict of metric results.
+        """
+        import SEACells.core
+        import scanpy as sc
+
+        if n_clusters is None:
+            n_clusters = self.nmb_prototypes
+
+        ad = self.train_ds.adata.copy()
+
+        # Ensure PCA exists
+        if 'X_pca' not in ad.obsm:
+            print("Computing PCA for SEACells...")
+            sc.pp.pca(ad, n_comps=50)
+
+        # Build SEACells model with its own kernel
+        model = SEACells.core.SEACells(
+            ad,
+            build_kernel_on='X_pca',
+            n_SEACells=n_clusters,
+            n_waypoint_eigs=n_waypoint_eigs,
+            use_gpu=False,
+            verbose=True,
+        )
+
+        # Build kernel (SEACells native)
+        print("Building SEACells kernel...")
+        model.construct_kernel_matrix()
+
+        # Initialize archetypes
+        print("Initializing archetypes...")
+        model.initialize_archetypes()
+
+        # Fit
+        print(f"Fitting SEACells (max_iter={max_iter})...")
+        model.fit(max_iter=max_iter)
+
+        # Hard assignments
+        assignments = np.array(model.A_.argmax(axis=0)).ravel()
+        n_unique = len(np.unique(assignments))
+        print(f"SEACells native: {n_unique} unique clusters from {n_clusters} archetypes")
+
+        # Save + metrics
+        return self._eval_baseline(assignments, f'seacells_native_K{n_clusters}', n_clusters)
+
+    def compare_runs(self, base_dir=None):
+        """Auto-discover and compare metrics from all model runs in a base directory.
+
+        Scans every subdirectory of base_dir for metrics.json or clusters.npz.
+        Only loads runs that have saved metrics. Model folder names are
+        auto-shortened by stripping the longest common prefix so only the
+        differing parts are shown.
+
+        Args:
+            base_dir: parent directory containing one folder per run.
+                      Defaults to self.get_save_dir() (e.g. MODEL_DIR/<dataset_id>/).
+
+        Returns:
+            (df, all_metrics) — pandas DataFrame of scalar metrics + info,
+            and full metrics dict.
+        """
+        import json
+        import pandas as pd
+
+        if base_dir is None:
+            base_dir = self.get_save_dir()
+
+        # Auto-discover runs
+        all_metrics = {}
+        for entry in sorted(os.listdir(base_dir)):
+            run_dir = os.path.join(base_dir, entry)
+            if not os.path.isdir(run_dir):
+                continue
+            json_path = os.path.join(run_dir, 'metrics.json')
+            npz_path = os.path.join(run_dir, 'clusters.npz')
+            if os.path.exists(json_path):
+                with open(json_path) as f:
+                    all_metrics[entry] = json.load(f)
+            elif os.path.exists(npz_path):
+                data = np.load(npz_path, allow_pickle=True)
+                all_metrics[entry] = json.loads(str(data['metrics_json']))
+
+        if not all_metrics:
+            print(f"No runs with metrics found in {base_dir}")
+            return None, {}
+
+        # Auto-shorten names: strip longest common prefix up to last separator
+        full_names = list(all_metrics.keys())
+        if len(full_names) > 1:
+            prefix = os.path.commonprefix(full_names)
+            # Trim to last underscore/hyphen so we don't cut mid-word
+            for sep in ('_', '-'):
+                idx = prefix.rfind(sep)
+                if idx > 0:
+                    prefix = prefix[:idx + 1]
+                    break
+            short_names = [n[len(prefix):] or n for n in full_names]
         else:
-            return neg_loss
+            short_names = full_names
+        name_map = dict(zip(full_names, short_names))
+
+        print(f"Found {len(all_metrics)} runs in {base_dir}")
+
+        # Collect scalar metrics, per-cluster dicts, and info fields
+        scalar_keys = set()
+        per_cluster_keys = set()
+        info_keys = set()
+        for m in all_metrics.values():
+            for k, v in m.items():
+                if k.startswith('_info/'):
+                    info_keys.add(k)
+                elif isinstance(v, (int, float)):
+                    scalar_keys.add(k)
+                elif isinstance(v, dict):
+                    per_cluster_keys.add(k)
+        scalar_keys = sorted(scalar_keys)
+        per_cluster_keys = sorted(per_cluster_keys)
+        info_keys = sorted(info_keys)
+
+        # --- Build DataFrame ---
+        rows = {}
+        for full, short in name_map.items():
+            row = {}
+            for k in info_keys:
+                row[k.replace('_info/', '')] = all_metrics[full].get(k, '')
+            for k in scalar_keys:
+                v = all_metrics[full].get(k)
+                row[k] = v if isinstance(v, (int, float)) else None
+            rows[short] = row
+        df = pd.DataFrame(rows).T
+        df.index.name = 'run'
+
+        return df, all_metrics
+
+    def compare_clusterings(self, assignments_dict=None, figsize=(14, 4)):
+        """Compare clustering quality across methods.
+
+        Args:
+            assignments_dict: dict of {name: np.ndarray} cluster assignments.
+                If None, compares proto assignments vs k-means on embeddings.
+            figsize: figure size.
+
+        Returns:
+            dict of results per method, and the figure.
+        """
+        import matplotlib.pyplot as plt
+
+        if assignments_dict is None:
+            # Auto: proto vs kmeans
+            from sklearn.cluster import KMeans
+            with torch.no_grad():
+                z = self.encode_adata(self.train_ds.adata, self.model, z_idx=1)
+            z_np = z.cpu().numpy()
+
+            # Proto assignments
+            scores = self.model.prototypes(z)
+            proto_assign = scores.argmax(dim=1).cpu().numpy()
+
+            # K-means on same embeddings
+            K = self.nmb_prototypes
+            km = KMeans(n_clusters=K, n_init=3, random_state=42).fit(z_np)
+
+            assignments_dict = {
+                'proto': proto_assign,
+                'kmeans': km.labels_,
+            }
+
+        results = {}
+        for name, assigns in assignments_dict.items():
+            results[name] = self.clustering_score(assigns, label=name)
+
+        # Plot
+        names = list(results.keys())
+        fig, axes = plt.subplots(1, 3, figsize=figsize)
+
+        # Panel 1: overall score bar
+        scores = [results[n]['score'] for n in names]
+        baselines = [results[n]['expected_random'] for n in names]
+        x = np.arange(len(names))
+        axes[0].bar(x, scores, alpha=0.8, label='score')
+        axes[0].bar(x, baselines, alpha=0.3, color='gray', label='random baseline')
+        axes[0].set_xticks(x)
+        axes[0].set_xticklabels(names)
+        axes[0].set_ylabel('weighted same-cluster rate')
+        axes[0].set_title('Overall score')
+        axes[0].legend(fontsize=8)
+
+        # Panel 2: box plot of per-cluster intra-affinity
+        box_data = []
+        box_labels = []
+        for n in names:
+            vals = list(results[n]['per_cluster'].values())
+            box_data.append(vals)
+            box_labels.append(n)
+        axes[1].boxplot(box_data, labels=box_labels)
+        axes[1].set_ylabel('intra-cluster affinity fraction')
+        axes[1].set_title('Per-cluster score')
+
+        # Panel 3: ratio bar
+        ratios = [results[n]['ratio'] for n in names]
+        axes[2].bar(x, ratios, alpha=0.8, color='steelblue')
+        axes[2].set_xticks(x)
+        axes[2].set_xticklabels(names)
+        axes[2].set_ylabel('score / random baseline')
+        axes[2].set_title('Ratio (higher = better)')
+        axes[2].axhline(1.0, color='gray', ls='--', lw=0.8)
+
+        fig.tight_layout()
+        plt.show()
+
+        return results, fig
 
     def calc_r1r2_loss(self, z):
         """
         Li et al. style R1/R2 prototype coverage losses.
         Uses scores (same as assignment) to ensure consistency.
 
-        R1: each proto should be "best" for at least 1 cell → move proto
-        R2: each cell should have high score for at least 1 proto → move encoder
+        R1: each proto should be "best" for at least 1 cell -> move proto
+        R2: each cell should have high score for at least 1 proto -> move encoder
 
         Ensures: no orphan protos, no uncovered cells.
         """
@@ -1317,7 +1551,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         # R1: move protos toward cells (detach z)
         # Use same scoring as assignment
         scores_r1 = self.model.proto_soft_assignments(z.detach())  # (B, K)
-        r1 = -scores_r1.max(dim=0).values.mean()  # max score per proto → minimize neg
+        r1 = -scores_r1.max(dim=0).values.mean()  # max score per proto -> minimize neg
 
         # R2: move cells toward protos (detach protos)
         # Recompute scores with detached protos
@@ -1331,344 +1565,1284 @@ class SCProtoTrainer(AdoptiveTrainer):
             scores_r2 = z @ protos_detached.T
         else:  # fallback to negative euclidean
             scores_r2 = -torch.cdist(z, protos_detached, p=2)
-        r2 = -scores_r2.max(dim=1).values.mean()  # max score per cell → minimize neg
+        r2 = -scores_r2.max(dim=1).values.mean()  # max score per cell -> minimize neg
 
         return r1 + r2
 
-    def calc_swapped_recon(self, z, scores, bs, inputs):
-        loss = 0
+    @torch.no_grad()
+    def _sample_edges(self, n_edges=10000):
+        """Sample positive edges and negative pairs, return indices and weights."""
+        aff = self.train_ds.aff_raw if hasattr(self.train_ds, 'aff_raw') else self.train_ds.aff
+        coo = aff.tocoo()
+        heads, tails, weights = coo.row, coo.col, coo.data.astype(np.float64)
+        n = min(n_edges, len(heads))
+        idx = np.random.choice(len(heads), size=n, replace=False)
+        neg_tails = np.random.randint(0, aff.shape[0], size=n)
+        return heads[idx], tails[idx], weights[idx], neg_tails
 
-        for view_id in self.views_for_assign:
-            view_scores = scores[bs * view_id : bs * (view_id + 1)].detach()
-            view_codes = view_scores.argmax(dim=1)
+    @torch.no_grad()
+    def plot_p_distribution(self, n_edges=10000, bins=80, figsize=(7, 4)):
+        """Plot p (input-space affinity weight) distribution for sampled edges."""
+        import matplotlib.pyplot as plt
+        heads, tails, weights, _ = self._sample_edges(n_edges)
 
-            # calc recon loss by closet proto to pos pairs
-            subloss = 0
-            aug_view_ids = np.delete(np.arange(self.nmb_views), view_id)
-            for v in aug_view_ids:
-                aug_z = z[bs * v : bs * (v + 1)]
-                aug_inputs = {k: inputs[k][bs * v : bs * (v + 1)] for k in inputs}
-                recon_loss, _, _ = self.model.quantized_recon_step(
-                    aug_z, view_codes, **aug_inputs
-                )
-                subloss += recon_loss
+        fig, ax = plt.subplots(figsize=figsize)
+        ax.hist(weights, bins=bins, alpha=0.7, density=True, edgecolor='black', linewidth=0.5)
+        ax.set_xlabel('p (affinity weight)')
+        ax.set_ylabel('density')
+        ax.set_title(f'p distribution (input space) — {len(weights)} edges')
+        ax.axvline(np.median(weights), color='red', ls='--', label=f'median={np.median(weights):.4f}')
+        ax.legend()
+        plt.tight_layout()
+        plt.show()
+        return fig
 
-            loss += subloss / len(aug_view_ids)
-        return loss / len(self.views_for_assign)
+    @torch.no_grad()
+    def plot_q_distribution(self, n_edges=10000, bins=80, figsize=(10, 4)):
+        """Plot q (latent-space similarity) for positive and negative pairs."""
+        import matplotlib.pyplot as plt
 
-    def parse_model_output(self, outputs):
-        if self.model_type == "gm":
-            z_swav, _, logits, cvae_loss, (propagation, sim), resp = outputs
-            propagation, sim = 0, 0
+        heads, tails, weights, neg_tails = self._sample_edges(n_edges)
+
+        # Build X tensor if _umap_state not available
+        if hasattr(self, '_umap_state'):
+            X = self._umap_state['X']
+            loss_fn = self._umap_state['loss_fn']
         else:
-            z_swav, _, logits, cvae_loss, (propagation, sim) = outputs
-            resp = None
+            adata = self.train_ds.adata
+            if hasattr(adata.X, 'toarray'):
+                X = torch.tensor(adata.X.toarray(), dtype=torch.float32).to(self.device)
+            else:
+                X = torch.tensor(adata.X, dtype=torch.float32).to(self.device)
+            min_dist = getattr(self, 'umap_min_dist', 0.5)
+            spread = getattr(self, 'umap_spread', 1.0)
+            neg_rate = getattr(self, 'umap_neg_rate', 5)
+            loss_fn = ParametricUMAPLoss(min_dist=min_dist, spread=spread, negative_sample_rate=neg_rate)
 
-        return z_swav, logits, cvae_loss, resp, propagation, sim
+        use_proto_sim = getattr(self, 'umap_similarity', 'embedding') == 'proto'
+        proto_metric = getattr(self, 'umap_proto_metric', 'dotp')
 
-    def compute_swav_loss(
-        self,
-        scores,
-        z,
-        bs,
-        ds_id,
-        manifold_scores=None,
-        resp=None,
-        sim=None,
-        adoptive_eps=None,
-    ):
-        if sim is None or self.weighted_kl == 0:
-            sim = torch.ones(z.size(0), device=z.device, dtype=z.dtype)
+        all_idx = np.unique(np.concatenate([heads, tails, neg_tails]))
+        X_batch = X[all_idx]
 
-        (
-            loss,
-            p_matched,
-            q_matched,
-            p_uncertainty,
-            q_uncertainty,
-            qproto_utilization,
-            proto_entropy,
-        ) = (0, 0, 0, 0, 0, 0, 0)
-        q_effk, p_effk = 0, 0
-        # each crop mean each augmentation, just caluclate q and loss for first crops_for_assign
-        for view_idx, view_id in enumerate(self.views_for_assign):
-            with torch.no_grad():
-                # outputs for 1 batch of data, [aug1s1, a1s2, a1s3, .., a1sb]
-                view_scores = scores[bs * view_id : bs * (view_id + 1)].detach()
-                # print(f'scores min, max: {view_scores.min()}, {view_scores.max()}')
-                # with torch.no_grad(): not nessecary because both funcion has no grad decorator
-                sinkhorn_input = self.prepare_sinkhorn_input(
-                    view_idx, z, view_id, bs, view_scores, ds_id
-                )
-                if self.cell_w_mode != "uniform":
-                    cell_weights = manifold_scores[self.cell_w_mode][
-                        bs * view_id : bs * (view_id + 1)
-                    ]
-                else:
-                    cell_weights = None  # uniform
-                if self.sinkhorn_iterations == 0:
-                    if adoptive_eps is not None:
-                        eps = torch.as_tensor(
-                            adoptive_eps[bs * view_id : bs * (view_id + 1)],
-                            device=view_scores.device,
-                            dtype=view_scores.dtype,
-                        )
-                        q = F.softmax(view_scores / eps[:, None], dim=1)
-                    else:
-                        q = F.softmax(view_scores / self.epsilon, dim=1)
-                else:
-                    q = self.sinkhorn(sinkhorn_input, cell_weights)
-                qassign_cnts = get_hard_assign_cnts(q)
-                max_active = min(scores.size(0), scores.size(1))
-                qproto_utilization += (qassign_cnts != 0).sum().item() / max_active
-                q = q[-bs:]
-                # print(f'q min, max: {q.min()}, {q.max()}')
-                q_uncertainty -= (q * (q.clamp_min(1e-8)).log()).sum(dim=1).mean()
+        if hasattr(self.train_ds, 'conditions'):
+            batch_cond = self.train_ds.conditions[torch.tensor(all_idx)].to(self.device)
+        else:
+            n_conds = len(self.model.scpoli_cvae.n_conditions)
+            batch_cond = torch.zeros(len(all_idx), n_conds, dtype=torch.long, device=self.device)
 
-            view_scores = scores[bs * view_id : bs * (view_id + 1)]
-            p = F.softmax(view_scores / self.temperature, dim=1)
-            p_effk += (-(p * p.clamp_min(1e-8).log()).sum(dim=1)).exp().median()  # ADD
-
-            # per-sample entropy (H_p > 0)
-            H_p = -(p * p.clamp_min(1e-8).log()).sum(dim=1).mean()
-            p_uncertainty += H_p
-
-            usage = p.mean(dim=0)  # shape [K]
-            H_proto = -(usage * usage.clamp_min(1e-8).log()).sum()
-            proto_entropy += H_proto
-
-            if self.hard_clustering == 1:
-                q = self.hard_clusters(q)
-            q_effk += (-(q * q.clamp_min(1e-8).log()).sum(dim=1)).exp().median()  # ADD
-            # check how consitent q is with other augmentations [cross entropy]
-            subloss = 0
-            vp_matched, vq_matched = 0, 0
-            aug_view_ids = np.delete(np.arange(self.nmb_views), view_id)
-            for v in aug_view_ids:
-                aug_scores = scores[bs * v : bs * (v + 1)] / self.temperature
-                self.check_finit(aug_scores, "p")
-
-                # p and log(p)
-                log_p = F.log_softmax(aug_scores, dim=1)
-                p = log_p.exp()  # numerically consistent with log_p
-
-                if self.div_type == "kl":
-                    # ----- KL(p‖q) variant -----
-                    # Only clamp q to avoid log(0)
-                    log_q = q.clamp_min(1e-8).log()
-                    # KL(p||q) = sum_i p_i * (log p_i - log q_i)
-                    kl = (
-                        torch.sum(p * (log_p - log_q), dim=1)
-                        * sim[bs * v : bs * (v + 1)]
-                    )
-                    subloss += kl.mean()
-                else:
-                    # ----- default CE (≈ KL(q‖p)) -----
-                    # CE = -∑ q_i * log p_i
-                    ce = -torch.sum(q * log_p, dim=1) * sim[bs * v : bs * (v + 1)]
-                    subloss += ce.mean()  # add (no explicit minus outside loop)
-
-                vp_matched += get_matched_pairs_ratio(view_scores, aug_scores)
-                vq_matched += get_matched_pairs_ratio(q, aug_scores)
-
-            loss += subloss / len(aug_view_ids)
-            p_matched += vp_matched / len(aug_view_ids)
-            q_matched += vq_matched / len(aug_view_ids)
-
-        return (
-            loss / len(self.views_for_assign),
-            p_matched / len(self.views_for_assign),
-            q_matched / len(self.views_for_assign),
-            qproto_utilization / len(self.views_for_assign),
-            p_uncertainty / len(self.views_for_assign),
-            q_uncertainty / len(self.views_for_assign),
-            proto_entropy / len(self.views_for_assign),
-            q_effk / len(self.views_for_assign),  # ADD
-            p_effk / len(self.views_for_assign),  # ADD
-        )
-
-    def get_lr_grad(self):
-        # --- Monitor learning rate and gradient norm ---
-        lr = self.optimizer.param_groups[0]["lr"]
-
-        total_norm = 0.0
-        for p in self.model.parameters():
-            if p.grad is not None:
-                param_norm = p.grad.data.norm(2)
-                total_norm += param_norm.item() ** 2
-        grad_norm = total_norm**0.5
-
-        return {"lr": lr, "grad_norm": grad_norm}
-
-    def test_epoch(self):
         self.model.eval()
-        with torch.no_grad():
-            for inputs in self.test_loader:
-                bs = inputs["x"].size(0)
-                # ds_ids = range(inputs['x'].size(1))
-                inputs = {
-                    k: inputs[k].transpose(0, 1) for k in inputs.keys()
-                }  # bring dataset in first to calc loss per dataset
-                meters = {"loss": AverageMeter()}
+        z_all, _, _ = self.model.encoder_out({'x': X_batch, 'batch': batch_cond})
+        idx_map = {int(v): i for i, v in enumerate(all_idx)}
+        def _map(arr):
+            return torch.tensor([idx_map[int(x)] for x in arr], device=self.device)
 
-                for ds_id in self.ds_ids:
-                    _, meters, _ = self.calc_ds_loss(
-                        inputs, ds_id, meters, bs, self.test_ds.adata, "val"
-                    )
-        meters = {k: getattr(v, "avg", v) for k, v in meters.items()}
-        return meters
+        if use_proto_sim:
+            logits = self.model.prototypes(z_all)
+            sa = F.softmax(logits / self.epsilon, dim=1)
+            s_h = sa[_map(heads)]
+            s_t = sa[_map(tails)]
+            s_n = sa[_map(neg_tails)]
+            _eps = 1e-4
+            if proto_metric == 'cosine':
+                s_h = F.normalize(s_h, dim=-1)
+                s_t = F.normalize(s_t, dim=-1)
+                s_n = F.normalize(s_n, dim=-1)
+            q_pos = (s_h * s_t).sum(dim=-1).clamp(_eps, 1 - _eps).cpu().numpy()
+            q_neg = (s_h * s_n).sum(dim=-1).clamp(_eps, 1 - _eps).cpu().numpy()
+        else:
+            z_h = z_all[_map(heads)]
+            z_t = z_all[_map(tails)]
+            z_n = z_all[_map(neg_tails)]
+            q_pos = loss_fn.compute_q(z_h, z_t).cpu().numpy()
+            q_neg = loss_fn.compute_q(z_h, z_n).cpu().numpy()
 
-        # define test loader
-        # pass data, get loss and metrics
-        # return the dict
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
 
-    def _handle_prototype_freezing(self, epoch):
+        # Left: q_pos vs q_neg density histograms
+        ax1.hist(q_pos, bins=bins, alpha=0.6, density=True, label=f'q_pos (mean={q_pos.mean():.4f})', color='steelblue', edgecolor='black', linewidth=0.3)
+        ax1.hist(q_neg, bins=bins, alpha=0.6, density=True, label=f'q_neg (mean={q_neg.mean():.4f})', color='salmon', edgecolor='black', linewidth=0.3)
+        ax1.set_xlabel('q (latent similarity)')
+        ax1.set_ylabel('density')
+        ax1.set_title(f'q distribution — {len(q_pos)} edges')
+        ax1.legend()
 
-        for name, p in self.model.named_parameters():
-            if "prototypes" in name:
-                if epoch < self.freeze_prototypes_nepochs:
-                    p.grad = None
-                else:
-                    break
+        # Right: p vs q scatter for positive edges
+        ax2.scatter(weights, q_pos, s=1, alpha=0.3, c='steelblue', rasterized=True)
+        ax2.set_xlabel('p (input affinity)')
+        ax2.set_ylabel('q (latent similarity)')
+        ax2.set_title('p vs q (positive edges)')
+        # diagonal reference
+        lims = [0, max(weights.max(), q_pos.max())]
+        ax2.plot(lims, lims, 'k--', alpha=0.3, linewidth=0.8)
 
-    def update_learning_rate(self, iteration):
-        for param_group in self.optimizer.param_groups:
-            param_group["lr"] = self.lr_schedule[iteration]
+        plt.tight_layout()
+        plt.show()
+        return fig
 
-    def hard_clusters(self, out: torch.Tensor) -> torch.Tensor:
-        """
-        Convert output probabilities/logits into hard one-hot clusters.
+    # ==================== Prototype Interpretation ====================
+
+    @torch.no_grad()
+    def decode_prototypes(self, batch_mode='mean'):
+        """Decode all prototypes to gene expression space.
+
         Args:
-            out (torch.Tensor): shape (batch, prototypes)
+            batch_mode: how to handle batch condition.
+                'mean' - average over all batch conditions (default)
+                'first' - use first batch condition
+                'all' - return decoded for each batch condition
+
         Returns:
-            torch.Tensor: one-hot encoded tensor of same shape as `out`
+            If batch_mode='all': dict of {batch_id: np.ndarray [K, genes]}
+            Otherwise: np.ndarray [K, genes]
         """
-        max_indices = torch.argmax(out, dim=1)
-        return F.one_hot(max_indices, num_classes=out.size(1)).to(out.dtype)
+        protos = self.model.get_prototypes()  # [K, latent_dim]
+        K = protos.shape[0]
 
-    def check_finit(self, prob, name):
-        if not torch.isfinite(prob).all():
-            print(f"⚠️ Invalid values in {name}! (nan/inf detected)")
-            print("min:", prob.min().item(), "max:", prob.max().item())
-
-    @torch.no_grad()
-    def sinkhorn(self, out, _):
-        Q = torch.exp(
-            out / self.epsilon
-        ).t()  # Q is K-by-B for consistency with notations from our paper
-
-        B = Q.shape[1] * self.world_size  # number of samples to assign
-        K = Q.shape[0]  # how many prototypes
-
-        # make the matrix sums to 1
-        sum_Q = torch.sum(Q)
-        # print(f'Q_sum {sum_Q}')
-        Q /= sum_Q
-
-        for it in range(self.sinkhorn_iterations):
-            # normalize each row: total weight per prototype must be 1/K
-            sum_of_rows = torch.sum(Q, dim=1, keepdim=True)
-            # print(f'row sum (proto) {sum_of_rows}')
-            Q /= sum_of_rows + 1e-12
-            Q /= K
-
-            # normalize each column: total weight per sample must be 1/B
-            # print(f'col sum (samples) {torch.sum(Q, dim=0, keepdim=True)}')
-            Q /= torch.sum(Q, dim=0, keepdim=True) + 1e-12
-            Q /= B
-
-        Q *= B  # the colomns must sum to 1 so that Q is an assignment
-        return Q.t()
-
-    @torch.no_grad()
-    def distributed_sinkhorn_marginal(self, out, cell_weights=None):
-        Q = torch.exp(out / self.epsilon).t()
-        self.check_finit(Q, "q")
-        B = Q.shape[1]
-        K = Q.shape[0]
-
-        Q /= torch.sum(Q)
-
-        # prototypes uniform
-        row_marginals = torch.full((K, 1), 1.0 / K, device=Q.device, dtype=Q.dtype)
-
-        # samples weighted
-        if cell_weights is None:
-            col_marginals = torch.full((1, B), 1.0 / B, device=Q.device, dtype=Q.dtype)
+        # Get unique batch conditions
+        if hasattr(self.train_ds, 'conditions'):
+            all_conds = self.train_ds.conditions.unique(dim=0)
         else:
-            col_marginals = cell_weights.view(1, -1)
-            col_marginals = col_marginals / col_marginals.sum()
+            n_conds = len(self.model.scpoli_cvae.n_conditions)
+            all_conds = torch.zeros(1, n_conds, dtype=torch.long, device=self.device)
 
-        for _ in range(self.sinkhorn_iterations):
-            # match prototypes
-            Q *= row_marginals / (Q.sum(dim=1, keepdim=True) + 1e-12)
-            # match samples (your custom weights)
-            Q *= col_marginals / (Q.sum(dim=0, keepdim=True) + 1e-12)
+        all_conds = all_conds.to(self.device)
+        protos = protos.to(self.device)
 
-        return (Q * B).t()  # (B, P)
+        if batch_mode == 'all':
+            results = {}
+            for i, cond in enumerate(all_conds):
+                cond_expanded = cond.unsqueeze(0).expand(K, -1)
+                decoded = self.model.decode(protos, cond_expanded)
+                results[i] = decoded.cpu().numpy()
+            return results
 
-    def get_model_prototypes(self, model):
-        prototypes = model.get_prototypes()
-        if self.use_projector_out:
-            return model.projection_head(prototypes)
+        elif batch_mode == 'first':
+            cond = all_conds[0].unsqueeze(0).expand(K, -1)
+            decoded = self.model.decode(protos, cond)
+            return decoded.cpu().numpy()
+
+        else:  # mean
+            decoded_sum = None
+            for cond in all_conds:
+                cond_expanded = cond.unsqueeze(0).expand(K, -1)
+                decoded = self.model.decode(protos, cond_expanded)
+                if decoded_sum is None:
+                    decoded_sum = decoded
+                else:
+                    decoded_sum = decoded_sum + decoded
+            return (decoded_sum / len(all_conds)).cpu().numpy()
+
+    def label_prototypes(self, label_key):
+        """Label each prototype based on majority vote of assigned cells.
+
+        Args:
+            label_key: column name in adata.obs for labels
+
+        Returns:
+            dict with:
+                'labels': pd.Series mapping proto_id -> majority label
+                'purity': pd.Series mapping proto_id -> purity (fraction of majority)
+                'counts': pd.DataFrame with full crosstab
+        """
+        assignments, _ = self._get_assignments()
+        labels = self.train_ds.adata.obs[label_key].values
+
+        # Build crosstab: proto x label
+        df = pd.DataFrame({'proto': assignments, 'label': labels})
+        counts = pd.crosstab(df['proto'], df['label'])
+
+        # Majority vote
+        majority_labels = counts.idxmax(axis=1)
+        purity = counts.max(axis=1) / counts.sum(axis=1)
+
+        return {
+            'labels': majority_labels,
+            'purity': purity,
+            'counts': counts,
+        }
+
+    def prototype_dge(self, niche_key, celltype_key, method='wilcoxon'):
+        """Compute DGE on decoded prototypes per niche within each celltype.
+
+        For each celltype, compares prototypes labeled as niche X vs rest.
+        Saves ALL genes (no filtering).
+
+        Args:
+            niche_key: column for niche labels
+            celltype_key: column for celltype labels
+            method: scanpy rank_genes_groups method ('wilcoxon', 't-test', etc.)
+
+        Returns:
+            pd.DataFrame with columns:
+                celltype, niche, gene, logfoldchange, pval, pval_adj, score
+        """
+        import scanpy as sc
+
+        # Decode prototypes and create AnnData
+        decoded = self.decode_prototypes(batch_mode='mean')
+        proto_ad = sc.AnnData(decoded)
+        proto_ad.var_names = self.train_ds.adata.var_names
+
+        # Label prototypes
+        niche_labels = self.label_prototypes(niche_key)['labels']
+        ct_labels = self.label_prototypes(celltype_key)['labels']
+
+        proto_ad.obs['niche'] = niche_labels.values
+        proto_ad.obs['celltype'] = ct_labels.values
+        proto_ad.obs['proto_id'] = niche_labels.index.values
+
+        rows = []
+        for ct in proto_ad.obs['celltype'].unique():
+            ct_ad = proto_ad[proto_ad.obs['celltype'] == ct].copy()
+            if ct_ad.n_obs < 3:
+                continue
+
+            niches = ct_ad.obs['niche'].unique()
+            if len(niches) < 2:
+                continue
+
+            for niche in niches:
+                n_pos = (ct_ad.obs['niche'] == niche).sum()
+                n_neg = (ct_ad.obs['niche'] != niche).sum()
+                if n_pos < 1 or n_neg < 1:
+                    continue
+
+                # Create binary group
+                ct_ad.obs['_group'] = np.where(ct_ad.obs['niche'] == niche, 'pos', 'rest')
+
+                try:
+                    sc.tl.rank_genes_groups(
+                        ct_ad, '_group', groups=['pos'], reference='rest',
+                        method=method, use_raw=False
+                    )
+                    dge = sc.get.rank_genes_groups_df(ct_ad, group='pos')
+                    dge['celltype'] = ct
+                    dge['niche'] = niche
+                    dge['n_pos'] = n_pos
+                    dge['n_neg'] = n_neg
+                    rows.append(dge)
+                except Exception as e:
+                    print(f"DGE failed for {ct}/{niche}: {e}")
+                    continue
+
+        if not rows:
+            return pd.DataFrame()
+
+        result = pd.concat(rows, ignore_index=True)
+        result = result.rename(columns={'names': 'gene', 'logfoldchanges': 'logfoldchange',
+                                         'pvals': 'pval', 'pvals_adj': 'pval_adj', 'scores': 'score'})
+        return result[['celltype', 'niche', 'gene', 'logfoldchange', 'pval', 'pval_adj', 'score', 'n_pos', 'n_neg']]
+
+    def singlecell_dge(self, niche_key, celltype_key, method='wilcoxon'):
+        """Compute DGE on single cells per niche within each celltype.
+
+        Same format as prototype_dge for direct comparison.
+
+        Args:
+            niche_key: column for niche labels
+            celltype_key: column for celltype labels
+            method: scanpy rank_genes_groups method
+
+        Returns:
+            pd.DataFrame with same columns as prototype_dge
+        """
+        import scanpy as sc
+
+        adata = self.train_ds.adata.copy()
+
+        rows = []
+        for ct in adata.obs[celltype_key].unique():
+            ct_ad = adata[adata.obs[celltype_key] == ct].copy()
+            if ct_ad.n_obs < 3:
+                continue
+
+            niches = ct_ad.obs[niche_key].unique()
+            if len(niches) < 2:
+                continue
+
+            for niche in niches:
+                n_pos = (ct_ad.obs[niche_key] == niche).sum()
+                n_neg = (ct_ad.obs[niche_key] != niche).sum()
+                if n_pos < 2 or n_neg < 2:
+                    continue
+
+                ct_ad.obs['_group'] = np.where(ct_ad.obs[niche_key] == niche, 'pos', 'rest')
+
+                try:
+                    sc.tl.rank_genes_groups(
+                        ct_ad, '_group', groups=['pos'], reference='rest',
+                        method=method, use_raw=False
+                    )
+                    dge = sc.get.rank_genes_groups_df(ct_ad, group='pos')
+                    dge['celltype'] = ct
+                    dge['niche'] = niche
+                    dge['n_pos'] = n_pos
+                    dge['n_neg'] = n_neg
+                    rows.append(dge)
+                except Exception as e:
+                    print(f"DGE failed for {ct}/{niche}: {e}")
+                    continue
+
+        if not rows:
+            return pd.DataFrame()
+
+        result = pd.concat(rows, ignore_index=True)
+        result = result.rename(columns={'names': 'gene', 'logfoldchanges': 'logfoldchange',
+                                         'pvals': 'pval', 'pvals_adj': 'pval_adj', 'scores': 'score'})
+        return result[['celltype', 'niche', 'gene', 'logfoldchange', 'pval', 'pval_adj', 'score', 'n_pos', 'n_neg']]
+
+    def prototype_stats(self, niche_key, celltype_key):
+        """Compute statistical metrics for prototype clustering.
+
+        Args:
+            niche_key: column for niche labels
+            celltype_key: column for celltype labels
+
+        Returns:
+            dict with:
+                'niche_purity': purity of niche labels per prototype
+                'celltype_purity': purity of celltype labels per prototype
+                'chi2_niche': chi2 test for niche vs prototype association
+                'chi2_celltype': chi2 test for celltype vs prototype association
+                'silhouette_niche': silhouette score for niche separation (per celltype)
+                'silhouette_celltype': silhouette score for celltype separation
+        """
+        from scipy.stats import chi2_contingency
+        from sklearn.metrics import silhouette_score
+
+        assignments, _ = self._get_assignments()
+        obs = self.train_ds.adata.obs
+
+        niche_labels = obs[niche_key].values
+        ct_labels = obs[celltype_key].values
+
+        # Purity
+        niche_info = self.label_prototypes(niche_key)
+        ct_info = self.label_prototypes(celltype_key)
+
+        # Chi2 tests
+        niche_tab = pd.crosstab(assignments, niche_labels)
+        ct_tab = pd.crosstab(assignments, ct_labels)
+
+        chi2_niche = chi2_contingency(niche_tab)[1] if niche_tab.shape[0] > 1 and niche_tab.shape[1] > 1 else np.nan
+        chi2_ct = chi2_contingency(ct_tab)[1] if ct_tab.shape[0] > 1 and ct_tab.shape[1] > 1 else np.nan
+
+        # Silhouette on embeddings
+        with torch.no_grad():
+            z = self.encode_adata(self.train_ds.adata, self.model, z_idx=1)
+        z_np = z.cpu().numpy()
+
+        # Overall celltype silhouette
+        if len(np.unique(ct_labels)) >= 2:
+            sil_ct = silhouette_score(z_np, ct_labels)
         else:
-            return prototypes
+            sil_ct = np.nan
 
-    @torch.no_grad()
-    def prepare_sinkhorn_input(self, queue_slot, z, view_id, bs, view_logits, ds_id):
-        output_logits = view_logits
+        # Niche silhouette per celltype
+        sil_niche_per_ct = {}
+        for ct in np.unique(ct_labels):
+            mask = ct_labels == ct
+            niches_ct = niche_labels[mask]
+            if len(np.unique(niches_ct)) >= 2:
+                sil_niche_per_ct[ct] = silhouette_score(z_np[mask], niches_ct)
+            else:
+                sil_niche_per_ct[ct] = np.nan
 
-        # instead of: if queue is not None -> check if ds_id is in queue
-        # time to use the queue
-        if ds_id in self.queue:
-            # check if the queue has any real data
-            if self.use_the_queue or not torch.all(
-                self.queue[ds_id][queue_slot, -1, :] == 0
-            ):
-                self.use_the_queue = 1
-                # 'get prototypes assignment scores for self.queue[i] (which contain some old embeddings)'
-                queue_logits = self.model.proto_soft_assignments(
-                    self.queue[ds_id][queue_slot]
-                )
-                output_logits = torch.cat([queue_logits, view_logits])
+        return {
+            'niche_purity_mean': niche_info['purity'].mean(),
+            'niche_purity_per_proto': niche_info['purity'].to_dict(),
+            'celltype_purity_mean': ct_info['purity'].mean(),
+            'celltype_purity_per_proto': ct_info['purity'].to_dict(),
+            'chi2_niche_pval': chi2_niche,
+            'chi2_celltype_pval': chi2_ct,
+            'silhouette_celltype': sil_ct,
+            'silhouette_niche_per_ct': sil_niche_per_ct,
+            'silhouette_niche_mean': np.nanmean(list(sil_niche_per_ct.values())),
+        }
 
-            # fill the queue
-            self.queue[ds_id][queue_slot, bs:] = self.queue[ds_id][
-                queue_slot, :-bs
-            ].clone()
-            self.queue[ds_id][queue_slot, :bs] = z[view_id * bs : (view_id + 1) * bs]
+    def eval_prototypes(self, niche_key=None, celltype_key=None, save_dir=None):
+        """Run all prototype evaluation and save results.
 
-        return output_logits
+        Args:
+            niche_key: column for niche labels. Defaults to 'niches_2D' if present.
+            celltype_key: column for celltype labels. Defaults to dataset.label_key.
+            save_dir: directory to save results. Defaults to get_dump_path().
 
-    def init_queue(self, ds_id):
-        self.queue[ds_id] = torch.zeros(
-            len(self.views_for_assign),
-            self.queue_length,  # // divide by wprld size
-            self.latent_dims,
-        ).cuda()
+        Returns:
+            dict with all results
+        """
+        import json
 
-    def update_temp_eps(self, epoch):
-        if self.sched_temp_eps == 0:
-            return
+        if save_dir is None:
+            save_dir = self.get_dump_path()
+        os.makedirs(save_dir, exist_ok=True)
 
-        t = epoch / max(1, self.n_epochs - 1)
+        obs = self.train_ds.adata.obs
+        if celltype_key is None:
+            celltype_key = self.dataset.label_key
+        if niche_key is None:
+            niche_key = 'niches_2D' if 'niches_2D' in obs.columns else celltype_key
 
-        # cosine decay with floor
-        self.temperature = max(
-            self.temperature_min,
-            self._temperature0 * 0.5 * (1 + np.cos(np.pi * t)),
-        )
+        print(f"Evaluating prototypes: niche_key={niche_key}, celltype_key={celltype_key}")
 
-        self.epsilon = max(
-            self.epsilon_min,
-            self._epsilon0 * 0.5 * (1 + np.cos(np.pi * t)),
-        )
-        if hasattr(self.model, "temperature"):
-            self.model.temperature = self.epsilon
+        results = {}
 
+        # 1. Decode prototypes
+        print("Decoding prototypes...")
+        decoded = self.decode_prototypes(batch_mode='mean')
+        np.save(os.path.join(save_dir, 'decoded_prototypes.npy'), decoded)
+        results['decoded_shape'] = decoded.shape
 
-if __name__ == "__main__":
-    swav = SCProtoTrainer()
-    swav.setup()
-    swav.run()
-    swav.encode_ref()
+        # 2. Label prototypes
+        print("Labeling prototypes...")
+        niche_labels = self.label_prototypes(niche_key)
+        ct_labels = self.label_prototypes(celltype_key)
+
+        label_df = pd.DataFrame({
+            'proto_id': niche_labels['labels'].index,
+            'niche': niche_labels['labels'].values,
+            'niche_purity': niche_labels['purity'].values,
+            'celltype': ct_labels['labels'].values,
+            'celltype_purity': ct_labels['purity'].values,
+        })
+        label_df.to_csv(os.path.join(save_dir, 'prototype_labels.csv'), index=False)
+        results['n_prototypes'] = len(label_df)
+
+        # 3. Prototype DGE
+        print("Computing prototype DGE...")
+        proto_dge = self.prototype_dge(niche_key, celltype_key)
+        proto_dge.to_csv(os.path.join(save_dir, 'prototype_dge.csv'), index=False)
+        results['proto_dge_rows'] = len(proto_dge)
+
+        # 4. Single-cell DGE
+        print("Computing single-cell DGE...")
+        sc_dge = self.singlecell_dge(niche_key, celltype_key)
+        sc_dge.to_csv(os.path.join(save_dir, 'singlecell_dge.csv'), index=False)
+        results['sc_dge_rows'] = len(sc_dge)
+
+        # 5. Statistical tests
+        print("Computing statistics...")
+        stats = self.prototype_stats(niche_key, celltype_key)
+        results.update({k: v for k, v in stats.items() if not isinstance(v, dict)})
+
+        # Save stats
+        stats_save = {k: (v if not isinstance(v, dict) else {str(kk): vv for kk, vv in v.items()})
+                      for k, v in stats.items()}
+        with open(os.path.join(save_dir, 'prototype_stats.json'), 'w') as f:
+            json.dump(stats_save, f, indent=2, default=float)
+
+        # 6. Save summary
+        with open(os.path.join(save_dir, 'eval_summary.json'), 'w') as f:
+            json.dump({k: (v if not isinstance(v, (np.floating, np.integer)) else float(v))
+                       for k, v in results.items()}, f, indent=2)
+
+        print(f"Results saved to {save_dir}")
+        print(f"  - decoded_prototypes.npy: {decoded.shape}")
+        print(f"  - prototype_labels.csv: {len(label_df)} prototypes")
+        print(f"  - prototype_dge.csv: {len(proto_dge)} rows")
+        print(f"  - singlecell_dge.csv: {len(sc_dge)} rows")
+        print(f"  - prototype_stats.json")
+
+        return results
+
+    def eval_singlecell(self, niche_key=None, celltype_key=None):
+        """Run DGE and stats on raw single cells (ground truth baseline).
+
+        Saves results to <save_dir>/gt/ folder.
+
+        Args:
+            niche_key: column for niche labels. Defaults to 'niches_2D'.
+            celltype_key: column for celltype labels. Defaults to dataset.label_key.
+
+        Returns:
+            dict with dge DataFrame and stats
+        """
+        import json
+        import scanpy as sc
+        from scipy.stats import chi2_contingency
+        from sklearn.metrics import silhouette_score
+
+        save_dir = os.path.join(self.get_save_dir(), 'gt')
+        os.makedirs(save_dir, exist_ok=True)
+
+        adata = self.train_ds.adata
+        obs = adata.obs
+        if celltype_key is None:
+            celltype_key = self.dataset.label_key
+        if niche_key is None:
+            niche_key = 'niches_2D' if 'niches_2D' in obs.columns else celltype_key
+
+        print(f"Evaluating single cells: niche_key={niche_key}, celltype_key={celltype_key}")
+
+        # 1. DGE
+        print("Computing single-cell DGE...")
+        sc_dge = self.singlecell_dge(niche_key, celltype_key)
+        sc_dge.to_csv(os.path.join(save_dir, 'singlecell_dge.csv'), index=False)
+
+        # 2. Stats
+        print("Computing statistics...")
+        niche_labels = obs[niche_key].values
+        ct_labels = obs[celltype_key].values
+
+        # Chi2
+        niche_tab = pd.crosstab(ct_labels, niche_labels)
+        chi2_pval = chi2_contingency(niche_tab)[1] if niche_tab.shape[0] > 1 and niche_tab.shape[1] > 1 else np.nan
+
+        # Silhouette on PCA
+        if 'X_pca' not in adata.obsm:
+            sc.pp.pca(adata, n_comps=min(50, adata.n_vars - 1))
+        X = adata.obsm['X_pca']
+
+        sil_ct = silhouette_score(X, ct_labels) if len(np.unique(ct_labels)) >= 2 else np.nan
+        sil_niche_per_ct = {}
+        for ct in np.unique(ct_labels):
+            mask = ct_labels == ct
+            if len(np.unique(niche_labels[mask])) >= 2:
+                sil_niche_per_ct[ct] = silhouette_score(X[mask], niche_labels[mask])
+
+        stats = {
+            'chi2_niche_celltype_pval': chi2_pval,
+            'silhouette_celltype': sil_ct,
+            'silhouette_niche_per_ct': {str(k): v for k, v in sil_niche_per_ct.items()},
+            'silhouette_niche_mean': np.nanmean(list(sil_niche_per_ct.values())),
+            'n_cells': len(adata),
+        }
+        with open(os.path.join(save_dir, 'singlecell_stats.json'), 'w') as f:
+            json.dump(stats, f, indent=2, default=float)
+
+        print(f"Saved to {save_dir}: singlecell_dge.csv ({len(sc_dge)} rows), singlecell_stats.json")
+        return {'dge': sc_dge, 'stats': stats}
+
+    def compare_dge_plots(self, ct=None, niche=None):
+        """Load DGE results and plot volcano + logFC distribution comparison.
+
+        Args:
+            ct: celltype to show in volcano (if None, picks first available)
+            niche: niche to show in volcano (if None, picks first available)
+
+        Returns:
+            dict with proto_dge, sc_dge DataFrames
+        """
+        import matplotlib.pyplot as plt
+
+        # Load DGE files
+        proto_path = os.path.join(self.get_dump_path(), 'prototype_dge.csv')
+        sc_path = os.path.join(self.get_save_dir(), 'gt', 'singlecell_dge.csv')
+
+        if not os.path.exists(proto_path):
+            print(f"Run t.eval_prototypes() first. Missing: {proto_path}")
+            return None
+        if not os.path.exists(sc_path):
+            print(f"Run t.eval_singlecell() first. Missing: {sc_path}")
+            return None
+
+        proto_dge = pd.read_csv(proto_path)
+        sc_dge = pd.read_csv(sc_path)
+
+        # Pick ct/niche if not specified
+        if ct is None:
+            ct = proto_dge['celltype'].iloc[0]
+        if niche is None:
+            niche = proto_dge[proto_dge['celltype'] == ct]['niche'].iloc[0]
+
+        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+
+        # --- Row 1: Volcano plots ---
+        for ax, dge, title in [(axes[0, 0], sc_dge, 'Single-cell'), (axes[0, 1], proto_dge, 'Metacell')]:
+            d = dge[(dge['celltype'] == ct) & (dge['niche'] == niche)].copy()
+            if len(d) == 0:
+                ax.set_title(f'{title}: No data for {ct}/{niche}')
+                continue
+            d['neg_log_p'] = -np.log10(d['pval'].clip(lower=1e-300))
+
+            ax.scatter(d['logfoldchange'], d['neg_log_p'], s=3, alpha=0.4, c='gray')
+            sig = d[(d['pval_adj'] < 0.05) & (abs(d['logfoldchange']) > 0.5)]
+            ax.scatter(sig['logfoldchange'], sig['neg_log_p'], s=8, c='red', alpha=0.7)
+
+            ax.set_xlabel('Log Fold Change')
+            ax.set_ylabel('-log10(p)')
+            ax.set_title(f'{title}: {ct} / {niche}\n({len(sig)} sig genes)')
+            ax.axhline(-np.log10(0.05), ls='--', c='blue', alpha=0.3)
+            ax.axvline(0, ls='--', c='black', alpha=0.3)
+
+        # --- Row 2: LogFC distributions ---
+        ax = axes[1, 0]
+        ax.hist(sc_dge['logfoldchange'].dropna(), bins=50, alpha=0.6,
+                label=f'Single-cell (std={sc_dge["logfoldchange"].std():.2f})', density=True)
+        ax.hist(proto_dge['logfoldchange'].dropna(), bins=50, alpha=0.6,
+                label=f'Metacell (std={proto_dge["logfoldchange"].std():.2f})', density=True)
+        ax.set_xlabel('Log Fold Change')
+        ax.set_ylabel('Density')
+        ax.set_title('LogFC Distribution (all genes)')
+        ax.legend()
+
+        # --- Row 2 right: Signal comparison scatter ---
+        ax = axes[1, 1]
+        rows = []
+        for (c, n), p_grp in proto_dge.groupby(['celltype', 'niche']):
+            s_grp = sc_dge[(sc_dge['celltype'] == c) & (sc_dge['niche'] == n)]
+            if len(s_grp) < 10 or len(p_grp) < 5:
+                continue
+            rows.append({
+                'sc_signal': s_grp.nlargest(20, 'logfoldchange')['logfoldchange'].mean(),
+                'proto_signal': p_grp.nlargest(20, 'logfoldchange')['logfoldchange'].mean(),
+            })
+        if rows:
+            df_sig = pd.DataFrame(rows)
+            ax.scatter(df_sig['sc_signal'], df_sig['proto_signal'], s=40, alpha=0.7)
+            lim = max(df_sig['sc_signal'].max(), df_sig['proto_signal'].max()) * 1.1
+            ax.plot([0, lim], [0, lim], 'k--', alpha=0.3)
+            pct = (df_sig['proto_signal'] > df_sig['sc_signal']).mean() * 100
+            ax.set_title(f'Signal Strength\n(Metacell stronger in {pct:.0f}% cases)')
+        ax.set_xlabel('Single-cell signal (mean top20 logFC)')
+        ax.set_ylabel('Metacell signal (mean top20 logFC)')
+
+        plt.tight_layout()
+        plt.show()
+
+        # Compute comparison scores
+        from interpretable_ssl.evaluation.niche_recovery import jaccard, rbo
+        score_rows = []
+        for (c, n), p_grp in proto_dge.groupby(['celltype', 'niche']):
+            s_grp = sc_dge[(sc_dge['celltype'] == c) & (sc_dge['niche'] == n)]
+            if len(s_grp) < 10 or len(p_grp) < 5:
+                continue
+            p_genes = p_grp.nlargest(20, 'logfoldchange')['gene'].tolist()
+            s_genes = s_grp.nlargest(20, 'logfoldchange')['gene'].tolist()
+            merged = p_grp.merge(s_grp, on='gene', suffixes=('_proto', '_sc'))
+            corr = merged['logfoldchange_proto'].corr(merged['logfoldchange_sc']) if len(merged) > 5 else np.nan
+            score_rows.append({
+                'celltype': c, 'niche': n,
+                'jaccard': jaccard(p_genes, s_genes),
+                'rbo': rbo(p_genes, s_genes),
+                'logfc_corr': corr,
+                'n_proto': len(p_grp), 'n_sc': len(s_grp),
+            })
+        scores_df = pd.DataFrame(score_rows)
+
+        print(f"\nDGE Comparison Scores:")
+        print(f"  Jaccard:   mean={scores_df['jaccard'].mean():.3f}, median={scores_df['jaccard'].median():.3f}")
+        print(f"  RBO:       mean={scores_df['rbo'].mean():.3f}, median={scores_df['rbo'].median():.3f}")
+        print(f"  LogFC corr: mean={scores_df['logfc_corr'].mean():.3f}, median={scores_df['logfc_corr'].median():.3f}")
+
+        return {'proto_dge': proto_dge, 'sc_dge': sc_dge, 'scores': scores_df}
+
+    def compare_dge_all_niches(self, celltype=None):
+        """Plot volcano comparison for all niches (one row per niche).
+
+        Args:
+            celltype: filter to specific celltype (None = all)
+
+        Returns:
+            dict with proto_dge, sc_dge, scores DataFrames
+        """
+        import matplotlib.pyplot as plt
+
+        # Load DGE files
+        proto_path = os.path.join(self.get_dump_path(), 'prototype_dge.csv')
+        sc_path = os.path.join(self.get_save_dir(), 'gt', 'singlecell_dge.csv')
+
+        if not os.path.exists(proto_path) or not os.path.exists(sc_path):
+            print("Run t.eval_prototypes() and t.eval_singlecell() first")
+            return None
+
+        proto_dge = pd.read_csv(proto_path)
+        sc_dge = pd.read_csv(sc_path)
+
+        # Get unique celltype/niche combos
+        if celltype:
+            proto_dge = proto_dge[proto_dge['celltype'] == celltype]
+            sc_dge = sc_dge[sc_dge['celltype'] == celltype]
+
+        combos = proto_dge.groupby(['celltype', 'niche']).size().reset_index()[['celltype', 'niche']]
+        n_combos = len(combos)
+
+        if n_combos == 0:
+            print("No data found")
+            return None
+
+        # Create figure: 2 columns (single-cell, metacell), n_combos rows
+        fig, axes = plt.subplots(n_combos, 2, figsize=(10, 3 * n_combos))
+        if n_combos == 1:
+            axes = axes.reshape(1, -1)
+
+        for i, (_, row) in enumerate(combos.iterrows()):
+            ct, niche = row['celltype'], row['niche']
+
+            for j, (dge, title) in enumerate([(sc_dge, 'Single-cell'), (proto_dge, 'Metacell')]):
+                ax = axes[i, j]
+                d = dge[(dge['celltype'] == ct) & (dge['niche'] == niche)].copy()
+
+                if len(d) == 0:
+                    ax.set_title(f'{title}: No data')
+                    continue
+
+                d['neg_log_p'] = -np.log10(d['pval'].clip(lower=1e-300))
+
+                ax.scatter(d['logfoldchange'], d['neg_log_p'], s=2, alpha=0.4, c='gray')
+                sig = d[(d['pval_adj'] < 0.05) & (abs(d['logfoldchange']) > 0.5)]
+                ax.scatter(sig['logfoldchange'], sig['neg_log_p'], s=6, c='red', alpha=0.7)
+
+                ax.set_xlabel('LogFC')
+                ax.set_ylabel('-log10(p)')
+                ax.set_title(f'{title}: {ct[:15]} / {niche[:20]}\n({len(sig)} sig)')
+                ax.axhline(-np.log10(0.05), ls='--', c='blue', alpha=0.3)
+                ax.axvline(0, ls='--', c='black', alpha=0.3)
+
+        plt.tight_layout()
+        plt.show()
+
+        # Compute scores
+        from interpretable_ssl.evaluation.niche_recovery import jaccard, rbo
+        score_rows = []
+        for (c, n), p_grp in proto_dge.groupby(['celltype', 'niche']):
+            s_grp = sc_dge[(sc_dge['celltype'] == c) & (sc_dge['niche'] == n)]
+            if len(s_grp) < 5 or len(p_grp) < 3:
+                continue
+            p_genes = p_grp.nlargest(20, 'logfoldchange')['gene'].tolist()
+            s_genes = s_grp.nlargest(20, 'logfoldchange')['gene'].tolist()
+            merged = p_grp.merge(s_grp, on='gene', suffixes=('_proto', '_sc'))
+            corr = merged['logfoldchange_proto'].corr(merged['logfoldchange_sc']) if len(merged) > 5 else np.nan
+            score_rows.append({
+                'celltype': c, 'niche': n,
+                'jaccard': jaccard(p_genes, s_genes),
+                'rbo': rbo(p_genes, s_genes),
+                'logfc_corr': corr,
+            })
+        scores_df = pd.DataFrame(score_rows)
+
+        print(f"\nScores: jaccard={scores_df['jaccard'].mean():.3f}, rbo={scores_df['rbo'].mean():.3f}, corr={scores_df['logfc_corr'].mean():.3f}")
+
+        return {'proto_dge': proto_dge, 'sc_dge': sc_dge, 'scores': scores_df}
+
+    def eval_baseline_clustering(self, name, niche_key=None, celltype_key=None):
+        """Evaluate a baseline clustering method (spectral, seacells, etc.)
+
+        Loads clustering from baseline folder, computes average gene expression
+        per cluster, runs DGE, and saves results.
+
+        Args:
+            name: baseline name (e.g., 'spectral_K50', 'seacells_K50')
+            niche_key: column for niche labels
+            celltype_key: column for celltype labels
+
+        Returns:
+            dict with dge DataFrame and stats
+        """
+        import scanpy as sc
+
+        # Paths
+        baseline_dir = os.path.join(self.get_save_dir(), name)
+        clusters_path = os.path.join(baseline_dir, 'clusters.npz')
+
+        if not os.path.exists(clusters_path):
+            print(f"Baseline not found: {clusters_path}")
+            print(f"Run t.eval_spectral() or t.eval_seacells() first")
+            return None
+
+        # Load clustering
+        data = np.load(clusters_path, allow_pickle=True)
+        assignments = data['assignments']
+
+        # Setup keys
+        obs = self.train_ds.adata.obs
+        if celltype_key is None:
+            celltype_key = self.dataset.label_key
+        if niche_key is None:
+            niche_key = 'niches_2D' if 'niches_2D' in obs.columns else celltype_key
+
+        print(f"Evaluating baseline '{name}': niche_key={niche_key}, celltype_key={celltype_key}")
+
+        # Compute average gene expression per cluster
+        X = self.train_ds.adata.X
+        if hasattr(X, 'toarray'):
+            X = X.toarray()
+
+        n_clusters = len(np.unique(assignments))
+        avg_expr = np.zeros((n_clusters, X.shape[1]))
+        cluster_ids = np.unique(assignments)
+
+        for i, c in enumerate(cluster_ids):
+            mask = assignments == c
+            avg_expr[i] = X[mask].mean(axis=0)
+
+        # Create AnnData for clusters
+        cluster_ad = sc.AnnData(avg_expr)
+        cluster_ad.var_names = self.train_ds.adata.var_names
+
+        # Label clusters by majority vote
+        niche_labels = obs[niche_key].values
+        ct_labels = obs[celltype_key].values
+
+        cluster_niche = []
+        cluster_ct = []
+        for c in cluster_ids:
+            mask = assignments == c
+            # Majority vote
+            vals, counts = np.unique(niche_labels[mask], return_counts=True)
+            cluster_niche.append(vals[counts.argmax()])
+            vals, counts = np.unique(ct_labels[mask], return_counts=True)
+            cluster_ct.append(vals[counts.argmax()])
+
+        cluster_ad.obs['niche'] = cluster_niche
+        cluster_ad.obs['celltype'] = cluster_ct
+        cluster_ad.obs['cluster_id'] = cluster_ids
+
+        # Run DGE (same logic as prototype_dge)
+        rows = []
+        for ct in cluster_ad.obs['celltype'].unique():
+            ct_ad = cluster_ad[cluster_ad.obs['celltype'] == ct].copy()
+            if ct_ad.n_obs < 3:
+                continue
+            niches = ct_ad.obs['niche'].unique()
+            if len(niches) < 2:
+                continue
+
+            for niche in niches:
+                n_pos = (ct_ad.obs['niche'] == niche).sum()
+                n_neg = (ct_ad.obs['niche'] != niche).sum()
+                if n_pos < 1 or n_neg < 1:
+                    continue
+
+                ct_ad.obs['_group'] = np.where(ct_ad.obs['niche'] == niche, 'pos', 'rest')
+                try:
+                    sc.tl.rank_genes_groups(ct_ad, '_group', groups=['pos'], reference='rest',
+                                            method='wilcoxon', use_raw=False)
+                    dge = sc.get.rank_genes_groups_df(ct_ad, group='pos')
+                    dge['celltype'] = ct
+                    dge['niche'] = niche
+                    dge['n_pos'] = n_pos
+                    dge['n_neg'] = n_neg
+                    rows.append(dge)
+                except Exception as e:
+                    print(f"DGE failed for {ct}/{niche}: {e}")
+
+        if not rows:
+            print("No DGE results")
+            return None
+
+        dge_df = pd.concat(rows, ignore_index=True)
+        dge_df = dge_df.rename(columns={'names': 'gene', 'logfoldchanges': 'logfoldchange',
+                                         'pvals': 'pval', 'pvals_adj': 'pval_adj', 'scores': 'score'})
+        dge_df = dge_df[['celltype', 'niche', 'gene', 'logfoldchange', 'pval', 'pval_adj', 'score', 'n_pos', 'n_neg']]
+
+        # Save
+        dge_df.to_csv(os.path.join(baseline_dir, 'baseline_dge.csv'), index=False)
+        np.save(os.path.join(baseline_dir, 'avg_expression.npy'), avg_expr)
+
+        print(f"Saved to {baseline_dir}: baseline_dge.csv ({len(dge_df)} rows), avg_expression.npy")
+
+        return {'dge': dge_df, 'avg_expr': avg_expr, 'cluster_ad': cluster_ad}
+
+    def compare_all_methods(self, niche_key=None, celltype_key=None, name_map=None):
+        """Compare DGE results across all methods: prototype, baselines, single-cell.
+
+        Computes jaccard/rbo/logfc_corr for each method vs single-cell ground truth.
+
+        Args:
+            niche_key: column for niche labels
+            celltype_key: column for celltype labels
+            name_map: dict mapping folder names to display names, e.g.
+                      {'scproto_ds-s28f_v31': 'Proto UMAP', 'spectral_K50': 'Spectral'}
+
+        Returns:
+            DataFrame with method, mean_jaccard, mean_rbo, mean_logfc_corr, logfc_std
+        """
+        import matplotlib.pyplot as plt
+        from interpretable_ssl.evaluation.niche_recovery import jaccard, rbo
+
+        obs = self.train_ds.adata.obs
+        if celltype_key is None:
+            celltype_key = self.dataset.label_key
+        if niche_key is None:
+            niche_key = 'niches_2D' if 'niches_2D' in obs.columns else celltype_key
+
+        # Load single-cell ground truth
+        sc_path = os.path.join(self.get_save_dir(), 'gt', 'singlecell_dge.csv')
+        if not os.path.exists(sc_path):
+            print("Run t.eval_singlecell() first")
+            return None
+        sc_dge = pd.read_csv(sc_path)
+
+        # Find all methods in model dir
+        methods = {}
+
+        for entry in os.listdir(self.get_save_dir()):
+            entry_dir = os.path.join(self.get_save_dir(), entry)
+            if not os.path.isdir(entry_dir):
+                continue
+
+            # Check for prototype_dge.csv (trained models)
+            proto_path = os.path.join(entry_dir, 'prototype_dge.csv')
+            if os.path.exists(proto_path):
+                methods[entry] = pd.read_csv(proto_path)
+                continue
+
+            # Check for baseline_dge.csv (baselines)
+            baseline_path = os.path.join(entry_dir, 'baseline_dge.csv')
+            if os.path.exists(baseline_path):
+                methods[entry] = pd.read_csv(baseline_path)
+
+        if not methods:
+            print("No methods found. Run t.eval_prototypes() and t.eval_baseline_clustering() first")
+            return None
+
+        # Compute scores for each method
+        results = []
+        for method_name, method_dge in methods.items():
+            scores = []
+            for (ct, niche), m_grp in method_dge.groupby(['celltype', 'niche']):
+                s_grp = sc_dge[(sc_dge['celltype'] == ct) & (sc_dge['niche'] == niche)]
+                if len(s_grp) < 10 or len(m_grp) < 3:
+                    continue
+
+                m_genes = m_grp.nlargest(20, 'logfoldchange')['gene'].tolist()
+                s_genes = s_grp.nlargest(20, 'logfoldchange')['gene'].tolist()
+                merged = m_grp.merge(s_grp, on='gene', suffixes=('_method', '_sc'))
+                corr = merged['logfoldchange_method'].corr(merged['logfoldchange_sc']) if len(merged) > 5 else np.nan
+
+                scores.append({
+                    'jaccard': jaccard(m_genes, s_genes),
+                    'rbo': rbo(m_genes, s_genes),
+                    'logfc_corr': corr,
+                })
+
+            if scores:
+                scores_df = pd.DataFrame(scores)
+                results.append({
+                    'method': method_name,
+                    'mean_jaccard': scores_df['jaccard'].mean(),
+                    'mean_rbo': scores_df['rbo'].mean(),
+                    'mean_logfc_corr': scores_df['logfc_corr'].mean(),
+                    'logfc_std': method_dge['logfoldchange'].std(),
+                    'n_comparisons': len(scores),
+                })
+
+        results_df = pd.DataFrame(results).sort_values('mean_jaccard', ascending=False)
+
+        # Apply name mapping
+        if name_map:
+            results_df['display_name'] = results_df['method'].map(lambda x: name_map.get(x, x))
+        else:
+            results_df['display_name'] = results_df['method']
+
+        # Plot comparison
+        fig, axes = plt.subplots(1, 4, figsize=(14, 4))
+        x = range(len(results_df))
+        names = results_df['display_name'].tolist()
+
+        for ax, col, title in zip(axes, ['mean_jaccard', 'mean_rbo', 'mean_logfc_corr', 'logfc_std'],
+                                   ['Jaccard ↑', 'RBO ↑', 'LogFC Corr ↑', 'LogFC Std ↑']):
+            bars = ax.bar(x, results_df[col], alpha=0.7)
+            ax.set_xticks(x)
+            ax.set_xticklabels(names, rotation=45, ha='right')
+            ax.set_title(title)
+            # Highlight best
+            best_idx = results_df[col].idxmax() if '↑' in title else results_df[col].idxmin()
+            best_pos = results_df.index.get_loc(best_idx)
+            bars[best_pos].set_color('green')
+
+        plt.tight_layout()
+        plt.show()
+
+        print("\nMethod Comparison (vs single-cell ground truth):")
+        print(results_df.to_string(index=False))
+
+        return results_df
+
+    def find_discovered_genes(self, pval_thr=0.05, logfc_thr=0.5):
+        """Find genes significant in metacell but not in single-cell.
+
+        These are genes that metacells "discover" by reducing noise/sparsity.
+
+        Args:
+            pval_thr: adjusted p-value threshold for significance
+            logfc_thr: absolute log fold change threshold
+
+        Returns:
+            DataFrame with discovered genes and their stats
+        """
+        proto_path = os.path.join(self.get_dump_path(), 'prototype_dge.csv')
+        sc_path = os.path.join(self.get_save_dir(), 'gt', 'singlecell_dge.csv')
+
+        if not os.path.exists(proto_path) or not os.path.exists(sc_path):
+            print("Run t.eval_prototypes() and t.eval_singlecell() first")
+            return None
+
+        proto_dge = pd.read_csv(proto_path)
+        sc_dge = pd.read_csv(sc_path)
+
+        rows = []
+        for (ct, niche), p_grp in proto_dge.groupby(['celltype', 'niche']):
+            s_grp = sc_dge[(sc_dge['celltype'] == ct) & (sc_dge['niche'] == niche)]
+            if len(s_grp) == 0:
+                continue
+
+            # Significant in prototype
+            p_sig = p_grp[(p_grp['pval_adj'] < pval_thr) & (abs(p_grp['logfoldchange']) > logfc_thr)]
+
+            # Significant genes in single-cell
+            s_sig_genes = set(s_grp[(s_grp['pval_adj'] < pval_thr) & (abs(s_grp['logfoldchange']) > logfc_thr)]['gene'])
+
+            # Metacell-only genes
+            for _, gene_row in p_sig.iterrows():
+                if gene_row['gene'] not in s_sig_genes:
+                    sc_match = s_grp[s_grp['gene'] == gene_row['gene']]
+                    rows.append({
+                        'celltype': ct,
+                        'niche': niche,
+                        'gene': gene_row['gene'],
+                        'proto_logfc': gene_row['logfoldchange'],
+                        'proto_pval': gene_row['pval_adj'],
+                        'sc_logfc': sc_match['logfoldchange'].values[0] if len(sc_match) > 0 else np.nan,
+                        'sc_pval': sc_match['pval_adj'].values[0] if len(sc_match) > 0 else np.nan,
+                    })
+
+        df = pd.DataFrame(rows)
+
+        if len(df) == 0:
+            print("No metacell-discovered genes found")
+            return df
+
+        # Sort by proto_logfc
+        df = df.sort_values('proto_logfc', ascending=False).reset_index(drop=True)
+
+        # Save
+        save_path = os.path.join(self.get_dump_path(), 'discovered_genes.csv')
+        df.to_csv(save_path, index=False)
+
+        print(f"Found {len(df)} metacell-discovered genes")
+        print(f"Saved to {save_path}")
+        print(f"\nTop 15 by logFC:")
+        print(df.head(15).to_string(index=False))
+
+        return df
+
+    def plot_discovered_genes(self, top_n=20, figsize=(14, 10)):
+        """Plot discovered genes: bar chart + volcano highlighting.
+
+        Args:
+            top_n: number of top genes to show in bar chart
+            figsize: figure size
+
+        Returns:
+            Figure and discovered genes DataFrame
+        """
+        import matplotlib.pyplot as plt
+
+        # Load discovered genes
+        save_path = os.path.join(self.get_dump_path(), 'discovered_genes.csv')
+        if not os.path.exists(save_path):
+            print("Run t.find_discovered_genes() first")
+            return None
+
+        df = pd.read_csv(save_path)
+
+        fig, axes = plt.subplots(2, 2, figsize=figsize)
+
+        # --- Top-left: Top upregulated genes ---
+        ax = axes[0, 0]
+        top_up = df[df['proto_logfc'] > 0].nlargest(top_n, 'proto_logfc')
+        colors = ['#2ecc71' if 'Tumor' in n else '#3498db' for n in top_up['niche']]
+        bars = ax.barh(range(len(top_up)), top_up['proto_logfc'], color=colors, alpha=0.8)
+        ax.set_yticks(range(len(top_up)))
+        ax.set_yticklabels([f"{row['gene']} ({row['niche'][:15]})" for _, row in top_up.iterrows()], fontsize=8)
+        ax.set_xlabel('Log Fold Change (metacell)')
+        ax.set_title(f'Top {len(top_up)} Upregulated\n(green=Tumor surface, blue=Desmoplastic)')
+        ax.invert_yaxis()
+
+        # --- Top-right: Top downregulated genes ---
+        ax = axes[0, 1]
+        top_down = df[df['proto_logfc'] < 0].nsmallest(top_n, 'proto_logfc')
+        colors = ['#e74c3c' if 'Desmo' in n else '#9b59b6' for n in top_down['niche']]
+        bars = ax.barh(range(len(top_down)), top_down['proto_logfc'], color=colors, alpha=0.8)
+        ax.set_yticks(range(len(top_down)))
+        ax.set_yticklabels([f"{row['gene']} ({row['niche'][:15]})" for _, row in top_down.iterrows()], fontsize=8)
+        ax.set_xlabel('Log Fold Change (metacell)')
+        ax.set_title(f'Top {len(top_down)} Downregulated\n(red=Desmoplastic, purple=other)')
+        ax.invert_yaxis()
+
+        # --- Bottom-left: Metacell vs Single-cell logFC scatter ---
+        ax = axes[1, 0]
+        valid = df.dropna(subset=['sc_logfc'])
+        ax.scatter(valid['sc_logfc'], valid['proto_logfc'], s=30, alpha=0.6, c='steelblue')
+
+        # Label top genes
+        for _, row in valid.nlargest(5, 'proto_logfc').iterrows():
+            ax.annotate(row['gene'], (row['sc_logfc'], row['proto_logfc']), fontsize=7)
+        for _, row in valid.nsmallest(5, 'proto_logfc').iterrows():
+            ax.annotate(row['gene'], (row['sc_logfc'], row['proto_logfc']), fontsize=7)
+
+        lim = max(abs(valid['sc_logfc']).max(), abs(valid['proto_logfc']).max()) * 1.1
+        ax.plot([-lim, lim], [-lim, lim], 'k--', alpha=0.3)
+        ax.axhline(0, c='gray', lw=0.5)
+        ax.axvline(0, c='gray', lw=0.5)
+        ax.set_xlabel('Single-cell logFC (not significant)')
+        ax.set_ylabel('Metacell logFC (significant)')
+        ax.set_title('Metacell amplifies weak signals')
+
+        # --- Bottom-right: P-value comparison ---
+        ax = axes[1, 1]
+        valid = df.dropna(subset=['sc_pval'])
+        ax.scatter(-np.log10(valid['sc_pval'].clip(lower=1e-10)),
+                   -np.log10(valid['proto_pval'].clip(lower=1e-10)),
+                   s=30, alpha=0.6, c='coral')
+
+        ax.axhline(-np.log10(0.05), c='red', ls='--', alpha=0.5, label='p=0.05')
+        ax.axvline(-np.log10(0.05), c='blue', ls='--', alpha=0.5)
+        ax.set_xlabel('Single-cell -log10(p)')
+        ax.set_ylabel('Metacell -log10(p)')
+        ax.set_title('Metacell finds significance\n(top-left = discovered)')
+        ax.legend(fontsize=8)
+
+        plt.tight_layout()
+        plt.show()
+
+        return fig, df
+
+    def discovered_genes_table(self, top_n=30):
+        """Generate a formatted table of discovered genes for presentation.
+
+        Args:
+            top_n: number of genes to include
+
+        Returns:
+            DataFrame formatted for presentation
+        """
+        save_path = os.path.join(self.get_dump_path(), 'discovered_genes.csv')
+        if not os.path.exists(save_path):
+            print("Run t.find_discovered_genes() first")
+            return None
+
+        df = pd.read_csv(save_path)
+
+        # Select top up and down
+        top_up = df[df['proto_logfc'] > 0].nlargest(top_n // 2, 'proto_logfc')
+        top_down = df[df['proto_logfc'] < 0].nsmallest(top_n // 2, 'proto_logfc')
+        selected = pd.concat([top_up, top_down])
+
+        # Format for presentation
+        table = selected[['gene', 'niche', 'proto_logfc', 'proto_pval', 'sc_logfc', 'sc_pval']].copy()
+        table['proto_logfc'] = table['proto_logfc'].round(2)
+        table['sc_logfc'] = table['sc_logfc'].round(2)
+        table['proto_pval'] = table['proto_pval'].apply(lambda x: f"{x:.1e}")
+        table['sc_pval'] = table['sc_pval'].apply(lambda x: f"{x:.1e}" if pd.notna(x) else "NA")
+        table['direction'] = table['proto_logfc'].apply(lambda x: '↑' if x > 0 else '↓')
+
+        table = table.rename(columns={
+            'gene': 'Gene',
+            'niche': 'Niche',
+            'proto_logfc': 'Metacell LogFC',
+            'proto_pval': 'Metacell p-val',
+            'sc_logfc': 'Single-cell LogFC',
+            'sc_pval': 'Single-cell p-val',
+            'direction': '↑↓'
+        })
+
+        return table[['Gene', '↑↓', 'Niche', 'Metacell LogFC', 'Metacell p-val', 'Single-cell LogFC', 'Single-cell p-val']]
+
+    def plot_gene_comparison(self, genes=None, top_n=10):
+        """Plot side-by-side comparison of specific genes: metacell vs single-cell.
+
+        Args:
+            genes: list of gene names to plot. If None, uses top discovered genes.
+            top_n: if genes is None, use top_n discovered genes
+
+        Returns:
+            Figure
+        """
+        import matplotlib.pyplot as plt
+
+        save_path = os.path.join(self.get_dump_path(), 'discovered_genes.csv')
+        if not os.path.exists(save_path):
+            print("Run t.find_discovered_genes() first")
+            return None
+
+        df = pd.read_csv(save_path)
+
+        if genes is None:
+            # Get top by absolute logfc
+            top_up = df[df['proto_logfc'] > 0].nlargest(top_n // 2, 'proto_logfc')
+            top_down = df[df['proto_logfc'] < 0].nsmallest(top_n // 2, 'proto_logfc')
+            selected = pd.concat([top_up, top_down])
+        else:
+            selected = df[df['gene'].isin(genes)]
+
+        fig, ax = plt.subplots(figsize=(12, 6))
+
+        x = np.arange(len(selected))
+        width = 0.35
+
+        bars1 = ax.bar(x - width/2, selected['proto_logfc'], width, label='Metacell (significant)', color='#2ecc71', alpha=0.8)
+        bars2 = ax.bar(x + width/2, selected['sc_logfc'], width, label='Single-cell (not sig)', color='#95a5a6', alpha=0.8)
+
+        ax.set_ylabel('Log Fold Change')
+        ax.set_title('Discovered Genes: Metacell vs Single-cell')
+        ax.set_xticks(x)
+        ax.set_xticklabels([f"{row['gene']}\n({row['niche'][:10]})" for _, row in selected.iterrows()],
+                          rotation=45, ha='right', fontsize=8)
+        ax.legend()
+        ax.axhline(0, c='black', lw=0.5)
+
+        # Add significance markers
+        for i, (_, row) in enumerate(selected.iterrows()):
+            if row['proto_pval'] < 0.01:
+                ax.text(i - width/2, row['proto_logfc'] + 0.05 * np.sign(row['proto_logfc']), '**', ha='center', fontsize=10)
+            elif row['proto_pval'] < 0.05:
+                ax.text(i - width/2, row['proto_logfc'] + 0.05 * np.sign(row['proto_logfc']), '*', ha='center', fontsize=10)
+
+        plt.tight_layout()
+        plt.show()
+
+        return fig
+
+    def plot_method_comparison_summary(self):
+        """Create a summary figure comparing all methods for presentation.
+
+        Returns:
+            Figure
+        """
+        import matplotlib.pyplot as plt
+
+        # Run compare_all_methods but capture the data
+        result = self.compare_all_methods()
+        if result is None:
+            return None
+
+        # Additional summary plot
+        fig, axes = plt.subplots(1, 3, figsize=(14, 4))
+
+        # Load discovered genes count
+        disc_path = os.path.join(self.get_dump_path(), 'discovered_genes.csv')
+        n_discovered = len(pd.read_csv(disc_path)) if os.path.exists(disc_path) else 0
+
+        # Panel 1: Method comparison bar
+        ax = axes[0]
+        methods = result['method'].tolist()
+        jaccard = result['mean_jaccard'].tolist()
+        colors = ['#2ecc71' if 'proto' in m.lower() else '#3498db' for m in methods]
+        ax.bar(methods, jaccard, color=colors, alpha=0.8)
+        ax.set_ylabel('Jaccard Score')
+        ax.set_title('Agreement with Ground Truth')
+        ax.set_xticklabels(methods, rotation=45, ha='right')
+
+        # Panel 2: Signal strength
+        ax = axes[1]
+        logfc_std = result['logfc_std'].tolist()
+        ax.bar(methods, logfc_std, color=colors, alpha=0.8)
+        ax.set_ylabel('LogFC Std')
+        ax.set_title('Signal Strength (higher=cleaner)')
+        ax.set_xticklabels(methods, rotation=45, ha='right')
+
+        # Panel 3: Discovered genes summary
+        ax = axes[2]
+        ax.text(0.5, 0.7, f"{n_discovered}", fontsize=48, ha='center', va='center', transform=ax.transAxes, fontweight='bold', color='#2ecc71')
+        ax.text(0.5, 0.35, "Genes Discovered", fontsize=14, ha='center', va='center', transform=ax.transAxes)
+        ax.text(0.5, 0.15, "(significant in metacell,\nnot in single-cell)", fontsize=10, ha='center', va='center', transform=ax.transAxes, color='gray')
+        ax.axis('off')
+
+        plt.tight_layout()
+        plt.show()
+
+        return fig
