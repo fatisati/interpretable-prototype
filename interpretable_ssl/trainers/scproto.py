@@ -521,10 +521,14 @@ class SCProtoTrainer(AdoptiveTrainer):
         total_metrics = {
             'loss': 0, 'umap': 0, 'q_pos': 0, 'q_neg': 0, 'margin': 0,
             'loss_pos': 0, 'loss_neg': 0, 'recon': 0, 'kl': 0,
-            'proto_recon': 0, 'r1r2': 0,
+            'proto_recon': 0, 'r1r2': 0, 'n_unused_protos': 0,
         }
         n_batches = 0
-        n_iters = max(len(l) for l in loaders)
+        # One epoch = one pass through unique edges (not the pre-expanded list).
+        # The expanded list still provides weighted sampling (strong edges appear more),
+        # but epoch length is now independent of the n_epochs used at EdgeDataset construction.
+        n_iters = max(len(ds.head) for ds in s['edge_datasets']) // self.batch_size
+        n_iters = max(1, n_iters)
 
         from tqdm import tqdm
         for _ in tqdm(range(n_iters), desc='edges'):
@@ -580,6 +584,9 @@ class SCProtoTrainer(AdoptiveTrainer):
                 with torch.no_grad():
                     sa_effk = (1.0 / (soft_assign * soft_assign).sum(dim=1))
                     total_metrics['effk'] = total_metrics.get('effk', 0) + sa_effk.median().item()
+                    hard_assign = soft_assign.argmax(dim=1)
+                    n_used = hard_assign.unique().numel()
+                    total_metrics['n_unused_protos'] += self.nmb_prototypes - n_used
 
             # Step 3: per-ds loss using slices of shared z_unique
             for ds_id, batch in enumerate(ds_batches):
@@ -684,6 +691,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         if self.lambda_r1r2 > 0:
             extra += f" | r1r2={metrics['r1r2']:.4f}"
         effk_str = f" | effk={metrics['effk']:.1f}" if 'effk' in metrics else ""
+        unused_str = f" | unused_proto={metrics['n_unused_protos']:.0f}" if 'n_unused_protos' in metrics else ""
 
         knn_str = ""
         # if epoch % 5 == 0 or epoch == total_epochs:
@@ -695,31 +703,129 @@ class SCProtoTrainer(AdoptiveTrainer):
               f"loss={metrics['loss']:.4f} | "
               f"q+={metrics['q_pos']:.3f} | "
               f"q-={metrics['q_neg']:.3f} | "
-              f"margin={metrics['margin']:.3f}{effk_str}{extra}{knn_str}")
+              f"margin={metrics['margin']:.3f}{effk_str}{unused_str}{extra}{knn_str}")
 
-    def train_umap_edges(self, epochs: int = None, verbose: bool = True):
-        """Train encoder using edge-centric parametric UMAP (fresh start)."""
+    def train_umap_edges(self, epochs: int = None, verbose: bool = True,
+                         early_stop: bool = False, eval_freq: int = 10,
+                         patience: int = 50, max_epochs: int = None,
+                         early_stop_metric: str = 'homophily'):
+        """Train encoder using edge-centric parametric UMAP (fresh start).
+
+        Args:
+            epochs: fixed number of epochs (used when early_stop=False)
+            early_stop: if True, stop based on early_stop_metric instead of fixed epochs
+            eval_freq: evaluate metric every N epochs (used when early_stop=True)
+            patience: stop if no improvement for this many epochs (used when early_stop=True)
+            max_epochs: hard cap on epochs regardless of early stopping
+            early_stop_metric: 'homophily' or 'modularity' (used when early_stop=True)
+        """
         epochs = epochs or getattr(self, 'pretraining_epochs', 200)
         self._setup_umap_edges(epochs)
-        metrics = self.continue_train_umap_edges(epochs, verbose)
+        metrics = self.continue_train_umap_edges(
+            epochs, verbose,
+            early_stop=early_stop, eval_freq=eval_freq,
+            patience=patience, max_epochs=max_epochs,
+            early_stop_metric=early_stop_metric,
+        )
         self.save_clusters()
         return metrics
 
-    def continue_train_umap_edges(self, epochs: int = 50, verbose: bool = True):
+    def continue_train_umap_edges(self, epochs: int = 50, verbose: bool = True,
+                                  early_stop: bool = False, eval_freq: int = 10,
+                                  patience: int = 50, max_epochs: int = None,
+                                  early_stop_metric: str = 'homophily'):
         """Continue UMAP edge training from current model state for more epochs.
 
         Rebuilds optimizer/loader/edge_dataset if needed (e.g. after code reload),
         but never touches model weights or prototypes.
+
+        Args:
+            epochs: fixed number of epochs (used when early_stop=False)
+            early_stop: if True, ignore epochs and stop based on early_stop_metric
+            eval_freq: evaluate metric every N epochs (used when early_stop=True)
+            patience: stop if no improvement for this many epochs
+            max_epochs: hard cap on epochs (used with early_stop=True)
+            early_stop_metric: 'homophily' or 'modularity' (used when early_stop=True)
         """
         if not hasattr(self, '_umap_state'):
-            # Rebuild training objects without reinitializing model/prototypes
             self._setup_umap_edges(epochs, init_prototypes=False)
 
         start = self._umap_state['epoch']
-        for i in range(epochs):
+
+        if not early_stop:
+            # --- fixed-epoch mode (original behaviour) ---
+            freq = getattr(self, 'umap_checkpoint_freq', 20)
+            last_epoch = start + epochs
+            for i in range(epochs):
+                metrics = self._run_umap_epoch()
+                current_epoch = start + i + 1
+                if verbose:
+                    self._print_umap_epoch(current_epoch, last_epoch, metrics)
+                if freq > 0 and (current_epoch % freq == 0 or current_epoch == last_epoch):
+                    self.save_umap_checkpoint()
+            return metrics
+
+        # --- early-stopping mode ---
+        best_score = -1.0
+        no_improve_epochs = 0
+        epoch_offset = 0
+
+        print(f"Early stopping mode: metric={early_stop_metric}, eval every {eval_freq} epochs, patience={patience}" +
+              (f", max_epochs={max_epochs}" if max_epochs else ""))
+
+        # Print initial modularity before any training
+        if early_stop_metric == 'modularity':
+            init_result = self.modularity()
+            best_score = init_result['modularity']
+            print(f"[Epoch 0] initial modularity={best_score:.4f}")
+
+        while True:
             metrics = self._run_umap_epoch()
+            epoch_offset += 1
+            current_epoch = start + epoch_offset
+
             if verbose:
-                self._print_umap_epoch(start + i + 1, start + epochs, metrics)
+                end_str = f"~{max_epochs}" if max_epochs else "?"
+                self._print_umap_epoch(current_epoch, end_str, metrics)
+
+            # Hard cap
+            if max_epochs and epoch_offset >= max_epochs:
+                print(f"[Early stop] Reached max_epochs={max_epochs}. Saving checkpoint.")
+                self.save_umap_checkpoint()
+                break
+
+            # Eval block
+            if epoch_offset % eval_freq == 0:
+                if early_stop_metric == 'modularity':
+                    # In recon-only mode prototypes aren't updated during training,
+                    # so re-init them from current encoder before scoring.
+                    recon_only = (getattr(self, 'lambda_recon', 0) > 0 and
+                                  getattr(self, 'lambda_umap', 1) == 0 and
+                                  getattr(self, 'lambda_proto', 0) == 0 and
+                                  getattr(self, 'lambda_swav', 0) == 0 and
+                                  getattr(self, 'lambda_proto_recon', 0) == 0)
+                    if recon_only:
+                        self.init_prototypes()
+                    result = self.modularity()
+                    score = result['modularity']
+                else:
+                    result = self.edge_homophily()
+                    score = result['homophily']
+
+                if score > best_score:
+                    improvement = score - best_score
+                    best_score = score
+                    no_improve_epochs = 0
+                    print(f"  [Early stop] {early_stop_metric} improved to {score:.4f} (+{improvement:.4f}) → saving checkpoint")
+                    self.save_umap_checkpoint()
+                else:
+                    no_improve_epochs += eval_freq
+                    print(f"  [Early stop] No improvement ({score:.4f} vs best {best_score:.4f}), "
+                          f"no-improve streak: {no_improve_epochs}/{patience}")
+                    if no_improve_epochs >= patience:
+                        print(f"[Early stop] Patience exhausted. Stopping at epoch {current_epoch}.")
+                        break
+
         return metrics
 
     def save_umap_checkpoint(self, path=None):
@@ -758,6 +864,21 @@ class SCProtoTrainer(AdoptiveTrainer):
             self._umap_state['optimizer'].load_state_dict(checkpoint['optimizer_state_dict'])
 
         print(f"Loaded UMAP checkpoint from {path} (resuming from epoch {checkpoint['epoch']})")
+
+    def save_modularity(self):
+        import json
+        import numpy as np
+        result = self.modularity()
+        path = os.path.join(self.get_dump_path(), 'modularity.json')
+        def _convert(o):
+            if isinstance(o, np.ndarray): return o.tolist()
+            if isinstance(o, (np.integer,)): return int(o)
+            if isinstance(o, (np.floating,)): return float(o)
+            raise TypeError(f'Not serializable: {type(o)}')
+        with open(path, 'w') as f:
+            json.dump(result, f, indent=2, default=_convert)
+        print(f"Saved modularity={result['modularity']:.4f} to {path}")
+        return result
 
     def _log_metric(self, name, value):
         """Store a scalar or dict metric value in the internal log and flush to disk."""
@@ -1050,6 +1171,123 @@ class SCProtoTrainer(AdoptiveTrainer):
             'label': label,
             'per_cluster_contribution': per_cluster,
         }
+
+    def conductance(self, assignments=None, label='proto'):
+        """Compute mean weighted conductance across clusters.
+
+        conductance(C) = cut(C, V\C) / min(vol(C), vol(V\C))
+
+        Lower is better (0 = perfect, 1 = worst).
+
+        Returns:
+            dict with mean_conductance, per_cluster, assignments, label.
+        """
+        import scipy.sparse as sp
+
+        assignments, label = self._get_assignments(assignments, label)
+
+        A = self.train_ds.aff_raw if hasattr(self.train_ds, 'aff_raw') else self.train_ds.aff
+        A = sp.csr_matrix(A)
+        A = (A + A.T) / 2
+
+        degrees = np.array(A.sum(axis=1)).ravel()
+        total_vol = degrees.sum()
+
+        cluster_ids = np.unique(assignments)
+        per_cluster = {}
+        vals = []
+        for c in cluster_ids:
+            mask = (assignments == c)
+            vol_c = degrees[mask].sum()
+            if vol_c == 0:
+                continue
+            e_c = A[mask][:, mask].sum()
+            cut_c = vol_c - e_c
+            denom = min(vol_c, total_vol - vol_c)
+            if denom == 0:
+                continue
+            cond = cut_c / denom
+            per_cluster[int(c)] = float(cond)
+            vals.append(cond)
+
+        mean_cond = float(np.mean(vals)) if vals else 0.0
+        print(f"[{label}] mean conductance: {mean_cond:.4f}  (lower is better)")
+
+        self._log_metric('conductance', mean_cond)
+        self._log_metric('conductance/per_cluster', per_cluster)
+
+        return {
+            'mean_conductance': mean_cond,
+            'per_cluster': per_cluster,
+            'assignments': assignments,
+            'label': label,
+        }
+
+    def edge_homophily(self, assignments=None, label='proto'):
+        """Compute weighted edge homophily.
+
+        homophily = sum of edge weights within clusters / total edge weight
+
+        Higher is better (1 = all edges within clusters, 0 = all edges cut).
+
+        Returns:
+            dict with homophily, assignments, label.
+        """
+        import scipy.sparse as sp
+
+        assignments, label = self._get_assignments(assignments, label)
+
+        A = self.train_ds.aff_raw if hasattr(self.train_ds, 'aff_raw') else self.train_ds.aff
+        A = sp.csr_matrix(A)
+        A = (A + A.T) / 2
+
+        total_weight = A.sum()
+        if total_weight == 0:
+            print(f"[{label}] edge homophily: 0.0000 (no edges)")
+            return {'homophily': 0.0, 'assignments': assignments, 'label': label}
+
+        intra_weight = 0.0
+        for c in np.unique(assignments):
+            mask = (assignments == c)
+            intra_weight += A[mask][:, mask].sum()
+
+        h = float(intra_weight / total_weight)
+        print(f"[{label}] edge homophily: {h:.4f}  (higher is better)")
+
+        self._log_metric('edge_homophily', h)
+
+        return {
+            'homophily': h,
+            'assignments': assignments,
+            'label': label,
+        }
+
+    def eval_graph_structure(self, assignments=None, label='proto'):
+        """Run graph structure preservation metrics and log them.
+
+        Computes: modularity, edge_homophily.
+
+        Returns:
+            dict with all scalar metrics.
+        """
+        print(f"\n{'='*50}")
+        print(f"Graph Structure Preservation Metrics [{label}]")
+        print(f"{'='*50}")
+
+        r_mod = self.modularity(assignments, label)
+        r_hom = self.edge_homophily(assignments, label)
+
+        summary = {
+            'modularity':     r_mod['modularity'],
+            'edge_homophily': r_hom['homophily'],
+        }
+
+        print(f"\nSummary:")
+        print(f"  Modularity:      {summary['modularity']:.4f}  (higher is better)")
+        print(f"  Edge Homophily:  {summary['edge_homophily']:.4f}  (higher is better)")
+        print(f"{'='*50}\n")
+
+        return summary
 
     def metacell_f1(self, assignments=None, label='proto'):
         """Compute F1 score treating clusters as metacells with majority-vote labels.

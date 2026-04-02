@@ -62,11 +62,62 @@ class AdoptiveTrainer(Trainer):
     def train_fully_supervised(self):
         pass
 
-    def pretrain_encoder(self):
+    PRETRAIN_PARAM_KEYS = [
+        'dataset_id', 'cvae_epochs', 'batch_size',
+        'latent_dims', 'l2norm', 'model_type', 'beta',
+    ]
+    PRETRAIN_ABBREVIATIONS = {
+        'dataset_id': 'ds', 'cvae_epochs': 'cvae_e', 'batch_size': 'BS',
+        'latent_dims': 'LD', 'l2norm': 'l2norm', 'model_type': 'model',
+        'beta': 'beta',
+    }
+
+    def _get_pretrain_name(self):
+        from interpretable_ssl.configs.defaults import get_defaults
+        defaults = get_defaults()
+        parts = ['pretrain']
+        for key in self.PRETRAIN_PARAM_KEYS:
+            val = self.params.get(key)
+            if val is not None and val != defaults.get(key):
+                abbr = self.PRETRAIN_ABBREVIATIONS[key]
+                parts.append(f"{abbr}-{val}" if isinstance(val, str) else f"{abbr}{val}")
+        return "_".join(parts)
+
+    def get_pretrain_dump_path(self):
+        from interpretable_ssl.configs.constants import MODEL_DIR
+        return os.path.join(MODEL_DIR, self.dataset_id, 'pretrain', self._get_pretrain_name())
+
+    def pretrain_encoder(self, scpoli_train_kwargs=None):
+        kwargs = scpoli_train_kwargs or {}
         self.extract_scpoli(self.model, True).train(
             n_epochs=self.cvae_epochs,
             pretraining_epochs=self.cvae_epochs,
+            **kwargs
         )
+
+    def save_pretrain_checkpoint(self, path=None):
+        import torch, os
+        if path is None:
+            os.makedirs(self.get_pretrain_dump_path(), exist_ok=True)
+            path = os.path.join(self.get_pretrain_dump_path(), 'pretrain_checkpoint.pth')
+        pretrain_params = {k: self.params.get(k) for k in self.PRETRAIN_PARAM_KEYS}
+        pretrain_params['condition_key'] = self.condition_key
+        torch.save({
+            'model_state_dict': self.model.state_dict(),
+            'pretrain_params': pretrain_params,
+        }, path)
+        print(f"Saved pretrain checkpoint to {path}")
+        return path
+
+    def load_pretrain_checkpoint(self, path=None):
+        import torch, os
+        if path is None:
+            path = os.path.join(self.get_pretrain_dump_path(), 'pretrain_checkpoint.pth')
+        checkpoint = torch.load(path, map_location=self.device)
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        print(f"Loaded pretrain checkpoint from {path}")
+        print(f"  pretrain_params: {checkpoint.get('pretrain_params')}")
+        return checkpoint
 
     def init_prototypes(self):
         pass
