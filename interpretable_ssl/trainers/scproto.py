@@ -589,6 +589,7 @@ class SCProtoTrainer(AdoptiveTrainer):
                     total_metrics['n_unused_protos'] += self.nmb_prototypes - n_used
 
             # Step 3: per-ds loss using slices of shared z_unique
+            total_edges = 0
             for ds_id, batch in enumerate(ds_batches):
                 head = batch['head']; tail = batch['tail']
                 weights = batch['weight']; neg_samples = batch['neg_samples']
@@ -622,9 +623,10 @@ class SCProtoTrainer(AdoptiveTrainer):
                     z_neg = z_unique[_gather(neg_samples.flatten())].view(B, neg_K, -1)
                     umap_loss_ds, metrics = loss_fn(z_head, z_tail, z_neg, weights)
 
-                umap_loss = umap_loss + umap_loss_ds
+                umap_loss = umap_loss + umap_loss_ds * B
+                total_edges += B
 
-            umap_loss = umap_loss / n_ds
+            umap_loss = umap_loss / total_edges
 
             # Auxiliary losses computed once on the shared batch (not per-ds)
             if lambda_proto_recon > 0:

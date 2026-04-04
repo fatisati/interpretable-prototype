@@ -22,6 +22,23 @@ def softplus_inverse(y):
     return torch.log(torch.exp(y) - 1.0)
 
 
+def apply_niche_mask(scores, cell_niche_idx, proto_niche_labels, value = float('-inf')):
+    """
+    Mask scores for non-matching niche prototypes.
+
+    Args:
+        scores: (B, K) assignment scores
+        cell_niche_idx: (B,) niche index for each cell
+        proto_niche_labels: (K,) niche index for each prototype
+
+    Returns:
+        scores with -inf for non-matching prototypes
+    """
+    # mask: (B, K) where True = cell's niche matches proto's niche
+    mask = cell_niche_idx.unsqueeze(1) == proto_niche_labels.unsqueeze(0)
+    return scores.masked_fill(~mask, value)
+
+
 class SwavBase(nn.Module):
     def __init__(
         self,
@@ -51,13 +68,15 @@ class SwavBase(nn.Module):
         # self.propagation_reg = propagation_reg
         # self.prot_emb_sim_reg = prot_emb_sim_reg
 
-    def init_prototypes_kmeans(self, embeddings, nmb_prots):
+    def init_prototypes_kmeans(self, embeddings, nmb_prots, normalize_centers=True, random_state=42):
         # Run KMeans on embeddings (convert to numpy for compatibility)
-        kmeans = KMeans(n_clusters=nmb_prots)
+        kmeans = KMeans(n_clusters=nmb_prots, random_state=random_state)
         kmeans.fit(embeddings.cpu().numpy())
 
         # Get cluster centers and convert them back to a PyTorch tensor
         cluster_centers = torch.tensor(kmeans.cluster_centers_)
+        if normalize_centers:
+            cluster_centers = torch.nn.functional.normalize(cluster_centers, dim=1, p=2)
         self.set_prototypes(cluster_centers)
 
     def compute_cvae_loss(self, recon_loss, kl_loss, mmd_loss):
@@ -68,6 +87,8 @@ class SwavBase(nn.Module):
     def encoder_out(self, batch):
         x, recon_loss, kl_loss, mmd_loss = self.scpoli_cvae(**batch)
         cvae_loss = self.compute_cvae_loss(recon_loss, kl_loss, mmd_loss)
+        if self.l2norm:
+            x = nn.functional.normalize(x, dim=1, p=2)
         return x, recon_loss + mmd_loss, kl_loss
 
     def forward(self, batch):
@@ -75,9 +96,6 @@ class SwavBase(nn.Module):
 
         if self.projection_head is not None:
             x = self.projection_head(x)
-
-        if self.l2norm:
-            x = nn.functional.normalize(x, dim=1, p=2)
 
         propagation_sim = self.propagation_sim_loss(x)
 
@@ -305,13 +323,24 @@ class scProtoGMVAE(SwAVModel):
         self.gm_vparam = self.gm_vparam.to(self.get_prototypes().device)
         self.kl_type = kl_type
         self.recon_version = recon_version
+        self.proto_niche_labels = None  # Set by trainer for niche-constrained mode
+
     def forward(self, bs, batch):
-        z, recon, kl, resp, kl_balance, proto_recon = self.calc_z_and_cvae_loss(bs, **batch)
+        # Extract niche info if present
+        cell_niche_idx = batch.pop('cell_niche_idx', None)
+
+        z, recon, kl, resp, kl_balance, proto_recon = self.calc_z_and_cvae_loss(
+            bs, cell_niche_idx=cell_niche_idx, **batch
+        )
         propagation_sim = self.propagation_sim_loss(z)
+
+        # Pass niche info to proto_soft_assignments
+        scores = self.proto_soft_assignments(z, cell_niche_idx, self.proto_niche_labels)
+
         return (
             z,
             z,
-            self.proto_soft_assignments(z),
+            scores,
             recon,
             proto_recon,
             propagation_sim,
@@ -328,6 +357,7 @@ class scProtoGMVAE(SwAVModel):
         sizefactor=None,
         celltypes=None,
         labeled=None,
+        cell_niche_idx=None,
     ):
         batch_embeddings = torch.hstack(
             [self.scpoli_cvae.embeddings[i](batch[:, i]) for i in range(batch.shape[1])]
@@ -340,9 +370,13 @@ class scProtoGMVAE(SwAVModel):
         if self.l2norm:
             z_mu = nn.functional.normalize(z_mu, dim=1, p=2)
 
-        
+        # Pass niche info for niche-constrained assignment
         scores = torch.softmax(
-            self.proto_soft_assignments(z_mu[:bs]) / self.temperature,
+            self.proto_soft_assignments(
+                z_mu[:bs],
+                cell_niche_idx[:bs] if cell_niche_idx is not None else None,
+                self.proto_niche_labels
+            ) / self.temperature,
             dim=1
         )#.detach()  # (B, K) v28
 
@@ -444,9 +478,13 @@ class scProtoGMVAE(SwAVModel):
         decoder_out = self.scpoli_cvae.decoder(z, batch_embeddings)
         return decoder_out[0]
 
-    def proto_soft_assignments(self, z):
+    def proto_soft_assignments(self, z, cell_niche_idx=None, proto_niche_labels=None):
         if self.assignment_metric == "dotp":
-            return self.prototypes(z)
+            s = self.prototypes(z)
+            # Apply niche mask if provided (set non-matching to -inf -> 0 after softmax)
+            if cell_niche_idx is not None and proto_niche_labels is not None:
+                s = apply_niche_mask(s, cell_niche_idx, proto_niche_labels, value=0)
+            return s
         elif self.assignment_metric == "ddotp":
             return F.linear(z, self.prototypes.weight.detach())
         elif self.assignment_metric == "dneuc":
@@ -459,6 +497,18 @@ class scProtoGMVAE(SwAVModel):
             protos = self.get_prototypes()  # (K, d)
             d2 = torch.cdist(z, protos, p=2) ** 2  # ||z - c||^2   (B, K)
             s = -d2  # negative distance
+            s = s - s.max(dim=1, keepdim=True)[0]  # row-wise stabilization
+            s = s.clamp(min=-75)
+            return s
+        elif self.assignment_metric == "sneuc_niche":  # niche-constrained sneuc
+            protos = self.get_prototypes()  # (K, d)
+            d2 = torch.cdist(z, protos, p=2) ** 2  # ||z - c||^2   (B, K)
+            s = -d2  # negative distance
+
+            # Apply niche mask before stabilization
+            if cell_niche_idx is not None and proto_niche_labels is not None:
+                s = apply_niche_mask(s, cell_niche_idx, proto_niche_labels)
+
             s = s - s.max(dim=1, keepdim=True)[0]  # row-wise stabilization
             s = s.clamp(min=-75)
             return s

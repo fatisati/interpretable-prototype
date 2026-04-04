@@ -92,6 +92,7 @@ def metacell_niche_validation_df(
                     tmp, "group", groups=["pos"], reference="ctrl", method="wilcoxon"
                 )
                 rg_mc = sc.get.rank_genes_groups_df(tmp, group="pos")
+                rg_mc = rg_mc.sort_values("logfoldchanges", ascending=False)
                 mc_genes = rg_mc["names"].head(topk).tolist()
                 mc_dge = rg_mc.head(topk)[
                     ["names", "logfoldchanges", "pvals_adj"]

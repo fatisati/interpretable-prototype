@@ -444,12 +444,15 @@ class Trainer(TrainerBase):
 
         Args:
             adata: AnnData to plot (default: self.dataset.adata or self.train_ds.adata)
-            color_key: obs column for coloring (default: self.dataset.label_key)
+            color_key: obs column for coloring, or list of columns for multiple plots
+                       (default: self.dataset.label_key)
             model: model to use (default: self.model)
             max_cells: subsample if more cells
+            figsize: figure size per subplot (width, height)
+            show_proto_nums: whether to show prototype numbers
 
         Returns:
-            fig, proto_labels
+            fig, proto_labels (dict if multiple color_keys)
         """
         import matplotlib.pyplot as plt
         from collections import Counter
@@ -463,6 +466,12 @@ class Trainer(TrainerBase):
         if color_key is None:
             color_key = self.dataset.label_key
 
+        # Handle list of color keys
+        if isinstance(color_key, (list, tuple)):
+            color_keys = list(color_key)
+        else:
+            color_keys = [color_key]
+
         ad = adata.copy() if adata.n_obs <= max_cells else adata[np.random.choice(adata.n_obs, max_cells, replace=False)].copy()
 
         z = self.encode_adata(ad, model, z_idx=1).detach().cpu().numpy()
@@ -472,46 +481,72 @@ class Trainer(TrainerBase):
         # Assignment by closest proto (Euclidean)
         assignments = np.argmin(cdist(z, proto), axis=1)
 
-        # Joint UMAP
+        # Joint UMAP (compute once, reuse for all plots)
         combined = np.vstack([z, proto])
         tmp_ad = sc.AnnData(combined)
-        sc.pp.neighbors(tmp_ad, use_rep='X', n_neighbors=15)
-        sc.tl.umap(tmp_ad)
+        sc.pp.neighbors(tmp_ad, use_rep='X', n_neighbors=15, random_state=42)
+        sc.tl.umap(tmp_ad, random_state=42)
         z_umap = tmp_ad.obsm['X_umap'][:len(z)]
         proto_umap = tmp_ad.obsm['X_umap'][len(z):]
 
-        # Majority vote labels
-        labels = ad.obs[color_key].values
-        proto_labels = []
-        proto_sizes = []
-        for p in range(n_protos):
-            mask = assignments == p
-            n = mask.sum()
-            proto_sizes.append(n)
-            proto_labels.append(Counter(labels[mask]).most_common(1)[0][0] if n > 0 else None)
+        # Create subplots
+        n_plots = len(color_keys)
+        n_cols = min(n_plots, 3)
+        n_rows = (n_plots + n_cols - 1) // n_cols
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(figsize[0] * n_cols, figsize[1] * n_rows))
+        if n_plots == 1:
+            axes = [axes]
+        else:
+            axes = axes.flatten()
 
-        # Plot
-        fig, ax = plt.subplots(figsize=figsize)
-        unique_labels = np.unique(labels)
-        cmap = plt.cm.get_cmap('tab20', len(unique_labels))
-        label_to_color = {lbl: cmap(i) for i, lbl in enumerate(unique_labels)}
+        all_proto_labels = {}
 
-        for lbl in unique_labels:
-            mask = labels == lbl
-            ax.scatter(z_umap[mask, 0], z_umap[mask, 1], c=[label_to_color[lbl]], label=lbl, alpha=0.5, s=10)
+        for idx, ck in enumerate(color_keys):
+            ax = axes[idx]
+            labels = ad.obs[ck].values
 
-        for i, plbl in enumerate(proto_labels):
-            c = 'white' if plbl is None else label_to_color.get(plbl, 'white')
-            size = max(50, min(300, proto_sizes[i] // 2))
-            ax.scatter(proto_umap[i, 0], proto_umap[i, 1], c=[c], edgecolor='black', s=size, linewidth=1, zorder=10)
-            if show_proto_nums:
-                ax.annotate(str(i), (proto_umap[i, 0], proto_umap[i, 1]), fontsize=7, ha='center', va='center')
+            # Majority vote labels for this color key
+            proto_labels = []
+            proto_sizes = []
+            for p in range(n_protos):
+                mask = assignments == p
+                n = mask.sum()
+                proto_sizes.append(n)
+                proto_labels.append(Counter(labels[mask]).most_common(1)[0][0] if n > 0 else None)
 
-        n_used = sum(1 for s in proto_sizes if s > 0)
-        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=8)
-        ax.set_title(f'UMAP with Prototypes ({n_used}/{n_protos} used)')
+            all_proto_labels[ck] = proto_labels
+
+            # Plot cells
+            unique_labels = np.unique(labels)
+            cmap = plt.cm.get_cmap('tab20', len(unique_labels))
+            label_to_color = {lbl: cmap(i) for i, lbl in enumerate(unique_labels)}
+
+            for lbl in unique_labels:
+                mask = labels == lbl
+                ax.scatter(z_umap[mask, 0], z_umap[mask, 1], c=[label_to_color[lbl]], label=lbl, alpha=0.5, s=10)
+
+            # Plot prototypes
+            for i, plbl in enumerate(proto_labels):
+                c = 'white' if plbl is None else label_to_color.get(plbl, 'white')
+                size = max(50, min(300, proto_sizes[i] // 2))
+                ax.scatter(proto_umap[i, 0], proto_umap[i, 1], c=[c], edgecolor='black', s=size, linewidth=1, zorder=10)
+                if show_proto_nums:
+                    ax.annotate(str(i), (proto_umap[i, 0], proto_umap[i, 1]), fontsize=7, ha='center', va='center')
+
+            n_used = sum(1 for s in proto_sizes if s > 0)
+            ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=8)
+            ax.set_title(f'{ck} ({n_used}/{n_protos} protos)')
+
+        # Hide unused subplots
+        for idx in range(n_plots, len(axes)):
+            axes[idx].set_visible(False)
+
         plt.tight_layout()
-        return fig, proto_labels
+
+        # Return single proto_labels if single color_key, else dict
+        if len(color_keys) == 1:
+            return fig, all_proto_labels[color_keys[0]]
+        return fig, all_proto_labels
 
     def plot_ref_umap(self, save_plot=True, name_postfix=None, model=None):
 

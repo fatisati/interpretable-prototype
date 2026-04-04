@@ -3,8 +3,7 @@ import numpy as np
 import pandas as pd
 from copy import deepcopy
 from scib_metrics.benchmark import Benchmarker
-from interpretable_ssl.models.linear import *
-from interpretable_ssl.evaluation.knn import *
+
 
 import sys
 
@@ -356,6 +355,378 @@ def affinity_preservation_metrics(t, temperature=None, max_cells=10000, k_neighb
 
 
 # ============================================================================
+# Downstream Utility Metrics: DGE Consistency + scGraph on Metacells
+# ============================================================================
+
+def _build_pseudobulk_adata(ad, ct_key, batch_key):
+    """Average expression per (cell_type, batch) → one row per group."""
+    import anndata
+    rows, obs_rows = [], []
+    for (ct, batch), idx in ad.obs.groupby([ct_key, batch_key]).groups.items():
+        X = ad.X[ad.obs_names.get_indexer(idx)]
+        if hasattr(X, 'toarray'):
+            X = X.toarray()
+        rows.append(X.mean(axis=0))
+        obs_rows.append({ct_key: ct, batch_key: batch, 'n_cells': len(idx)})
+    pb_ad = anndata.AnnData(
+        X=np.array(rows),
+        obs=pd.DataFrame(obs_rows),
+        var=ad.var.copy(),
+    )
+    return pb_ad
+
+
+def eval_dge_consistency(t, ad=None, ct_key='cell_type', batch_key='batch',
+                         save_dir=None, thr=0.01, rbo_p=0.9):
+    """
+    Evaluate downstream utility of learned metacells via DGE consistency.
+
+    For each cell type, computes DGE on:
+      1. Learned metacells (proto assignments)
+      2. Pseudo-bulk baseline (avg expression per cell_type x batch)
+
+    Then compares each to per-batch DGE (ground truth) using avg Jaccard and RBO.
+    Higher = better agreement with per-batch ground truth.
+
+    Returns:
+        results: dict with scalar summary metrics
+        dfs: dict of DataFrames (rbo/jaccard for metacell and pseudobulk)
+    """
+    import scanpy as sc
+    import anndata
+    from interpretable_ssl.evaluation.de_helper import compute_dge_consistency
+
+    if ad is None:
+        ad = t.train_ds.adata
+
+    # ensure lognorm on cell-level adata
+    if ad.X.max() > 20:
+        if 'lognorm' in ad.layers:
+            ad.X = ad.layers['lognorm']
+        else:
+            sc.pp.normalize_total(ad, target_sum=1e4)
+            sc.pp.log1p(ad)
+
+    # --- Metacell adata: decode prototypes (no raw matrix access) ---
+    decoded = t.decode_prototypes(batch_mode='first')   # [K, genes]
+    ct_labels = t.label_prototypes(ct_key)['labels']
+    mc_ad = anndata.AnnData(X=decoded)
+    mc_ad.var_names = ad.var_names
+    mc_ad.obs[ct_key] = ct_labels.values.astype(str)
+
+    # --- Pseudo-bulk adata ---
+    pb_ad = _build_pseudobulk_adata(ad, ct_key, batch_key)
+    pb_ad.obs[ct_key] = pb_ad.obs[ct_key].astype(str)
+
+    print("Running DGE consistency: metacells...")
+    df_rbo_mc, _, df_jac_mc = compute_dge_consistency(
+        mc_ad, ad, ct_key, batch_key, thr=thr, rbo_p=rbo_p,
+        name='metacell', save_path=save_dir,
+    )
+
+    print("Running DGE consistency: pseudo-bulk baseline...")
+    df_rbo_pb, _, df_jac_pb = compute_dge_consistency(
+        pb_ad, ad, ct_key, batch_key, thr=thr, rbo_p=rbo_p,
+        name='pseudobulk', save_path=save_dir,
+    )
+
+    mc_rbo  = float(df_rbo_mc['avg global'].values[0])
+    mc_jac  = float(df_jac_mc['avg global'].values[0])
+    pb_rbo  = float(df_rbo_pb['avg global'].values[0])
+    pb_jac  = float(df_jac_pb['avg global'].values[0])
+
+    results = {
+        'dge/metacell_rbo':   mc_rbo,
+        'dge/metacell_jac':   mc_jac,
+        'dge/pseudobulk_rbo': pb_rbo,
+        'dge/pseudobulk_jac': pb_jac,
+        'dge/rbo_gain':       mc_rbo - pb_rbo,
+        'dge/jac_gain':       mc_jac - pb_jac,
+    }
+
+    print(f"\n{'='*50}")
+    print(f"DGE Consistency (avg global)")
+    print(f"{'='*50}")
+    print(f"  Metacell   RBO:  {mc_rbo:.4f}   Jaccard: {mc_jac:.4f}")
+    print(f"  Pseudobulk RBO:  {pb_rbo:.4f}   Jaccard: {pb_jac:.4f}")
+    print(f"  Gain (mc-pb) RBO: {mc_rbo-pb_rbo:+.4f}  Jaccard: {mc_jac-pb_jac:+.4f}")
+    print(f"{'='*50}\n")
+
+    dfs = {
+        'rbo_metacell': df_rbo_mc, 'jac_metacell': df_jac_mc,
+        'rbo_pseudobulk': df_rbo_pb, 'jac_pseudobulk': df_jac_pb,
+    }
+    return results, dfs
+
+
+def eval_scgraph_metacells(t, ad=None, ct_key='cell_type', batch_key='batch',
+                           save_dir=None):
+    """
+    Run scGraph on decoded prototype expression.
+
+    Steps:
+      1. Decode all prototypes to gene expression via t.decode_prototypes()
+      2. Label each prototype via majority vote (t.label_prototypes)
+      3. Compute PCA on decoded expression
+      4. Run get_mc_scg: builds ground truth cell type graph from original cells,
+         then checks if prototype PCA graph matches it
+
+    Returns:
+        DataFrame with scGraph results (lower is better).
+    """
+    import scanpy as sc
+    import anndata
+    from interpretable_ssl.evaluation.metric_helpers.embedding_metrics import get_mc_scg
+
+    if ad is None:
+        ad = t.train_ds.adata
+
+    # 1. Decode prototypes → [K, genes], no large sparse matrix needed
+    decoded = t.decode_prototypes(batch_mode='first')
+
+    # 2. Label prototypes by majority vote
+    ct_labels = t.label_prototypes(ct_key)['labels']
+
+    # 3. Build small AnnData (K rows)
+    mc_ad = anndata.AnnData(X=decoded)
+    mc_ad.var_names = ad.var_names
+    mc_ad.obs[ct_key] = ct_labels.values.astype(str)
+
+    # 4. PCA on decoded expression (small matrix, cheap)
+    n_comps = min(30, mc_ad.n_obs - 1)
+    sc.tl.pca(mc_ad, n_comps=n_comps)
+    mc_ad.obsm['proto_pca'] = mc_ad.obsm['X_pca']
+
+    results = None
+    try:
+        print("Running scGraph on decoded prototypes...")
+        results = get_mc_scg(ad, mc_ad, batch_key, ct_key, ['proto_pca'])
+        print(results)
+        if save_dir:
+            results.to_csv(os.path.join(save_dir, 'scgraph_metacell.csv'))
+    except Exception as e:
+        print(f"scGraph failed: {e}")
+
+    return results
+
+
+def eval_downstream(t, ad=None, ct_key='cell_type', batch_key='batch',
+                    save_dir=None, run_scgraph=True):
+    """
+    Full downstream evaluation: DGE consistency + scGraph on metacells.
+    Logs all scalar metrics via t._log_metric.
+
+    Usage:
+        results = eval_downstream(t, ct_key='celltype', batch_key='tech',
+                                  save_dir=t.get_dump_path())
+    """
+    if ad is None:
+        ad = t.train_ds.adata.copy()
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
+
+    all_results = {}
+
+    dge_results, _ = eval_dge_consistency(t, ad, ct_key, batch_key, save_dir)
+    all_results.update(dge_results)
+
+    if run_scgraph:
+        sg_results = eval_scgraph_metacells(t, ad, ct_key, batch_key, save_dir)
+        all_results.update(sg_results)
+
+    for k, v in all_results.items():
+        if isinstance(v, (int, float)):
+            t._log_metric(k, v)
+
+    return all_results
+
+
+# ============================================================================
+# Cell Type Coverage, Purity, Batch Entropy
+# ============================================================================
+
+def proto_celltype_stats(t, ad=None, ct_key='cell_type', batch_key='batch'):
+    """
+    Build a per-proto summary DataFrame with:
+      - majority_ct: majority cell type (by vote)
+      - ct_purity: fraction of cells in proto matching majority cell type
+      - batch_entropy: entropy of batch distribution within proto
+      - n_cells: number of cells assigned
+
+    Also returns scalar summary metrics:
+      - ct_coverage: fraction of cell types represented as majority in at least one proto
+
+    Args:
+        t: SCProtoTrainer
+        ad: AnnData (defaults to t.train_ds.adata)
+        ct_key: cell type column in adata.obs
+        batch_key: batch column in adata.obs
+
+    Returns:
+        proto_df: DataFrame indexed by proto_id
+        summary: dict with scalar metrics (ct_coverage, mean_ct_purity, mean_batch_entropy)
+    """
+    from interpretable_ssl.evaluation.mc_metric_utils import calc_purity, calc_batch_entropy
+
+    if ad is None:
+        ad = t.train_ds.adata
+
+    hard_assign = get_proto_assignments(t, ad)
+    obs = ad.obs.copy()
+    obs['_proto'] = hard_assign.astype(str)
+
+    active_protos = obs['_proto'].unique()
+
+    rows = []
+    for p in sorted(active_protos, key=lambda x: int(x)):
+        mask = obs['_proto'] == p
+        sub = obs[mask]
+        n_cells = len(sub)
+
+        # majority cell type
+        ct_counts = sub[ct_key].value_counts()
+        majority_ct = ct_counts.index[0]
+        ct_purity = ct_counts.iloc[0] / n_cells
+
+        # batch entropy
+        if batch_key in sub.columns and sub[batch_key].nunique() > 1:
+            p_batch = sub[batch_key].value_counts(normalize=True).values
+            batch_ent = float(-np.sum(p_batch * np.log(p_batch + 1e-10)))
+        else:
+            batch_ent = 0.0
+
+        rows.append({
+            'proto_id': int(p),
+            'majority_ct': majority_ct,
+            'ct_purity': ct_purity,
+            'batch_entropy': batch_ent,
+            'n_cells': n_cells,
+        })
+
+    proto_df = pd.DataFrame(rows).set_index('proto_id')
+
+    all_cts = ad.obs[ct_key].unique()
+    covered_cts = proto_df['majority_ct'].unique()
+    ct_coverage = len(set(covered_cts) & set(all_cts)) / len(all_cts)
+
+    summary = {
+        'ct_coverage': ct_coverage,
+        'n_covered_ct': len(set(covered_cts) & set(all_cts)),
+        'n_total_ct': len(all_cts),
+        'mean_ct_purity': proto_df['ct_purity'].mean(),
+        'median_ct_purity': proto_df['ct_purity'].median(),
+        'mean_batch_entropy': proto_df['batch_entropy'].mean(),
+        'n_active_protos': len(proto_df),
+    }
+
+    return proto_df, summary
+
+
+def plot_ct_purity_boxplot(proto_df, ax=None, figsize=(12, 5), title='Cell Type Purity per Proto'):
+    """
+    Box plot of ct_purity per cell type (majority_ct).
+    Each box shows the distribution of purity values across protos assigned to that cell type.
+    """
+    import matplotlib.pyplot as plt
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=figsize)
+    else:
+        fig = ax.figure
+
+    ct_order = (
+        proto_df.groupby('majority_ct')['ct_purity']
+        .median()
+        .sort_values(ascending=False)
+        .index.tolist()
+    )
+
+    data = [proto_df.loc[proto_df['majority_ct'] == ct, 'ct_purity'].values for ct in ct_order]
+    bp = ax.boxplot(data, labels=ct_order, patch_artist=True, showfliers=True)
+
+    for patch in bp['boxes']:
+        patch.set_facecolor('#4C9BE8')
+        patch.set_alpha(0.7)
+
+    ax.set_xlabel('Cell Type (majority label)')
+    ax.set_ylabel('Cell Type Purity')
+    ax.set_title(title)
+    ax.tick_params(axis='x', rotation=45)
+    ax.set_ylim(0, 1.05)
+    ax.axhline(proto_df['ct_purity'].mean(), color='red', linestyle='--', linewidth=1, label=f"mean={proto_df['ct_purity'].mean():.2f}")
+    ax.legend()
+
+    fig.tight_layout()
+    return fig, ax
+
+
+def plot_purity_vs_entropy(proto_df, ax=None, figsize=(8, 6),
+                           title='Cell Type Purity vs Batch Entropy'):
+    """
+    Scatter plot: x=batch_entropy, y=ct_purity, one dot per proto, colored by majority_ct.
+    Dot size proportional to n_cells.
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib.cm as cm
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=figsize)
+    else:
+        fig = ax.figure
+
+    cts = proto_df['majority_ct'].unique()
+    colors = cm.tab20(np.linspace(0, 1, len(cts)))
+    ct_color = dict(zip(cts, colors))
+
+    for ct in cts:
+        sub = proto_df[proto_df['majority_ct'] == ct]
+        sizes = (sub['n_cells'] / proto_df['n_cells'].max()) * 200 + 10
+        ax.scatter(
+            sub['batch_entropy'], sub['ct_purity'],
+            c=[ct_color[ct]], label=ct,
+            s=sizes, alpha=0.7, edgecolors='none'
+        )
+
+    ax.set_xlabel('Batch Entropy (higher = better mixing)')
+    ax.set_ylabel('Cell Type Purity')
+    ax.set_title(title)
+    ax.set_xlim(left=0)
+    ax.set_ylim(0, 1.05)
+
+    # legend outside if many cell types
+    if len(cts) <= 12:
+        ax.legend(bbox_to_anchor=(1.01, 1), loc='upper left', fontsize=8)
+    else:
+        ax.legend(bbox_to_anchor=(1.01, 1), loc='upper left', fontsize=6, ncol=2)
+
+    fig.tight_layout()
+    return fig, ax
+
+
+def evaluate_proto_quality(t, ad=None, ct_key='cell_type', batch_key='batch', save_dir=None):
+    """
+    Calc and save proto quality metrics. No plots.
+
+    Returns:
+        proto_df: per-proto DataFrame
+        summary: scalar metrics dict
+    """
+    proto_df, summary = proto_celltype_stats(t, ad, ct_key=ct_key, batch_key=batch_key)
+
+    print(f"CT coverage:      {summary['ct_coverage']:.1%} ({summary['n_covered_ct']}/{summary['n_total_ct']})")
+    print(f"CT purity:        mean={summary['mean_ct_purity']:.3f}  median={summary['median_ct_purity']:.3f}")
+    print(f"Batch entropy:    mean={summary['mean_batch_entropy']:.3f}")
+    print(f"Active protos:    {summary['n_active_protos']}")
+
+    if save_dir is not None:
+        os.makedirs(save_dir, exist_ok=True)
+        proto_df.to_csv(os.path.join(save_dir, 'proto_quality.csv'))
+        print(f"Saved to {save_dir}/proto_quality.csv")
+
+    return proto_df, summary
+
+
+# ============================================================================
 # Metacell / Prototype Niche Evaluation Metrics
 # ============================================================================
 
@@ -380,16 +751,13 @@ def build_metacell_adata(t, ad=None, ct_key='celltype', niche_key='niches_2D'):
     import scanpy as sc
 
     if ad is None:
-        ad = t.train_ds.adata.copy()
-    else:
-        ad = ad.copy()
+        ad = t.train_ds.adata
 
     # Get prototype assignments
     hard_assign = get_proto_assignments(t, ad)
-    ad.obs['proto_idx'] = hard_assign.astype(str)
 
-    # Get expression matrix
-    X = ad.X.toarray() if hasattr(ad.X, 'toarray') else ad.X
+    import scipy.sparse as sp
+    X = ad.X  # keep sparse
 
     # Aggregate per prototype
     protos = np.unique(hard_assign)
@@ -401,8 +769,10 @@ def build_metacell_adata(t, ad=None, ct_key='celltype', niche_key='niches_2D'):
         if mask.sum() == 0:
             continue
 
-        # Mean expression
-        mc_expr.append(X[mask].mean(axis=0))
+        # Mean expression — works on both sparse and dense without densifying all at once
+        X_sub = X[mask]
+        mean_expr = np.asarray(X_sub.mean(axis=0)).ravel()
+        mc_expr.append(mean_expr)
 
         # Majority vote for labels
         if ct_key in ad.obs.columns:
@@ -871,3 +1241,83 @@ def save_niche_recovery(t, save_path, method_name='scproto',
     print(f"Saved to {out_path}")
 
     return results
+
+
+# ============================================================================
+# Master evaluation function
+# ============================================================================
+
+def evaluate_all(t, ct_key='cell_type', batch_key='batch',
+                 save_dir=None, run_scgraph=True):
+    """
+    Run all three groups of metrics and log everything to metrics.json.
+
+    Group 1 — Cell type & batch quality:
+        ct_coverage, ct_purity (mean/median), batch_entropy, n_active_protos
+
+    Group 2 — Graph structure preservation:
+        modularity, ncut, conductance, edge_homophily
+
+    Group 3 — Downstream utility:
+        DGE consistency (RBO + Jaccard) vs per-batch ground truth,
+        pseudo-bulk baseline for comparison,
+        scGraph on decoded prototype PCA (optional)
+
+    All scalars are logged via t._log_metric → saved to metrics.json.
+
+    Args:
+        t:           SCProtoTrainer (trained)
+        ct_key:      cell type column in adata.obs
+        batch_key:   batch column in adata.obs
+        save_dir:    directory to save CSVs (defaults to t.get_dump_path())
+        run_scgraph: whether to run scGraph (can be slow)
+
+    Returns:
+        dict with all scalar metrics from all three groups
+    """
+    if save_dir is None:
+        save_dir = t.get_dump_path()
+    os.makedirs(save_dir, exist_ok=True)
+
+    all_results = {}
+
+    # --- Group 1: Cell type & batch quality ---
+    print("\n" + "="*50)
+    print("Group 1: Cell Type & Batch Quality")
+    print("="*50)
+    try:
+        _, summary1 = evaluate_proto_quality(t, ct_key=ct_key, batch_key=batch_key, save_dir=save_dir)
+        for k, v in summary1.items():
+            t._log_metric(f'ct_quality/{k}', v)
+        all_results.update({f'ct_quality/{k}': v for k, v in summary1.items()})
+    except Exception as e:
+        print(f"Group 1 failed: {e}")
+
+    # --- Group 2: Graph structure preservation ---
+    print("\n" + "="*50)
+    print("Group 2: Graph Structure Preservation")
+    print("="*50)
+    try:
+        import interpretable_ssl.trainers.scproto as _scproto_mod
+        summary2 = _scproto_mod.SCProtoTrainer.eval_graph_structure(t)
+        all_results.update(summary2)
+    except Exception as e:
+        print(f"Group 2 failed: {e}")
+
+    # --- Group 3: Downstream utility ---
+    print("\n" + "="*50)
+    print("Group 3: Downstream Utility")
+    print("="*50)
+    try:
+        summary3 = eval_downstream(t, ct_key=ct_key, batch_key=batch_key,
+                                   save_dir=save_dir, run_scgraph=run_scgraph)
+        all_results.update({k: v for k, v in summary3.items() if isinstance(v, (int, float))})
+    except Exception as e:
+        print(f"Group 3 failed: {e}")
+
+    print("\n" + "="*50)
+    print("All metrics saved to metrics.json")
+    print("="*50)
+
+    return all_results
+

@@ -110,7 +110,12 @@ ABBREVIATIONS = {
     'k_pos': 'kp',
     'softm': 'sm',
     'lambda_aff': 'laff',
+    'aff_sim_type': 'afst',
     'two_sided': 'ts',
     'lsim': 'lsim',
-    'graph_mode': 'grm'
+    'graph_mode': 'grm',
+    'lambda_proto_recon': 'lprec',
+    'lambda_r1r2': 'lr1r2',
+    'lambda_umap': 'lumap',
+    'umap_similarity': 'usim'
 }

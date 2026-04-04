@@ -3,6 +3,17 @@ import SEACells
 import pandas as pd
 import numpy as np
 import os
+
+# Fix SEACells GPU bug: inject cupyx into SEACells.core namespace
+try:
+    import cupy as cp
+    import cupyx
+    import cupyx.scipy.sparse
+    if cp.cuda.is_available():
+        SEACells.core.cupyx = cupyx
+        SEACells.core.cp = cp
+except ImportError:
+    pass
 from collections import Counter
 from interpretable_ssl.evaluation.mc_metric_utils import *
 
@@ -28,19 +39,32 @@ def compute_seacells(ad, n_SEACells, build_kernel_on="X_pca"):
         10  # Number of eigenvalues to consider when initializing metacells
     )
 
+    # Auto-detect GPU: use if cupy is available and working
+    use_gpu = False
+    try:
+        import cupy as cp
+        import cupyx.scipy.sparse
+        if cp.cuda.is_available():
+            use_gpu = True
+    except Exception:
+        pass
+
     model = SEACells.core.SEACells(
         ad,
         build_kernel_on=build_kernel_on,
         n_SEACells=n_SEACells,
         n_waypoint_eigs=n_waypoint_eigs,
-        convergence_epsilon=1e-5,
+        use_gpu=use_gpu,
     )
 
     model.construct_kernel_matrix()
     # M = model.kernel_matrix
     # Initialize archetypes
     model.initialize_archetypes()
-    model.fit(min_iter=10, max_iter=50)
+    model.fit()
+
+    if "counts" not in ad.layers:
+        ad.layers["counts"] = ad.X.copy()
 
     SEACell_ad = SEACells.core.summarize_by_SEACell(
         ad, SEACells_label="SEACell", summarize_layer="counts"

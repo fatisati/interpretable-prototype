@@ -123,7 +123,7 @@ def get_defaults():
         "use_counts": 1,
         "knn_method": 'faiss',
         
-        "affinity_type": "arbf",
+        "affinity_type": "uctx",
         'cell_w_mode': 'uniform',
         "model": "swav",  # swav specific
         "lambda_align": 0,
@@ -132,19 +132,21 @@ def get_defaults():
         
         "lambda_l2": 0.0, # 1e-3
         
-        "lambda_kl": 0.1,
-        "lambda_recon": 1.0, 
+        "lambda_kl": 0.0,
+        "lambda_recon": 0.0, 
         'lambda_balance': 0.0,
-        'lambda_swav': 1.0,
+        'lambda_swav': 0.0,
         "lambda_proto": 0.0, # 1,
         "lambda_commit": 0.0, # 0.25
         "lambda_p_uncertainty": 0.0,
         'lambda_proto_entropy': 0.0,
         
         "lambda_proto_recon": 0.0,
-        'assignment_metric': 'sneuc',
+        "lambda_umap": 1,
+        'umap_similarity': 'embedding',
+        'assignment_metric': 'dotp',
         "model_type": 'gm',
-        "l2norm": 0,
+        "l2norm": 1,
         
 
         "recon_update_target": 'encoder',
@@ -156,10 +158,10 @@ def get_defaults():
         'kl_sched': 1,
         'swav_sched': 0, # not used yet
         'recon_start_epoch': 0,
-        'kl_start_epoch': 10,
-        "cvae_epochs": 25,
-        "pretraining_epochs": 50,
-        "ft_epochs": 10,
+        'kl_start_epoch': 0,
+        "cvae_epochs": 0,
+        "pretraining_epochs": 25,
+        "ft_epochs": 0,
         
         'umap_metric': 'euclidean',
         'opt': 'adam',
@@ -189,6 +191,9 @@ def get_defaults():
         'umap_spread': 1.0,        # UMAP spread (default=1.0)
         'umap_neg_rate': 5,        # Negative samples per positive edge
         'umap_edge_epochs': 200,   # Epochs for edge sampling expansion
+        'umap_similarity': 'embedding',  # 'embedding' (distance kernel) or 'proto' (soft assignment dot product)
+        'umap_proto_effk': 5.0,          # target effective k for proto soft assignments (auto-calibrates temperature)
+        'umap_proto_metric': 'cosine',     # 'dotp' (c_i^T c_j) or 'cosine' (cosine similarity of assignment vectors)
         'temperature_min': 0.04,
         'epsilon_min': 0.02,
         'sched_temp_eps': 0,
@@ -199,6 +204,6 @@ def get_defaults():
         'recon_v': 2,
         
         # in this version we pass self.epsilon instead of self.tempreture for kl and proto recon
-        "version": 30 # changed proto recon, changed kl not to leak pos pair info
+        "version": 31 # changed proto recon, changed kl not to leak pos pair info
     }
     return defaults

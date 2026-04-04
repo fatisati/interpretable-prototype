@@ -120,6 +120,21 @@ def calc_purity(
     return float(np.mean(pur))
 
 
+def calc_batch_entropy(df, batch_key, mc_key="SEACell", return_per_mc=False):
+    if batch_key not in df.columns:
+        return None
+
+    groups = df.groupby(mc_key)
+    ents = []
+    for _, sub in groups:
+        p = sub[batch_key].value_counts(normalize=True).values
+        ents.append(float(-np.sum(p * np.log(p + 1e-10))))
+
+    if return_per_mc:
+        return pd.Series(ents, index=pd.Index(groups.groups.keys(), dtype=str), name="batch_entropy")
+    return float(np.mean(ents))
+
+
 def mc_label_purity(ad, lk, mc_key="SEACell", name="model", save_path=None):
     g = ad.obs.groupby(mc_key)[lk]
     maj = g.agg(lambda x: x.value_counts().idxmax())
