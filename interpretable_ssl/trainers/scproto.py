@@ -215,9 +215,11 @@ class SCProtoTrainer(AdoptiveTrainer):
         )
         self.test_ds = MultiCropsDataset(self.val_, **common_dataset_kwargs)
 
-        # Print affinity report if available
-        if hasattr(self.train_ds, 'aff') and self.train_ds.aff is not None:
-            self.aff_stats = affinity_report(self.train_ds.aff)
+        # Print affinity report if available (use raw affinity for accurate weight stats)
+        _aff_for_report = (self.train_ds.aff_raw if hasattr(self.train_ds, 'aff_raw')
+                           else self.train_ds.aff)
+        if _aff_for_report is not None:
+            self.aff_stats = affinity_report(_aff_for_report)
             logger.info(f"Affinity stats: {self.aff_stats}")
             print(f"📊 Affinity: mean_deg={self.aff_stats['mean_deg']:.1f}, effk_med={self.aff_stats['effk_med']:.1f}, mutual={self.aff_stats['mutual_ratio']:.2%}")
 
@@ -572,7 +574,7 @@ class SCProtoTrainer(AdoptiveTrainer):
                 else:
                     q_pos = (s_head * s_tail).sum(dim=-1).clamp(_eps, 1.0 - _eps)
                     q_neg = (s_head.unsqueeze(1) * s_neg).sum(dim=-1).clamp(_eps, 1.0 - _eps)
-                loss_pos = -(weights * torch.log(q_pos)).mean()
+                loss_pos = -torch.log(q_pos).mean()
                 loss_neg = -torch.log(1.0 - q_neg).sum(dim=1).mean()
                 umap_loss = loss_pos + loss_neg
                 metrics = {

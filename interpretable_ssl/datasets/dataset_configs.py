@@ -70,6 +70,13 @@ DATASETS = {
         "test_studies": ["celseq", "celseq2"],
         "num_prototypes": 220,
     },
+    "ipanc": { #indrop1 pancreas
+        "path": Path(DATA_DIR) / "pancreas_inDrop1.h5ad",
+        "batch_key": "tech",
+        "label_key": "celltype",
+        "label_encoder_path": os.path.join(CODE_DIR, "data/pancras_label_encoder.pkl"),
+        "num_prototypes": 25,
+    },
      ".1pancreas": {
         "path": Path(DATA_DIR) / ".1pancreas.h5ad",
         "batch_key": "tech",

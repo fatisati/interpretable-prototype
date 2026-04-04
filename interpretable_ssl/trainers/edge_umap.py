@@ -222,9 +222,11 @@ class ParametricUMAPLoss(nn.Module):
             loss: Scalar loss
             metrics: Dict with q_pos, q_neg, margin, etc.
         """
-        # Positive loss: -w * log(q)
+        # Positive loss: -log(q)
+        # Weights are already encoded in sampling frequency (WeightedRandomSampler),
+        # so we do NOT multiply by weights here to avoid double-penalising weak edges.
         q_pos = self.compute_q(z_head, z_tail)  # [B]
-        loss_pos = -(weights * torch.log(q_pos)).mean()
+        loss_pos = -torch.log(q_pos).mean()
 
         # Negative loss: -log(1 - q) for each negative
         z_head_exp = z_head.unsqueeze(1)  # [B, 1, d]

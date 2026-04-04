@@ -118,6 +118,14 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
                 self.aff = self.run_graph_generator(lock_path)
 
         self.set_affinities()
+        # Save raw affinity (no row-normalization) for edge-UMAP training and modularity.
+        # normalize_aff() below overwrites self.aff with a row-normalized copy, so we
+        # capture the raw weights here (diagonal removed, no row-sum scaling).
+        _raw = self.aff.tocsr(copy=True)
+        _raw.setdiag(0)
+        _raw.eliminate_zeros()
+        self.aff_raw = _raw
+
         self.use_manifold_weights = use_manifold_weights
         self.manifold = {}
         if self.use_manifold_weights:
