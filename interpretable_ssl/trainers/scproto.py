@@ -511,16 +511,9 @@ class SCProtoTrainer(AdoptiveTrainer):
             'proto_recon': 0, 'r1r2': 0, 'n_unused_protos': 0,
         }
         n_batches = 0
-        n_iters = max(1, len(s['edge_dataset'].head) // self.batch_size)
 
         from tqdm import tqdm
-        loader_iter = iter(loader)
-        for _ in tqdm(range(n_iters), desc='edges'):
-            try:
-                batch = next(loader_iter)
-            except StopIteration:
-                loader_iter = iter(loader)
-                batch = next(loader_iter)
+        for batch in tqdm(loader, desc='edges'):
             if self.l2norm == 1:
                 with torch.no_grad():
                     self.model.normalize_prototypes()
