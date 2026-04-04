@@ -46,12 +46,11 @@ def find_ab_params(spread: float, min_dist: float) -> Tuple[float, float]:
 
 class EdgeDataset(Dataset):
     """
-    Dataset that samples edges from an affinity graph.
+    Dataset that samples edges from an affinity graph using weighted sampling.
 
-    Edges are expanded by their weight: an edge with weight w will appear
-    approximately (w / w_max) * n_epochs times in the dataset.
-
-    This matches how official UMAP handles edge sampling.
+    Each edge is stored once. A WeightedRandomSampler picks edges proportional
+    to their affinity weight, so strong edges are visited more often per epoch.
+    Negative samples are drawn on-the-fly within the head node's dataset.
     """
 
     def __init__(
@@ -63,16 +62,6 @@ class EdgeDataset(Dataset):
         cell_ds: Optional[np.ndarray] = None,
         neg_ds_id: Optional[int] = None,
     ):
-        """
-        Args:
-            affinity: Sparse affinity matrix (n_cells x n_cells) with p_ij values
-            n_epochs: Number of epochs (controls how often edges are sampled)
-            negative_sample_rate: Number of negative samples per positive edge
-            seed: Random seed
-            cell_ds: Optional (n_cells,) int array mapping each cell to its dataset id.
-            neg_ds_id: If set, all negatives are sampled from this ds regardless of head's ds.
-                       If None and cell_ds is set, negatives are from head's own ds.
-        """
         self.n_cells = affinity.shape[0]
         self.negative_sample_rate = negative_sample_rate
         self.rng = np.random.RandomState(seed)
@@ -91,9 +80,9 @@ class EdgeDataset(Dataset):
         aff_coo = affinity.tocoo()
 
         # Get edges and weights
-        self.head = aff_coo.row.astype(np.int64)  # source nodes
-        self.tail = aff_coo.col.astype(np.int64)  # target nodes
-        self.weights = aff_coo.data.astype(np.float32)  # edge weights (p_ij)
+        self.head = aff_coo.row.astype(np.int64)
+        self.tail = aff_coo.col.astype(np.int64)
+        self.weights = aff_coo.data.astype(np.float32)
 
         # Filter out very weak edges (like official UMAP)
         weight_threshold = self.weights.max() / float(n_epochs)
@@ -102,23 +91,10 @@ class EdgeDataset(Dataset):
         self.tail = self.tail[mask]
         self.weights = self.weights[mask]
 
-        # Compute epochs_per_sample: how many times each edge appears
-        # edges with higher weight appear more often
-        self.epochs_per_sample = (n_epochs * self.weights / self.weights.max()).astype(np.int32)
-        self.epochs_per_sample = np.maximum(self.epochs_per_sample, 1)  # at least once
-
-        # Expand edges by their sampling frequency
-        self.expanded_head = np.repeat(self.head, self.epochs_per_sample)
-        self.expanded_tail = np.repeat(self.tail, self.epochs_per_sample)
-        self.expanded_weights = np.repeat(self.weights, self.epochs_per_sample)
-
         # Build adjacency sets for negative sampling (to exclude actual neighbors)
         self.adj_sets = self._build_adjacency_sets(affinity)
 
-        # Shuffle once at init
-        self._shuffle()
-
-        print(f"📊 EdgeDataset: {len(self.head)} edges -> {len(self.expanded_head)} expanded samples")
+        print(f"📊 EdgeDataset: {len(self.head)} edges")
         print(f"   Weight range: [{self.weights.min():.4f}, {self.weights.max():.4f}]")
 
     def _build_adjacency_sets(self, affinity: csr_matrix) -> dict:
@@ -130,30 +106,15 @@ class EdgeDataset(Dataset):
                 adj_sets[i].add(j)
         return adj_sets
 
-    def _shuffle(self):
-        """Shuffle expanded edges."""
-        perm = self.rng.permutation(len(self.expanded_head))
-        self.expanded_head = self.expanded_head[perm]
-        self.expanded_tail = self.expanded_tail[perm]
-        self.expanded_weights = self.expanded_weights[perm]
-
     def __len__(self):
-        return len(self.expanded_head)
+        return len(self.head)
 
     def __getitem__(self, idx):
-        """
-        Returns:
-            head: source node index
-            tail: target node index
-            weight: edge weight (p_ij)
-            neg_samples: array of K negative node indices
-        """
-        head = self.expanded_head[idx]
-        tail = self.expanded_tail[idx]
-        weight = self.expanded_weights[idx]
+        head = self.head[idx]
+        tail = self.tail[idx]
+        weight = self.weights[idx]
 
-        # Sample negatives (non-neighbors of head)
-        # candidates: fixed ds if neg_ds_id set, else head's own ds, else global
+        # Sample negatives on-the-fly (non-neighbors of head, within head's dataset)
         neighbors = self.adj_sets[head]
         if self.neg_ds_id is not None:
             candidates = self.ds_cells[self.neg_ds_id]
@@ -172,7 +133,6 @@ class EdgeDataset(Dataset):
                 neg_samples.append(neg)
             attempts += 1
 
-        # Pad with random if not enough (shouldn't happen often)
         while len(neg_samples) < self.negative_sample_rate:
             if candidates is not None:
                 neg_samples.append(candidates[self.rng.randint(0, len(candidates))])
@@ -185,10 +145,6 @@ class EdgeDataset(Dataset):
             'weight': weight,
             'neg_samples': np.array(neg_samples, dtype=np.int64),
         }
-
-    def reshuffle(self):
-        """Reshuffle for new epoch."""
-        self._shuffle()
 
 
 def edge_collate_fn(batch):

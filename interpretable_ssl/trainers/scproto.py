@@ -451,10 +451,17 @@ class SCProtoTrainer(AdoptiveTrainer):
         else:
             cell_ds = np.zeros(len(self.train_ds.adata), dtype=np.int64)
 
-        # Single EdgeDataset over all edges; neg sampling stays within head's dataset
+        # Single EdgeDataset over all edges; neg sampling stays within head's dataset.
+        # WeightedRandomSampler picks edges proportional to affinity weight each epoch.
+        from torch.utils.data import WeightedRandomSampler
         edge_dataset = EdgeDataset(affinity, n_epochs=epochs, negative_sample_rate=neg_rate, cell_ds=cell_ds)
+        sampler = WeightedRandomSampler(
+            weights=torch.from_numpy(edge_dataset.weights).float(),
+            num_samples=len(edge_dataset),
+            replacement=True,
+        )
         loader = DataLoader(
-            edge_dataset, batch_size=self.batch_size, shuffle=True,
+            edge_dataset, batch_size=self.batch_size, sampler=sampler,
             collate_fn=edge_collate_fn, num_workers=0, drop_last=False,
         )
 
@@ -634,7 +641,6 @@ class SCProtoTrainer(AdoptiveTrainer):
         for k in total_metrics:
             total_metrics[k] /= max(n_batches, 1)
 
-        s['edge_dataset'].reshuffle()
         s['epoch'] += 1
         return total_metrics
 
