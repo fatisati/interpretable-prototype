@@ -513,6 +513,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             'proto_recon': 0, 'r1r2': 0, 'n_unused_protos': 0,
         }
         n_batches = 0
+        used_proto_ids = set()
 
         from tqdm import tqdm
         for batch in tqdm(loader, desc='edges'):
@@ -557,6 +558,7 @@ class SCProtoTrainer(AdoptiveTrainer):
                 with torch.no_grad():
                     sa_effk = (1.0 / (soft_assign * soft_assign).sum(dim=1))
                     total_metrics['effk'] = total_metrics.get('effk', 0) + sa_effk.median().item()
+                    used_proto_ids.update(soft_assign.argmax(dim=1).unique().cpu().tolist())
 
                 s_head = soft_assign[_gather(head)]
                 s_tail = soft_assign[_gather(tail)]
@@ -633,24 +635,8 @@ class SCProtoTrainer(AdoptiveTrainer):
         for k in total_metrics:
             total_metrics[k] /= max(n_batches, 1)
 
-        # Global unused-prototype count: encode all cells, take argmax over full dataset.
         if use_proto_sim:
-            self.model.eval()
-            with torch.no_grad():
-                all_assigns = []
-                chunk = 1024
-                for i in range(0, X.shape[0], chunk):
-                    x_chunk = X[i:i + chunk]
-                    if hasattr(self.train_ds, 'conditions'):
-                        cond_chunk = self.train_ds.conditions[i:i + chunk].to(self.device)
-                    else:
-                        n_conds = len(self.model.scpoli_cvae.n_conditions)
-                        cond_chunk = torch.zeros(len(x_chunk), n_conds, dtype=torch.long, device=self.device)
-                    z_chunk, _, _ = self.model.encoder_out({'x': x_chunk, 'batch': cond_chunk})
-                    all_assigns.append(self.model.prototypes(z_chunk).argmax(dim=1))
-                n_used_global = torch.cat(all_assigns).unique().numel()
-                total_metrics['n_unused_protos'] = self.nmb_prototypes - n_used_global
-            self.model.train()
+            total_metrics['n_unused_protos'] = self.nmb_prototypes - len(used_proto_ids)
 
         s['epoch'] += 1
         return total_metrics
