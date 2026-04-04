@@ -451,28 +451,12 @@ class SCProtoTrainer(AdoptiveTrainer):
         else:
             cell_ds = np.zeros(len(self.train_ds.adata), dtype=np.int64)
 
-        n_ds = len(np.unique(cell_ds))
-
-        # Build one EdgeDataset per ds (edges where head OR tail in ds)
-        # This guarantees every ds contributes to every weight update
-        aff_coo = affinity.tocoo()
-        head_ds = cell_ds[aff_coo.row]
-        tail_ds = cell_ds[aff_coo.col]
-        from scipy.sparse import csr_matrix as _csr
-        edge_datasets, loaders = [], []
-        for ds_id in range(n_ds):
-            mask = (head_ds == ds_id) | (tail_ds == ds_id)
-            ds_aff = _csr(
-                (aff_coo.data[mask], (aff_coo.row[mask], aff_coo.col[mask])),
-                shape=affinity.shape,
-            )
-            ds_ed = EdgeDataset(ds_aff, n_epochs=epochs, negative_sample_rate=neg_rate, cell_ds=cell_ds, neg_ds_id=ds_id)
-            edge_datasets.append(ds_ed)
-            edge_bs = min(self.batch_size, len(ds_ed))
-            loaders.append(DataLoader(
-                ds_ed, batch_size=edge_bs, shuffle=True,
-                collate_fn=edge_collate_fn, num_workers=0, drop_last=False,
-            ))
+        # Single EdgeDataset over all edges; neg sampling stays within head's dataset
+        edge_dataset = EdgeDataset(affinity, n_epochs=epochs, negative_sample_rate=neg_rate, cell_ds=cell_ds)
+        loader = DataLoader(
+            edge_dataset, batch_size=self.batch_size, shuffle=True,
+            collate_fn=edge_collate_fn, num_workers=0, drop_last=False,
+        )
 
         loss_fn = ParametricUMAPLoss(min_dist=min_dist, spread=spread, negative_sample_rate=neg_rate)
 
@@ -484,13 +468,11 @@ class SCProtoTrainer(AdoptiveTrainer):
 
         self._umap_state = {
             'X': X.to(self.device),
-            'edge_datasets': edge_datasets,
+            'edge_dataset': edge_dataset,
             'loss_fn': loss_fn,
-            'loaders': loaders,
-            'ds_iters': [iter(l) for l in loaders],
+            'loader': loader,
             'optimizer': optimizer,
             'epoch': 0,
-            'n_ds': n_ds,
         }
 
         print(f"Starting edge-centric UMAP training (similarity={umap_similarity})")
@@ -503,11 +485,9 @@ class SCProtoTrainer(AdoptiveTrainer):
         """Run a single UMAP edge training epoch. Returns metrics dict."""
         s = self._umap_state
         X = s['X']
-        loaders = s['loaders']
-        ds_iters = s['ds_iters']
+        loader = s['loader']
         loss_fn = s['loss_fn']
         optimizer = s['optimizer']
-        n_ds = s['n_ds']
 
         lambda_umap = getattr(self, 'lambda_umap', 1.0)
         lambda_recon = self.lambda_recon
@@ -524,39 +504,25 @@ class SCProtoTrainer(AdoptiveTrainer):
             'proto_recon': 0, 'r1r2': 0, 'n_unused_protos': 0,
         }
         n_batches = 0
-        # One epoch = one pass through unique edges (not the pre-expanded list).
-        # The expanded list still provides weighted sampling (strong edges appear more),
-        # but epoch length is now independent of the n_epochs used at EdgeDataset construction.
-        n_iters = max(len(ds.head) for ds in s['edge_datasets']) // self.batch_size
-        n_iters = max(1, n_iters)
 
         from tqdm import tqdm
-        for _ in tqdm(range(n_iters), desc='edges'):
+        for batch in tqdm(loader, desc='edges'):
             if self.l2norm == 1:
                 with torch.no_grad():
                     self.model.normalize_prototypes()
 
             optimizer.zero_grad()
-            umap_loss = torch.tensor(0.0, device=self.device)
-            metrics = {'q_pos': 0, 'q_neg': 0, 'margin': 0, 'loss_pos': 0, 'loss_neg': 0}
             proto_recon_loss = torch.tensor(0.0, device=self.device)
             r1r2_loss = torch.tensor(0.0, device=self.device)
 
-            # Step 1: collect one batch per ds
-            ds_batches = []
-            for ds_id in range(n_ds):
-                try:
-                    batch = next(ds_iters[ds_id])
-                except StopIteration:
-                    ds_iters[ds_id] = iter(loaders[ds_id])
-                    batch = next(ds_iters[ds_id])
-                ds_batches.append({k: v.to(self.device) for k, v in batch.items()})
+            head        = batch['head'].to(self.device)
+            tail        = batch['tail'].to(self.device)
+            weights     = batch['weight'].to(self.device)
+            neg_samples = batch['neg_samples'].to(self.device)
+            B, neg_K = neg_samples.shape
 
-            # Step 2: pool all unique nodes across all ds batches — single forward pass
-            all_idx = torch.cat([
-                torch.cat([b['head'], b['tail'], b['neg_samples'].flatten()])
-                for b in ds_batches
-            ])
+            # Single forward pass over unique nodes in this batch
+            all_idx = torch.cat([head, tail, neg_samples.flatten()])
             unique_idx = torch.unique(all_idx)
             X_batch = X[unique_idx]
             n_samples = len(X_batch)
@@ -569,7 +535,6 @@ class SCProtoTrainer(AdoptiveTrainer):
 
             z_unique, recon_loss, kl_loss = self.model.encoder_out({'x': X_batch, 'batch': batch_cond})
 
-            # Build global index map once
             unique_idx_cpu = unique_idx.cpu().numpy()
             idx_map = {int(idx): i for i, idx in enumerate(unique_idx_cpu)}
 
@@ -577,7 +542,6 @@ class SCProtoTrainer(AdoptiveTrainer):
                 return torch.tensor([idx_map[int(i)] for i in indices.cpu().numpy()],
                                     device=self.device, dtype=torch.long)
 
-            # Compute proto assignments once if needed
             if use_proto_sim:
                 logits = self.model.prototypes(z_unique)
                 soft_assign = F.softmax(logits / self.epsilon, dim=1)
@@ -588,14 +552,6 @@ class SCProtoTrainer(AdoptiveTrainer):
                     n_used = hard_assign.unique().numel()
                     total_metrics['n_unused_protos'] += self.nmb_prototypes - n_used
 
-            # Step 3: flatten all ds batches into one loss (no per-ds grouping)
-            head    = torch.cat([b['head'] for b in ds_batches])
-            tail    = torch.cat([b['tail'] for b in ds_batches])
-            weights = torch.cat([b['weight'] for b in ds_batches])
-            neg_samples = torch.cat([b['neg_samples'] for b in ds_batches])
-            B, neg_K = neg_samples.shape
-
-            if use_proto_sim:
                 s_head = soft_assign[_gather(head)]
                 s_tail = soft_assign[_gather(tail)]
                 s_neg = soft_assign[_gather(neg_samples.flatten())].view(B, neg_K, -1)
@@ -671,8 +627,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         for k in total_metrics:
             total_metrics[k] /= max(n_batches, 1)
 
-        for ed in s['edge_datasets']:
-            ed.reshuffle()
+        s['edge_dataset'].reshuffle()
         s['epoch'] += 1
         return total_metrics
 
