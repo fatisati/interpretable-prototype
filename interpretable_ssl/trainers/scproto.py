@@ -762,7 +762,8 @@ class SCProtoTrainer(AdoptiveTrainer):
                                   getattr(self, 'lambda_proto', 0) == 0 and
                                   getattr(self, 'lambda_swav', 0) == 0 and
                                   getattr(self, 'lambda_proto_recon', 0) == 0)
-                    if recon_only:
+                    embedding_mode = getattr(self, 'umap_similarity', 'embedding') == 'embedding'
+                    if recon_only or embedding_mode:
                         self.init_prototypes()
                     result = self.modularity()
                     score = result['modularity']
