@@ -588,45 +588,40 @@ class SCProtoTrainer(AdoptiveTrainer):
                     n_used = hard_assign.unique().numel()
                     total_metrics['n_unused_protos'] += self.nmb_prototypes - n_used
 
-            # Step 3: per-ds loss using slices of shared z_unique
-            total_edges = 0
-            for ds_id, batch in enumerate(ds_batches):
-                head = batch['head']; tail = batch['tail']
-                weights = batch['weight']; neg_samples = batch['neg_samples']
-                B, neg_K = neg_samples.shape
+            # Step 3: flatten all ds batches into one loss (no per-ds grouping)
+            head    = torch.cat([b['head'] for b in ds_batches])
+            tail    = torch.cat([b['tail'] for b in ds_batches])
+            weights = torch.cat([b['weight'] for b in ds_batches])
+            neg_samples = torch.cat([b['neg_samples'] for b in ds_batches])
+            B, neg_K = neg_samples.shape
 
-                if use_proto_sim:
-                    s_head = soft_assign[_gather(head)]
-                    s_tail = soft_assign[_gather(tail)]
-                    s_neg = soft_assign[_gather(neg_samples.flatten())].view(B, neg_K, -1)
-                    _eps = 1e-4
-                    if proto_metric == 'cosine':
-                        s_head_n = F.normalize(s_head, dim=-1, p=2)
-                        s_tail_n = F.normalize(s_tail, dim=-1, p=2)
-                        s_neg_n = F.normalize(s_neg, dim=-1, p=2)
-                        q_pos = (s_head_n * s_tail_n).sum(dim=-1).clamp(_eps, 1.0 - _eps)
-                        q_neg = (s_head_n.unsqueeze(1) * s_neg_n).sum(dim=-1).clamp(_eps, 1.0 - _eps)
-                    else:
-                        q_pos = (s_head * s_tail).sum(dim=-1).clamp(_eps, 1.0 - _eps)
-                        q_neg = (s_head.unsqueeze(1) * s_neg).sum(dim=-1).clamp(_eps, 1.0 - _eps)
-                    loss_pos = -(weights * torch.log(q_pos)).mean()
-                    loss_neg = -torch.log(1.0 - q_neg).sum(dim=1).mean()
-                    umap_loss_ds = loss_pos + loss_neg
-                    metrics = {
-                        'q_pos': q_pos.mean().item(), 'q_neg': q_neg.mean().item(),
-                        'margin': (q_pos.mean() - q_neg.mean()).item(),
-                        'loss_pos': loss_pos.item(), 'loss_neg': loss_neg.item(),
-                    }
+            if use_proto_sim:
+                s_head = soft_assign[_gather(head)]
+                s_tail = soft_assign[_gather(tail)]
+                s_neg = soft_assign[_gather(neg_samples.flatten())].view(B, neg_K, -1)
+                _eps = 1e-4
+                if proto_metric == 'cosine':
+                    s_head_n = F.normalize(s_head, dim=-1, p=2)
+                    s_tail_n = F.normalize(s_tail, dim=-1, p=2)
+                    s_neg_n = F.normalize(s_neg, dim=-1, p=2)
+                    q_pos = (s_head_n * s_tail_n).sum(dim=-1).clamp(_eps, 1.0 - _eps)
+                    q_neg = (s_head_n.unsqueeze(1) * s_neg_n).sum(dim=-1).clamp(_eps, 1.0 - _eps)
                 else:
-                    z_head = z_unique[_gather(head)]
-                    z_tail = z_unique[_gather(tail)]
-                    z_neg = z_unique[_gather(neg_samples.flatten())].view(B, neg_K, -1)
-                    umap_loss_ds, metrics = loss_fn(z_head, z_tail, z_neg, weights)
-
-                umap_loss = umap_loss + umap_loss_ds * B
-                total_edges += B
-
-            umap_loss = umap_loss / total_edges
+                    q_pos = (s_head * s_tail).sum(dim=-1).clamp(_eps, 1.0 - _eps)
+                    q_neg = (s_head.unsqueeze(1) * s_neg).sum(dim=-1).clamp(_eps, 1.0 - _eps)
+                loss_pos = -(weights * torch.log(q_pos)).mean()
+                loss_neg = -torch.log(1.0 - q_neg).sum(dim=1).mean()
+                umap_loss = loss_pos + loss_neg
+                metrics = {
+                    'q_pos': q_pos.mean().item(), 'q_neg': q_neg.mean().item(),
+                    'margin': (q_pos.mean() - q_neg.mean()).item(),
+                    'loss_pos': loss_pos.item(), 'loss_neg': loss_neg.item(),
+                }
+            else:
+                z_head = z_unique[_gather(head)]
+                z_tail = z_unique[_gather(tail)]
+                z_neg = z_unique[_gather(neg_samples.flatten())].view(B, neg_K, -1)
+                umap_loss, metrics = loss_fn(z_head, z_tail, z_neg, weights)
 
             # Auxiliary losses computed once on the shared batch (not per-ds)
             if lambda_proto_recon > 0:
