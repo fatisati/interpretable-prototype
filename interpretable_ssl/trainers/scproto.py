@@ -671,7 +671,8 @@ class SCProtoTrainer(AdoptiveTrainer):
     def train_umap_edges(self, epochs: int = None, verbose: bool = True,
                          early_stop: bool = False, eval_freq: int = 10,
                          patience: int = 50, max_epochs: int = None,
-                         early_stop_metric: str = 'homophily'):
+                         early_stop_metric: str = 'homophily',
+                         min_delta: float = 0.0):
         """Train encoder using edge-centric parametric UMAP (fresh start).
 
         Args:
@@ -681,6 +682,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             patience: stop if no improvement for this many epochs (used when early_stop=True)
             max_epochs: hard cap on epochs regardless of early stopping
             early_stop_metric: 'homophily' or 'modularity' (used when early_stop=True)
+            min_delta: minimum improvement in metric to count as progress (default 0.0)
         """
         epochs = epochs or getattr(self, 'pretraining_epochs', 200)
         self._setup_umap_edges(epochs)
@@ -689,6 +691,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             early_stop=early_stop, eval_freq=eval_freq,
             patience=patience, max_epochs=max_epochs,
             early_stop_metric=early_stop_metric,
+            min_delta=min_delta,
         )
         self.save_clusters()
         return metrics
@@ -696,7 +699,8 @@ class SCProtoTrainer(AdoptiveTrainer):
     def continue_train_umap_edges(self, epochs: int = 50, verbose: bool = True,
                                   early_stop: bool = False, eval_freq: int = 10,
                                   patience: int = 50, max_epochs: int = None,
-                                  early_stop_metric: str = 'homophily'):
+                                  early_stop_metric: str = 'homophily',
+                                  min_delta: float = 0.0):
         """Continue UMAP edge training from current model state for more epochs.
 
         Rebuilds optimizer/loader/edge_dataset if needed (e.g. after code reload),
@@ -736,11 +740,12 @@ class SCProtoTrainer(AdoptiveTrainer):
         print(f"Early stopping mode: metric={early_stop_metric}, eval every {eval_freq} epochs, patience={patience}" +
               (f", max_epochs={max_epochs}" if max_epochs else ""))
 
-        # Print initial modularity before any training
+        # Print initial modularity before any training and save as baseline checkpoint
         if early_stop_metric == 'modularity':
             init_result = self.modularity()
             best_score = init_result['modularity']
-            print(f"[Epoch 0] initial modularity={best_score:.4f}")
+            print(f"[Epoch 0] initial modularity={best_score:.4f} → saving as baseline checkpoint")
+            self.save_umap_checkpoint()
 
         while True:
             metrics = self._run_umap_epoch()
@@ -776,15 +781,15 @@ class SCProtoTrainer(AdoptiveTrainer):
                     result = self.edge_homophily()
                     score = result['homophily']
 
-                if score > best_score:
-                    improvement = score - best_score
+                improvement = score - best_score
+                if improvement > min_delta:
                     best_score = score
                     no_improve_epochs = 0
                     print(f"  [Early stop] {early_stop_metric} improved to {score:.4f} (+{improvement:.4f}) → saving checkpoint")
                     self.save_umap_checkpoint()
                 else:
                     no_improve_epochs += eval_freq
-                    print(f"  [Early stop] No improvement ({score:.4f} vs best {best_score:.4f}), "
+                    print(f"  [Early stop] No improvement ({score:.4f} vs best {best_score:.4f}, min_delta={min_delta}), "
                           f"no-improve streak: {no_improve_epochs}/{patience}")
                     if no_improve_epochs >= patience:
                         print(f"[Early stop] Patience exhausted. Stopping at epoch {current_epoch}.")
@@ -821,7 +826,8 @@ class SCProtoTrainer(AdoptiveTrainer):
         self.model.to(self.device)
 
         # Rebuild training objects (dataset, loader, loss_fn, optimizer)
-        self._setup_umap_edges()
+        # init_prototypes=False: model weights (including prototypes) already loaded above
+        self._setup_umap_edges(init_prototypes=False)
         self._umap_state['epoch'] = checkpoint['epoch']
 
         if checkpoint.get('optimizer_state_dict') is not None:
@@ -843,6 +849,77 @@ class SCProtoTrainer(AdoptiveTrainer):
             json.dump(result, f, indent=2, default=_convert)
         print(f"Saved modularity={result['modularity']:.4f} to {path}")
         return result
+
+    def eval_metacell_quality(self, assignments=None, label='proto'):
+        """Compute and save cell-type purity, batch entropy, and modularity per metacell.
+
+        Purity and batch entropy are computed per metacell (per-mc Series), then
+        saved to CSV. Modularity is computed graph-level and saved to JSON.
+        All scalar summaries are also stored in the metrics log.
+
+        Args:
+            assignments: np.ndarray of integer cluster labels (n_cells,), or None for auto.
+            label: assignment method name.
+
+        Returns:
+            dict with keys 'purity', 'batch_entropy', 'modularity'.
+        """
+        import json
+        import pandas as pd
+
+        assignments, label = self._get_assignments(assignments, label)
+        obs = self.train_ds.adata.obs.copy()
+        obs['_mc'] = assignments
+
+        dump = self.get_dump_path()
+
+        # --- Cell-type purity per metacell ---
+        lk = self.dataset.label_key
+        purity_per_mc = calc_purity(obs, label_key=lk, mc_key='_mc', return_per_mc=True)
+        if purity_per_mc is not None:
+            purity_per_mc.index.name = 'metacell'
+            purity_per_mc.to_csv(os.path.join(dump, 'purity_per_mc.csv'))
+            mean_purity = float(purity_per_mc.mean())
+            print(f"[{label}] mean cell-type purity: {mean_purity:.4f}")
+        else:
+            mean_purity = None
+            print(f"[{label}] cell-type purity: label key '{lk}' not in obs, skipped")
+
+        # --- Batch entropy per metacell ---
+        bk = getattr(self.dataset, 'batch_key', None) or getattr(self, 'condition_key', None)
+        entropy_per_mc = calc_batch_entropy(obs, batch_key=bk, mc_key='_mc', return_per_mc=True) if bk else None
+        if entropy_per_mc is not None:
+            entropy_per_mc.index.name = 'metacell'
+            entropy_per_mc.to_csv(os.path.join(dump, 'batch_entropy_per_mc.csv'))
+            mean_entropy = float(entropy_per_mc.mean())
+            print(f"[{label}] mean batch entropy: {mean_entropy:.4f}")
+        else:
+            mean_entropy = None
+            print(f"[{label}] batch entropy: batch key not found, skipped")
+
+        # --- Modularity ---
+        mod_result = self.modularity(assignments=assignments, label=label)
+        mod_path = os.path.join(dump, 'modularity.json')
+        def _convert(o):
+            if isinstance(o, np.ndarray): return o.tolist()
+            if isinstance(o, (np.integer,)): return int(o)
+            if isinstance(o, (np.floating,)): return float(o)
+            raise TypeError(f'Not serializable: {type(o)}')
+        with open(mod_path, 'w') as f:
+            json.dump(mod_result, f, indent=2, default=_convert)
+
+        # --- Log scalar summaries ---
+        if mean_purity is not None:
+            self._log_metric('mean_cell_type_purity', mean_purity)
+        if mean_entropy is not None:
+            self._log_metric('mean_batch_entropy', mean_entropy)
+        self._log_metric('modularity', mod_result['modularity'])
+
+        return {
+            'purity': purity_per_mc,
+            'batch_entropy': entropy_per_mc,
+            'modularity': mod_result,
+        }
 
     def _log_metric(self, name, value):
         """Store a scalar or dict metric value in the internal log and flush to disk."""
@@ -1934,6 +2011,61 @@ class SCProtoTrainer(AdoptiveTrainer):
                 else:
                     decoded_sum = decoded_sum + decoded
             return (decoded_sum / len(all_conds)).cpu().numpy()
+
+    @torch.no_grad()
+    def save_metacells(self, path=None):
+        """Decode all prototypes using the globally dominant batch (most cells).
+
+        1. Count total cells per batch across all cells
+        2. Pick the batch with the most cells
+        3. Decode all K prototypes with that single batch embedding
+        4. Save as AnnData to dump_path/metacells.h5ad
+
+        Returns:
+            AnnData of shape [K, genes]
+        """
+        import anndata as ad
+        import pandas as pd
+
+        if path is None:
+            path = os.path.join(self.get_dump_path(), 'metacells.h5ad')
+
+        adata = self.train_ds.adata
+        K = self.nmb_prototypes
+
+        # Find globally dominant batch condition
+        if hasattr(self.train_ds, 'conditions'):
+            conditions = self.train_ds.conditions  # [N, n_cond_keys]
+            unique_conds, counts = torch.unique(conditions, dim=0, return_counts=True)
+            dominant_cond = unique_conds[counts.argmax()].unsqueeze(0).to(self.device)
+            print(f"Dominant batch: {dominant_cond.cpu().tolist()} ({counts.max().item()} cells)")
+        else:
+            n_conds = len(self.model.scpoli_cvae.n_conditions)
+            dominant_cond = torch.zeros(1, n_conds, dtype=torch.long, device=self.device)
+
+        # Decode all prototypes with the dominant batch
+        protos = self.model.get_prototypes().to(self.device)  # [K, latent_dim]
+        cond_expanded = dominant_cond.expand(K, -1)           # [K, n_cond_keys]
+        X = self.model.decode(protos, cond_expanded).cpu().numpy()  # [K, genes]
+
+        # Build obs metadata
+        assignments, _ = self._get_assignments()
+        cell_counts = [(assignments == k).sum() for k in range(K)]
+        obs = pd.DataFrame({
+            'prototype_id': np.arange(K),
+            'n_cells': cell_counts,
+        }, index=[f'proto_{k}' for k in range(K)])
+
+        mc_adata = ad.AnnData(
+            X=X,
+            obs=obs,
+            var=adata.var.copy(),
+        )
+
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        mc_adata.write_h5ad(path)
+        print(f"Saved metacells ({K} prototypes) to {path}")
+        return mc_adata
 
     def label_prototypes(self, label_key):
         """Label each prototype based on majority vote of assigned cells.

@@ -32,12 +32,8 @@ def preprocess(ad, n_top_genes):
     return ad
 
 
-def compute_seacells(ad, n_SEACells, build_kernel_on="X_pca"):
-    # ad = preprocess(ad, n_top_genes)
-    ## Additional parameters
-    n_waypoint_eigs = (
-        10  # Number of eigenvalues to consider when initializing metacells
-    )
+def compute_seacells(ad, n_SEACells, build_kernel_on="X_pca", k=50):
+    n_waypoint_eigs = 10
 
     # Auto-detect GPU: use if cupy is available and working
     use_gpu = False
@@ -58,8 +54,6 @@ def compute_seacells(ad, n_SEACells, build_kernel_on="X_pca"):
     )
 
     model.construct_kernel_matrix()
-    # M = model.kernel_matrix
-    # Initialize archetypes
     model.initialize_archetypes()
     model.fit()
 
