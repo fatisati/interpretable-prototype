@@ -457,9 +457,13 @@ class SCProtoTrainer(AdoptiveTrainer):
         # WeightedRandomSampler picks edges proportional to affinity weight each epoch.
         from torch.utils.data import WeightedRandomSampler
         edge_dataset = EdgeDataset(affinity, n_epochs=epochs, negative_sample_rate=neg_rate, cell_ds=cell_ds)
+        steps_per_epoch = getattr(self, 'umap_steps_per_epoch', None)
+        n_samples = min(len(edge_dataset), steps_per_epoch * self.batch_size) if steps_per_epoch else len(edge_dataset)
+        if steps_per_epoch:
+            print(f"   umap_steps_per_epoch={steps_per_epoch} → {n_samples} edges/epoch (of {len(edge_dataset)} total)")
         sampler = WeightedRandomSampler(
             weights=torch.from_numpy(edge_dataset.weights).float(),
-            num_samples=len(edge_dataset),
+            num_samples=n_samples,
             replacement=True,
         )
         loader = DataLoader(
@@ -545,12 +549,9 @@ class SCProtoTrainer(AdoptiveTrainer):
 
             z_unique, recon_loss, kl_loss = self.model.encoder_out({'x': X_batch, 'batch': batch_cond})
 
-            unique_idx_cpu = unique_idx.cpu().numpy()
-            idx_map = {int(idx): i for i, idx in enumerate(unique_idx_cpu)}
-
+            # torch.unique returns sorted output, so searchsorted gives O(log n) vectorized lookup
             def _gather(indices):
-                return torch.tensor([idx_map[int(i)] for i in indices.cpu().numpy()],
-                                    device=self.device, dtype=torch.long)
+                return torch.searchsorted(unique_idx, indices)
 
             if use_proto_sim:
                 logits = self.model.prototypes(z_unique)
