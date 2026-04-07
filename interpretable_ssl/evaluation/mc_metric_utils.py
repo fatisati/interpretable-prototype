@@ -391,3 +391,42 @@ def save_all_mc_metrics(
     if "dc" not in ad.obsm:
         ad.obsm["dc"] = compute_dc(ad, bk).values
     summarize_metacell_quality(ad, bk, lk, save_path, name)
+
+
+def calc_task2_metrics(ad, mc_ad, lk, bk, obsm_keys, name, save_path):
+    """
+    Task 2: Metacell representation quality.
+      - Coverage:        fraction of cell types in ad represented by at least one metacell
+      - DGE consistency: agreement between metacell DE and per-batch single-cell DE
+      - scGraph:         how well metacell embeddings recover single-cell consensus structure
+
+    Returns:
+        dict with scalar summaries for logging:
+            {'coverage': float, 'dge_jaccard_avg': float, 'scgraph_corr_avg': float}
+    """
+    os.makedirs(save_path, exist_ok=True)
+
+    # 1. Coverage
+    coverage = len(set(mc_ad.obs[lk].dropna().unique())) / ad.obs[lk].nunique()
+    pd.DataFrame({"coverage": [coverage]}, index=[name]).to_csv(
+        f"{save_path}/coverage.csv"
+    )
+
+    # 2. DGE consistency (saves dge_consistency.csv)
+    df_rbo, df_kt, df_jac = compute_dge_consistency(mc_ad, ad, lk, bk, name=name, save_path=save_path)
+    dge_rbo_avg     = float(df_rbo["avg global"].iloc[0]) if df_rbo is not None else None
+    dge_kendall_avg = float(df_kt["avg global"].iloc[0])  if df_kt  is not None else None
+    dge_jaccard_avg = float(df_jac["avg global"].iloc[0]) if df_jac is not None else None
+
+    # 3. scGraph
+    scg = get_mc_scg(ad, mc_ad, bk, lk, obsm_keys)
+    scg.to_csv(f"{save_path}/scgraph.csv")
+    scgraph_corr_avg = float(scg["Corr-PCA"].mean()) if scg is not None else None
+
+    return {
+        "coverage":         coverage,
+        "dge_rbo_avg":      dge_rbo_avg,
+        "dge_kendall_avg":  dge_kendall_avg,
+        "dge_jaccard_avg":  dge_jaccard_avg,
+        "scgraph_corr_avg": scgraph_corr_avg,
+    }

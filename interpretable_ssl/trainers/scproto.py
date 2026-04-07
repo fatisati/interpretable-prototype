@@ -808,6 +808,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         }
         torch.save(state, path)
         print(f"Saved UMAP checkpoint to {path} (epoch {state['epoch']})")
+        self.save_metacells()
         return path
 
     def load_umap_checkpoint(self, path=None):
@@ -920,6 +921,53 @@ class SCProtoTrainer(AdoptiveTrainer):
             'batch_entropy': entropy_per_mc,
             'modularity': mod_result,
         }
+
+    def eval_task2_metrics(self, mc_ad=None):
+        """Compute and save task 2 metacell representation metrics.
+
+        Metrics: coverage, DGE consistency (RBO/Kendall/Jaccard), scGraph.
+        All scalar summaries are also stored in the metrics log.
+
+        Args:
+            mc_ad: metacell AnnData, or None to load from the saved checkpoint path.
+
+        Returns:
+            dict with keys 'coverage', 'dge_jaccard_avg', 'scgraph_corr_avg'.
+        """
+        import scanpy as sc
+        from interpretable_ssl.evaluation.mc_metric_utils import calc_task2_metrics
+
+        ad  = self.train_ds.adata
+        lk  = self.dataset.label_key
+        bk  = getattr(self.dataset, 'batch_key', None) or getattr(self, 'condition_key', None)
+        name = self.get_model_name()
+        dump = self.get_dump_path()
+
+        # Load metacells if not provided; generate if not yet saved
+        if mc_ad is None:
+            import anndata
+            mc_path = os.path.join(dump, 'metacells.h5ad')
+            mc_ad = anndata.read_h5ad(mc_path) if os.path.exists(mc_path) else self.save_metacells()
+
+        # Attach majority-vote cell-type labels; drop unused prototypes (no cells assigned)
+        proto_labels = self.label_prototypes(lk)['labels']  # Series: proto_id -> label
+        mc_ad.obs[lk] = mc_ad.obs['prototype_id'].map(proto_labels)
+        mc_ad = mc_ad[mc_ad.obs[lk].notna()].copy()
+
+        # PCA embedding for scGraph
+        sc.tl.pca(mc_ad)
+        obsm_key = f"{name}_mc_pca"
+        mc_ad.obsm[obsm_key] = mc_ad.obsm["X_pca"]
+
+        scalars = calc_task2_metrics(ad, mc_ad, lk, bk, [obsm_key], name, dump)
+
+        # Log scalar summaries
+        for metric_name, value in scalars.items():
+            if value is not None:
+                self._log_metric(metric_name, value)
+                print(f"[task2] {metric_name}: {value:.4f}")
+
+        return scalars
 
     def _log_metric(self, name, value):
         """Store a scalar or dict metric value in the internal log and flush to disk."""

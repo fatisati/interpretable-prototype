@@ -108,6 +108,53 @@ def eval_seacell_quality(ds_id):
     }
 
 
+def eval_seacell_task2(ds_id):
+    """Compute and save task 2 metrics for SEACell metacells.
+
+    Mirrors eval_seacell_quality() for task 1. Loads saved SEACell files,
+    then computes coverage, DGE consistency, and scGraph.
+
+    Returns:
+        dict with scalar summaries: coverage, dge_rbo_avg, dge_kendall_avg,
+        dge_jaccard_avg, scgraph_corr_avg.
+    """
+    import scanpy as sc
+    from interpretable_ssl.evaluation.metric_helpers.embedding_metrics import load_seacell
+
+    save_path = get_seacell_path(ds_id)
+    sc_file = os.path.join(save_path, 'seacell_sc.h5ad')
+    if not os.path.exists(sc_file):
+        raise FileNotFoundError(f"SEACell files not found at {save_path}. Run train mode first.")
+
+    print(f"Loading SEACell from {save_path} ...")
+    ad, mc_ad = load_seacell(ds_id)
+
+    bk = DATASETS[ds_id].get('batch_key', None)
+    lk = DATASETS[ds_id]['label_key']
+
+    # PCA on mc_ad for scGraph
+    sc.tl.pca(mc_ad)
+    mc_ad.obsm['seacell_mc_pca'] = mc_ad.obsm['X_pca']
+
+    scalars = calc_task2_metrics(ad, mc_ad, lk, bk, ['seacell_mc_pca'], 'seacell', save_path)
+
+    for metric_name, value in scalars.items():
+        if value is not None:
+            print(f"[seacell task2] {metric_name}: {value:.4f}")
+
+    metrics_path = os.path.join(save_path, 'metrics.json')
+    if os.path.exists(metrics_path):
+        with open(metrics_path) as f:
+            metrics = json.load(f)
+    else:
+        metrics = {}
+    metrics.update({k: v for k, v in scalars.items() if v is not None})
+    with open(metrics_path, 'w') as f:
+        json.dump(metrics, f, indent=2)
+
+    return scalars
+
+
 def load_dataset(ds_id):
     conf = DATASETS[ds_id]
     return (

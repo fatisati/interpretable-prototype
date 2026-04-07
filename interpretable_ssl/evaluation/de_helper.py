@@ -199,24 +199,23 @@ def compute_dge_consistency(
 
     rare_ct = get_rare(ad, lk)
 
+    rename = {}
+    for ct in ad.obs[lk].unique():
+        frac = (ad.obs[lk] == ct).mean() * 100
+        rename[ct] = f"{ct} ({frac:.1f}%, K={K_dict.get(ct,0)})"
+
     def _to_df(rows, metric):
-        df = pd.DataFrame([rows], index=[name or metric])
+        df = pd.DataFrame([rows], index=[f"{name or metric}_{metric}"])
         df["avg global"] = df.mean(axis=1)
         df["avg rare"] = df[rare_ct].mean(axis=1)
-        rename = {}
-        for ct in ad.obs[lk].unique():
-            frac = (ad.obs[lk] == ct).mean() * 100
-            rename[ct] = f"{ct} ({frac:.1f}%, K={K_dict.get(ct,0)})"
         return df.rename(columns=rename)
 
-    df_rbo = _to_df(rows_rbo, "avg_rbo")
-    df_kt = _to_df(rows_kt, "avg_kendall")
-    df_jac = _to_df(rows_jac, "avg_jaccard")
+    df_rbo = _to_df(rows_rbo, "rbo")
+    df_kt = _to_df(rows_kt, "kendall")
+    df_jac = _to_df(rows_jac, "jaccard")
 
     if save_path is not None:
-        df_rbo.to_csv(f"{save_path}/dge_rbo.csv")
-        df_kt.to_csv(f"{save_path}/dge_kendall.csv")
-        df_jac.to_csv(f"{save_path}/dge_jaccard.csv")
+        pd.concat([df_rbo, df_kt, df_jac]).to_csv(f"{save_path}/dge_consistency.csv")
     if "lognorm_gt" in ad.layers:
         ad.X = ad.layers["lognorm"]
     return df_rbo, df_kt, df_jac
