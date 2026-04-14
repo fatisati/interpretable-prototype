@@ -309,8 +309,12 @@ class SCProtoTrainer(AdoptiveTrainer):
                 lo = eps   # q too high → need more crisp  → smaller eps
 
         self.epsilon = eps
+        q_final = mean_q_pos(eps)
         print(f"[eps calibration] E[p_pos]={p_pos:.4f} → epsilon={eps:.4f} "
-              f"(E[q_pos]={mean_q_pos(eps):.4f})")
+              f"(E[q_pos]={q_final:.4f})")
+        self._log_metric('calibrated_epsilon', eps)
+        self._log_metric('calibrated_epsilon/q_pos', q_final)
+        self._log_metric('calibrated_epsilon/p_pos_target', p_pos)
         return eps
 
     def build_model(self):
