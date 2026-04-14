@@ -24,6 +24,7 @@ class SingleCellDataset(Dataset):
         test_study_cnt=2,
         batch_key=None,
         label_key="cell_type",
+        niche_key=None,
         use_counts=False,
         **kwargs
     ):
@@ -33,6 +34,7 @@ class SingleCellDataset(Dataset):
         self.batch_key = batch_key
 
         self.label_key = label_key
+        self.niche_key = niche_key
         self.path = path
         self.test_studies = test_studies
         if adata is None:

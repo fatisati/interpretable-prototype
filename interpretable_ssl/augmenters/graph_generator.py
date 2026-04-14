@@ -140,6 +140,11 @@ def generate_affinity(ad, k, bk, affinity_type="inverse_dist", graph_mode=None):
         sc.pp.neighbors(ad, n_neighbors=k, use_rep="X_pca")
         return ad.obsp["connectivities"]
 
+    elif affinity_type == "ctx_umap":
+        ad.obsm["X_ctx"] = spatial_context_pca(ad, k)
+        sc.pp.neighbors(ad, n_neighbors=k, use_rep="X_ctx")
+        return ad.obsp["connectivities"]
+
     elif affinity_type in ["spatial", "scoaff"]:
 
         # s_aff = multi_batch_aff(ad, bk, lambda x: spatial_affinity(x, k))
@@ -157,6 +162,21 @@ def generate_affinity(ad, k, bk, affinity_type="inverse_dist", graph_mode=None):
             return st_aff
         else:
             return st_aff @ st_aff.T
+
+
+def spatial_context_pca(ad, k):
+    """Average PCA of k nearest spatial neighbors per cell."""
+    import faiss
+
+    spatial = ad.obsm["spatial"].astype(np.float32)
+    if spatial.shape[1] == 3:
+        spatial[:, 2] *= 30.0
+    index = faiss.IndexFlatL2(spatial.shape[1])
+    index.add(spatial)
+    _, I = index.search(spatial, k + 1)
+    I = I[:, 1:]  # exclude self
+    pca = ad.obsm["X_pca"]
+    return pca[I].mean(axis=1)  # (N, d)
 
 
 def faiss_knn(b_adata, k):

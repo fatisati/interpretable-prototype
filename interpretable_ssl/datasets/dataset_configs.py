@@ -158,6 +158,7 @@ DATASETS = {
         "path": Path(DATA_DIR) / "spatial/snsc.h5ad",
         "batch_key": "section",
         "label_key": "celltypes",
+        "niche_key": 'niches_2D',  # TODO: set to niche annotation column name
         "label_encoder_path": os.path.join(CODE_DIR, "data/NSCLC_3D.pkl"),
         "test_studies": ["section_4", "section_10"],
         "num_prototypes": 400,

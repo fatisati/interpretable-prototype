@@ -874,6 +874,11 @@ class SCProtoTrainer(AdoptiveTrainer):
 
         dump = self.get_dump_path()
 
+        # --- Unused prototypes ---
+        n_unused = int(self.nmb_prototypes - len(np.unique(assignments)))
+        unused_ratio = n_unused / self.nmb_prototypes
+        print(f"[{label}] unused protos: {n_unused}/{self.nmb_prototypes} ({unused_ratio:.2%})")
+
         # --- Cell-type purity per metacell ---
         lk = self.dataset.label_key
         purity_per_mc = calc_purity(obs, label_key=lk, mc_key='_mc', return_per_mc=True)
@@ -885,6 +890,20 @@ class SCProtoTrainer(AdoptiveTrainer):
         else:
             mean_purity = None
             print(f"[{label}] cell-type purity: label key '{lk}' not in obs, skipped")
+
+        # --- Niche purity per metacell ---
+        nk = getattr(self.dataset, 'niche_key', None)
+        niche_purity_per_mc = calc_purity(obs, label_key=nk, mc_key='_mc', return_per_mc=True) if nk else None
+        if niche_purity_per_mc is not None:
+            niche_purity_per_mc.index.name = 'metacell'
+            niche_purity_per_mc.to_csv(os.path.join(dump, 'niche_purity_per_mc.csv'))
+            mean_niche_purity = float(niche_purity_per_mc.mean())
+            print(f"[{label}] mean niche purity: {mean_niche_purity:.4f}")
+            self._log_metric('mean_niche_purity', mean_niche_purity)
+        else:
+            mean_niche_purity = None
+            if nk:
+                print(f"[{label}] niche purity: niche key '{nk}' not in obs, skipped")
 
         # --- Batch entropy per metacell ---
         bk = getattr(self.dataset, 'batch_key', None) or getattr(self, 'condition_key', None)
@@ -915,11 +934,16 @@ class SCProtoTrainer(AdoptiveTrainer):
         if mean_entropy is not None:
             self._log_metric('mean_batch_entropy', mean_entropy)
         self._log_metric('modularity', mod_result['modularity'])
+        self._log_metric('n_unused_protos', n_unused)
+        self._log_metric('unused_proto_ratio', unused_ratio)
 
         return {
             'purity': purity_per_mc,
+            'niche_purity': niche_purity_per_mc,
             'batch_entropy': entropy_per_mc,
             'modularity': mod_result,
+            'n_unused_protos': n_unused,
+            'unused_proto_ratio': unused_ratio,
         }
 
     def eval_task2_metrics(self, mc_ad=None):
@@ -968,6 +992,55 @@ class SCProtoTrainer(AdoptiveTrainer):
                 print(f"[task2] {metric_name}: {value:.4f}")
 
         return scalars
+
+    def eval_task3_metrics(self, mc_ad=None):
+        """Compute and save task 3 spatial metrics (niche DGE consistency).
+
+        Only runs if dataset has a niche_key defined. Saves:
+            ct_niche_rbo_full.csv  — raw per-(cell_type, niche) RBO
+            ct_niche_rbo.csv       — mean RBO per cell type
+
+        Returns:
+            dict with key 'ct_niche_rbo_avg', or empty dict if no niche_key.
+        """
+        nk = getattr(self.dataset, 'niche_key', None)
+        if not nk:
+            print("[task3] no niche_key defined, skipped")
+            return {}
+
+        from interpretable_ssl.evaluation.de_helper import celltype_niche_dge
+        import anndata
+
+        ad   = self.train_ds.adata
+        lk   = self.dataset.label_key
+        name = self.get_model_name()
+        dump = self.get_dump_path()
+
+        if mc_ad is None:
+            mc_path = os.path.join(dump, 'metacells.h5ad')
+            mc_ad = anndata.read_h5ad(mc_path) if os.path.exists(mc_path) else self.save_metacells()
+
+        proto_labels = self.label_prototypes(lk)['labels']
+        mc_ad = mc_ad.copy()
+        mc_ad.obs[lk] = mc_ad.obs['prototype_id'].map(proto_labels)
+        mc_ad = mc_ad[mc_ad.obs[lk].notna()].copy()
+
+        # propagate niche labels to metacells via majority vote
+        obs = self.train_ds.adata.obs.copy()
+        assignments, _ = self._get_assignments(None, 'proto')
+        obs['_mc'] = assignments
+        from interpretable_ssl.evaluation.mc_metric_utils import calc_purity
+        _, major_niche = calc_purity(obs, label_key=nk, mc_key='_mc',
+                                     return_per_mc=True, return_major_label=True)
+        mc_ad.obs[nk] = mc_ad.obs['prototype_id'].astype(str).map(major_niche)
+
+        summary, _ = celltype_niche_dge(ad, mc_ad, lk, nk, name, dump)
+        ct_niche_rbo_avg = float(summary.values.mean())
+
+        self._log_metric('ct_niche_rbo_avg', ct_niche_rbo_avg)
+        print(f"[task3] mean ct-niche RBO: {ct_niche_rbo_avg:.4f}")
+
+        return {'ct_niche_rbo_avg': ct_niche_rbo_avg}
 
     def _log_metric(self, name, value):
         """Store a scalar or dict metric value in the internal log and flush to disk."""

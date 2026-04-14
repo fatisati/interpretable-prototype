@@ -35,7 +35,7 @@ def _compute_modularity(ad, mc_idx):
     return {'modularity': float(Q), 'per_cluster_contribution': per_cluster}
 
 
-def eval_seacell_quality(ds_id):
+def eval_seacell_task1(ds_id):
     """Load saved SEACell files and compute metacell quality metrics comparable to
     t_proto.eval_metacell_quality(): purity, batch entropy, and modularity.
 
@@ -59,7 +59,13 @@ def eval_seacell_quality(ds_id):
     obs = ad.obs.copy()
     obs['_mc'] = mc_idx
 
-    # --- Purity ---
+    # --- Unused prototypes ---
+    n_total_mc = mc_idx.max() + 1
+    n_unused = int(n_total_mc - len(np.unique(mc_idx)))
+    unused_ratio = n_unused / n_total_mc
+    print(f"[seacell] unused protos: {n_unused}/{n_total_mc} ({unused_ratio:.2%})")
+
+    # --- Cell-type purity ---
     purity_per_mc = calc_purity(obs, label_key=lk, mc_key='_mc', return_per_mc=True)
     if purity_per_mc is not None:
         purity_per_mc.index.name = 'metacell'
@@ -67,6 +73,14 @@ def eval_seacell_quality(ds_id):
         print(f"[seacell] mean cell-type purity: {purity_per_mc.mean():.4f}")
     else:
         print(f"[seacell] cell-type purity: label key '{lk}' not in obs, skipped")
+
+    # --- Niche purity ---
+    nk = DATASETS[ds_id].get('niche_key')
+    niche_purity_per_mc = calc_purity(obs, label_key=nk, mc_key='_mc', return_per_mc=True) if nk else None
+    if niche_purity_per_mc is not None:
+        niche_purity_per_mc.index.name = 'metacell'
+        niche_purity_per_mc.to_csv(os.path.join(save_path, 'niche_purity_per_mc.csv'))
+        print(f"[seacell] mean niche purity: {niche_purity_per_mc.mean():.4f}")
 
     # --- Batch entropy ---
     entropy_per_mc = None
@@ -90,21 +104,33 @@ def eval_seacell_quality(ds_id):
     with open(os.path.join(save_path, 'modularity.json'), 'w') as f:
         json.dump(mod_result, f, indent=2, default=_convert)
 
-    # --- Summary metrics.json ---
-    metrics = {}
+    # --- Summary metrics.json (read-then-update to preserve task2 metrics) ---
+    metrics_path = os.path.join(save_path, 'metrics.json')
+    if os.path.exists(metrics_path):
+        with open(metrics_path) as f:
+            metrics = json.load(f)
+    else:
+        metrics = {}
     if purity_per_mc is not None:
         metrics['mean_cell_type_purity'] = float(purity_per_mc.mean())
+    if niche_purity_per_mc is not None:
+        metrics['mean_niche_purity'] = float(niche_purity_per_mc.mean())
     if entropy_per_mc is not None:
         metrics['mean_batch_entropy'] = float(entropy_per_mc.mean())
     metrics['modularity'] = mod_result['modularity']
-    with open(os.path.join(save_path, 'metrics.json'), 'w') as f:
+    metrics['n_unused_protos'] = n_unused
+    metrics['unused_proto_ratio'] = unused_ratio
+    with open(metrics_path, 'w') as f:
         json.dump(metrics, f, indent=2)
 
     print(f"Saved metrics to {save_path}")
     return {
         'purity': purity_per_mc,
+        'niche_purity': niche_purity_per_mc,
         'batch_entropy': entropy_per_mc,
         'modularity': mod_result,
+        'n_unused_protos': n_unused,
+        'unused_proto_ratio': unused_ratio,
     }
 
 
@@ -153,6 +179,59 @@ def eval_seacell_task2(ds_id):
         json.dump(metrics, f, indent=2)
 
     return scalars
+
+
+def eval_seacell_task3(ds_id):
+    """Compute and save task 3 spatial metrics (niche DGE consistency) for SEACells.
+
+    Only runs if dataset has a niche_key defined.
+
+    Returns:
+        dict with key 'ct_niche_rbo_avg', or empty dict if no niche_key.
+    """
+    nk = DATASETS[ds_id].get('niche_key')
+    if not nk:
+        print(f"[seacell task3] no niche_key for '{ds_id}', skipped")
+        return {}
+
+    from interpretable_ssl.evaluation.metric_helpers.embedding_metrics import load_seacell
+    from interpretable_ssl.evaluation.de_helper import celltype_niche_dge
+    from interpretable_ssl.evaluation.mc_metric_utils import calc_purity
+
+    save_path = get_seacell_path(ds_id)
+    sc_file = os.path.join(save_path, 'seacell_sc.h5ad')
+    if not os.path.exists(sc_file):
+        raise FileNotFoundError(f"SEACell files not found at {save_path}. Run train mode first.")
+
+    print(f"Loading SEACell from {save_path} ...")
+    ad, mc_ad = load_seacell(ds_id)
+    lk = DATASETS[ds_id]['label_key']
+
+    # Propagate niche labels to metacells via majority vote
+    obs = ad.obs.copy()
+    mc_idx = np.array([int(i.split('-')[-1]) for i in ad.obs['SEACell'].values])
+    obs['_mc'] = mc_idx
+    _, major_niche = calc_purity(obs, label_key=nk, mc_key='_mc',
+                                  return_per_mc=True, return_major_label=True)
+    mc_ad.obs[nk] = mc_ad.obs.index.map(
+        lambda x: major_niche.get(str(int(x.split('-')[-1])))
+    )
+
+    summary, _ = celltype_niche_dge(ad, mc_ad, lk, nk, 'seacell', save_path)
+    ct_niche_rbo_avg = float(summary.values.mean())
+    print(f"[seacell task3] mean ct-niche RBO: {ct_niche_rbo_avg:.4f}")
+
+    metrics_path = os.path.join(save_path, 'metrics.json')
+    if os.path.exists(metrics_path):
+        with open(metrics_path) as f:
+            metrics = json.load(f)
+    else:
+        metrics = {}
+    metrics['ct_niche_rbo_avg'] = ct_niche_rbo_avg
+    with open(metrics_path, 'w') as f:
+        json.dump(metrics, f, indent=2)
+
+    return {'ct_niche_rbo_avg': ct_niche_rbo_avg}
 
 
 def load_dataset(ds_id):

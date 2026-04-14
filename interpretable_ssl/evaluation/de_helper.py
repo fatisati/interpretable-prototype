@@ -231,10 +231,10 @@ def topk_per_niche(ad, k=10):
 
 def get_niche_markers(ad, ct, ct_key, niche_key, k=50):
     ad_ct = ad[ad.obs[ct_key] == ct].copy()
-    ad_ct = ad_ct[ad_ct.obs[niche_key] != "Excluded"].copy()
 
+    # Excluded stays in the dataset (contributes to "rest") but is never a DGE group
     valid = ad_ct.obs[niche_key].value_counts()
-    valid = valid[valid > 1].index.tolist()
+    valid = valid[(valid > 1) & (valid.index != "Excluded")].index.tolist()
 
     if len(valid) == 0:
         return {}
@@ -256,28 +256,46 @@ def summerize_dict(d, thr):
     return np.mean(np.array(list(d.values())) > thr)
 
 
-def compare_niche_dge(ad, mc_ad, lk, ct, thr):
-    sc_markers = get_niche_markers(ad, ct, lk, "niches_2D")
-    mc_markers = get_niche_markers(mc_ad, ct, lk, "niches_2D")
-    rbo_dict = {
+def compare_niche_dge(ad, mc_ad, lk, ct, niche_key, k=50, verbose=True):
+    """For one cell type, compute per-niche DGE in sc and mc, return RBO per niche."""
+    if verbose:
+        sc_counts = ad[(ad.obs[lk] == ct) & (ad.obs[niche_key] != "Excluded")].obs[niche_key].value_counts()
+        mc_counts = mc_ad[(mc_ad.obs[lk] == ct) & (mc_ad.obs[niche_key] != "Excluded")].obs[niche_key].value_counts()
+        sc_valid = sc_counts[sc_counts > 1]
+        mc_valid = mc_counts[mc_counts > 1]
+        print(f"  [niche-dge] CT='{ct}' (Excluded removed)")
+        print(f"    sc : {len(sc_counts)} niches, {len(sc_valid)} with >1 cell  | counts: {sc_counts.to_dict()}")
+        print(f"    mc : {len(mc_counts)} niches, {len(mc_valid)} with >1 proto | counts: {mc_counts.to_dict()}")
+        if len(mc_valid) == 0:
+            print(f"    -> mc has no niche with >1 proto — mc_markers will be empty, RBO=0")
+
+    sc_markers = get_niche_markers(ad, ct, lk, niche_key, k)
+    mc_markers = get_niche_markers(mc_ad, ct, lk, niche_key, k)
+    return {
         n: rbo(sc_markers[n], mc_markers.get(n, []), p=0.95) for n in sc_markers
     }
-    jaccard_dict = {
-        n: jaccard(sc_markers[n], mc_markers.get(n, [])) for n in sc_markers
-    }
-    return summerize_dict(rbo_dict, thr), summerize_dict(jaccard_dict, thr)
 
 
-def celltype_niche_dge(ad, mc_ad, lk, name, save_path):
-    r_df = pd.DataFrame(index=["rbo"])
-    j_df = pd.DataFrame(index=["jaccard"])
+def celltype_niche_dge(ad, mc_ad, lk, niche_key, name, save_path, k=50):
+    """Per-(cell_type, niche) RBO between sc and mc DGE.
 
+    Saves:
+        ct_niche_rbo_full.csv  — raw matrix (niches x cell_types)
+        ct_niche_rbo.csv       — mean RBO per cell type (1 row)
+
+    Returns:
+        summary_df  — mean RBO per cell type, shape (1, n_cell_types)
+        full_df     — raw per-niche RBO, shape (n_niches, n_cell_types)
+    """
+    records = {}  # ct -> {niche: rbo}
     for ct in ad.obs[lk].unique():
-        r, j = compare_niche_dge(ad, mc_ad, lk, ct, 0.01)
-        r_df[ct] = r
-        j_df[ct] = j
-    r_df.index = [name]
-    j_df.index = [name]
-    r_df.to_csv(save_path + "/ct_niche_rbo.csv")
-    j_df.to_csv(save_path + "/ct_niche_jaccard.csv")
-    return r_df, j_df
+        records[ct] = compare_niche_dge(ad, mc_ad, lk, ct, niche_key, k)
+
+    full_df = pd.DataFrame(records).fillna(0.0)  # rows=niches, cols=cell_types
+    full_df.index.name = 'niche'
+    full_df.to_csv(save_path + "/ct_niche_rbo_full.csv")
+
+    summary = full_df.mean(axis=0).to_frame(name=name).T  # (1, n_cell_types)
+    summary.to_csv(save_path + "/ct_niche_rbo.csv")
+
+    return summary, full_df
