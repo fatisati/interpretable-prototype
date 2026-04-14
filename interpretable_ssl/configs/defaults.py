@@ -192,6 +192,7 @@ def get_defaults():
         'umap_neg_rate': 5,        # Negative samples per positive edge
         'umap_edge_epochs': 200,   # Epochs for edge sampling expansion
         'umap_similarity': 'embedding',  # 'embedding' (distance kernel) or 'proto' (soft assignment dot product)
+        'calibrate_eps': 0,              # 1 = auto-calibrate epsilon so E[q_pos] = E[p_pos] after proto init
         'umap_proto_effk': 5.0,          # target effective k for proto soft assignments (auto-calibrates temperature)
         'umap_proto_metric': 'cosine',     # 'dotp' (c_i^T c_j) or 'cosine' (cosine similarity of assignment vectors)
         'temperature_min': 0.04,

@@ -117,5 +117,6 @@ ABBREVIATIONS = {
     'lambda_proto_recon': 'lprec',
     'lambda_r1r2': 'lr1r2',
     'lambda_umap': 'lumap',
-    'umap_similarity': 'usim'
+    'umap_similarity': 'usim',
+    'calibrate_eps': 'ecal'
 }

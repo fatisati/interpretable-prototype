@@ -265,6 +265,54 @@ class SCProtoTrainer(AdoptiveTrainer):
             embeddings = self.encode_adata(self.train_ds.adata, self.model, z_idx=1)
             self.model.init_prototypes_kmeans(embeddings, self.nmb_prototypes)
 
+    def calibrate_epsilon(self, n_samples=5000):
+        """Find epsilon so that E[q_pos] = E[p_pos] over sampled positive pairs.
+
+        Bisects over epsilon in [1e-4, 10] until the mean soft-assignment dot
+        product for positive pairs matches the mean affinity weight of those pairs.
+        This keeps the UMAP loss in a well-scaled regime throughout training —
+        q values are neither saturated (≈1) nor dead (≈0).
+
+        Sets self.epsilon in-place and returns the found value.
+        """
+        import scipy.sparse as sp
+
+        aff = self.train_ds.aff_raw if hasattr(self.train_ds, 'aff_raw') else self.train_ds.aff
+        coo = sp.coo_matrix(aff)
+
+        # Sample positive pairs
+        n = min(n_samples, len(coo.data))
+        idx = np.random.choice(len(coo.data), n, replace=False)
+        heads = torch.tensor(coo.row[idx], dtype=torch.long, device=self.device)
+        tails = torch.tensor(coo.col[idx], dtype=torch.long, device=self.device)
+        p_pos = float(coo.data[idx].mean())   # target: mean affinity weight
+
+        # Encode all cells once
+        self.model.eval()
+        with torch.no_grad():
+            z_all = self.encode_adata(self.train_ds.adata, self.model, z_idx=1)
+            z_all = z_all.to(self.device)
+            logits_all = self.model.prototypes(z_all)   # n_cells × K
+
+        def mean_q_pos(eps):
+            soft = torch.softmax(logits_all / eps, dim=-1)
+            q = (soft[heads] * soft[tails]).sum(dim=-1).mean().item()
+            return q
+
+        lo, hi = 1e-4, 10.0
+        for _ in range(60):
+            eps = (lo + hi) / 2
+            q = mean_q_pos(eps)
+            if q < p_pos:
+                hi = eps   # q too low → need more diffuse → larger eps
+            else:
+                lo = eps   # q too high → need more crisp  → smaller eps
+
+        self.epsilon = eps
+        print(f"[eps calibration] E[p_pos]={p_pos:.4f} → epsilon={eps:.4f} "
+              f"(E[q_pos]={mean_q_pos(eps):.4f})")
+        return eps
+
     def build_model(self):
         self.model = self.get_model()
         self.model = self.model.cuda()
@@ -443,6 +491,9 @@ class SCProtoTrainer(AdoptiveTrainer):
 
         if init_prototypes:
             self.init_prototypes()
+
+        if self.calibrate_eps and umap_similarity == 'proto':
+            self.calibrate_epsilon()
 
         # Build cell -> ds_id mapping
         if self.condition_key is not None:
