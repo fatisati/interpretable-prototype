@@ -260,19 +260,108 @@ class SCProtoTrainer(AdoptiveTrainer):
         return model
 
     def init_prototypes(self):
-        if self.prot_init == "kmeans" and self.decodable_prototypes == 0:
+        if self.prot_init == "kmeans":
             logger.info("initalizing prototypes using kmeans")
             embeddings = self.encode_adata(self.train_ds.adata, self.model, z_idx=1)
             self.model.init_prototypes_kmeans(embeddings, self.nmb_prototypes)
+        elif self.prot_init == "waypoint":
+            logger.info("initializing prototypes using waypoint (topology-aware MaxMin)")
+            self._init_prototypes_waypoint()
+
+    def _init_prototypes_waypoint(self, n_eigs=10):
+        """Topology-aware prototype init mirroring SEACells' initialize_archetypes().
+
+        Steps:
+          1. Symmetrise aff_raw and compute its normalised diffusion map
+             (top n_eigs eigenvectors of D^{-1/2} A D^{-1/2}).
+          2. Greedy MaxMin in diffusion space: iteratively pick the cell
+             that is farthest from all already-chosen cells.
+          3. Encode the K chosen cells and set them as prototype vectors.
+
+        This guarantees coverage of every topological region of the affinity
+        graph, including rare populations — unlike k-means which over-represents
+        dense clusters.
+        """
+        import scipy.sparse as sp
+        from scipy.sparse.linalg import eigsh
+        from tqdm import tqdm
+
+        K   = self.nmb_prototypes
+        aff = self.train_ds.aff_raw if hasattr(self.train_ds, 'aff_raw') else self.train_ds.aff
+        N   = aff.shape[0]
+        print(f"[waypoint init] N={N} cells, K={K} prototypes, n_eigs={n_eigs}")
+
+        A  = sp.csr_matrix(aff)
+        A  = (A + A.T) / 2
+
+        # --- normalised affinity (same normalisation as SEACells) ---
+        print("[waypoint init] computing diffusion map ...")
+        d          = np.array(A.sum(axis=1)).ravel()
+        d_inv_sqrt = 1.0 / np.sqrt(d + 1e-8)
+        D_inv_sqrt = sp.diags(d_inv_sqrt)
+        L_sym      = D_inv_sqrt @ A @ D_inv_sqrt
+
+        n_eigs = min(n_eigs, N - 2)
+        _, vecs = eigsh(L_sym, k=n_eigs, which='LM')   # [N, n_eigs]
+        print(f"[waypoint init] diffusion map done — {n_eigs} eigenvectors")
+
+        # --- greedy MaxMin in diffusion space ---
+        chosen    = [np.random.randint(0, N)]
+        min_dists = np.full(N, np.inf)
+
+        for _ in tqdm(range(K - 1), desc="waypoint MaxMin", unit="proto"):
+            last      = chosen[-1]
+            d_last    = ((vecs - vecs[last]) ** 2).sum(axis=1)
+            min_dists = np.minimum(min_dists, d_last)
+            chosen.append(int(min_dists.argmax()))
+
+        chosen = np.array(chosen)
+        print(f"[waypoint init] selected {K} seed cells")
+
+        # --- encode chosen cells and set as prototypes ---
+        adata_chosen = self.train_ds.adata[chosen]
+        embeddings   = self.encode_adata(adata_chosen, self.model, z_idx=1)  # [K, d]
+
+        centers = torch.nn.functional.normalize(embeddings.float(), dim=1)
+        self.model.set_prototypes(centers)
+
+    @staticmethod
+    def _proto_sim(s_i, s_j, metric='dotp'):
+        """Pairwise proto similarity between softmax assignment vectors.
+
+        Args:
+            s_i, s_j: (B, K) softmax assignment vectors
+            metric: 'dotp' | 'cosine' | 'bhattacharyya'
+
+        Note: epsilon calibration always uses dotp regardless of metric, because
+        cosine and bhattacharyya both → 1 for uniform assignments (ε→∞), making
+        match-p calibration impossible. Dotp → 1/K → 0 as assignments spread,
+        so calibrating ε via dotp gives well-scaled assignments for any metric.
+        """
+        if metric == 'cosine':
+            return (F.normalize(s_i, dim=-1) * F.normalize(s_j, dim=-1)).sum(dim=-1)
+        elif metric == 'bhattacharyya':
+            return ((s_i + 1e-8).sqrt() * (s_j + 1e-8).sqrt()).sum(dim=-1)
+        else:  # dotp
+            return (s_i * s_j).sum(dim=-1)
+
+    @staticmethod
+    def _proto_sim_neg(s_i, s_neg, metric='dotp'):
+        """Similarity between s_i (B,K) and negatives s_neg (B,N,K) → (B,N)."""
+        if metric == 'cosine':
+            return (F.normalize(s_i, dim=-1).unsqueeze(1) * F.normalize(s_neg, dim=-1)).sum(dim=-1)
+        elif metric == 'bhattacharyya':
+            return ((s_i + 1e-8).sqrt().unsqueeze(1) * (s_neg + 1e-8).sqrt()).sum(dim=-1)
+        else:  # dotp
+            return (s_i.unsqueeze(1) * s_neg).sum(dim=-1)
 
     def calibrate_epsilon(self, n_samples=5000):
-        """Find epsilon so that E[q_pos] = E[p_pos] over sampled positive pairs.
+        """Find epsilon so that E[q_pos(dotp)] = E[p_pos] over sampled positive pairs.
 
-        Bisects over epsilon in [1e-4, 10] until the mean soft-assignment dot
-        product for positive pairs matches the mean affinity weight of those pairs.
-        This keeps the UMAP loss in a well-scaled regime throughout training —
-        q values are neither saturated (≈1) nor dead (≈0).
+        If p-q matching is unreachable (target p_pos exceeds max achievable q_pos),
+        falls back to effk-based calibration using umap_proto_effk.
 
+        Always calibrates via dotp regardless of umap_proto_metric.
         Sets self.epsilon in-place and returns the found value.
         """
         import scipy.sparse as sp
@@ -285,7 +374,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         idx = np.random.choice(len(coo.data), n, replace=False)
         heads = torch.tensor(coo.row[idx], dtype=torch.long, device=self.device)
         tails = torch.tensor(coo.col[idx], dtype=torch.long, device=self.device)
-        p_pos = float(coo.data[idx].mean())   # target: mean affinity weight
+        p_pos = float(coo.data[idx].mean())
 
         # Encode all cells once
         self.model.eval()
@@ -295,23 +384,83 @@ class SCProtoTrainer(AdoptiveTrainer):
             logits_all = self.model.prototypes(z_all)   # n_cells × K
 
         def mean_q_pos(eps):
-            soft = torch.softmax(logits_all / eps, dim=-1)
-            q = (soft[heads] * soft[tails]).sum(dim=-1).mean().item()
+            with torch.no_grad():
+                soft = torch.softmax(logits_all / eps, dim=-1)
+                q = self._proto_sim(soft[heads], soft[tails], metric='dotp').mean().item()
             return q
+
+        # Check if target is achievable (max q_pos at sharpest epsilon)
+        q_at_lo = mean_q_pos(1e-4)
+        if q_at_lo < p_pos:
+            effk_fallback = getattr(self, 'umap_proto_effk', 5.0)
+            print(f"[eps calibration] E[p_pos]={p_pos:.4f} unreachable (max E[q_pos]={q_at_lo:.4f}), "
+                  f"falling back to effk={effk_fallback:.1f}")
+            return self.calibrate_effk(effk_fallback)
 
         lo, hi = 1e-4, 10.0
         for _ in range(60):
             eps = (lo + hi) / 2
             q = mean_q_pos(eps)
             if q < p_pos:
-                hi = eps   # q too low → need more diffuse → larger eps
+                hi = eps
             else:
-                lo = eps   # q too high → need more crisp  → smaller eps
+                lo = eps
 
         self.epsilon = eps
         print(f"[eps calibration] E[p_pos]={p_pos:.4f} → epsilon={eps:.4f} "
               f"(E[q_pos]={mean_q_pos(eps):.4f})")
         return eps
+
+    def calibrate_effk(self, target_effk=5.0):
+        """Find epsilon so that mean effective-k over all cells = target_effk.
+
+        effk_i = 1 / sum_k(s_ik^2) — effective number of protos per cell.
+        Higher epsilon → softer assignments → higher effk.
+        Sets self.epsilon in-place and returns the found value.
+        """
+        self.model.eval()
+        with torch.no_grad():
+            z_all = self.encode_adata(self.train_ds.adata, self.model, z_idx=1)
+            z_all = z_all.to(self.device)
+            logits_all = self.model.prototypes(z_all)
+
+        def mean_effk(eps):
+            with torch.no_grad():
+                soft = torch.softmax(logits_all / eps, dim=-1)
+                return (1.0 / (soft ** 2).sum(dim=-1)).mean().item()
+
+        lo, hi = 1e-6, 100.0
+        for _ in range(60):
+            eps = (lo + hi) / 2
+            ek = mean_effk(eps)
+            if ek < target_effk:
+                lo = eps   # effk too low → softer → larger eps
+            else:
+                hi = eps   # effk too high → sharper → smaller eps
+
+        self.epsilon = eps
+        print(f"[effk calibration] target_effk={target_effk:.1f} → epsilon={eps:.4f} (mean_effk={mean_effk(eps):.2f})")
+        return eps
+
+    @torch.no_grad()
+    def _init_proto_usage_nk_batch(self):
+        """Compute per-batch proto usage from full dataset. Called at the start of each epoch.
+
+        Encodes all cells, computes n_k_b = sum of soft assignments for each batch b.
+        Stored in self._proto_usage_nk_batch as the EMA starting point for the epoch.
+        """
+        self.model.eval()
+        z_all = self.encode_adata(self.train_ds.adata, self.model, z_idx=1)
+        z_all = z_all.to(self.device)
+        s_all = F.softmax(self.model.prototypes(z_all) / self.epsilon, dim=1)  # (N, K)
+
+        cell_ds_all = self._umap_state['cell_ds']  # (N,) on CPU
+        self._proto_usage_nk_batch = {}
+        for b in cell_ds_all.unique():
+            b_int = b.item()
+            mask = (cell_ds_all == b).to(self.device)
+            self._proto_usage_nk_batch[b_int] = s_all[mask].sum(dim=0).clamp(min=1e-6).cpu()
+        self.model.train()
 
     def build_model(self):
         self.model = self.get_model()
@@ -524,6 +673,14 @@ class SCProtoTrainer(AdoptiveTrainer):
 
         loss_fn = ParametricUMAPLoss(min_dist=min_dist, spread=spread, negative_sample_rate=neg_rate)
 
+        # Precompute per-cell degrees and 2m for degree-weighted positive loss.
+        # w_ij = A_ij / (k_i * k_j / 2m) — upweights pairs more connected than expected.
+        _A = sp.csr_matrix(affinity)
+        _deg = np.array(_A.sum(axis=1)).ravel()          # k_i for each cell
+        _two_m = float(_deg.sum())                        # 2m = total edge weight
+        self._cell_degree = torch.tensor(_deg, dtype=torch.float32)   # (N,)
+        self._two_m = _two_m
+
         if umap_similarity == 'proto':
             params = list(self.model.scpoli_cvae.parameters()) + list(self.model.prototypes.parameters())
         else:
@@ -537,6 +694,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             'loader': loader,
             'optimizer': optimizer,
             'epoch': 0,
+            'cell_ds': torch.tensor(cell_ds, dtype=torch.long),
         }
 
         print(f"Starting edge-centric UMAP training (similarity={umap_similarity})")
@@ -606,7 +764,26 @@ class SCProtoTrainer(AdoptiveTrainer):
 
             if use_proto_sim:
                 logits = self.model.prototypes(z_unique)
-                soft_assign = F.softmax(logits / self.epsilon, dim=1)
+
+                # Mode 2: per-batch IDF logit correction before softmax
+                if getattr(self, 'usage_norm_sim', 0) == 2:
+                    cell_ds_all = self._umap_state['cell_ds']
+                    batch_ids = cell_ds_all[unique_idx.cpu()]              # (n_unique,) on CPU
+                    log_correction = torch.zeros_like(logits)              # (n_unique, K)
+                    for b in batch_ids.unique():
+                        b_int = b.item()
+                        mask = (batch_ids == b).to(self.device)
+                        if hasattr(self, '_proto_usage_nk_batch') and b_int in self._proto_usage_nk_batch:
+                            n_k_b = self._proto_usage_nk_batch[b_int].to(self.device).clamp(min=1e-6)
+                        else:
+                            n_k_b = torch.ones(logits.shape[1], device=self.device)
+                        log_correction[mask] = torch.log(n_k_b / n_k_b.mean())
+                    soft_assign = F.softmax((logits - self.epsilon * log_correction) / self.epsilon, dim=1)
+                    soft_assign_orig = F.softmax(logits / self.epsilon, dim=1).detach()  # uncorrected, for EMA
+                else:
+                    soft_assign = F.softmax(logits / self.epsilon, dim=1)
+                    soft_assign_orig = soft_assign
+
                 with torch.no_grad():
                     sa_effk = (1.0 / (soft_assign * soft_assign).sum(dim=1))
                     total_metrics['effk'] = total_metrics.get('effk', 0) + sa_effk.median().item()
@@ -616,16 +793,49 @@ class SCProtoTrainer(AdoptiveTrainer):
                 s_tail = soft_assign[_gather(tail)]
                 s_neg = soft_assign[_gather(neg_samples.flatten())].view(B, neg_K, -1)
                 _eps = 1e-4
-                if proto_metric == 'cosine':
-                    s_head_n = F.normalize(s_head, dim=-1, p=2)
-                    s_tail_n = F.normalize(s_tail, dim=-1, p=2)
-                    s_neg_n = F.normalize(s_neg, dim=-1, p=2)
-                    q_pos = (s_head_n * s_tail_n).sum(dim=-1).clamp(_eps, 1.0 - _eps)
-                    q_neg = (s_head_n.unsqueeze(1) * s_neg_n).sum(dim=-1).clamp(_eps, 1.0 - _eps)
+
+                usage_mode = getattr(self, 'usage_norm_sim', 0)
+                if usage_mode == 1:
+                    # mini-batch global: normalize with mini-batch n_k (batch-biased)
+                    n_k = soft_assign.sum(dim=0).clamp(min=1e-6)
+                    w = n_k / n_k.mean()
+                    s_head_n = s_head / w
+                    s_tail_n = s_tail / w
+                    s_neg_n  = s_neg  / w
+                    q_pos = self._proto_sim(s_head_n, s_tail_n, proto_metric).clamp(_eps, 1.0 - _eps)
+                    q_neg = self._proto_sim_neg(s_head_n, s_neg_n, proto_metric).clamp(_eps, 1.0 - _eps)
+                elif usage_mode == 3:
+                    # batch-balanced: each batch contributes equally to n_k regardless of cell count
+                    cell_ds_all = self._umap_state['cell_ds']
+                    batch_ids = cell_ds_all[unique_idx.cpu()]
+                    n_k_per_batch = []
+                    for b in batch_ids.unique():
+                        mask = (batch_ids == b).to(self.device)
+                        n_k_per_batch.append(soft_assign[mask].sum(dim=0))
+                    n_k = torch.stack(n_k_per_batch).mean(dim=0).clamp(min=1e-6)
+                    w = n_k / n_k.mean()
+                    s_head_n = s_head / w
+                    s_tail_n = s_tail / w
+                    s_neg_n  = s_neg  / w
+                    q_pos = self._proto_sim(s_head_n, s_tail_n, proto_metric).clamp(_eps, 1.0 - _eps)
+                    q_neg = self._proto_sim_neg(s_head_n, s_neg_n, proto_metric).clamp(_eps, 1.0 - _eps)
                 else:
-                    q_pos = (s_head * s_tail).sum(dim=-1).clamp(_eps, 1.0 - _eps)
-                    q_neg = (s_head.unsqueeze(1) * s_neg).sum(dim=-1).clamp(_eps, 1.0 - _eps)
-                loss_pos = -torch.log(q_pos).mean()
+                    # mode 0: no normalization; mode 2: correction already inside softmax
+                    q_pos = self._proto_sim(s_head, s_tail, proto_metric).clamp(_eps, 1.0 - _eps)
+                    q_neg = self._proto_sim_neg(s_head, s_neg, proto_metric).clamp(_eps, 1.0 - _eps)
+                if getattr(self, 'lambda_degree_weight', 0):
+                    # Degree-weighted positive loss: w_ij = A_ij / (k_i * k_j / 2m)
+                    # Upweights pairs more connected than expected by chance,
+                    # directly aligning the loss with what modularity measures.
+                    k = self._cell_degree.to(self.device)
+                    k_head = k[head]
+                    k_tail = k[tail]
+                    null = (k_head * k_tail) / self._two_m
+                    deg_w = weights / null.clamp(min=1e-8)   # A_ij / (k_i*k_j/2m)
+                    deg_w = deg_w / (deg_w.mean() + 1e-8)   # normalise to mean=1
+                    loss_pos = -(deg_w * torch.log(q_pos)).mean()
+                else:
+                    loss_pos = -torch.log(q_pos).mean()
                 loss_neg = -torch.log(1.0 - q_neg).sum(dim=1).mean()
                 umap_loss = loss_pos + loss_neg
                 metrics = {
@@ -672,6 +882,21 @@ class SCProtoTrainer(AdoptiveTrainer):
 
             loss.backward()
             optimizer.step()
+
+            # EMA update for usage_norm_sim=2: update after weights change
+            if getattr(self, 'usage_norm_sim', 0) == 2 and use_proto_sim:
+                ema_alpha = getattr(self, 'usage_nk_alpha', 0.999)
+                with torch.no_grad():
+                    for b in batch_ids.unique():
+                        b_int = b.item()
+                        mask = (batch_ids == b).to(self.device)
+                        n_k_b_new = soft_assign_orig[mask].sum(dim=0).clamp(min=1e-6).cpu()
+                        if not hasattr(self, '_proto_usage_nk_batch'):
+                            self._proto_usage_nk_batch = {}
+                        if b_int in self._proto_usage_nk_batch:
+                            self._proto_usage_nk_batch[b_int] = ema_alpha * self._proto_usage_nk_batch[b_int] + (1 - ema_alpha) * n_k_b_new
+                        else:
+                            self._proto_usage_nk_batch[b_int] = n_k_b_new
 
             total_metrics['loss'] += loss.item()
             total_metrics['umap'] += umap_loss.item()
@@ -770,11 +995,15 @@ class SCProtoTrainer(AdoptiveTrainer):
 
         start = self._umap_state['epoch']
 
+        use_nk = getattr(self, 'usage_norm_sim', 0) == 2
+
         if not early_stop:
             # --- fixed-epoch mode (original behaviour) ---
             freq = getattr(self, 'umap_checkpoint_freq', 20)
             last_epoch = start + epochs
             for i in range(epochs):
+                if use_nk:
+                    self._init_proto_usage_nk_batch()
                 metrics = self._run_umap_epoch()
                 current_epoch = start + i + 1
                 if verbose:
@@ -791,14 +1020,21 @@ class SCProtoTrainer(AdoptiveTrainer):
         print(f"Early stopping mode: metric={early_stop_metric}, eval every {eval_freq} epochs, patience={patience}" +
               (f", max_epochs={max_epochs}" if max_epochs else ""))
 
-        # Print initial modularity before any training and save as baseline checkpoint
+        # Print initial modularity and coverage before any training and save as baseline checkpoint
         if early_stop_metric == 'modularity':
             init_result = self.modularity()
             best_score = init_result['modularity']
-            print(f"[Epoch 0] initial modularity={best_score:.4f} → saving as baseline checkpoint")
+            lk = self.dataset.label_key
+            proto_labels = self.label_prototypes(lk)['labels']
+            n_covered = proto_labels.nunique()
+            n_total = self.train_ds.adata.obs[lk].nunique()
+            init_coverage = n_covered / n_total
+            print(f"[Epoch 0] initial modularity={best_score:.4f}, coverage={init_coverage:.4f} ({n_covered}/{n_total} cell types) → saving as baseline checkpoint")
             self.save_umap_checkpoint()
 
         while True:
+            if use_nk:
+                self._init_proto_usage_nk_batch()
             metrics = self._run_umap_epoch()
             epoch_offset += 1
             current_epoch = start + epoch_offset
@@ -828,19 +1064,23 @@ class SCProtoTrainer(AdoptiveTrainer):
                         self.init_prototypes()
                     result = self.modularity()
                     score = result['modularity']
+                    proto_labels = self.label_prototypes(lk)['labels']
+                    n_covered = proto_labels.nunique()
+                    coverage_str = f", coverage={n_covered/n_total:.4f} ({n_covered}/{n_total})"
                 else:
                     result = self.edge_homophily()
                     score = result['homophily']
+                    coverage_str = ""
 
                 improvement = score - best_score
                 if improvement > min_delta:
                     best_score = score
                     no_improve_epochs = 0
-                    print(f"  [Early stop] {early_stop_metric} improved to {score:.4f} (+{improvement:.4f}) → saving checkpoint")
+                    print(f"  [Early stop] {early_stop_metric} improved to {score:.4f} (+{improvement:.4f}){coverage_str} → saving checkpoint")
                     self.save_umap_checkpoint()
                 else:
                     no_improve_epochs += eval_freq
-                    print(f"  [Early stop] No improvement ({score:.4f} vs best {best_score:.4f}, min_delta={min_delta}), "
+                    print(f"  [Early stop] No improvement ({score:.4f} vs best {best_score:.4f}, min_delta={min_delta}){coverage_str}, "
                           f"no-improve streak: {no_improve_epochs}/{patience}")
                     if no_improve_epochs >= patience:
                         print(f"[Early stop] Patience exhausted. Stopping at epoch {current_epoch}.")
@@ -1388,7 +1628,7 @@ class SCProtoTrainer(AdoptiveTrainer):
     def conductance(self, assignments=None, label='proto'):
         """Compute mean weighted conductance across clusters.
 
-        conductance(C) = cut(C, V\C) / min(vol(C), vol(V\C))
+        conductance(C) = cut(C, V\\C) / min(vol(C), vol(V\\C))
 
         Lower is better (0 = perfect, 1 = worst).
 
@@ -2095,12 +2335,8 @@ class SCProtoTrainer(AdoptiveTrainer):
             s_t = sa[_map(tails)]
             s_n = sa[_map(neg_tails)]
             _eps = 1e-4
-            if proto_metric == 'cosine':
-                s_h = F.normalize(s_h, dim=-1)
-                s_t = F.normalize(s_t, dim=-1)
-                s_n = F.normalize(s_n, dim=-1)
-            q_pos = (s_h * s_t).sum(dim=-1).clamp(_eps, 1 - _eps).cpu().numpy()
-            q_neg = (s_h * s_n).sum(dim=-1).clamp(_eps, 1 - _eps).cpu().numpy()
+            q_pos = self._proto_sim(s_h, s_t, proto_metric).clamp(_eps, 1 - _eps).cpu().numpy()
+            q_neg = self._proto_sim(s_h, s_n, proto_metric).clamp(_eps, 1 - _eps).cpu().numpy()
         else:
             z_h = z_all[_map(heads)]
             z_t = z_all[_map(tails)]

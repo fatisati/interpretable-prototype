@@ -118,5 +118,10 @@ ABBREVIATIONS = {
     'lambda_r1r2': 'lr1r2',
     'lambda_umap': 'lumap',
     'umap_similarity': 'usim',
-    'calibrate_eps': 'ecal'
+    'umap_proto_metric': 'upm',
+    'calibrate_eps': 'ecal',
+    'epsilon_start_factor': 'esf',
+    'umap_proto_effk_start': 'effks',
+    'usage_norm_sim': 'unorm',
+    'lambda_degree_weight': 'degw',
 }
