@@ -104,7 +104,7 @@ def calc_dge(ad, label_key):
 
 def prepare_topK(dge_df, ct, thr, K):
     """Filter by p-value, sort by score, return top-K gene names."""
-    df = dge_df.query("group == @ct and pvals_adj < @thr")
+    df = dge_df[(dge_df['group'] == ct) & (dge_df['pvals_adj'] < thr)]
     df = df.sort_values("scores", ascending=False)
     return df["names"].tolist()[:K]
 
