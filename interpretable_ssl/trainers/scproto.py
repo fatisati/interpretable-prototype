@@ -726,6 +726,8 @@ class SCProtoTrainer(AdoptiveTrainer):
             'loss_pos': 0, 'loss_neg': 0, 'recon': 0, 'kl': 0,
             'proto_recon': 0, 'r1r2': 0, 'proto_attract': 0, 'n_unused_protos': 0,
         }
+        mode5_c_min = 1.0   # worst-case min coverage seen this epoch (before correction)
+        mode5_corr_max = 0.0  # worst-case max boost applied this epoch
         n_batches = 0
         used_proto_ids = set()
 
@@ -790,6 +792,8 @@ class SCProtoTrainer(AdoptiveTrainer):
                         sa_prelim = F.softmax(logits / self.epsilon, dim=1)
                         c_k = sa_prelim.max(dim=0).values.clamp(min=1e-8)
                         log_corr = torch.log(c_k / c_k.mean()).clamp(min=-5.0, max=5.0)
+                        mode5_c_min = min(mode5_c_min, c_k.min().item())
+                        mode5_corr_max = max(mode5_corr_max, (-log_corr).max().item())
                     soft_assign = F.softmax(logits / self.epsilon - log_corr, dim=1)
                     soft_assign_orig = soft_assign
                 else:
@@ -953,6 +957,10 @@ class SCProtoTrainer(AdoptiveTrainer):
         if use_proto_sim:
             total_metrics['n_unused_protos'] = self.nmb_prototypes - len(used_proto_ids)
 
+        if getattr(self, 'usage_norm_sim', 0) == 5:
+            total_metrics['mode5_c_min'] = mode5_c_min
+            total_metrics['mode5_corr_max'] = mode5_corr_max
+
         s['epoch'] += 1
         return total_metrics
 
@@ -969,6 +977,8 @@ class SCProtoTrainer(AdoptiveTrainer):
             extra += f" | r1r2={metrics['r1r2']:.4f}"
         if getattr(self, 'lambda_proto_attract', 0) > 0:
             extra += f" | proto_attract={metrics['proto_attract']:.4f}"
+        if getattr(self, 'usage_norm_sim', 0) == 5 and 'mode5_c_min' in metrics:
+            extra += f" | c_min={metrics['mode5_c_min']:.3f} corr={metrics['mode5_corr_max']:.2f}"
         effk_str = f" | effk={metrics['effk']:.1f}" if 'effk' in metrics else ""
         unused_str = f" | unused_proto={metrics['n_unused_protos']:.0f}" if 'n_unused_protos' in metrics else ""
 
