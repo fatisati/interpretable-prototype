@@ -766,8 +766,9 @@ class SCProtoTrainer(AdoptiveTrainer):
             if use_proto_sim:
                 logits = self.model.prototypes(z_unique)
 
-                # Mode 2: per-batch IDF logit correction before softmax
-                if getattr(self, 'usage_norm_sim', 0) == 2:
+                # Modes 2 and 5: logit correction before softmax
+                _usage_mode_pre = getattr(self, 'usage_norm_sim', 0)
+                if _usage_mode_pre == 2:
                     cell_ds_all = self._umap_state['cell_ds']
                     batch_ids = cell_ds_all[unique_idx.cpu()]              # (n_unique,) on CPU
                     log_correction = torch.zeros_like(logits)              # (n_unique, K)
@@ -781,6 +782,14 @@ class SCProtoTrainer(AdoptiveTrainer):
                         log_correction[mask] = torch.log(n_k_b / n_k_b.mean())
                     soft_assign = F.softmax((logits - self.epsilon * log_correction) / self.epsilon, dim=1)
                     soft_assign_orig = F.softmax(logits / self.epsilon, dim=1).detach()  # uncorrected, for EMA
+                elif _usage_mode_pre == 5:
+                    # coverage-based before-softmax: clamp log_corr (not c_k) to preserve strong signal for dead protos
+                    with torch.no_grad():
+                        sa_prelim = F.softmax(logits / self.epsilon, dim=1)
+                        c_k = sa_prelim.max(dim=0).values.clamp(min=1e-8)
+                        log_corr = torch.log(c_k / c_k.mean()).clamp(min=-5.0, max=5.0)
+                    soft_assign = F.softmax((logits - self.epsilon * log_corr) / self.epsilon, dim=1)
+                    soft_assign_orig = soft_assign
                 else:
                     soft_assign = F.softmax(logits / self.epsilon, dim=1)
                     soft_assign_orig = soft_assign
