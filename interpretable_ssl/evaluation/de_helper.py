@@ -24,13 +24,9 @@ def calc_dge_filtered(ad, label_key, filter_thr=0.05):
     group_cnt = ad.obs[label_key].value_counts()
     valid_groups = group_cnt[group_cnt > 1].index
     ad_valid = ad[ad.obs[label_key].isin(valid_groups)]
-    sc.tl.rank_genes_groups(
-        ad_valid, groupby=label_key, method="t-test", key_added="rank_genes"
-    )
-    dge_df = sc.get.rank_genes_groups_df(ad_valid, key="rank_genes", group=None)
-    dge_df = dge_df[dge_df["pvals_adj"] < filter_thr]
-    # dge_df["group"] = dge_df["group"].map(lambda x: x.lower())
-    return dge_df
+    sc.tl.rank_genes_groups(ad_valid, groupby=label_key, method="t-test", key_added="rank_genes")
+    dge_df = _rank_genes_to_df(ad_valid)
+    return dge_df[dge_df["pvals_adj"] < filter_thr]
 
 
 def calculate_avg_jaccard(mc_de, batch_de_dict, col_name=None):
@@ -89,17 +85,25 @@ def jaccard(a, b):
     return len(a & b) / len(a | b) if len(a | b) else 0.0
 
 
+def _rank_genes_to_df(ad, key='rank_genes'):
+    """Collect rank_genes_groups results into a DataFrame with a guaranteed 'group' column.
+    Newer scanpy versions drop the 'group' column when group=None; calling per-group avoids this."""
+    groups = list(ad.uns[key]['names'].dtype.names)
+    dfs = []
+    for g in groups:
+        sub = sc.get.rank_genes_groups_df(ad, key=key, group=g)
+        sub.insert(0, 'group', g)
+        dfs.append(sub)
+    return pd.concat(dfs, ignore_index=True)
+
+
 def calc_dge(ad, label_key):
     """Compute DGE without filtering."""
     group_cnt = ad.obs[label_key].value_counts()
     valid = group_cnt[group_cnt > 1].index
     ad = ad[ad.obs[label_key].isin(valid)]
-    sc.tl.rank_genes_groups(
-        ad, groupby=label_key, method="t-test", key_added="rank_genes"
-    )
-    df = sc.get.rank_genes_groups_df(ad, key="rank_genes", group=None)
-    # df["group"] = df["group"].str.lower()
-    return df
+    sc.tl.rank_genes_groups(ad, groupby=label_key, method="t-test", key_added="rank_genes")
+    return _rank_genes_to_df(ad)
 
 
 def prepare_topK(dge_df, ct, thr, K):
