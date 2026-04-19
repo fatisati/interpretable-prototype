@@ -716,6 +716,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         lambda_kl = self.lambda_kl
         lambda_proto_recon = self.lambda_proto_recon
         lambda_r1r2 = self.lambda_r1r2
+        lambda_proto_attract = getattr(self, 'lambda_proto_attract', 0.0)
         use_proto_sim = getattr(self, 'umap_similarity', 'embedding') == 'proto'
         proto_metric = getattr(self, 'umap_proto_metric', 'dotp')
 
@@ -723,7 +724,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         total_metrics = {
             'loss': 0, 'umap': 0, 'q_pos': 0, 'q_neg': 0, 'margin': 0,
             'loss_pos': 0, 'loss_neg': 0, 'recon': 0, 'kl': 0,
-            'proto_recon': 0, 'r1r2': 0, 'n_unused_protos': 0,
+            'proto_recon': 0, 'r1r2': 0, 'proto_attract': 0, 'n_unused_protos': 0,
         }
         n_batches = 0
         used_proto_ids = set()
@@ -819,6 +820,19 @@ class SCProtoTrainer(AdoptiveTrainer):
                     s_neg_n  = s_neg  / w
                     q_pos = self._proto_sim(s_head_n, s_tail_n, proto_metric).clamp(_eps, 1.0 - _eps)
                     q_neg = self._proto_sim_neg(s_head_n, s_neg_n, proto_metric).clamp(_eps, 1.0 - _eps)
+                elif usage_mode == 4:
+                    # coverage-based: normalize by max score per proto (batch-size independent)
+                    # c_k = max_i(s_ik): determined by single best-matching cell, not cell count
+                    # dead protos have c_k ≈ 0 → w_k ≈ 0 → dividing amplifies their assignments
+                    c_k = soft_assign.max(dim=0).values
+                    # floor at 10% of mean to prevent explosion when c_k ≈ 0
+                    c_k = c_k.clamp(min=0.1 * c_k.mean().clamp(min=1e-6))
+                    w = c_k / c_k.mean()
+                    s_head_n = s_head / w
+                    s_tail_n = s_tail / w
+                    s_neg_n  = s_neg  / w
+                    q_pos = self._proto_sim(s_head_n, s_tail_n, proto_metric).clamp(_eps, 1.0 - _eps)
+                    q_neg = self._proto_sim_neg(s_head_n, s_neg_n, proto_metric).clamp(_eps, 1.0 - _eps)
                 else:
                     # mode 0: no normalization; mode 2: correction already inside softmax
                     q_pos = self._proto_sim(s_head, s_tail, proto_metric).clamp(_eps, 1.0 - _eps)
@@ -880,6 +894,18 @@ class SCProtoTrainer(AdoptiveTrainer):
             if lambda_r1r2 > 0:
                 loss = loss + lambda_r1r2 * r1r2_loss
 
+            proto_attract_loss = torch.tensor(0.0, device=self.device)
+            if lambda_proto_attract > 0 and use_proto_sim:
+                with torch.no_grad():
+                    r_i = soft_assign.max(dim=1).values          # (N,) cell rep quality
+                    lost_weight = (1.0 - r_i)                    # (N,) high = poorly represented
+                    n_k = soft_assign.sum(dim=0).clamp(min=1e-6) # (K,)
+                    dead_weight = 1.0 / n_k
+                    dead_weight = dead_weight / dead_weight.mean()
+                attraction = soft_assign * lost_weight.unsqueeze(1)  # (N, K)
+                proto_attract_loss = -(dead_weight * attraction.max(dim=0).values).mean()
+                loss = loss + lambda_proto_attract * proto_attract_loss
+
             loss.backward()
             optimizer.step()
 
@@ -904,6 +930,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             total_metrics['kl'] += kl_loss.item()
             total_metrics['r1r2'] += r1r2_loss.item()
             total_metrics['proto_recon'] += proto_recon_loss.item()
+            total_metrics['proto_attract'] += proto_attract_loss.item()
             for k, v in metrics.items():
                 if k in total_metrics:
                     total_metrics[k] += v
@@ -929,6 +956,8 @@ class SCProtoTrainer(AdoptiveTrainer):
             extra += f" | proto_recon={metrics['proto_recon']:.4f}"
         if self.lambda_r1r2 > 0:
             extra += f" | r1r2={metrics['r1r2']:.4f}"
+        if getattr(self, 'lambda_proto_attract', 0) > 0:
+            extra += f" | proto_attract={metrics['proto_attract']:.4f}"
         effk_str = f" | effk={metrics['effk']:.1f}" if 'effk' in metrics else ""
         unused_str = f" | unused_proto={metrics['n_unused_protos']:.0f}" if 'n_unused_protos' in metrics else ""
 
