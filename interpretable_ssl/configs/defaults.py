@@ -195,7 +195,7 @@ def get_defaults():
         'umap_similarity': 'embedding',  # 'embedding' (distance kernel) or 'proto' (soft assignment dot product)
         'calibrate_eps': 0,              # 1 = auto-calibrate epsilon so E[q_pos] = E[p_pos] after proto init
         'umap_proto_effk': 5.0,          # target effective k for proto soft assignments (auto-calibrates temperature)
-        'usage_norm_sim': 0,             # 1 = post-softmax mini-batch global (batch-biased); 2 = pre-softmax per-batch EMA; 3 = pre-softmax batch-balanced; 4 = pre-softmax coverage-based (max score per proto)
+        'usage_norm_sim': 0,             # 1 = mini-batch global; 2 = full-dataset per-batch init + per-step EMA; 3 = mini-batch batch-balanced; 4 = coverage-based (max score per proto, batch-size independent)
         'usage_nk_alpha': 0.9,           # EMA smoothing for mode 2 (per mini-batch step)
         'lambda_degree_weight': 0,       # 1 = weight positive loss by A_ij/(k_i*k_j/2m); aligns loss with modularity null model
         'umap_proto_metric': 'cosine',     # 'dotp' (c_i^T c_j) or 'cosine' (cosine similarity of assignment vectors)
