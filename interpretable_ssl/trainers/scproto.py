@@ -837,15 +837,16 @@ class SCProtoTrainer(AdoptiveTrainer):
                     q_pos = self._proto_sim(s_head_n, s_tail_n, proto_metric).clamp(_eps, 1.0 - _eps)
                     q_neg = self._proto_sim_neg(s_head_n, s_neg_n, proto_metric).clamp(_eps, 1.0 - _eps)
                 elif usage_mode == 4:
-                    # coverage-based: divide by c_k then renormalize → valid distribution, batch-size independent
+                    # coverage-based: normalize by c_k then renormalize row sum → valid distribution
                     c_k = soft_assign.max(dim=0).values.detach()
                     c_k = c_k.clamp(min=0.1 * c_k.mean().clamp(min=1e-6))
-                    s_head_n = s_head / c_k
-                    s_head_n = s_head_n / s_head_n.sum(dim=1, keepdim=True)
-                    s_tail_n = s_tail / c_k
-                    s_tail_n = s_tail_n / s_tail_n.sum(dim=1, keepdim=True)
-                    s_neg_n  = s_neg  / c_k
-                    s_neg_n  = s_neg_n  / s_neg_n.sum(dim=2, keepdim=True)
+                    w = c_k / c_k.mean()
+                    s_head_n = s_head / w
+                    s_head_n = s_head_n / s_head_n.sum(dim=1, keepdim=True).detach()
+                    s_tail_n = s_tail / w
+                    s_tail_n = s_tail_n / s_tail_n.sum(dim=1, keepdim=True).detach()
+                    s_neg_n  = s_neg  / w
+                    s_neg_n  = s_neg_n  / s_neg_n.sum(dim=2, keepdim=True).detach()
                     q_pos = self._proto_sim(s_head_n, s_tail_n, proto_metric).clamp(_eps, 1.0 - _eps)
                     q_neg = self._proto_sim_neg(s_head_n, s_neg_n, proto_metric).clamp(_eps, 1.0 - _eps)
                 else:
