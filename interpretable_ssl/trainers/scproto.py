@@ -791,7 +791,8 @@ class SCProtoTrainer(AdoptiveTrainer):
                     with torch.no_grad():
                         sa_prelim = F.softmax(logits / self.epsilon, dim=1)
                         c_k = sa_prelim.max(dim=0).values.clamp(min=1e-8)
-                        log_corr = torch.log(c_k / c_k.mean()).clamp(min=-5.0, max=5.0)
+                        corr_clamp = getattr(self, 'usage_norm_corr_clamp', 10.0)
+                        log_corr = torch.log(c_k / c_k.mean()).clamp(min=-corr_clamp, max=corr_clamp)
                         mode5_c_min = min(mode5_c_min, c_k.min().item())
                         mode5_corr_max = max(mode5_corr_max, (-log_corr).max().item())
                     soft_assign = F.softmax(logits / self.epsilon - log_corr, dim=1)
