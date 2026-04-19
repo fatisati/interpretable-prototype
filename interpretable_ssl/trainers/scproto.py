@@ -783,19 +783,14 @@ class SCProtoTrainer(AdoptiveTrainer):
                     soft_assign = F.softmax((logits - self.epsilon * log_correction) / self.epsilon, dim=1)
                     soft_assign_orig = F.softmax(logits / self.epsilon, dim=1).detach()  # uncorrected, for EMA
                 elif _usage_mode_pre == 5:
-                    # coverage-based before-softmax with EMA: stable global c_k estimate across steps
-                    # sa_prelim is only used to update EMA; correction uses accumulated EMA not current mini-batch
-                    ema_alpha = getattr(self, 'usage_nk_alpha', 0.999)
+                    # coverage-based before-softmax: log-prior correction applied directly to normalized logits
+                    # no ε scaling → correction strength is independent of temperature
+                    # sa_prelim reflects current step's coverage; no EMA (EMA hides dying protos)
                     with torch.no_grad():
                         sa_prelim = F.softmax(logits / self.epsilon, dim=1)
-                        c_k_new = sa_prelim.max(dim=0).values.clamp(min=1e-8).cpu()
-                        if not hasattr(self, '_proto_coverage_ema'):
-                            self._proto_coverage_ema = c_k_new
-                        else:
-                            self._proto_coverage_ema = ema_alpha * self._proto_coverage_ema + (1 - ema_alpha) * c_k_new
-                        c_k = self._proto_coverage_ema.to(self.device)
+                        c_k = sa_prelim.max(dim=0).values.clamp(min=1e-8)
                         log_corr = torch.log(c_k / c_k.mean()).clamp(min=-5.0, max=5.0)
-                    soft_assign = F.softmax((logits - self.epsilon * log_corr) / self.epsilon, dim=1)
+                    soft_assign = F.softmax(logits / self.epsilon - log_corr, dim=1)
                     soft_assign_orig = soft_assign
                 else:
                     soft_assign = F.softmax(logits / self.epsilon, dim=1)
