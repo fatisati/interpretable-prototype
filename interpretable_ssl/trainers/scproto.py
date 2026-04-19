@@ -765,12 +765,13 @@ class SCProtoTrainer(AdoptiveTrainer):
 
             if use_proto_sim:
                 logits = self.model.prototypes(z_unique)
+                usage_mode = getattr(self, 'usage_norm_sim', 0)
 
-                # Mode 2: per-batch IDF logit correction before softmax
-                if getattr(self, 'usage_norm_sim', 0) == 2:
+                if usage_mode == 2:
+                    # per-batch IDF correction before softmax using EMA n_k per batch
                     cell_ds_all = self._umap_state['cell_ds']
-                    batch_ids = cell_ds_all[unique_idx.cpu()]              # (n_unique,) on CPU
-                    log_correction = torch.zeros_like(logits)              # (n_unique, K)
+                    batch_ids = cell_ds_all[unique_idx.cpu()]
+                    log_correction = torch.zeros_like(logits)
                     for b in batch_ids.unique():
                         b_int = b.item()
                         mask = (batch_ids == b).to(self.device)
@@ -781,6 +782,29 @@ class SCProtoTrainer(AdoptiveTrainer):
                         log_correction[mask] = torch.log(n_k_b / n_k_b.mean())
                     soft_assign = F.softmax((logits - self.epsilon * log_correction) / self.epsilon, dim=1)
                     soft_assign_orig = F.softmax(logits / self.epsilon, dim=1).detach()  # uncorrected, for EMA
+                elif usage_mode == 3:
+                    # batch-balanced correction before softmax: preliminary assignments → batch-balanced n_k → corrected softmax
+                    cell_ds_all = self._umap_state['cell_ds']
+                    batch_ids = cell_ds_all[unique_idx.cpu()]
+                    with torch.no_grad():
+                        sa_prelim = F.softmax(logits / self.epsilon, dim=1)
+                        n_k_per_batch = []
+                        for b in batch_ids.unique():
+                            mask = (batch_ids == b).to(self.device)
+                            n_k_per_batch.append(sa_prelim[mask].sum(dim=0))
+                        n_k = torch.stack(n_k_per_batch).mean(dim=0).clamp(min=1e-6)
+                        log_corr = torch.log(n_k / n_k.mean())
+                    soft_assign = F.softmax((logits - self.epsilon * log_corr) / self.epsilon, dim=1)
+                    soft_assign_orig = soft_assign
+                elif usage_mode == 4:
+                    # coverage-based correction before softmax: preliminary assignments → max score per proto → corrected softmax
+                    with torch.no_grad():
+                        sa_prelim = F.softmax(logits / self.epsilon, dim=1)
+                        c_k = sa_prelim.max(dim=0).values
+                        c_k = c_k.clamp(min=0.1 * c_k.mean().clamp(min=1e-6))
+                        log_corr = torch.log(c_k / c_k.mean())
+                    soft_assign = F.softmax((logits - self.epsilon * log_corr) / self.epsilon, dim=1)
+                    soft_assign_orig = soft_assign
                 else:
                     soft_assign = F.softmax(logits / self.epsilon, dim=1)
                     soft_assign_orig = soft_assign
@@ -795,9 +819,8 @@ class SCProtoTrainer(AdoptiveTrainer):
                 s_neg = soft_assign[_gather(neg_samples.flatten())].view(B, neg_K, -1)
                 _eps = 1e-4
 
-                usage_mode = getattr(self, 'usage_norm_sim', 0)
                 if usage_mode == 1:
-                    # mini-batch global: normalize with mini-batch n_k (batch-biased)
+                    # mini-batch global: normalize with mini-batch n_k after softmax (batch-biased)
                     n_k = soft_assign.sum(dim=0).clamp(min=1e-6)
                     w = n_k / n_k.mean()
                     s_head_n = s_head / w
@@ -805,36 +828,8 @@ class SCProtoTrainer(AdoptiveTrainer):
                     s_neg_n  = s_neg  / w
                     q_pos = self._proto_sim(s_head_n, s_tail_n, proto_metric).clamp(_eps, 1.0 - _eps)
                     q_neg = self._proto_sim_neg(s_head_n, s_neg_n, proto_metric).clamp(_eps, 1.0 - _eps)
-                elif usage_mode == 3:
-                    # batch-balanced: each batch contributes equally to n_k regardless of cell count
-                    cell_ds_all = self._umap_state['cell_ds']
-                    batch_ids = cell_ds_all[unique_idx.cpu()]
-                    n_k_per_batch = []
-                    for b in batch_ids.unique():
-                        mask = (batch_ids == b).to(self.device)
-                        n_k_per_batch.append(soft_assign[mask].sum(dim=0))
-                    n_k = torch.stack(n_k_per_batch).mean(dim=0).clamp(min=1e-6)
-                    w = n_k / n_k.mean()
-                    s_head_n = s_head / w
-                    s_tail_n = s_tail / w
-                    s_neg_n  = s_neg  / w
-                    q_pos = self._proto_sim(s_head_n, s_tail_n, proto_metric).clamp(_eps, 1.0 - _eps)
-                    q_neg = self._proto_sim_neg(s_head_n, s_neg_n, proto_metric).clamp(_eps, 1.0 - _eps)
-                elif usage_mode == 4:
-                    # coverage-based: normalize by max score per proto (batch-size independent)
-                    # c_k = max_i(s_ik): determined by single best-matching cell, not cell count
-                    # dead protos have c_k ≈ 0 → w_k ≈ 0 → dividing amplifies their assignments
-                    c_k = soft_assign.max(dim=0).values
-                    # floor at 10% of mean to prevent explosion when c_k ≈ 0
-                    c_k = c_k.clamp(min=0.1 * c_k.mean().clamp(min=1e-6))
-                    w = c_k / c_k.mean()
-                    s_head_n = s_head / w
-                    s_tail_n = s_tail / w
-                    s_neg_n  = s_neg  / w
-                    q_pos = self._proto_sim(s_head_n, s_tail_n, proto_metric).clamp(_eps, 1.0 - _eps)
-                    q_neg = self._proto_sim_neg(s_head_n, s_neg_n, proto_metric).clamp(_eps, 1.0 - _eps)
                 else:
-                    # mode 0: no normalization; mode 2: correction already inside softmax
+                    # modes 0, 2, 3, 4: no post-softmax normalization (correction already inside softmax for 2/3/4)
                     q_pos = self._proto_sim(s_head, s_tail, proto_metric).clamp(_eps, 1.0 - _eps)
                     q_neg = self._proto_sim_neg(s_head, s_neg, proto_metric).clamp(_eps, 1.0 - _eps)
                 if getattr(self, 'lambda_degree_weight', 0):
