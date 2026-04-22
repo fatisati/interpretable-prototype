@@ -125,4 +125,7 @@ ABBREVIATIONS = {
     'umap_proto_effk_start': 'effks',
     'usage_norm_sim': 'unorm',
     'lambda_degree_weight': 'degw',
+    'degree_norm_loss': 'dnl',
+    'lambda_nassoc': 'lna',
+    'nassoc_alpha': 'naa',
 }

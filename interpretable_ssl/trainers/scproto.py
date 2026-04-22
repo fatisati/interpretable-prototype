@@ -411,35 +411,42 @@ class SCProtoTrainer(AdoptiveTrainer):
               f"(E[q_pos]={mean_q_pos(eps):.4f})")
         return eps
 
-    def calibrate_effk(self, target_effk=5.0):
-        """Find epsilon so that mean effective-k over all cells = target_effk.
+    def calibrate_effk(self, target_effk=5.0, agg=None):
+        """Find epsilon so that mean/median effective-k over all cells = target_effk.
 
         effk_i = 1 / sum_k(s_ik^2) — effective number of protos per cell.
         Higher epsilon → softer assignments → higher effk.
         Sets self.epsilon in-place and returns the found value.
+        agg: 'mean' or 'median' (default from umap_proto_effk_agg config, fallback 'mean').
         """
+        if agg is None:
+            agg = getattr(self, 'umap_proto_effk_agg', 'mean')
+        if agg not in ('mean', 'median'):
+            raise ValueError(f"effk agg must be 'mean' or 'median', got {agg!r}")
+
         self.model.eval()
         with torch.no_grad():
             z_all = self.encode_adata(self.train_ds.adata, self.model, z_idx=1)
             z_all = z_all.to(self.device)
             logits_all = self.model.prototypes(z_all)
 
-        def mean_effk(eps):
+        def effk_stat(eps):
             with torch.no_grad():
                 soft = torch.softmax(logits_all / eps, dim=-1)
-                return (1.0 / (soft ** 2).sum(dim=-1)).mean().item()
+                ek = 1.0 / (soft ** 2).sum(dim=-1)
+                return ek.mean().item() if agg == 'mean' else ek.median().item()
 
         lo, hi = 1e-6, 100.0
         for _ in range(60):
             eps = (lo + hi) / 2
-            ek = mean_effk(eps)
+            ek = effk_stat(eps)
             if ek < target_effk:
                 lo = eps   # effk too low → softer → larger eps
             else:
                 hi = eps   # effk too high → sharper → smaller eps
 
         self.epsilon = eps
-        print(f"[effk calibration] target_effk={target_effk:.1f} → epsilon={eps:.4f} (mean_effk={mean_effk(eps):.2f})")
+        print(f"[effk calibration] target_effk={target_effk:.1f} → epsilon={eps:.4f} ({agg}_effk={effk_stat(eps):.2f})")
         return eps
 
     @torch.no_grad()
@@ -718,6 +725,8 @@ class SCProtoTrainer(AdoptiveTrainer):
         lambda_proto_recon = self.lambda_proto_recon
         lambda_r1r2 = self.lambda_r1r2
         lambda_proto_attract = getattr(self, 'lambda_proto_attract', 0.0)
+        lambda_nassoc = getattr(self, 'lambda_nassoc', 0.0)
+        nassoc_alpha = getattr(self, 'nassoc_alpha', 1.0)
         use_proto_sim = getattr(self, 'umap_similarity', 'embedding') == 'proto'
         proto_metric = getattr(self, 'umap_proto_metric', 'dotp')
 
@@ -725,7 +734,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         total_metrics = {
             'loss': 0, 'umap': 0, 'q_pos': 0, 'q_neg': 0, 'margin': 0,
             'loss_pos': 0, 'loss_neg': 0, 'recon': 0, 'kl': 0,
-            'proto_recon': 0, 'r1r2': 0, 'proto_attract': 0, 'n_unused_protos': 0,
+            'proto_recon': 0, 'r1r2': 0, 'proto_attract': 0, 'nassoc': 0, 'n_unused_protos': 0,
         }
         mode5_c_min = 1.0   # worst-case min coverage seen this epoch (before correction)
         mode5_corr_max = 0.0  # worst-case max boost applied this epoch
@@ -872,7 +881,14 @@ class SCProtoTrainer(AdoptiveTrainer):
 
                 q_pos = self._proto_sim(s_head_n, s_tail_n, proto_metric).clamp(_eps, 1.0 - _eps)
                 q_neg = self._proto_sim_neg(s_head_n, s_neg_n, proto_metric).clamp(_eps, 1.0 - _eps)
-                if getattr(self, 'lambda_degree_weight', 0):
+                if getattr(self, 'degree_norm_loss', 0):
+                    # Degree-normalized positive loss: downweight high-degree edges by 1/sqrt(d_i*d_j)
+                    # so each cell contributes equally regardless of neighborhood size.
+                    d = self._cell_degree.to(self.device)
+                    d_norm = d / d.median()
+                    deg_norm = 1.0 / torch.sqrt((d_norm[head] * d_norm[tail]).clamp(min=1e-8))
+                    loss_pos = -(deg_norm * torch.log(q_pos)).mean()
+                elif getattr(self, 'lambda_degree_weight', 0):
                     # Degree-weighted positive loss: w_ij = A_ij / (k_i * k_j / 2m)
                     # Upweights pairs more connected than expected by chance,
                     # directly aligning the loss with what modularity measures.
@@ -929,6 +945,30 @@ class SCProtoTrainer(AdoptiveTrainer):
             if lambda_r1r2 > 0:
                 loss = loss + lambda_r1r2 * r1r2_loss
 
+            nassoc_loss = torch.tensor(0.0, device=self.device)
+            if lambda_nassoc > 0 and use_proto_sim:
+                S = soft_assign                                          # [n_unique, K]
+                K_na = S.shape[1]
+                head_local = _gather(head)
+                tail_local = _gather(tail)
+                S_h = S[head_local]                                      # [B, K]
+                S_t = S[tail_local]                                      # [B, K]
+                A_part = S_h.T @ (weights.unsqueeze(1) * S_t)           # [K, K]
+                A_na = A_part + A_part.T                                 # symmetrize
+                # degree from batch edges (must match scope of A for M to be in [0,1])
+                d_na = torch.zeros(n_samples, device=self.device)
+                d_na.scatter_add_(0, head_local, weights)
+                d_na.scatter_add_(0, tail_local, weights)
+                vol = S.T @ d_na                                         # [K]
+                eps_na = 1e-8
+                norm = torch.sqrt((vol[:, None] + eps_na) * (vol[None, :] + eps_na))
+                M_na = A_na / norm                                       # [K, K]
+                I_na = torch.eye(K_na, device=self.device)
+                diag_M = torch.diag(M_na)
+                off_mask = ~torch.eye(K_na, dtype=torch.bool, device=self.device)
+                nassoc_loss = ((diag_M - 1) ** 2).mean() + nassoc_alpha * (M_na[off_mask] ** 2).mean()
+                loss = loss + lambda_nassoc * nassoc_loss
+
             proto_attract_loss = torch.tensor(0.0, device=self.device)
             if lambda_proto_attract > 0 and use_proto_sim:
                 with torch.no_grad():
@@ -966,6 +1006,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             total_metrics['r1r2'] += r1r2_loss.item()
             total_metrics['proto_recon'] += proto_recon_loss.item()
             total_metrics['proto_attract'] += proto_attract_loss.item()
+            total_metrics['nassoc'] += nassoc_loss.item()
             for k, v in metrics.items():
                 if k in total_metrics:
                     total_metrics[k] += v
@@ -997,6 +1038,8 @@ class SCProtoTrainer(AdoptiveTrainer):
             extra += f" | r1r2={metrics['r1r2']:.4f}"
         if getattr(self, 'lambda_proto_attract', 0) > 0:
             extra += f" | proto_attract={metrics['proto_attract']:.4f}"
+        if getattr(self, 'lambda_nassoc', 0) > 0:
+            extra += f" | nassoc={metrics['nassoc']:.4f}"
         if getattr(self, 'usage_norm_sim', 0) == 5 and 'mode5_c_min' in metrics:
             extra += f" | c_min={metrics['mode5_c_min']:.3f} corr={metrics['mode5_corr_max']:.2f}"
         effk_str = f" | effk={metrics['effk']:.1f}" if 'effk' in metrics else ""

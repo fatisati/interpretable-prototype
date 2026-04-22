@@ -196,10 +196,14 @@ def get_defaults():
         'umap_similarity': 'embedding',  # 'embedding' (distance kernel) or 'proto' (soft assignment dot product)
         'calibrate_eps': 0,              # 1 = auto-calibrate epsilon so E[q_pos] = E[p_pos] after proto init
         'umap_proto_effk': 5.0,          # target effective k for proto soft assignments (auto-calibrates temperature)
+        'umap_proto_effk_agg': 'mean',   # aggregation for effk calibration: 'mean' or 'median'
         'usage_norm_sim': 0,             # 0 = none; 1 = post-softmax global n_k; 2 = pre-softmax EMA per-batch; 3 = batch-balanced n_k; 4 = coverage w, no renorm, grad through w; 5 = pre-softmax log-corr; 6 = coverage w, renorm, grad through w; 7 = robust coverage (mean above median), renorm, parameter-free
-        'usage_norm_corr_clamp': 10.0,   # clamp for log_corr in mode 5 (default 10; raise if corr hits ceiling and dead protos persist)
+'usage_norm_corr_clamp': 10.0,   # clamp for log_corr in mode 5 (default 10; raise if corr hits ceiling and dead protos persist)
         'usage_nk_alpha': 0.9,           # EMA smoothing for mode 2 (per mini-batch step)
         'lambda_degree_weight': 0,       # 1 = weight positive loss by A_ij/(k_i*k_j/2m); aligns loss with modularity null model
+        'degree_norm_loss': 0,           # 1 = normalize positive loss by 1/sqrt(d_i*d_j); each cell contributes equally
+        'lambda_nassoc': 0.0,            # normalized association regularizer: forces S.T@W@S/vol toward identity
+        'nassoc_alpha': 1.0,             # weight of off-diagonal vs diagonal terms (after per-count normalization)
         'umap_proto_metric': 'cosine',     # 'dotp' (c_i^T c_j) or 'cosine' (cosine similarity of assignment vectors)
         'temperature_min': 0.04,
         'epsilon_min': 0.02,
