@@ -61,6 +61,7 @@ ABBREVIATIONS = {
     "batch_removal_ratio": 'br',
     "use_bknn": 'bknn',
     "freeze_batch_embedding": 'frzbe',
+    "freeze_decoder": 'frzdc',
     "batch_sinkhorn": "bsink",
     "weighted_batch": "wb",
     "knn_similarity": 'knnsim',

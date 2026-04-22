@@ -258,6 +258,12 @@ class SwavBase(nn.Module):
                 p.requires_grad = False
                 print(f"Froze: {name}")
 
+    def freeze_decoder(self):
+        for name, p in self.named_parameters():
+            if "scpoli_cvae.decoder" in name:
+                p.requires_grad = False
+                print(f"Froze: {name}")
+
 
 # TODO: refactor input params with swav base
 class SwAVModel(SwavBase):

@@ -81,6 +81,7 @@ def get_defaults():
         "batch_removal_ratio": 0.0,
         "use_bknn": 0,
         "freeze_batch_embedding": 0,
+        "freeze_decoder": 0,
         "batch_sinkhorn": 1,
         "weighted_batch": 0,
         "knn_similarity": 'cosine',
@@ -195,7 +196,7 @@ def get_defaults():
         'umap_similarity': 'embedding',  # 'embedding' (distance kernel) or 'proto' (soft assignment dot product)
         'calibrate_eps': 0,              # 1 = auto-calibrate epsilon so E[q_pos] = E[p_pos] after proto init
         'umap_proto_effk': 5.0,          # target effective k for proto soft assignments (auto-calibrates temperature)
-        'usage_norm_sim': 0,             # 1 = post-softmax mini-batch global; 2 = pre-softmax per-batch EMA; 3 = mini-batch batch-balanced; 4 = post-softmax coverage-based; 5 = pre-softmax coverage-based (log_corr clamped)
+        'usage_norm_sim': 0,             # 0 = none; 1 = post-softmax global n_k; 2 = pre-softmax EMA per-batch; 3 = batch-balanced n_k; 4 = coverage w, no renorm, grad through w; 5 = pre-softmax log-corr; 6 = coverage w, renorm, grad through w; 7 = robust coverage (mean above median), renorm, parameter-free
         'usage_norm_corr_clamp': 10.0,   # clamp for log_corr in mode 5 (default 10; raise if corr hits ceiling and dead protos persist)
         'usage_nk_alpha': 0.9,           # EMA smoothing for mode 2 (per mini-batch step)
         'lambda_degree_weight': 0,       # 1 = weight positive loss by A_ij/(k_i*k_j/2m); aligns loss with modularity null model

@@ -685,6 +685,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             params = list(self.model.scpoli_cvae.parameters()) + list(self.model.prototypes.parameters())
         else:
             params = list(self.model.scpoli_cvae.parameters())
+        params = [p for p in params if p.requires_grad]
         optimizer = torch.optim.Adam(params, lr=self.base_lr)
 
         self._umap_state = {
@@ -812,47 +813,65 @@ class SCProtoTrainer(AdoptiveTrainer):
                 _eps = 1e-4
 
                 usage_mode = getattr(self, 'usage_norm_sim', 0)
+
+                def _reweight(s_h, s_t, s_n, w, renorm=False):
+                    h = s_h / w
+                    t = s_t / w
+                    n = s_n / w
+                    if renorm:
+                        h = h / h.sum(dim=1, keepdim=True).detach()
+                        t = t / t.sum(dim=1, keepdim=True).detach()
+                        n = n / n.sum(dim=2, keepdim=True).detach()
+                    return h, t, n
+
                 if usage_mode == 1:
-                    # mini-batch global: normalize with mini-batch n_k (batch-biased)
+                    # post-softmax, mini-batch global: w = n_k / mean(n_k)
                     n_k = soft_assign.sum(dim=0).clamp(min=1e-6)
                     w = n_k / n_k.mean()
-                    s_head_n = s_head / w
-                    s_tail_n = s_tail / w
-                    s_neg_n  = s_neg  / w
-                    q_pos = self._proto_sim(s_head_n, s_tail_n, proto_metric).clamp(_eps, 1.0 - _eps)
-                    q_neg = self._proto_sim_neg(s_head_n, s_neg_n, proto_metric).clamp(_eps, 1.0 - _eps)
+                    s_head_n, s_tail_n, s_neg_n = _reweight(s_head, s_tail, s_neg, w)
+
                 elif usage_mode == 3:
-                    # batch-balanced: each batch contributes equally to n_k regardless of cell count
+                    # post-softmax, batch-balanced: average n_k across source batches equally
                     cell_ds_all = self._umap_state['cell_ds']
                     batch_ids = cell_ds_all[unique_idx.cpu()]
-                    n_k_per_batch = []
-                    for b in batch_ids.unique():
-                        mask = (batch_ids == b).to(self.device)
-                        n_k_per_batch.append(soft_assign[mask].sum(dim=0))
+                    n_k_per_batch = [
+                        soft_assign[(batch_ids == b).to(self.device)].sum(dim=0)
+                        for b in batch_ids.unique()
+                    ]
                     n_k = torch.stack(n_k_per_batch).mean(dim=0).clamp(min=1e-6)
                     w = n_k / n_k.mean()
-                    s_head_n = s_head / w
-                    s_tail_n = s_tail / w
-                    s_neg_n  = s_neg  / w
-                    q_pos = self._proto_sim(s_head_n, s_tail_n, proto_metric).clamp(_eps, 1.0 - _eps)
-                    q_neg = self._proto_sim_neg(s_head_n, s_neg_n, proto_metric).clamp(_eps, 1.0 - _eps)
+                    s_head_n, s_tail_n, s_neg_n = _reweight(s_head, s_tail, s_neg, w)
+
                 elif usage_mode == 4:
-                    # coverage-based: normalize by c_k then renormalize row sum → valid distribution
-                    c_k = soft_assign.max(dim=0).values.detach()
+                    # post-softmax, coverage-based: w = c_k / mean(c_k), no renorm, gradient flows through w
+                    c_k = soft_assign.max(dim=0).values
                     c_k = c_k.clamp(min=0.1 * c_k.mean().clamp(min=1e-6))
                     w = c_k / c_k.mean()
-                    s_head_n = s_head / w
-                    s_head_n = s_head_n / s_head_n.sum(dim=1, keepdim=True).detach()
-                    s_tail_n = s_tail / w
-                    s_tail_n = s_tail_n / s_tail_n.sum(dim=1, keepdim=True).detach()
-                    s_neg_n  = s_neg  / w
-                    s_neg_n  = s_neg_n  / s_neg_n.sum(dim=2, keepdim=True).detach()
-                    q_pos = self._proto_sim(s_head_n, s_tail_n, proto_metric).clamp(_eps, 1.0 - _eps)
-                    q_neg = self._proto_sim_neg(s_head_n, s_neg_n, proto_metric).clamp(_eps, 1.0 - _eps)
+                    s_head_n, s_tail_n, s_neg_n = _reweight(s_head, s_tail, s_neg, w)
+
+                elif usage_mode == 6:
+                    # post-softmax, coverage-based: w = c_k / mean(c_k), renorm with detached sum, gradient flows through w
+                    c_k = soft_assign.max(dim=0).values
+                    c_k = c_k.clamp(min=0.1 * c_k.mean().clamp(min=1e-6))
+                    w = c_k / c_k.mean()
+                    s_head_n, s_tail_n, s_neg_n = _reweight(s_head, s_tail, s_neg, w, renorm=True)
+
+                elif usage_mode == 7:
+                    # post-softmax, robust coverage: mean of top-50% assignments per proto
+                    # replaces max in mode 6 with mean of above-median cells — parameter-free
+                    med_k = soft_assign.median(dim=0).values                       # (K,)
+                    mask = soft_assign > med_k.unsqueeze(0)                        # (N, K)
+                    c_k = (soft_assign * mask).sum(dim=0) / mask.sum(dim=0).clamp(min=1)
+                    c_k = c_k.clamp(min=0.1 * c_k.mean().clamp(min=1e-6))
+                    w = c_k / c_k.mean()
+                    s_head_n, s_tail_n, s_neg_n = _reweight(s_head, s_tail, s_neg, w, renorm=True)
+
                 else:
-                    # mode 0: no normalization; mode 2: correction already inside softmax
-                    q_pos = self._proto_sim(s_head, s_tail, proto_metric).clamp(_eps, 1.0 - _eps)
-                    q_neg = self._proto_sim_neg(s_head, s_neg, proto_metric).clamp(_eps, 1.0 - _eps)
+                    # mode 0: no normalization; modes 2/5: correction already applied pre-softmax
+                    s_head_n, s_tail_n, s_neg_n = s_head, s_tail, s_neg
+
+                q_pos = self._proto_sim(s_head_n, s_tail_n, proto_metric).clamp(_eps, 1.0 - _eps)
+                q_neg = self._proto_sim_neg(s_head_n, s_neg_n, proto_metric).clamp(_eps, 1.0 - _eps)
                 if getattr(self, 'lambda_degree_weight', 0):
                     # Degree-weighted positive loss: w_ij = A_ij / (k_i * k_j / 2m)
                     # Upweights pairs more connected than expected by chance,
