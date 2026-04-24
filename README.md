@@ -2,6 +2,8 @@
 
 Train interpretable self-supervised metacell models on single-cell RNA-seq data.
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/fatisati/interpretable-prototype/blob/master/notebooks/example.ipynb)
+
 ## Quickstart
 
 ```python
