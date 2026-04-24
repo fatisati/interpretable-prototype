@@ -4,6 +4,20 @@ Train interpretable self-supervised metacell models on single-cell RNA-seq data.
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/fatisati/interpretable-prototype/blob/master/notebooks/example.ipynb)
 
+## Installation
+
+```bash
+pip install faiss-gpu-cu12  # or faiss-cpu if no GPU
+pip install git+https://github.com/fatisati/interpretable-prototype.git
+```
+
+On **Google Colab**, set your model save directory before importing:
+
+```python
+import os
+os.environ['MODEL_DIR'] = '/content/drive/MyDrive/models/'
+```
+
 ## Quickstart
 
 ```python
