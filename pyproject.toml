@@ -9,7 +9,7 @@ requires-python = ">=3.9"
 dependencies = [
     # not pre-installed on Colab — must be explicit
     "scarches==0.6.1",
-    "scvi-tools==0.19.0",
+    "scvi-tools",
     "scib-metrics==0.5.1",
     "seacells==0.3.3",
     "squidpy",
