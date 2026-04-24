@@ -115,7 +115,7 @@ class SingleCellDataset(Dataset):
         return self.adata
 
     def load_label_encoder(self):
-        if os.path.exists(self.label_encoder_path):
+        if self.label_encoder_path and os.path.exists(self.label_encoder_path):
             return pkl.load(open(self.label_encoder_path, "rb"))
         else:
             return utils.fit_label_encoder(self.adata, self.label_encoder_path, self.label_key)
