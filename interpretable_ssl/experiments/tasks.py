@@ -83,7 +83,7 @@ def get_trainer(**kwargs):
 
     def _reload_interpretable_ssl():
         for m in list(sys.modules):
-            if m.startswith("interpretable_ssl"):
+            if m.startswith("interpretable_ssl") and "dataset_configs" not in m:
                 importlib.reload(sys.modules[m])
 
     import interpretable_ssl.configs.defaults
