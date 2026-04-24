@@ -1,6 +1,6 @@
 # Interpretable SSL
 
-Train interpretable self-supervised metacell models on single-cell RNA-seq data.
+Train interpretable self-supervised metacell models on single-cell RNA-seq and spatial transcriptomics data.
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/fatisati/interpretable-prototype/blob/master/notebooks/example.ipynb)
 
@@ -62,9 +62,9 @@ print(res)
 
 The affinity graph controls which cells are considered neighbours during training.
 
-- **`arbf`** — Adaptive RBF kernel on PCA embeddings. Builds a kNN graph in expression space where edge weights decay smoothly with distance. Good default for most datasets.
+- **`arbf`** — Adaptive RBF kernel on PCA embeddings. Builds a kNN graph in expression space where edge weights decay smoothly with distance. Good default for scRNA-seq datasets.
 
-- **`ctx_umap`** — Spatial context UMAP. For each cell, averages the PCA embeddings of its k nearest spatial neighbors, then builds a UMAP graph on these spatially-smoothed embeddings. Connects cells that are transcriptionally similar *within their spatial context*. Only meaningful for spatial transcriptomics data with `adata.obsm['spatial']`.
+- **`ctx_umap`** — Spatial context UMAP. For each cell, averages the PCA embeddings of its k nearest spatial neighbors, then builds a UMAP graph on these spatially-smoothed embeddings. Connects cells that are transcriptionally similar *within their spatial context*. **Preferred for spatial transcriptomics data.** Requires `adata.obsm['spatial']` to be present.
 
 ## Full example
 
