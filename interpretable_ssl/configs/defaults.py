@@ -204,10 +204,13 @@ def get_defaults():
         'usage_nk_alpha': 0.9,           # EMA smoothing for mode 2 (per mini-batch step)
         'lambda_degree_weight': 0,       # 1 = weight positive loss by A_ij/(k_i*k_j/2m); aligns loss with modularity null model
         'degree_norm_loss': 0,           # 1 = normalize positive loss by 1/sqrt(d_i*d_j); each cell contributes equally
+        'lambda_proto_usage': 0.0,       # proto usage loss — prevents dead protos, silent when active
+        'proto_usage_mode': 'nk',        # 'nk': log(1+1/n_k) group-level; 'max': -log(max_i S[i,k]) stronger single-cell revival
         'lambda_nassoc': 0.0,            # normalized association regularizer: forces S.T@W@S/vol toward identity
         'nassoc_alpha': 1.0,             # weight of off-diagonal vs diagonal terms (after per-count normalization)
         'nassoc_agg': 'mean',            # how to aggregate per-batch M matrices: 'mean' (avg loss) or 'max' (element-wise max of M, then loss) or 'pbch' (loss per batch then avg; no cross-batch constraint, use mse diagonal)
         'nassoc_diag_loss': 'mse',       # diagonal loss form: 'mse' = (diag-1)^2, 'nll' = -log(avg_diag), 'nll2' = -log(avg_b[1-(d_b-1)^2]) rewards multi-batch moderate usage
+        'nassoc_diag': True,             # whether to include diagonal (purity) term; set False to keep only off-diagonal (redundancy) term
         'umap_proto_metric': 'cosine',     # 'dotp' | 'cosine' | 'bhattacharyya' | 'jsd' | 'bhatt_dist' | 'hellinger' | 'idot' (idot=1-dotp in [0,1], fed through a,b kernel like hellinger)
         'jsd_min_dist': 0.1,             # min_dist for JSD kernel a,b calibration (in JSD units, max ~0.693); only used when umap_proto_metric='jsd'
         'dist_min_dist': 0.1,            # min_dist for distribution-distance kernel (bhatt_dist/jsd/hellinger). Auto-calibrated from data when calibrate_eps=1.

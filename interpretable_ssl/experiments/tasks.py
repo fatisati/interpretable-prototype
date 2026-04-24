@@ -167,9 +167,6 @@ def find_metacells(
     Returns:
         (trainer, metrics) where metrics is a flat dict of evaluation scores.
     """
-    if label_key is None:
-        raise ValueError("label_key is required — pass the adata.obs column name with cell-type labels.")
-
     lambda_config = dict(lambda_config) if lambda_config is not None else dict(LAMBDA_PROTO_UMAP_PRECON)
 
     # --- accept AnnData directly: write to temp file, treat as path ---
@@ -183,6 +180,13 @@ def find_metacells(
 
     # --- resolve ds_id: known string or h5ad path ---
     ds_id = _resolve_ds_id(ds_id, batch_key=batch_key, label_key=label_key, niche_key=niche_key, num_prototypes=num_prototypes)
+
+    # For known datasets, fall back to the config's label_key
+    if label_key is None:
+        from interpretable_ssl.datasets.dataset_configs import DATASETS
+        label_key = DATASETS.get(ds_id, {}).get('label_key')
+    if label_key is None:
+        raise ValueError("label_key is required — pass the adata.obs column name with cell-type labels.")
 
     if affinity_type is not None:
         lambda_config['affinity_type'] = affinity_type
@@ -270,7 +274,7 @@ def find_metacells(
         print(f"Metrics saved to {out}")
         mc_adata.write_h5ad(os.path.join(result_save_path, 'metacells.h5ad'))
 
-    return t, res, mc_adata
+    return t, metrics, mc_adata
 
 
 # ---------------------------------------------------------------------------

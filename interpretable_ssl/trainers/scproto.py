@@ -874,10 +874,13 @@ class SCProtoTrainer(AdoptiveTrainer):
         lambda_proto_recon = self.lambda_proto_recon
         lambda_r1r2 = self.lambda_r1r2
         lambda_proto_attract = getattr(self, 'lambda_proto_attract', 0.0)
+        lambda_proto_usage = getattr(self, 'lambda_proto_usage', 0.0)
+        proto_usage_mode   = getattr(self, 'proto_usage_mode', 'nk')
         lambda_nassoc = getattr(self, 'lambda_nassoc', 0.0)
         nassoc_alpha = getattr(self, 'nassoc_alpha', 1.0)
         nassoc_agg = getattr(self, 'nassoc_agg', 'mean')
         nassoc_diag_loss = getattr(self, 'nassoc_diag_loss', 'mse')
+        nassoc_diag = getattr(self, 'nassoc_diag', True)
         use_proto_sim = getattr(self, 'umap_similarity', 'embedding') == 'proto'
         proto_metric = getattr(self, 'umap_proto_metric', 'dotp')
 
@@ -885,7 +888,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         total_metrics = {
             'loss': 0, 'umap': 0, 'q_pos': 0, 'q_neg': 0, 'margin': 0,
             'loss_pos': 0, 'loss_neg': 0, 'recon': 0, 'kl': 0,
-            'proto_recon': 0, 'r1r2': 0, 'proto_attract': 0, 'nassoc': 0, 'n_unused_protos': 0,
+            'proto_recon': 0, 'r1r2': 0, 'proto_attract': 0, 'nassoc': 0, 'proto_usage': 0, 'n_unused_protos': 0,
         }
         mode5_c_min = 1.0   # worst-case min coverage seen this epoch (before correction)
         mode5_corr_max = 0.0  # worst-case max boost applied this epoch
@@ -1134,6 +1137,15 @@ class SCProtoTrainer(AdoptiveTrainer):
             if lambda_r1r2 > 0:
                 r1r2_loss = self.calc_r1r2_loss(z_unique)
 
+            proto_usage_loss = torch.tensor(0.0, device=self.device)
+            if lambda_proto_usage > 0 and use_proto_sim:
+                if proto_usage_mode == 'max':
+                    c_k = soft_assign.max(dim=0).values                   # (K,)
+                    proto_usage_loss = -torch.log(c_k.clamp(min=1e-8)).mean()
+                else:                                                      # 'nk' (default)
+                    n_k = soft_assign.sum(dim=0)                          # (K,)
+                    proto_usage_loss = torch.log(1.0 + 1.0 / n_k.clamp(min=1e-8)).mean()
+
             loss = lambda_umap * umap_loss
             if lambda_recon > 0:
                 loss = loss + lambda_recon * recon_loss
@@ -1143,6 +1155,8 @@ class SCProtoTrainer(AdoptiveTrainer):
                 loss = loss + lambda_proto_recon * proto_recon_loss
             if lambda_r1r2 > 0:
                 loss = loss + lambda_r1r2 * r1r2_loss
+            if lambda_proto_usage > 0:
+                loss = loss + lambda_proto_usage * proto_usage_loss
 
             nassoc_loss = torch.tensor(0.0, device=self.device)
             if lambda_nassoc > 0 and use_proto_sim:
@@ -1203,7 +1217,8 @@ class SCProtoTrainer(AdoptiveTrainer):
                             else:
                                 return ((d - 1) ** 2).mean()
                         batch_losses = [
-                            _diag_loss(M_b.diag()) + nassoc_alpha * (M_b[off_mask] ** 2).mean()
+                            ((_diag_loss(M_b.diag()) if nassoc_diag else 0.0)
+                             + nassoc_alpha * (M_b[off_mask] ** 2).mean())
                             for M_b in M_list
                         ]
                         nassoc_loss = torch.stack(batch_losses).mean()
@@ -1226,7 +1241,8 @@ class SCProtoTrainer(AdoptiveTrainer):
                             diag_term = -torch.log(avg_f.clamp(min=1e-8)).mean()
                         else:
                             diag_term = ((diag_M - 1) ** 2).mean()
-                        nassoc_loss = diag_term + nassoc_alpha * (M_agg[off_mask] ** 2).mean()
+                        offdiag_term = nassoc_alpha * (M_agg[off_mask] ** 2).mean()
+                        nassoc_loss = (diag_term if nassoc_diag else 0.0) + offdiag_term
                     loss = loss + lambda_nassoc * nassoc_loss
 
             proto_attract_loss = torch.tensor(0.0, device=self.device)
@@ -1267,6 +1283,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             total_metrics['proto_recon'] += proto_recon_loss.item()
             total_metrics['proto_attract'] += proto_attract_loss.item()
             total_metrics['nassoc'] += nassoc_loss.item()
+            total_metrics['proto_usage'] += proto_usage_loss.item()
             for k, v in metrics.items():
                 if k in total_metrics:
                     total_metrics[k] += v
@@ -1305,6 +1322,8 @@ class SCProtoTrainer(AdoptiveTrainer):
             extra += f" | proto_attract={metrics['proto_attract']:.4f}"
         if getattr(self, 'lambda_nassoc', 0) > 0:
             extra += f" | nassoc={metrics['nassoc']:.4f}"
+        if getattr(self, 'lambda_proto_usage', 0) > 0:
+            extra += f" | proto_usage={metrics['proto_usage']:.4f}"
         if getattr(self, 'usage_norm_sim', 0) == 5 and 'mode5_c_min' in metrics:
             extra += f" | c_min={metrics['mode5_c_min']:.3f} corr={metrics['mode5_corr_max']:.2f}"
         effk_str = f" | effk={metrics['effk']:.1f}" if 'effk' in metrics else ""

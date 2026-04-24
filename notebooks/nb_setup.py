@@ -5,6 +5,10 @@ Colab boilerplate — run this at the top of every notebook:
 import sys, os, importlib
 from importlib import reload
 
+PROJECT_ROOT = '/content/drive/MyDrive/codes/interpretable-prototype'
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 import anndata
 if not hasattr(anndata, "read"):
     anndata.read = anndata.read_h5ad
@@ -24,7 +28,7 @@ mpl.rcParams['figure.dpi'] = 150
 def reload_interpretable_ssl():
     for m in list(sys.modules):
         if m.startswith("interpretable_ssl") or m == "constants":
-            importlib.reload(sys.modules[m])
+            del sys.modules[m]
 
 # Make tasks available directly after %run nb_setup.py
 reload_interpretable_ssl()
