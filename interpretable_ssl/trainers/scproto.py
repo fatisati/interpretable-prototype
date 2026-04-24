@@ -23,7 +23,7 @@ from interpretable_ssl.trainers.adaptive_trainer import AdoptiveTrainer
 from interpretable_ssl.trainers.scproto_utils import *
 from interpretable_ssl.trainers.affinity import *
 from interpretable_ssl.trainers.scpoli_helpers import *
-from interpretable_ssl.trainers.edge_umap import EdgeDataset, ParametricUMAPLoss, edge_collate_fn
+from interpretable_ssl.trainers.edge_umap import EdgeDataset, ParametricUMAPLoss, edge_collate_fn, find_ab_params
 from interpretable_ssl.augmenters.adata_augmenter import *
 from interpretable_ssl.models.swav import *
 from interpretable_ssl.evaluation.visualization import *
@@ -79,6 +79,39 @@ def affinity_report(A):
         "mutual_ratio": mutual_ratio,
         "frac_empty_rows": float((nnz == 0).mean()),
     }
+
+
+@torch.no_grad()
+def _per_batch_sinkhorn(scaled_logits, batch_ids, n_iters=3):
+    """Per-batch Sinkhorn normalization.
+
+    Each batch's submatrix is independently normalized to be doubly stochastic:
+      - each cell's row sums to 1 (valid assignment distribution)
+      - each proto's column sums to N_b/K within batch b (uniform usage per batch)
+
+    Args:
+        scaled_logits: (N, K) tensor, already divided by epsilon
+        batch_ids:     (N,) integer tensor of batch id per cell (on same device)
+        n_iters:       number of Sinkhorn iterations
+
+    Returns:
+        Q: (N, K) float tensor, no gradient
+    """
+    K = scaled_logits.shape[1]
+    Q = scaled_logits.exp().clone()
+    unique_batches = batch_ids.unique()
+    for _ in range(n_iters):
+        # row norm: each cell sums to 1
+        Q /= Q.sum(dim=1, keepdim=True).clamp(min=1e-8)
+        # per-batch column norm: each proto gets N_b/K total weight within batch b
+        for b in unique_batches:
+            mask = batch_ids == b
+            N_b = mask.sum().float()
+            col_sums = Q[mask].sum(dim=0).clamp(min=1e-8)
+            Q[mask] = Q[mask] / col_sums * (N_b / K)
+    # final row norm so rows are valid distributions
+    Q /= Q.sum(dim=1, keepdim=True).clamp(min=1e-8)
+    return Q
 
 
 def _med_effk_from_logits(logits, temp):
@@ -331,17 +364,30 @@ class SCProtoTrainer(AdoptiveTrainer):
 
         Args:
             s_i, s_j: (B, K) softmax assignment vectors
-            metric: 'dotp' | 'cosine' | 'bhattacharyya'
+            metric: 'dotp' | 'cosine' | 'bhattacharyya' | 'jsd' | 'bhatt_dist'
 
-        Note: epsilon calibration always uses dotp regardless of metric, because
-        cosine and bhattacharyya both → 1 for uniform assignments (ε→∞), making
-        match-p calibration impossible. Dotp → 1/K → 0 as assignments spread,
-        so calibrating ε via dotp gives well-scaled assignments for any metric.
+        Note: epsilon calibration always uses dotp regardless of metric.
+
+        'bhatt_dist' returns Bhattacharyya *distance* = -log(BC), range [0, ∞).
+        Caller converts to q via (1 + a * d^(2b))^-1.
+        All other metrics return similarity directly used as q.
         """
         if metric == 'cosine':
             return (F.normalize(s_i, dim=-1) * F.normalize(s_j, dim=-1)).sum(dim=-1)
         elif metric == 'bhattacharyya':
             return ((s_i + 1e-8).sqrt() * (s_j + 1e-8).sqrt()).sum(dim=-1)
+        elif metric == 'jsd':
+            m = 0.5 * (s_i + s_j)
+            return (0.5 * (s_i * (s_i / m.clamp(min=1e-8)).log()).sum(dim=-1)
+                  + 0.5 * (s_j * (s_j / m.clamp(min=1e-8)).log()).sum(dim=-1))
+        elif metric == 'bhatt_dist':
+            BC = (s_i.clamp(min=1e-8).sqrt() * s_j.clamp(min=1e-8).sqrt()).sum(dim=-1).clamp(max=1.0 - 1e-6)
+            return -BC.log()
+        elif metric == 'hellinger':
+            BC = (s_i.clamp(min=1e-8).sqrt() * s_j.clamp(min=1e-8).sqrt()).sum(dim=-1).clamp(max=1.0)
+            return (1.0 - BC).clamp(min=0.0).sqrt()
+        elif metric == 'idot':
+            return 1.0 - (s_i * s_j).sum(dim=-1)
         else:  # dotp
             return (s_i * s_j).sum(dim=-1)
 
@@ -352,18 +398,45 @@ class SCProtoTrainer(AdoptiveTrainer):
             return (F.normalize(s_i, dim=-1).unsqueeze(1) * F.normalize(s_neg, dim=-1)).sum(dim=-1)
         elif metric == 'bhattacharyya':
             return ((s_i + 1e-8).sqrt().unsqueeze(1) * (s_neg + 1e-8).sqrt()).sum(dim=-1)
+        elif metric == 'jsd':
+            s_i_ = s_i.unsqueeze(1)
+            m = 0.5 * (s_i_ + s_neg)
+            return (0.5 * (s_i_ * (s_i_ / m.clamp(min=1e-8)).log()).sum(dim=-1)
+                  + 0.5 * (s_neg * (s_neg / m.clamp(min=1e-8)).log()).sum(dim=-1))
+        elif metric == 'bhatt_dist':
+            s_i_ = s_i.unsqueeze(1)                                              # (B, 1, K)
+            BC = (s_i_.clamp(min=1e-8).sqrt() * s_neg.clamp(min=1e-8).sqrt()).sum(dim=-1).clamp(max=1.0 - 1e-6)
+            return -BC.log()                                                      # (B, N)
+        elif metric == 'hellinger':
+            s_i_ = s_i.unsqueeze(1)                                              # (B, 1, K)
+            BC = (s_i_.clamp(min=1e-8).sqrt() * s_neg.clamp(min=1e-8).sqrt()).sum(dim=-1).clamp(max=1.0)
+            return (1.0 - BC).clamp(min=0.0).sqrt()                              # (B, N)
+        elif metric == 'idot':
+            return 1.0 - (s_i.unsqueeze(1) * s_neg).sum(dim=-1)                 # (B, N)
         else:  # dotp
             return (s_i.unsqueeze(1) * s_neg).sum(dim=-1)
 
     def calibrate_epsilon(self, n_samples=5000):
-        """Find epsilon so that E[q_pos(dotp)] = E[p_pos] over sampled positive pairs.
+        """Calibrate epsilon for proto mode.
 
-        If p-q matching is unreachable (target p_pos exceeds max achievable q_pos),
-        falls back to effk-based calibration using umap_proto_effk.
-
-        Always calibrates via dotp regardless of umap_proto_metric.
+        calibrate_eps=1: p/q matching (dotp only) — binary-searches epsilon so E[q_pos] = E[p_pos].
+          Falls back to effk if target is unreachable.
+          Non-dotp metrics always use effk (p/q matching is meaningless for distance kernels).
+        calibrate_eps=2: effk alignment — always uses calibrate_effk regardless of metric or p/q result.
         Sets self.epsilon in-place and returns the found value.
         """
+        proto_metric = getattr(self, 'umap_proto_metric', 'dotp')
+        effk_target = getattr(self, 'umap_proto_effk', 5.0)
+
+        # calibrate_eps=2: always use effk, skip p/q entirely
+        if getattr(self, 'calibrate_eps', 1) == 2:
+            print(f"[eps calibration] calibrate_eps=2, using effk target={effk_target:.1f}")
+            return self.calibrate_effk(effk_target)
+
+        if proto_metric != 'dotp':
+            print(f"[eps calibration] metric={proto_metric}, using effk target={effk_target:.1f}")
+            return self.calibrate_effk(effk_target)
+
         import scipy.sparse as sp
 
         aff = self.train_ds.aff_raw if hasattr(self.train_ds, 'aff_raw') else self.train_ds.aff
@@ -389,13 +462,18 @@ class SCProtoTrainer(AdoptiveTrainer):
                 q = self._proto_sim(soft[heads], soft[tails], metric='dotp').mean().item()
             return q
 
+        def effk_stats(eps):
+            with torch.no_grad():
+                soft = torch.softmax(logits_all / eps, dim=-1)
+                ek = 1.0 / (soft ** 2).sum(dim=-1)
+                return ek.mean().item(), ek.median().item()
+
         # Check if target is achievable (max q_pos at sharpest epsilon)
         q_at_lo = mean_q_pos(1e-4)
         if q_at_lo < p_pos:
-            effk_fallback = getattr(self, 'umap_proto_effk', 5.0)
             print(f"[eps calibration] E[p_pos]={p_pos:.4f} unreachable (max E[q_pos]={q_at_lo:.4f}), "
-                  f"falling back to effk={effk_fallback:.1f}")
-            return self.calibrate_effk(effk_fallback)
+                  f"falling back to effk={effk_target:.1f}")
+            return self.calibrate_effk(effk_target)
 
         lo, hi = 1e-4, 10.0
         for _ in range(60):
@@ -407,9 +485,66 @@ class SCProtoTrainer(AdoptiveTrainer):
                 lo = eps
 
         self.epsilon = eps
+        ek_mean, ek_med = effk_stats(eps)
         print(f"[eps calibration] E[p_pos]={p_pos:.4f} → epsilon={eps:.4f} "
-              f"(E[q_pos]={mean_q_pos(eps):.4f})")
+              f"(E[q_pos]={mean_q_pos(eps):.4f}, effk_mean={ek_mean:.2f}, effk_med={ek_med:.2f})")
         return eps
+
+    def calibrate_dist_kernel(self, metric, n_samples=10000):
+        """Auto-calibrate dist_min_dist, dist_spread, and (a, b) from positive-edge distances.
+
+        Encodes all cells, computes pairwise distances on positive edges using `metric`,
+        then derives:
+          dist_min_dist  ← 5th percentile of distances
+          dist_spread    ← (90th − 5th percentile) / ln(10)  [so q drops to ~0.1 at 90th pct]
+          _dist_a, _dist_b ← find_ab_params(dist_spread, dist_min_dist)
+
+        Sets self.dist_min_dist, self.dist_spread, self._dist_a, self._dist_b in-place.
+        """
+        import scipy.sparse as sp
+
+        aff = self.train_ds.aff_raw if hasattr(self.train_ds, 'aff_raw') else self.train_ds.aff
+        coo = sp.coo_matrix(aff)
+
+        n = min(n_samples, len(coo.data))
+        idx = np.random.choice(len(coo.data), n, replace=False)
+        heads = torch.tensor(coo.row[idx], dtype=torch.long, device=self.device)
+        tails = torch.tensor(coo.col[idx], dtype=torch.long, device=self.device)
+
+        self.model.eval()
+        with torch.no_grad():
+            z_all = self.encode_adata(self.train_ds.adata, self.model, z_idx=1)
+            z_all = z_all.to(self.device)
+            logits_all = self.model.prototypes(z_all)
+            soft_all = torch.softmax(logits_all / self.epsilon, dim=-1)
+            dists = self._proto_sim(soft_all[heads], soft_all[tails], metric=metric).cpu().numpy()
+
+        p5  = float(np.percentile(dists, 5))
+        p90 = float(np.percentile(dists, 90))
+        dist_min_dist = max(p5, 1e-4)
+        dist_spread   = max((p90 - p5) / np.log(10), 1e-4)
+
+        print(f"[dist kernel calibration] metric={metric}, n={n}")
+        print(f"   dist range: p5={p5:.4f}, p50={np.percentile(dists,50):.4f}, p90={p90:.4f}, p99={np.percentile(dists,99):.4f}")
+        print(f"   → dist_min_dist={dist_min_dist:.4f}, dist_spread={dist_spread:.4f}")
+
+        try:
+            a, b = find_ab_params(dist_spread, dist_min_dist)
+            if a <= 0 or b <= 0:
+                raise ValueError(f"curve_fit returned non-positive params: a={a:.4f}, b={b:.4f}")
+            self._dist_a, self._dist_b = a, b
+            print(f"   → a={a:.4f}, b={b:.4f}")
+        except Exception as e:
+            # Fallback: use manual values from config if curve_fit fails
+            _dmd = getattr(self, 'dist_min_dist', 0.1)
+            _dsp = getattr(self, 'dist_spread', 0.3)
+            print(f"   ⚠ find_ab_params failed ({e}), falling back to manual dist_min_dist={_dmd}, dist_spread={_dsp}")
+            self._dist_a, self._dist_b = find_ab_params(_dsp, _dmd)
+            print(f"   → a={self._dist_a:.4f}, b={self._dist_b:.4f}")
+            return
+
+        self.dist_min_dist = dist_min_dist
+        self.dist_spread   = dist_spread
 
     def calibrate_effk(self, target_effk=5.0, agg=None):
         """Find epsilon so that mean/median effective-k over all cells = target_effk.
@@ -628,7 +763,7 @@ class SCProtoTrainer(AdoptiveTrainer):
 
     # -- UMAP edge training: setup / epoch / public API ------------------
 
-    def _setup_umap_edges(self, epochs: int = None, init_prototypes: bool = True):
+    def _setup_umap_edges(self, epochs: int = None, init_prototypes: bool = True, skip_calibration: bool = False):
         """Build and cache all objects needed for edge-centric UMAP training."""
         epochs = epochs or getattr(self, 'umap_edge_epochs', 200)
 
@@ -648,7 +783,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         if init_prototypes:
             self.init_prototypes()
 
-        if self.calibrate_eps and umap_similarity == 'proto':
+        if self.calibrate_eps and umap_similarity == 'proto' and not skip_calibration:
             self.calibrate_epsilon()
 
         # Build cell -> ds_id mapping
@@ -678,7 +813,21 @@ class SCProtoTrainer(AdoptiveTrainer):
             collate_fn=edge_collate_fn, num_workers=0, drop_last=False,
         )
 
-        loss_fn = ParametricUMAPLoss(min_dist=min_dist, spread=spread, negative_sample_rate=neg_rate)
+        _dist_metric = getattr(self, 'umap_proto_metric', 'cosine')
+        if umap_similarity != 'proto' or _dist_metric not in ('jsd', 'bhatt_dist', 'hellinger', 'idot'):
+            loss_fn = ParametricUMAPLoss(min_dist=min_dist, spread=spread, negative_sample_rate=neg_rate)
+        else:
+            loss_fn = None
+        if _dist_metric in ('jsd', 'bhatt_dist', 'hellinger', 'idot'):
+            if self.calibrate_eps and umap_similarity == 'proto' and not skip_calibration:
+                self.calibrate_dist_kernel(_dist_metric)
+            elif skip_calibration and hasattr(self, '_dist_a'):
+                print(f"   {_dist_metric} kernel: reusing calibrated a={self._dist_a:.4f}, b={self._dist_b:.4f}")
+            else:
+                _dmd = getattr(self, 'dist_min_dist', 0.1)
+                _dsp = getattr(self, 'dist_spread', 0.3)
+                self._dist_a, self._dist_b = find_ab_params(_dsp, _dmd)
+                print(f"   {_dist_metric} kernel: dist_min_dist={_dmd}, dist_spread={_dsp} -> a={self._dist_a:.4f}, b={self._dist_b:.4f}")
 
         # Precompute per-cell degrees and 2m for degree-weighted positive loss.
         # w_ij = A_ij / (k_i * k_j / 2m) — upweights pairs more connected than expected.
@@ -727,6 +876,8 @@ class SCProtoTrainer(AdoptiveTrainer):
         lambda_proto_attract = getattr(self, 'lambda_proto_attract', 0.0)
         lambda_nassoc = getattr(self, 'lambda_nassoc', 0.0)
         nassoc_alpha = getattr(self, 'nassoc_alpha', 1.0)
+        nassoc_agg = getattr(self, 'nassoc_agg', 'mean')
+        nassoc_diag_loss = getattr(self, 'nassoc_diag_loss', 'mse')
         use_proto_sim = getattr(self, 'umap_similarity', 'embedding') == 'proto'
         proto_metric = getattr(self, 'umap_proto_metric', 'dotp')
 
@@ -739,6 +890,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         mode5_c_min = 1.0   # worst-case min coverage seen this epoch (before correction)
         mode5_corr_max = 0.0  # worst-case max boost applied this epoch
         n_batches = 0
+        _batch_nk_accum = {}  # batch_id -> [K] cumulative soft assignment sum for batch entropy
         used_proto_ids = set()
 
         from tqdm import tqdm
@@ -778,7 +930,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             if use_proto_sim:
                 logits = self.model.prototypes(z_unique)
 
-                # Modes 2 and 5: logit correction before softmax
+                # Modes 2, 5, 8: logit correction before softmax
                 _usage_mode_pre = getattr(self, 'usage_norm_sim', 0)
                 if _usage_mode_pre == 2:
                     cell_ds_all = self._umap_state['cell_ds']
@@ -807,6 +959,18 @@ class SCProtoTrainer(AdoptiveTrainer):
                         mode5_corr_max = max(mode5_corr_max, (-log_corr).max().item())
                     soft_assign = F.softmax(logits / self.epsilon - log_corr, dim=1)
                     soft_assign_orig = soft_assign
+                elif _usage_mode_pre == 8:
+                    # pre-softmax double normalization:
+                    # 1) shift each column so min=0, divide by max → each proto has at least one cell with value 1
+                    # 2) divide by column sum (soft usage) → penalizes protos attracting many cells
+                    # handles negative logits safely via the shift
+                    col_min = logits.min(dim=0).values
+                    L_shifted = logits - col_min
+                    L_maxnorm = L_shifted / L_shifted.max(dim=0).values.clamp(min=1e-8)
+                    usage_k = L_maxnorm.sum(dim=0).clamp(min=1e-8)
+                    L_normed = L_maxnorm / usage_k
+                    soft_assign = F.softmax(L_normed / self.epsilon, dim=1)
+                    soft_assign_orig = soft_assign
                 else:
                     soft_assign = F.softmax(logits / self.epsilon, dim=1)
                     soft_assign_orig = soft_assign
@@ -815,6 +979,15 @@ class SCProtoTrainer(AdoptiveTrainer):
                     sa_effk = (1.0 / (soft_assign * soft_assign).sum(dim=1))
                     total_metrics['effk'] = total_metrics.get('effk', 0) + sa_effk.median().item()
                     used_proto_ids.update(soft_assign.argmax(dim=1).unique().cpu().tolist())
+                    # accumulate per-batch soft usage for batch entropy
+                    _bids = self._umap_state['cell_ds'][unique_idx.cpu()]
+                    for _b in _bids.unique():
+                        _b_int = _b.item()
+                        _nk_b = soft_assign[(_bids == _b).to(self.device)].sum(dim=0).cpu()
+                        if _b_int in _batch_nk_accum:
+                            _batch_nk_accum[_b_int] += _nk_b
+                        else:
+                            _batch_nk_accum[_b_int] = _nk_b
 
                 s_head = soft_assign[_gather(head)]
                 s_tail = soft_assign[_gather(tail)]
@@ -822,6 +995,7 @@ class SCProtoTrainer(AdoptiveTrainer):
                 _eps = 1e-4
 
                 usage_mode = getattr(self, 'usage_norm_sim', 0)
+                t_head = t_tail = t_neg = None  # Sinkhorn targets; set in mode 9
 
                 def _reweight(s_h, s_t, s_n, w, renorm=False):
                     h = s_h / w
@@ -875,12 +1049,37 @@ class SCProtoTrainer(AdoptiveTrainer):
                     w = c_k / c_k.mean()
                     s_head_n, s_tail_n, s_neg_n = _reweight(s_head, s_tail, s_neg, w, renorm=True)
 
+                elif usage_mode == 9:
+                    # per-batch Sinkhorn: t is balanced target (no grad), s carries gradients
+                    # q = 0.5*(dot(s_i, t_j) + dot(s_j, t_i)) — asymmetric, grad only through s
+                    cell_ds_all = self._umap_state['cell_ds']
+                    batch_ids = cell_ds_all[unique_idx.cpu()].to(self.device)
+                    n_iters = getattr(self, 'sinkhorn_iters', 3)
+                    t_all = _per_batch_sinkhorn(logits / self.epsilon, batch_ids, n_iters)
+                    t_head = t_all[_gather(head)]
+                    t_tail = t_all[_gather(tail)]
+                    t_neg  = t_all[_gather(neg_samples.flatten())].view(B, neg_K, -1)
+                    s_head_n, s_tail_n, s_neg_n = s_head, s_tail, s_neg
+
                 else:
                     # mode 0: no normalization; modes 2/5: correction already applied pre-softmax
                     s_head_n, s_tail_n, s_neg_n = s_head, s_tail, s_neg
 
-                q_pos = self._proto_sim(s_head_n, s_tail_n, proto_metric).clamp(_eps, 1.0 - _eps)
-                q_neg = self._proto_sim_neg(s_head_n, s_neg_n, proto_metric).clamp(_eps, 1.0 - _eps)
+                if t_head is not None:
+                    # mode 9: asymmetric Sinkhorn — grad through s, not t
+                    q_pos = 0.5 * (
+                        (s_head_n * t_tail).sum(dim=-1) +
+                        (s_tail_n * t_head).sum(dim=-1)
+                    ).clamp(_eps, 1.0 - _eps)
+                    q_neg = (s_head_n.unsqueeze(1) * t_neg).sum(dim=-1).clamp(_eps, 1.0 - _eps)
+                elif proto_metric in ('jsd', 'bhatt_dist', 'hellinger', 'idot'):
+                    d_pos = self._proto_sim(s_head_n, s_tail_n, proto_metric)
+                    d_neg = self._proto_sim_neg(s_head_n, s_neg_n, proto_metric)
+                    q_pos = (1.0 + self._dist_a * d_pos.pow(self._dist_b)).reciprocal().clamp(_eps, 1.0 - _eps)
+                    q_neg = (1.0 + self._dist_a * d_neg.pow(self._dist_b)).reciprocal().clamp(_eps, 1.0 - _eps)
+                else:
+                    q_pos = self._proto_sim(s_head_n, s_tail_n, proto_metric).clamp(_eps, 1.0 - _eps)
+                    q_neg = self._proto_sim_neg(s_head_n, s_neg_n, proto_metric).clamp(_eps, 1.0 - _eps)
                 if getattr(self, 'degree_norm_loss', 0):
                     # Degree-normalized positive loss: downweight high-degree edges by 1/sqrt(d_i*d_j)
                     # so each cell contributes equally regardless of neighborhood size.
@@ -947,27 +1146,88 @@ class SCProtoTrainer(AdoptiveTrainer):
 
             nassoc_loss = torch.tensor(0.0, device=self.device)
             if lambda_nassoc > 0 and use_proto_sim:
+                # Per-batch nassoc: compute M separately within each batch, then
+                # average equally across batches. This avoids the bias where
+                # batch-specific protos get free zero off-diagonals (because
+                # cross-batch edges are absent in aff_raw). Within each batch
+                # the graph is cell-type-structured, so nassoc correctly pushes
+                # toward cell-type-pure protos without encoding batch identity.
                 S = soft_assign                                          # [n_unique, K]
                 K_na = S.shape[1]
                 head_local = _gather(head)
                 tail_local = _gather(tail)
-                S_h = S[head_local]                                      # [B, K]
-                S_t = S[tail_local]                                      # [B, K]
-                A_part = S_h.T @ (weights.unsqueeze(1) * S_t)           # [K, K]
-                A_na = A_part + A_part.T                                 # symmetrize
-                # degree from batch edges (must match scope of A for M to be in [0,1])
-                d_na = torch.zeros(n_samples, device=self.device)
-                d_na.scatter_add_(0, head_local, weights)
-                d_na.scatter_add_(0, tail_local, weights)
-                vol = S.T @ d_na                                         # [K]
                 eps_na = 1e-8
-                norm = torch.sqrt((vol[:, None] + eps_na) * (vol[None, :] + eps_na))
-                M_na = A_na / norm                                       # [K, K]
-                I_na = torch.eye(K_na, device=self.device)
-                diag_M = torch.diag(M_na)
                 off_mask = ~torch.eye(K_na, dtype=torch.bool, device=self.device)
-                nassoc_loss = ((diag_M - 1) ** 2).mean() + nassoc_alpha * (M_na[off_mask] ** 2).mean()
-                loss = loss + lambda_nassoc * nassoc_loss
+
+                cell_ds_all = self._umap_state['cell_ds']               # (N_total,) CPU
+                # batch id for each unique cell in this mini-batch
+                cell_batch = cell_ds_all[unique_idx.cpu()].to(self.device)  # (n_unique,)
+                unique_batches = cell_batch.unique()
+
+                M_list = []
+                for b in unique_batches:
+                    # include all edges whose head is from batch b (tail may be cross-batch)
+                    b_head = cell_batch[head_local]
+                    edge_mask = (b_head == b)
+                    if edge_mask.sum() == 0:
+                        continue
+
+                    h_b = head_local[edge_mask]
+                    t_b = tail_local[edge_mask]
+                    w_b = weights[edge_mask]
+
+                    S_h = S[h_b]                                        # [E_b, K]
+                    S_t = S[t_b]                                        # [E_b, K]
+                    A_part = S_h.T @ (w_b.unsqueeze(1) * S_t)          # [K, K]
+                    A_na = A_part + A_part.T
+
+                    d_na = torch.zeros(n_samples, device=self.device)
+                    d_na.scatter_add_(0, h_b, w_b)
+                    d_na.scatter_add_(0, t_b, w_b)
+                    vol = S.T @ d_na                                    # [K]
+
+                    norm = torch.sqrt((vol[:, None] + eps_na) * (vol[None, :] + eps_na))
+                    M_list.append(A_na / norm)                          # [K, K]
+
+                if M_list:
+                    if nassoc_agg == 'pbch':
+                        # compute nassoc loss independently per batch then average:
+                        # nassoc is NOT responsible for cross-batch consistency (that's CVAE+UMAP's job)
+                        # within each batch: push diagonal toward 1 (purity) and off-diagonal toward 0 (no redundancy)
+                        # use mse for diagonal to avoid blowup when a proto is absent in some batches
+                        def _diag_loss(d):
+                            if nassoc_diag_loss == 'nll':
+                                return -torch.log(d.clamp(min=1e-8)).mean()
+                            elif nassoc_diag_loss == 'nll2':
+                                return -torch.log((1 - (d - 1) ** 2).clamp(min=1e-8)).mean()
+                            else:
+                                return ((d - 1) ** 2).mean()
+                        batch_losses = [
+                            _diag_loss(M_b.diag()) + nassoc_alpha * (M_b[off_mask] ** 2).mean()
+                            for M_b in M_list
+                        ]
+                        nassoc_loss = torch.stack(batch_losses).mean()
+                    else:
+                        if nassoc_agg == 'max':
+                            # element-wise max: diagonal uses best-case batch (weakest req),
+                            # off-diagonal uses worst-case batch (strictest req: no overlap in any batch)
+                            M_agg = torch.stack(M_list, dim=0).max(dim=0).values  # [K, K]
+                        else:
+                            M_agg = torch.stack(M_list, dim=0).mean(dim=0)        # [K, K]
+                        diag_M = torch.diag(M_agg)
+                        if nassoc_diag_loss == 'nll':
+                            diag_term = -torch.log(diag_M.clamp(min=1e-8)).mean()
+                        elif nassoc_diag_loss == 'nll2':
+                            # per-batch: f(d)=1-(d-1)^2 converts MSE-distance to similarity score in [0,1]
+                            # avg across batches then -log: rewards protos used moderately across batches
+                            # over single-batch perfect usage; no blowup for individual dead batches
+                            diag_per_batch = torch.stack([M.diag() for M in M_list])  # [B, K]
+                            avg_f = (1 - (diag_per_batch - 1) ** 2).mean(dim=0)      # [K]
+                            diag_term = -torch.log(avg_f.clamp(min=1e-8)).mean()
+                        else:
+                            diag_term = ((diag_M - 1) ** 2).mean()
+                        nassoc_loss = diag_term + nassoc_alpha * (M_agg[off_mask] ** 2).mean()
+                    loss = loss + lambda_nassoc * nassoc_loss
 
             proto_attract_loss = torch.tensor(0.0, device=self.device)
             if lambda_proto_attract > 0 and use_proto_sim:
@@ -1017,6 +1277,11 @@ class SCProtoTrainer(AdoptiveTrainer):
 
         if use_proto_sim:
             total_metrics['n_unused_protos'] = self.nmb_prototypes - len(used_proto_ids)
+            if len(_batch_nk_accum) > 1:
+                nk_mat = torch.stack(list(_batch_nk_accum.values()), dim=0)       # [B, K]
+                nk_norm = nk_mat / nk_mat.sum(dim=0, keepdim=True).clamp(min=1e-8)
+                bentropy = -(nk_norm * torch.log(nk_norm.clamp(min=1e-8))).sum(dim=0).mean()
+                total_metrics['batch_entropy'] = bentropy.item()
 
         if getattr(self, 'usage_norm_sim', 0) == 5:
             total_metrics['mode5_c_min'] = mode5_c_min
@@ -1044,6 +1309,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             extra += f" | c_min={metrics['mode5_c_min']:.3f} corr={metrics['mode5_corr_max']:.2f}"
         effk_str = f" | effk={metrics['effk']:.1f}" if 'effk' in metrics else ""
         unused_str = f" | unused_proto={metrics['n_unused_protos']:.0f}" if 'n_unused_protos' in metrics else ""
+        bentropy_str = f" | bentropy={metrics['batch_entropy']:.3f}" if 'batch_entropy' in metrics else ""
 
         knn_str = ""
         # if epoch % 5 == 0 or epoch == total_epochs:
@@ -1055,7 +1321,7 @@ class SCProtoTrainer(AdoptiveTrainer):
               f"loss={metrics['loss']:.4f} | "
               f"q+={metrics['q_pos']:.3f} | "
               f"q-={metrics['q_neg']:.3f} | "
-              f"margin={metrics['margin']:.3f}{effk_str}{unused_str}{extra}{knn_str}")
+              f"margin={metrics['margin']:.3f}{effk_str}{unused_str}{bentropy_str}{extra}{knn_str}")
 
     def train_umap_edges(self, epochs: int = None, verbose: bool = True,
                          early_stop: bool = False, eval_freq: int = 10,
@@ -1231,8 +1497,9 @@ class SCProtoTrainer(AdoptiveTrainer):
         self.model.to(self.device)
 
         # Rebuild training objects (dataset, loader, loss_fn, optimizer)
-        # init_prototypes=False: model weights (including prototypes) already loaded above
-        self._setup_umap_edges(init_prototypes=False)
+        # init_prototypes=False: model weights already loaded above
+        # skip_calibration=True: reuse epsilon/_dist_a/_dist_b from the original training setup
+        self._setup_umap_edges(init_prototypes=False, skip_calibration=True)
         self._umap_state['epoch'] = checkpoint['epoch']
 
         if checkpoint.get('optimizer_state_dict') is not None:
@@ -2349,27 +2616,38 @@ class SCProtoTrainer(AdoptiveTrainer):
         R2: each cell should have high score for at least 1 proto -> move encoder
 
         Ensures: no orphan protos, no uncovered cells.
+
+        r1r2_log=1: use -log(max) instead of -max.
+            Dead protos/cells get unbounded penalty (log(x)->-inf as x->0),
+            so no proto or cell can free-ride on the average.
         """
+        use_log = getattr(self, 'r1r2_log', 0)
         protos = self.model.get_prototypes()  # (K, D)
 
-        # R1: move protos toward cells (detach z)
-        # Use same scoring as assignment
-        scores_r1 = self.model.proto_soft_assignments(z.detach())  # (B, K)
-        r1 = -scores_r1.max(dim=0).values.mean()  # max score per proto -> minimize neg
+        def _soft_assign(z_, protos_):
+            if self.assignment_metric == 'sneuc':
+                d2 = torch.cdist(z_, protos_, p=2) ** 2
+                s = -d2
+                s = s - s.max(dim=1, keepdim=True)[0]
+                s = s.clamp(min=-75)
+            elif self.assignment_metric == 'dotp':
+                s = z_ @ protos_.T
+            else:
+                s = -torch.cdist(z_, protos_, p=2)
+            return F.softmax(s / self.epsilon, dim=1)  # (B, K) in (0,1)
 
-        # R2: move cells toward protos (detach protos)
-        # Recompute scores with detached protos
-        protos_detached = protos.detach()
-        if self.assignment_metric == 'sneuc':
-            d2 = torch.cdist(z, protos_detached, p=2) ** 2
-            scores_r2 = -d2
-            scores_r2 = scores_r2 - scores_r2.max(dim=1, keepdim=True)[0]
-            scores_r2 = scores_r2.clamp(min=-75)
-        elif self.assignment_metric == 'dotp':
-            scores_r2 = z @ protos_detached.T
-        else:  # fallback to negative euclidean
-            scores_r2 = -torch.cdist(z, protos_detached, p=2)
-        r2 = -scores_r2.max(dim=1).values.mean()  # max score per cell -> minimize neg
+        # R1: protos get gradient (z detached) — protos move toward cells
+        max_r1 = _soft_assign(z.detach(), protos).max(dim=0).values   # (K,)
+
+        # R2: z gets gradient (protos detached) — cells move toward protos
+        max_r2 = _soft_assign(z, protos.detach()).max(dim=1).values    # (B,)
+
+        if use_log:
+            r1 = -torch.log(max_r1.clamp(min=1e-6)).mean()
+            r2 = -torch.log(max_r2.clamp(min=1e-6)).mean()
+        else:
+            r1 = -max_r1.mean()
+            r2 = -max_r2.mean()
 
         return r1 + r2
 

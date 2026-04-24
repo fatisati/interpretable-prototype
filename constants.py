@@ -128,4 +128,9 @@ ABBREVIATIONS = {
     'degree_norm_loss': 'dnl',
     'lambda_nassoc': 'lna',
     'nassoc_alpha': 'naa',
+    'nassoc_agg': 'nagg',
+    'nassoc_diag_loss': 'nadl',
+    'jsd_min_dist': 'jsdmd',
+    'dist_min_dist': 'dstmd',
+    'dist_spread': 'dstsp',
 }

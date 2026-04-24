@@ -186,6 +186,7 @@ def get_defaults():
         'softm': 0,
         'lambda_aff': 0.0,
         'lambda_r1r2': 0.0,
+        'r1r2_log': 0,               # 0 = linear max, 1 = log(max) (penalizes dead protos more aggressively)
         'lambda_proto_attract': 0.0,  # dead-proto attraction to poorly-represented cells
         'two_sided': 0,
         # Edge-centric UMAP parameters
@@ -194,17 +195,23 @@ def get_defaults():
         'umap_neg_rate': 5,        # Negative samples per positive edge
         'umap_edge_epochs': 200,   # Epochs for edge sampling expansion
         'umap_similarity': 'embedding',  # 'embedding' (distance kernel) or 'proto' (soft assignment dot product)
-        'calibrate_eps': 0,              # 1 = auto-calibrate epsilon so E[q_pos] = E[p_pos] after proto init
+        'calibrate_eps': 0,              # 0=off; 1=p/q matching (E[q_pos]=E[p_pos], falls back to effk); 2=always use effk alignment
         'umap_proto_effk': 5.0,          # target effective k for proto soft assignments (auto-calibrates temperature)
         'umap_proto_effk_agg': 'mean',   # aggregation for effk calibration: 'mean' or 'median'
-        'usage_norm_sim': 0,             # 0 = none; 1 = post-softmax global n_k; 2 = pre-softmax EMA per-batch; 3 = batch-balanced n_k; 4 = coverage w, no renorm, grad through w; 5 = pre-softmax log-corr; 6 = coverage w, renorm, grad through w; 7 = robust coverage (mean above median), renorm, parameter-free
-'usage_norm_corr_clamp': 10.0,   # clamp for log_corr in mode 5 (default 10; raise if corr hits ceiling and dead protos persist)
+        'usage_norm_sim': 0,             # 0 = none; 1 = post-softmax global n_k; 2 = pre-softmax EMA per-batch; 3 = batch-balanced n_k; 4 = coverage w, no renorm, grad through w; 5 = pre-softmax log-corr; 6 = coverage w, renorm, grad through w; 7 = robust coverage (mean above median), renorm, parameter-free; 8 = pre-softmax col-shift+max-norm then usage-norm (each proto gets ≥1 cell=1, penalizes dominant protos); 9 = per-batch Sinkhorn (asymmetric loss: grad through s, Sinkhorn target t detached)
+        'sinkhorn_iters': 3,             # Sinkhorn iterations for usage_norm_sim=9
+        'usage_norm_corr_clamp': 10.0,   # clamp for log_corr in mode 5 (default 10; raise if corr hits ceiling and dead protos persist)
         'usage_nk_alpha': 0.9,           # EMA smoothing for mode 2 (per mini-batch step)
         'lambda_degree_weight': 0,       # 1 = weight positive loss by A_ij/(k_i*k_j/2m); aligns loss with modularity null model
         'degree_norm_loss': 0,           # 1 = normalize positive loss by 1/sqrt(d_i*d_j); each cell contributes equally
         'lambda_nassoc': 0.0,            # normalized association regularizer: forces S.T@W@S/vol toward identity
         'nassoc_alpha': 1.0,             # weight of off-diagonal vs diagonal terms (after per-count normalization)
-        'umap_proto_metric': 'cosine',     # 'dotp' (c_i^T c_j) or 'cosine' (cosine similarity of assignment vectors)
+        'nassoc_agg': 'mean',            # how to aggregate per-batch M matrices: 'mean' (avg loss) or 'max' (element-wise max of M, then loss) or 'pbch' (loss per batch then avg; no cross-batch constraint, use mse diagonal)
+        'nassoc_diag_loss': 'mse',       # diagonal loss form: 'mse' = (diag-1)^2, 'nll' = -log(avg_diag), 'nll2' = -log(avg_b[1-(d_b-1)^2]) rewards multi-batch moderate usage
+        'umap_proto_metric': 'cosine',     # 'dotp' | 'cosine' | 'bhattacharyya' | 'jsd' | 'bhatt_dist' | 'hellinger' | 'idot' (idot=1-dotp in [0,1], fed through a,b kernel like hellinger)
+        'jsd_min_dist': 0.1,             # min_dist for JSD kernel a,b calibration (in JSD units, max ~0.693); only used when umap_proto_metric='jsd'
+        'dist_min_dist': 0.1,            # min_dist for distribution-distance kernel (bhatt_dist/jsd/hellinger). Auto-calibrated from data when calibrate_eps=1.
+        'dist_spread': 0.3,              # spread for distribution-distance kernel. Auto-calibrated from data when calibrate_eps=1; smaller = faster q decay.
         'temperature_min': 0.04,
         'epsilon_min': 0.02,
         'sched_temp_eps': 0,
