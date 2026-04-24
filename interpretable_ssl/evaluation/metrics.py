@@ -5,11 +5,7 @@ from copy import deepcopy
 from scib_metrics.benchmark import Benchmarker
 
 
-import sys
-
-from interpretable_ssl.configs.paths import ISLANDER_SRC
-sys.path.append(ISLANDER_SRC)
-from scGraph import *
+from interpretable_ssl.scGraph import *
 import os
 
 class MetricCalculator:

@@ -14,7 +14,7 @@ import torch.nn.functional as F
 import torch.optim
 from torch.utils.data import DataLoader
 
-from swav.src.utils import initialize_exp, fix_random_seeds
+from interpretable_ssl.swav_utils import initialize_exp, fix_random_seeds
 
 from interpretable_ssl.configs.larc import LARC
 from interpretable_ssl.configs.defaults import *

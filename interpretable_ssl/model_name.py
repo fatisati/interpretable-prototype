@@ -1,4 +1,4 @@
-from constants import *
+from interpretable_ssl.constants import *
 
 def generate_model_name(defaults, params):
    

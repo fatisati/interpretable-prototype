@@ -3,9 +3,8 @@ import os
 import pandas as pd
 import sys
 
-from interpretable_ssl.configs.paths import ISLANDER_SRC, MODEL_DIR, get_seacell_model_dir
-sys.path.append(ISLANDER_SRC)
-from scGraph import *
+from interpretable_ssl.configs.paths import MODEL_DIR, get_seacell_model_dir
+from interpretable_ssl.scGraph import *
 import scanpy as sc
 import scvi
 import scanpy as sc

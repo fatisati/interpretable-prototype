@@ -2,7 +2,7 @@ from pathlib import Path
 from interpretable_ssl.configs.defaults import *
 from interpretable_ssl.configs.constants import *
 import os
-from constants import *
+from interpretable_ssl.constants import *
 from interpretable_ssl.utils import log_time
 from interpretable_ssl.model_name import generate_model_name
 

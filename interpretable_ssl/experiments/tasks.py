@@ -6,6 +6,7 @@ Usage in any notebook:
 """
 
 import os
+import json
 
 
 # ---------------------------------------------------------------------------
@@ -87,7 +88,7 @@ def get_trainer(**kwargs):
 
     import interpretable_ssl.configs.defaults
     reload(interpretable_ssl.configs.defaults)
-    import constants
+    import interpretable_ssl.constants as constants
     reload(constants)
     _reload_interpretable_ssl()
 
@@ -111,7 +112,7 @@ def get_trainer(**kwargs):
 # Core pipeline
 # ---------------------------------------------------------------------------
 
-def run_mc_task(
+def find_metacells(
     ds_id,
     cvae_epochs,
     train_epochs,
@@ -119,6 +120,12 @@ def run_mc_task(
     patience,
     batch_size=256,
     lambda_config=None,
+    batch_key=None,
+    label_key=None,
+    niche_key=None,
+    num_prototypes=None,
+    affinity_type=None,
+    result_save_path=None,
     min_delta=0.005,
     umap_steps_per_epoch=1000,
     load_pretrain=True,
@@ -130,28 +137,55 @@ def run_mc_task(
     """Train and evaluate metacell quality for one dataset.
 
     Args:
-        ds_id:                  Dataset ID (e.g. 'pancreas', 'pbmc-immune').
+        ds_id:                  Dataset ID (e.g. 'snsc') OR path to an .h5ad file.
         cvae_epochs:            Epochs for CVAE pre-training.
         train_epochs:           Max UMAP training epochs (early stopping applies).
         eval_freq:              Evaluate modularity every N epochs.
         patience:               Early stopping patience (epochs).
-        batch_size:             Batch size — must match the pretrain checkpoint you
-                                want to reuse (pancreas=256, pbmc-immune=512).
-        lambda_config:          Dict of lambda values. Defaults to LAMBDA_PROTO_UMAP.
-                                Pass LAMBDA_RECON_ONLY or a custom dict to override.
+        batch_size:             Batch size.
+        lambda_config:          Dict of lambda/training values. Defaults to
+                                LAMBDA_PROTO_UMAP_PRECON.
+        batch_key:              Column in adata.obs with batch labels. If None,
+                                all cells are treated as one batch.
+        label_key:              Column in adata.obs with cell-type labels.
+                                Used only for evaluation metrics, not training.
+        niche_key:              Column in adata.obs with niche annotations.
+                                Optional — only needed for spatial niche metrics.
+        num_prototypes:         Number of prototypes. If None, defaults to
+                                n_cells // 100.
+        affinity_type:          Graph affinity type (e.g. 'arbf', 'ctx_umap').
+                                Shortcut for passing via lambda_config.
+        result_save_path:       If set, saves metrics as metrics.json here.
         min_delta:              Minimum modularity improvement to reset patience.
         umap_steps_per_epoch:   Gradient steps per epoch (caps dataset size).
-        load_pretrain:          If True, load existing pretrain checkpoint if available.
-        load_umap:              If True, skip training and just load the UMAP checkpoint.
-        freeze_batch_embedding: If True, freeze batch embedding params before UMAP training.
+        load_pretrain:          If True, reuse existing pretrain checkpoint if found.
+        load_umap:              If True, skip training and load the UMAP checkpoint.
+        freeze_batch_embedding: If True, freeze batch embedding before UMAP training.
+        freeze_decoder:         If True, freeze decoder before UMAP training.
         trainer_kwargs:         Extra kwargs forwarded to get_trainer.
 
     Returns:
-        (trainer, metrics) where metrics is a flat dict:
-            {'purity': float, 'batch_entropy': float, 'modularity': float}
+        (trainer, metrics) where metrics is a flat dict of evaluation scores.
     """
-    if lambda_config is None:
-        lambda_config = LAMBDA_PROTO_UMAP
+    if label_key is None:
+        raise ValueError("label_key is required — pass the adata.obs column name with cell-type labels.")
+
+    lambda_config = dict(lambda_config) if lambda_config is not None else dict(LAMBDA_PROTO_UMAP_PRECON)
+
+    # --- accept AnnData directly: write to temp file, treat as path ---
+    import anndata
+    if isinstance(ds_id, anndata.AnnData):
+        import tempfile
+        tmp_dir = tempfile.mkdtemp()
+        tmp_path = os.path.join(tmp_dir, 'input.h5ad')
+        ds_id.write_h5ad(tmp_path)
+        ds_id = tmp_path
+
+    # --- resolve ds_id: known string or h5ad path ---
+    ds_id = _resolve_ds_id(ds_id, batch_key=batch_key, label_key=label_key, niche_key=niche_key, num_prototypes=num_prototypes)
+
+    if affinity_type is not None:
+        lambda_config['affinity_type'] = affinity_type
 
     trainer_kwargs = trainer_kwargs or {}
     experiment_name = trainer_kwargs.pop('experiment_name', _infer_experiment_name(lambda_config))
@@ -220,12 +254,78 @@ def run_mc_task(
         # Task 3 (spatial only)
         'ct_niche_rbo_avg':   res3.get('ct_niche_rbo_avg'),
     }
-    return t, metrics
+
+    # --- Attach metacell ID to original adata ---
+    assignments, _ = t._get_assignments()
+    t.train_ds.adata.obs['metacell_id'] = assignments
+
+    # --- Get metacell gene expression AnnData ---
+    mc_adata = t.save_metacells()
+
+    if result_save_path is not None:
+        os.makedirs(result_save_path, exist_ok=True)
+        out = os.path.join(result_save_path, 'metrics.json')
+        with open(out, 'w') as f:
+            json.dump({k: v for k, v in metrics.items() if v is not None}, f, indent=2)
+        print(f"Metrics saved to {out}")
+        mc_adata.write_h5ad(os.path.join(result_save_path, 'metacells.h5ad'))
+
+    return t, res, mc_adata
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+run_mc_task = find_metacells  # backward-compatible alias
+
+
+def _resolve_ds_id(ds_id, batch_key, label_key, niche_key, num_prototypes):
+    """Return a valid DATASETS key, registering a custom h5ad if needed."""
+    import scanpy as sc
+    from pathlib import Path
+    from interpretable_ssl.datasets.dataset_configs import DATASETS, register_dataset
+
+    ds_id = str(ds_id)
+
+    # Known dataset ID
+    if ds_id in DATASETS:
+        return ds_id
+
+    # Must be a file path then
+    if not os.path.isfile(ds_id):
+        known = sorted(DATASETS.keys())
+        raise ValueError(
+            f"'{ds_id}' is not a known dataset ID and is not a file path.\n"
+            f"Known IDs: {known}"
+        )
+
+    path = ds_id
+    name = Path(path).stem
+
+    adata = sc.read_h5ad(path)
+    n_cells = len(adata)
+
+    # Default batch_key: add a dummy column so scPoli doesn't fail
+    if batch_key is None:
+        batch_key = '_batch'
+        adata.obs['_batch'] = 'batch_0'
+        # save modified adata next to original so the path-based loader picks it up
+        tmp_path = str(Path(path).parent / f"{name}_ssl_tmp.h5ad")
+        adata.write_h5ad(tmp_path)
+        path = tmp_path
+        print(f"No batch_key given — treating all {n_cells} cells as one batch.")
+    elif batch_key not in adata.obs.columns:
+        raise ValueError(f"batch_key '{batch_key}' not found in adata.obs columns: {list(adata.obs.columns)}")
+
+    if num_prototypes is None:
+        num_prototypes = max(10, n_cells // 100)
+        print(f"num_prototypes not set — using {num_prototypes} ({n_cells} cells // 100).")
+
+    register_dataset(name, path, batch_key=batch_key, label_key=label_key, niche_key=niche_key, num_prototypes=num_prototypes)
+    print(f"Registered dataset '{name}': {n_cells} cells, {num_prototypes} prototypes, batch_key='{batch_key}'.")
+    return name
+
 
 def _infer_experiment_name(lambda_config):
     if lambda_config.get('lambda_proto_recon', 0) > 0 and lambda_config.get('lambda_umap', 0) == 0 and lambda_config.get('lambda_recon', 0) == 0:

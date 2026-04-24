@@ -262,3 +262,16 @@ def load_ds(ds_id):
     import scanpy as sc
     conf = DATASETS[ds_id]
     return sc.read_h5ad(conf['path']), conf.get('batch_key', None), conf['label_key'], conf['num_prototypes']
+
+
+def register_dataset(name, path, batch_key=None, label_key='cell_type', num_prototypes=None, **kwargs):
+    """Register a custom h5ad into DATASETS (in-memory only, file is never modified)."""
+    from pathlib import Path
+    DATASETS[name] = dict(
+        path=Path(path),
+        batch_key=batch_key,
+        label_key=label_key,
+        num_prototypes=num_prototypes,
+        test_studies=[],
+        **kwargs,
+    )

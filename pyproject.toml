@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "interpretable-ssl"
+version = "0.1.0"
+requires-python = ">=3.9"
+dependencies = [
+    # not pre-installed on Colab — must be explicit
+    "scarches==0.6.1",
+    "scvi-tools==0.19.0",
+    "scib-metrics==0.5.1",
+    "seacells==0.3.3",
+    "squidpy",
+    "wandb",
+    # pre-installed on Colab but listed for non-Colab environments
+    "torch>=2.0",
+    "numpy",
+    "pandas",
+    "scipy",
+    "scikit-learn",
+    "anndata",
+    "scanpy",
+    "matplotlib",
+    "seaborn",
+    "tqdm",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["interpretable_ssl*"]
