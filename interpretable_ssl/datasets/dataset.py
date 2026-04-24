@@ -118,7 +118,10 @@ class SingleCellDataset(Dataset):
         if self.label_encoder_path and os.path.exists(self.label_encoder_path):
             return pkl.load(open(self.label_encoder_path, "rb"))
         else:
-            return utils.fit_label_encoder(self.adata, self.label_encoder_path, self.label_key)
+            save_path = self.label_encoder_path or os.path.join(
+                os.path.dirname(str(self.path)), f"{self.name}_label_encoder.pkl"
+            )
+            return utils.fit_label_encoder(self.adata, save_path, self.label_key)
 
     def __len__(self):
         return len(self.adata)
