@@ -145,6 +145,22 @@ def generate_affinity(ad, k, bk, affinity_type="inverse_dist", graph_mode=None):
         sc.pp.neighbors(ad, n_neighbors=k, use_rep="X_ctx")
         return ad.obsp["connectivities"]
 
+    elif affinity_type == "ctx":
+        print('using new aff')
+        import SEACells
+        if 'X_ctx' not in ad.obsm:
+            sc.tl.pca(ad)
+            ad.obsm["X_ctx"] = build_context(ad, 7.5)
+        else:
+            print('using existing X_ctx in adata')
+        kernel_model = SEACells.build_graph.SEACellGraph(ad, "X_ctx", verbose=True)
+        return kernel_model.rbf(k, graph_construction="union")
+
+    elif affinity_type == "cpca":
+        X_ctx = spatial_context_pca(ad, k)
+        ad.obsm["X_ctx"] = X_ctx
+        return build_seacell_kernel(X_ctx, ad.obsm["X_pca"], k=k, graph_mode=graph_mode or "knn")
+
     elif affinity_type in ["spatial", "scoaff"]:
 
         # s_aff = multi_batch_aff(ad, bk, lambda x: spatial_affinity(x, k))
@@ -178,6 +194,15 @@ def spatial_context_pca(ad, k):
     pca = ad.obsm["X_pca"]
     return pca[I].mean(axis=1)  # (N, d)
 
+
+def build_context(ad, radius):
+    Xsp = ad.obsm["spatial"]
+    Xpca = ad.obsm["X_pca"]
+    nn_sp = NearestNeighbors(radius=radius).fit(Xsp)
+    neigh = nn_sp.radius_neighbors(Xsp, return_distance=False)
+    neigh = [idx[idx != i] for i, idx in enumerate(neigh)]
+    ctx = np.stack([Xpca[idx].mean(0) if len(idx) else Xpca[i] for i, idx in enumerate(neigh)])
+    return ctx
 
 def faiss_knn(b_adata, k):
     import faiss

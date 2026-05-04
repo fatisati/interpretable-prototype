@@ -132,7 +132,10 @@ def add_celltype_percent_to_cols(df, ad, lk):
 
 
 def get_batch_K(ad, lk, bk, thr=0.01, K_cap=200, fc_thr=0.5, fixed_K=200):
-    batch_de = {b: calc_dge(ad[ad.obs[bk] == b], lk) for b in ad.obs[bk].unique()}
+    if bk is None:
+        batch_de = {'all': calc_dge(ad, lk)}
+    else:
+        batch_de = {b: calc_dge(ad[ad.obs[bk] == b], lk) for b in ad.obs[bk].unique()}
 
     if fixed_K is not None:
         K_dict = {ct: fixed_K for ct in ad.obs[lk].unique()}

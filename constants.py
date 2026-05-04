@@ -133,4 +133,9 @@ ABBREVIATIONS = {
     'jsd_min_dist': 'jsdmd',
     'dist_min_dist': 'dstmd',
     'dist_spread': 'dstsp',
+    'proto_decoupled': 'pdec',
+    'gmm_eta': 'geta',
+    'gmm_eta_end': 'getae',
+    'gmm_resurrect': 'gres',
+    'gmm_resurrect_thresh': 'grest',
 }

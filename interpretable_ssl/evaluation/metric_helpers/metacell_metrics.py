@@ -81,9 +81,9 @@ def agg_obs(SEACell_ad, adata, obs_key):
     return SEACell_ad
 
 
-def save_seacell(ad, SEACell_ad, ds_id):
+def save_seacell(ad, SEACell_ad, ds_id, build_kernel_on="X_pca"):
     from interpretable_ssl.configs.paths import get_seacell_model_dir
-    seacell_dir = get_seacell_model_dir(ds_id)
+    seacell_dir = get_seacell_model_dir(ds_id, build_kernel_on)
     print("saving to: ", seacell_dir)
     os.makedirs(seacell_dir, exist_ok=True)
     ad.write(os.path.join(seacell_dir, "seacell_sc.h5ad"))

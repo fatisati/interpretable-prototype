@@ -19,6 +19,7 @@ LAMBDA_PROTO_UMAP = dict(
     lambda_kl=0,
     lambda_recon=0,
     lambda_proto_recon=0.0,
+    umap_similarity = 'proto'
 )
 
 LAMBDA_PARAM_UMAP = dict(
@@ -40,7 +41,11 @@ LAMBDA_PROTO_UMAP_PRECON = dict(
     umap_proto_metric='dotp',
     prot_init='waypoint',
     lambda_nassoc=1,
-    usage_norm_sim=4,
+    usage_norm_sim=0,
+    proto_usage_mode='ema',
+    lambda_proto_usage = 0.1,
+    umap_similarity='proto',
+    nassoc_agg = 'max'
 )
 
 LAMBDA_RECON_ONLY = dict(
@@ -132,6 +137,7 @@ def find_metacells(
     load_umap=False,
     freeze_batch_embedding=False,
     freeze_decoder=False,
+    soft_metrics=False,
     trainer_kwargs=None,
 ):
     """Train and evaluate metacell quality for one dataset.
@@ -151,8 +157,11 @@ def find_metacells(
                                 Used only for evaluation metrics, not training.
         niche_key:              Column in adata.obs with niche annotations.
                                 Optional — only needed for spatial niche metrics.
-        num_prototypes:         Number of prototypes. If None, defaults to
-                                n_cells // 100.
+        num_prototypes:         Number of prototypes. Options:
+                                  None            — use the dataset config default.
+                                  int             — use this exact count.
+                                  'lbat'          — floor(largest_batch_n / ratio) where
+                                                    ratio = total_n / default_np from config.
         affinity_type:          Graph affinity type (e.g. 'arbf', 'ctx_umap').
                                 Shortcut for passing via lambda_config.
         result_save_path:       If set, saves metrics as metrics.json here.
@@ -181,6 +190,9 @@ def find_metacells(
     # --- resolve ds_id: known string or h5ad path ---
     ds_id = _resolve_ds_id(ds_id, batch_key=batch_key, label_key=label_key, niche_key=niche_key, num_prototypes=num_prototypes)
 
+    # Resolve num_prototypes (int / 'largest_batch' / None) to a concrete int or None
+    resolved_num_prototypes = _resolve_num_prototypes(num_prototypes, ds_id)
+
     # For known datasets, fall back to the config's label_key
     if label_key is None:
         from interpretable_ssl.datasets.dataset_configs import DATASETS
@@ -195,6 +207,10 @@ def find_metacells(
     experiment_name = trainer_kwargs.pop('experiment_name', _infer_experiment_name(lambda_config))
     freeze_batch_embedding = int(lambda_config.pop('freeze_batch_embedding', freeze_batch_embedding))
     freeze_decoder = int(lambda_config.pop('freeze_decoder', freeze_decoder))
+    # num_prototypes may be passed inside lambda_config; pop it and let it win over the direct param
+    if 'num_prototypes' in lambda_config:
+        num_prototypes = lambda_config.pop('num_prototypes')
+        resolved_num_prototypes = _resolve_num_prototypes(num_prototypes, ds_id)
     t = get_trainer(
         experiment_name=experiment_name,
         cvae_epochs=cvae_epochs,
@@ -207,6 +223,7 @@ def find_metacells(
         umap_similarity=lambda_config.get('umap_similarity', 'proto'),
         freeze_batch_embedding=freeze_batch_embedding,
         freeze_decoder=freeze_decoder,
+        **({} if resolved_num_prototypes is None else {'num_prototypes': resolved_num_prototypes}),
         **{k: v for k, v in lambda_config.items() if k not in ('umap_similarity', 'affinity_type')},
         **trainer_kwargs,
     )
@@ -239,8 +256,8 @@ def find_metacells(
 
     # --- Eval ---
     t.load_umap_checkpoint()
-    res1 = t.eval_metacell_quality()
-    res2 = t.eval_task2_metrics()
+    res1 = t.eval_metacell_quality(soft_metrics=soft_metrics)
+    res2 = t.eval_task2_metrics(soft_metrics=soft_metrics)
     res3 = t.eval_task3_metrics()
 
     metrics = {
@@ -263,6 +280,34 @@ def find_metacells(
     assignments, _ = t._get_assignments()
     t.train_ds.adata.obs['metacell_id'] = assignments
 
+    # --- Aff-DC compactness: diffusion map on raw affinity graph ---
+    try:
+        from interpretable_ssl.evaluation.mc_metric_utils import compute_aff_dc_compactness
+        aff = t.train_ds.aff_raw if hasattr(t.train_ds, 'aff_raw') else t.train_ds.aff
+        batches_arr = t.train_ds.adata.obs[t.train_ds.batch_key].values
+        # comp_df/counts_df shape: (n_metacells, n_batches)
+        aff_comp_df, counts_df = compute_aff_dc_compactness(aff, assignments, batches_arr)
+        # per-metacell compactness: weighted mean over batches by cell count
+        # zero out counts where compactness is NaN (< 2 cells), then weighted sum / total cells
+        valid_counts = counts_df.where(aff_comp_df.notna(), 0)
+        per_mc_mean = (aff_comp_df.fillna(0) * valid_counts).sum(axis=1) / valid_counts.sum(axis=1)
+        # per-batch mean: weighted by cell count across metacells
+        per_batch_mean = (aff_comp_df.fillna(0) * valid_counts).sum(axis=0) / valid_counts.sum(axis=0)
+        metrics['aff_compactness_per_batch'] = {str(b): float(v) for b, v in per_batch_mean.items()}
+        metrics['aff_compactness_mean'] = float(per_mc_mean.mean())
+        # save CSV: per-batch compactness columns + weighted_mean column for comparison
+        csv_dir = result_save_path if result_save_path is not None else t.get_dump_path()
+        os.makedirs(csv_dir, exist_ok=True)
+        csv_path = os.path.join(csv_dir, 'aff_dc_compactness.csv')
+        out_df = aff_comp_df.copy()
+        out_df['weighted_mean'] = per_mc_mean  # overall metacell compactness for comparison
+        out_df.to_csv(csv_path)
+        print(f"[aff_dc_compactness] mean={metrics['aff_compactness_mean']:.4f} | saved to {csv_path}")
+    except Exception as e:
+        import traceback
+        print(f"Warning: aff_dc_compactness failed: {e}")
+        traceback.print_exc()
+
     # --- Get metacell gene expression AnnData ---
     mc_adata = t.save_metacells()
 
@@ -273,6 +318,8 @@ def find_metacells(
             json.dump({k: v for k, v in metrics.items() if v is not None}, f, indent=2)
         print(f"Metrics saved to {out}")
         mc_adata.write_h5ad(os.path.join(result_save_path, 'metacells.h5ad'))
+
+    t.save_umap_data()
 
     return t, metrics, mc_adata
 
@@ -329,6 +376,46 @@ def _resolve_ds_id(ds_id, batch_key, label_key, niche_key, num_prototypes):
     register_dataset(name, path, batch_key=batch_key, label_key=label_key, niche_key=niche_key, num_prototypes=num_prototypes)
     print(f"Registered dataset '{name}': {n_cells} cells, {num_prototypes} prototypes, batch_key='{batch_key}'.")
     return name
+
+
+def _resolve_num_prototypes(num_prototypes, ds_id):
+    """Resolve num_prototypes to a concrete int.
+
+    Accepts:
+        None            → return None (trainer uses dataset config default)
+        int             → use as-is
+        'largest_batch' → floor(largest_batch_n_cells / (total_n_cells / default_num_prototypes))
+    """
+    if num_prototypes is None:
+        return None
+    if isinstance(num_prototypes, int):
+        return num_prototypes
+    if num_prototypes == 'lbat':
+        import math
+        import anndata
+        from interpretable_ssl.datasets.dataset_configs import DATASETS
+        cfg = DATASETS[ds_id]
+        default_np = cfg['num_prototypes']
+        path = str(cfg['path'])
+        batch_key = cfg.get('batch_key')
+        adata = anndata.read_h5ad(path, backed='r')
+        n_cells = adata.n_obs
+        ratio = n_cells / default_np  # cells per prototype
+        if batch_key and batch_key in adata.obs.columns:
+            largest_batch_n = int(adata.obs[batch_key].value_counts().iloc[0])
+        else:
+            largest_batch_n = n_cells
+        adata.file.close()
+        resolved = max(1, math.floor(largest_batch_n / ratio))
+        print(
+            f"num_prototypes='lbat': total={n_cells}, default_np={default_np}, "
+            f"ratio={ratio:.1f} cells/proto, largest_batch={largest_batch_n} → {resolved} prototypes"
+        )
+        return resolved
+    raise ValueError(
+        f"Unknown num_prototypes value '{num_prototypes}'. "
+        "Use an int or 'lbat'."
+    )
 
 
 def _infer_experiment_name(lambda_config):

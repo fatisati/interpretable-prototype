@@ -21,8 +21,9 @@ class TrainerBase:
 
     def init_attributes(self, **kwargs):
         params = get_defaults().copy()
-        params.update(kwargs)
-        params.update(DATASETS[params['dataset_id']])
+        params.update(kwargs)                          # capture dataset_id + explicit overrides
+        params.update(DATASETS[params['dataset_id']])  # apply dataset config on top of defaults
+        params.update(kwargs)                          # explicit kwargs win over dataset config
         for key, value in params.items():
             setattr(self, key, value)
         return params

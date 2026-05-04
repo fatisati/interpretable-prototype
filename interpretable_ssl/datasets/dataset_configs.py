@@ -5,6 +5,19 @@ from interpretable_ssl.configs.paths import DATA_DIR as _DATA_DIR, CODE_DIR
 DATA_DIR = Path(_DATA_DIR)
 
 DATASETS = {
+    "sfib": {
+        "path": Path(DATA_DIR) / "spatial/sfib.h5ad",
+        "label_key": "niches_2D",
+        "label_encoder_path": os.path.join(CODE_DIR, "data/sfib.pkl"),
+        "num_prototypes": 100,
+    },
+    "lung": {
+        "path": Path(DATA_DIR) / "lung_hvg.h5ad",
+        "batch_key": "batch",
+        "label_key": "cell_type",
+        "label_encoder_path": os.path.join(CODE_DIR, "data/lung.pkl"),
+        "num_prototypes": 300,
+    },
     "cd34": {
         "path": Path(DATA_DIR) / "seacell/cd34_multiome_rna_preprocessed.h5ad",
         "label_key": "celltype",
@@ -156,12 +169,22 @@ DATASETS = {
     },
     "snsc": {
         "path": Path(DATA_DIR) / "spatial/snsc.h5ad",
-        "batch_key": "section",
         "label_key": "celltypes",
         "niche_key": 'niches_2D',  # TODO: set to niche annotation column name
         "label_encoder_path": os.path.join(CODE_DIR, "data/NSCLC_3D.pkl"),
         "test_studies": ["section_4", "section_10"],
         "num_prototypes": 400,
+        "batch_size": 1024,
+        "umap_checkpoint_freq": 10,
+    },
+    "sp": {
+        "path": Path(DATA_DIR) / "spatial/sp.h5ad",
+        "batch_key": "section",
+        "label_key": "celltypes",
+        "niche_key": 'niches_2D',  # TODO: set to niche annotation column name
+        "label_encoder_path": os.path.join(CODE_DIR, "data/NSCLC_3D.pkl"),
+        "test_studies": ["section_4", "section_10"],
+        "num_prototypes": 100,
         "batch_size": 1024,
         "umap_checkpoint_freq": 10,
     },
@@ -199,10 +222,10 @@ DATASETS = {
         "batch_key": "section",
         "label_key": "celltypes",
         "label_encoder_path": os.path.join(CODE_DIR, "data/NSCLC_3D_section_28.pkl"),
-        "num_prototypes": 100,
+        "num_prototypes": 300,
         "batch_size": 1024,
         "ft_epochs": 0,
-        "batch_key": "section",
+        "niche_key": 'niches_2D',  # TODO: set to niche annotation column name
     },
     "bms28nsc": { # but in reality, its 0.1 with some new probs
         "path": Path(DATA_DIR) / "spatial/bms28nsc_v1.h5ad",

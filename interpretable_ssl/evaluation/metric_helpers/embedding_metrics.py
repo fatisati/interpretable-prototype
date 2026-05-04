@@ -352,8 +352,8 @@ def get_scproto_metacell_metrics(
     )
 
 
-def load_seacell(ds_id, normalize=True):
-    seacell_dir = get_seacell_model_dir(ds_id)
+def load_seacell(ds_id, normalize=True, build_kernel_on="X_pca"):
+    seacell_dir = get_seacell_model_dir(ds_id, build_kernel_on)
     ad = sc.read_h5ad(os.path.join(seacell_dir, "seacell_sc.h5ad"))
     mc_ad = sc.read_h5ad(os.path.join(seacell_dir, "seacell_agg.h5ad"))
     if normalize and mc_ad.X.max() > 20:

@@ -45,15 +45,23 @@ def get_gpu_type_torch():
 
 
 def affinity_report(A):
-    """Report affinity matrix statistics."""
     import scipy.sparse as sp
+    import numpy as np
+
     A = A.tocsr(copy=True)
     A.setdiag(0)
     A.eliminate_zeros()
 
+    # --- existing ---
     nnz = np.diff(A.indptr)
     mean_deg = nnz.mean()
     med_deg = np.median(nnz)
+
+    # --- NEW: weighted degree ---
+    row_sum = np.array(A.sum(axis=1)).flatten()
+    deg_min = row_sum.min()
+    deg_max = row_sum.max()
+    deg_mean = row_sum.mean()
 
     ent = np.zeros(A.shape[0])
     effk = np.zeros(A.shape[0])
@@ -74,13 +82,18 @@ def affinity_report(A):
     return {
         "mean_deg": float(mean_deg),
         "med_deg": float(med_deg),
+
+        # NEW
+        "deg_min": float(deg_min),
+        "deg_max": float(deg_max),
+        "deg_mean": float(deg_mean),
+
         "effk_mean": float(effk.mean()),
         "effk_med": float(np.median(effk)),
         "mutual_ratio": mutual_ratio,
         "frac_empty_rows": float((nnz == 0).mean()),
     }
-
-
+    
 @torch.no_grad()
 def _per_batch_sinkhorn(scaled_logits, batch_ids, n_iters=3):
     """Per-batch Sinkhorn normalization.
@@ -254,8 +267,14 @@ class SCProtoTrainer(AdoptiveTrainer):
         if _aff_for_report is not None:
             self.aff_stats = affinity_report(_aff_for_report)
             logger.info(f"Affinity stats: {self.aff_stats}")
-            print(f"📊 Affinity: mean_deg={self.aff_stats['mean_deg']:.1f}, effk_med={self.aff_stats['effk_med']:.1f}, mutual={self.aff_stats['mutual_ratio']:.2%}")
-
+            print(
+                f"📊 Affinity: "
+                f"wdeg[min/mean/max]={self.aff_stats['deg_min']:.3f}/"
+                f"{self.aff_stats['deg_mean']:.3f}/"
+                f"{self.aff_stats['deg_max']:.3f}, "
+                f"effk_med={self.aff_stats['effk_med']:.1f}, "
+                f"mutual={self.aff_stats['mutual_ratio']:.2%}"
+            )
         self.train_loader = self.get_data_laoder(self.train_ds)
         self.test_loader = self.get_data_laoder(self.test_ds, drop_last=False)
 
@@ -420,7 +439,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         """Calibrate epsilon for proto mode.
 
         calibrate_eps=1: p/q matching (dotp only) — binary-searches epsilon so E[q_pos] = E[p_pos].
-          Falls back to effk if target is unreachable.
+          Falls back to effk if target is unreachable OR if the resulting effk_mean < 3.
           Non-dotp metrics always use effk (p/q matching is meaningless for distance kernels).
         calibrate_eps=2: effk alignment — always uses calibrate_effk regardless of metric or p/q result.
         Sets self.epsilon in-place and returns the found value.
@@ -484,8 +503,13 @@ class SCProtoTrainer(AdoptiveTrainer):
             else:
                 lo = eps
 
-        self.epsilon = eps
         ek_mean, ek_med = effk_stats(eps)
+        if ek_mean < 3.0:
+            print(f"[eps calibration] E[p_pos]={p_pos:.4f} → epsilon={eps:.4f} "
+                  f"(effk_mean={ek_mean:.2f} < 3.0), falling back to effk={effk_target:.1f}")
+            return self.calibrate_effk(effk_target)
+
+        self.epsilon = eps
         print(f"[eps calibration] E[p_pos]={p_pos:.4f} → epsilon={eps:.4f} "
               f"(E[q_pos]={mean_q_pos(eps):.4f}, effk_mean={ek_mean:.2f}, effk_med={ek_med:.2f})")
         return eps
@@ -837,7 +861,8 @@ class SCProtoTrainer(AdoptiveTrainer):
         self._cell_degree = torch.tensor(_deg, dtype=torch.float32)   # (N,)
         self._two_m = _two_m
 
-        if umap_similarity == 'proto':
+        proto_decoupled = getattr(self, 'proto_decoupled', False) and umap_similarity == 'proto'
+        if umap_similarity == 'proto' and not proto_decoupled:
             params = list(self.model.scpoli_cvae.parameters()) + list(self.model.prototypes.parameters())
         else:
             params = list(self.model.scpoli_cvae.parameters())
@@ -853,12 +878,111 @@ class SCProtoTrainer(AdoptiveTrainer):
             'epoch': 0,
             'cell_ds': torch.tensor(cell_ds, dtype=torch.long),
         }
+        self._c_k_ema = None  # reset EMA for proto_usage_mode='max'
+        self._gmm_n_total_epochs = epochs
+        if proto_decoupled:
+            self._init_decoupled_proto_state()
+            print(f"   proto_decoupled=True: prototypes updated via EMA of cluster means (excluded from optimizer)")
 
         print(f"Starting edge-centric UMAP training (similarity={umap_similarity})")
         print(f"   min_dist={min_dist}, spread={spread}, neg_rate={neg_rate}")
         print(f"   lambda_umap={getattr(self, 'lambda_umap', 1.0)}, "
               f"lambda_recon={self.lambda_recon}, lambda_kl={self.lambda_kl}, "
               f"lambda_proto_recon={self.lambda_proto_recon}, lambda_r1r2={self.lambda_r1r2}")
+
+    # ------------------------------------------------------------------
+    # Decoupled prototype learning (online GMM EM)
+    # ------------------------------------------------------------------
+
+    def _init_decoupled_proto_state(self):
+        """Seed running accumulators from current prototype positions.
+        Proto weights are NOT changed — this just gives the EMA updater a warm start."""
+        K = self.nmb_prototypes
+        protos = self.model.get_prototypes().detach().cpu().float()  # (K, D)
+        self._proto_running_count  = torch.ones(K)           # S_pi: effective cell count per proto
+        self._proto_running_sum    = protos.clone()           # S_mu: weighted sum of embeddings
+        self._proto_running_sq_sum = torch.ones_like(protos) # S_var: weighted sum of z² (for resurrect noise)
+
+    def _get_proto_update_eta(self):
+        """Return eta for the current epoch (linear schedule: gmm_eta → gmm_eta_end)."""
+        epoch   = self._umap_state.get('epoch', 0)
+        n_total = getattr(self, '_gmm_n_total_epochs', max(epoch, 1))
+        frac    = epoch / max(n_total - 1, 1)
+        eta_start = getattr(self, 'gmm_eta', 0.1)
+        eta_end   = getattr(self, 'gmm_eta_end', 0.5)
+        return eta_start + (eta_end - eta_start) * frac
+
+    @torch.no_grad()
+    def _update_protos_ema(self, z_det, soft_assign_det, eta):
+        """Update prototype positions as EMA of weighted cluster means.
+
+        Uses the same soft_assign already computed in the forward pass.
+        Prototypes are set directly — no gradient involved.
+
+        Args:
+            z_det:           (N, D) detached embeddings from this batch
+            soft_assign_det: (N, K) detached soft assignments from this batch
+            eta:             float, base forgetting factor (per-proto rate adapts based on usage)
+        """
+        z_cpu  = z_det.cpu().float()
+        s_cpu  = soft_assign_det.cpu().float()
+        N      = z_cpu.shape[0]
+
+        # --- batch statistics ---
+        count_b  = s_cpu.sum(0)               # (K,) effective cells assigned per proto
+        sum_b    = s_cpu.T @ z_cpu            # (K, D) weighted sum of embeddings
+        sq_sum_b = s_cpu.T @ (z_cpu ** 2)    # (K, D) weighted sum of z² (for variance)
+
+        # --- per-proto update rate: eta_k = eta ^ (usage_k / N) ---
+        # barely used proto → eta_k ≈ 1 → running stats frozen (no forgetting)
+        # heavily used proto → eta_k ≈ eta → normal EMA update
+        usage_frac = (count_b / N).clamp(0.0, 1.0)   # (K,)
+        eta_k      = eta ** usage_frac                 # (K,)
+
+        # --- update running accumulators ---
+        self._proto_running_count  = eta_k          * self._proto_running_count  + (1 - eta_k)          * count_b
+        self._proto_running_sum    = eta_k.unsqueeze(1) * self._proto_running_sum    + (1 - eta_k).unsqueeze(1) * sum_b
+        self._proto_running_sq_sum = eta_k.unsqueeze(1) * self._proto_running_sq_sum + (1 - eta_k).unsqueeze(1) * sq_sum_b
+
+        # --- new prototype position = weighted mean of assigned embeddings ---
+        count_safe = self._proto_running_count.clamp(min=1e-8)
+        new_mu     = self._proto_running_sum / count_safe.unsqueeze(1)   # (K, D)
+
+        # variance per proto (needed only for resurrect noise scale)
+        new_var = (self._proto_running_sq_sum / count_safe.unsqueeze(1) - new_mu ** 2).clamp(min=1e-6)
+
+        new_mu_out = new_mu.clone()
+
+        # --- resurrect (opt-in): split dominant proto into the most unused proto ---
+        if getattr(self, 'gmm_resurrect', False):
+            proto_weights = self._proto_running_count / self._proto_running_count.sum().clamp(min=1e-8)
+            thresh        = getattr(self, 'gmm_resurrect_thresh', 3.0) / self.nmb_prototypes
+
+            for k in (proto_weights > thresh).nonzero(as_tuple=True)[0].tolist():
+                j = proto_weights.argmin().item()
+                if j == k:
+                    continue
+                # rescale dominant proto mean slightly
+                norm_k = new_mu_out[k].norm().clamp(min=1e-8)
+                new_mu_out[k] = new_mu_out[k] / norm_k.sqrt()
+                # place dead proto near dominant one with small noise
+                noise_scale = new_var[k].mean().sqrt().item() * 0.1
+                new_mu_out[j] = new_mu_out[k] + torch.randn_like(new_mu_out[k]) * noise_scale
+                # split the running count and sums equally between k and j
+                half = self._proto_running_count[k].item() / 2.0
+                self._proto_running_count[k]    = half
+                self._proto_running_count[j]    = half
+                self._proto_running_sum[k]      = new_mu_out[k] * half
+                self._proto_running_sum[j]      = new_mu_out[j] * half
+                self._proto_running_sq_sum[k]   = new_var[k] * half
+                self._proto_running_sq_sum[j]   = new_var[k] * half
+                # recompute weights after split
+                proto_weights = self._proto_running_count / self._proto_running_count.sum().clamp(min=1e-8)
+
+        # --- write new positions into model weights (no gradient) ---
+        self.model.set_prototypes(new_mu_out.to(self.device))
+        if self.l2norm == 1:
+            self.model.normalize_prototypes()
 
     def _run_umap_epoch(self):
         """Run a single UMAP edge training epoch. Returns metrics dict."""
@@ -883,6 +1007,8 @@ class SCProtoTrainer(AdoptiveTrainer):
         nassoc_diag = getattr(self, 'nassoc_diag', True)
         use_proto_sim = getattr(self, 'umap_similarity', 'embedding') == 'proto'
         proto_metric = getattr(self, 'umap_proto_metric', 'dotp')
+        proto_decoupled = getattr(self, 'proto_decoupled', False) and use_proto_sim
+        _proto_eta = self._get_proto_update_eta() if proto_decoupled else 0.1
 
         self.model.train()
         total_metrics = {
@@ -890,6 +1016,9 @@ class SCProtoTrainer(AdoptiveTrainer):
             'loss_pos': 0, 'loss_neg': 0, 'recon': 0, 'kl': 0,
             'proto_recon': 0, 'r1r2': 0, 'proto_attract': 0, 'nassoc': 0, 'proto_usage': 0, 'n_unused_protos': 0,
         }
+        # snapshot proto positions at epoch start to measure movement
+        if proto_decoupled:
+            _proto_mu_epoch_start = self.model.get_prototypes().detach().cpu().clone()
         mode5_c_min = 1.0   # worst-case min coverage seen this epoch (before correction)
         mode5_corr_max = 0.0  # worst-case max boost applied this epoch
         n_batches = 0
@@ -931,10 +1060,17 @@ class SCProtoTrainer(AdoptiveTrainer):
                 return torch.searchsorted(unique_idx, indices)
 
             if use_proto_sim:
-                logits = self.model.prototypes(z_unique)
+                if proto_decoupled:
+                    # detached dot-product logits — no gradient to prototypes
+                    logits = F.linear(z_unique, self.model.get_prototypes().detach())
+                    # same soft_assign as non-decoupled, just with detached protos
+                    soft_assign = F.softmax(logits / self.epsilon, dim=1)
+                    soft_assign_orig = soft_assign
+                else:
+                    logits = self.model.prototypes(z_unique)
 
-                # Modes 2, 5, 8: logit correction before softmax
-                _usage_mode_pre = getattr(self, 'usage_norm_sim', 0)
+                # Modes 2, 5, 8: logit correction before softmax (only in non-decoupled mode)
+                _usage_mode_pre = 0 if proto_decoupled else getattr(self, 'usage_norm_sim', 0)
                 if _usage_mode_pre == 2:
                     cell_ds_all = self._umap_state['cell_ds']
                     batch_ids = cell_ds_all[unique_idx.cpu()]              # (n_unique,) on CPU
@@ -1118,8 +1254,13 @@ class SCProtoTrainer(AdoptiveTrainer):
 
             # Auxiliary losses computed once on the shared batch (not per-ds)
             if lambda_proto_recon > 0:
-                scores = soft_assign if use_proto_sim else F.softmax(self.model.prototypes(z_unique) / self.epsilon, dim=1)
-                protos = self.model.get_prototypes()
+                if proto_decoupled:
+                    # scores carry gradient to encoder; protos are detached (updated by GMM)
+                    scores = soft_assign
+                    protos = self.model.get_prototypes().detach()
+                else:
+                    scores = soft_assign if use_proto_sim else F.softmax(self.model.prototypes(z_unique) / self.epsilon, dim=1)
+                    protos = self.model.get_prototypes()
                 K = protos.size(0)
                 n_genes = X_batch.size(1)
                 unique_conds, inverse_idx = torch.unique(batch_cond, dim=0, return_inverse=True)
@@ -1131,7 +1272,10 @@ class SCProtoTrainer(AdoptiveTrainer):
                 for c in range(n_unique_conds):
                     cmask = inverse_idx == c
                     if cmask.any():
-                        recon_x_agg[cmask] = scores[cmask].detach() @ decoded_all[c]
+                        if proto_decoupled:
+                            recon_x_agg[cmask] = scores[cmask] @ decoded_all[c]
+                        else:
+                            recon_x_agg[cmask] = scores[cmask].detach() @ decoded_all[c]
                 proto_recon_loss = F.mse_loss(recon_x_agg, X_batch, reduction="none").sum(dim=-1).mean()
 
             if lambda_r1r2 > 0:
@@ -1142,6 +1286,16 @@ class SCProtoTrainer(AdoptiveTrainer):
                 if proto_usage_mode == 'max':
                     c_k = soft_assign.max(dim=0).values                   # (K,)
                     proto_usage_loss = -torch.log(c_k.clamp(min=1e-8)).mean()
+                elif proto_usage_mode == 'ema':
+                    c_k = soft_assign.max(dim=0).values                   # (K,)
+                    ema_alpha = getattr(self, 'usage_nk_alpha', 0.9)
+                    if self._c_k_ema is None:
+                        self._c_k_ema = c_k.detach().cpu()
+                        c_k_ema = c_k
+                    else:
+                        c_k_ema = ema_alpha * self._c_k_ema.to(self.device) + (1 - ema_alpha) * c_k
+                        self._c_k_ema = c_k_ema.detach().cpu()
+                    proto_usage_loss = -torch.log(c_k_ema.clamp(min=1e-8)).mean() / (1 - ema_alpha)
                 else:                                                      # 'nk' (default)
                     n_k = soft_assign.sum(dim=0)                          # (K,)
                     proto_usage_loss = torch.log(1.0 + 1.0 / n_k.clamp(min=1e-8)).mean()
@@ -1260,6 +1414,10 @@ class SCProtoTrainer(AdoptiveTrainer):
             loss.backward()
             optimizer.step()
 
+            # Decoupled proto update: online GMM M-step using same soft_assign from forward pass
+            if proto_decoupled:
+                self._update_protos_ema(z_unique.detach(), soft_assign.detach(), _proto_eta)
+
             # EMA update for usage_norm_sim=2: update after weights change
             if getattr(self, 'usage_norm_sim', 0) == 2 and use_proto_sim:
                 ema_alpha = getattr(self, 'usage_nk_alpha', 0.999)
@@ -1304,6 +1462,20 @@ class SCProtoTrainer(AdoptiveTrainer):
             total_metrics['mode5_c_min'] = mode5_c_min
             total_metrics['mode5_corr_max'] = mode5_corr_max
 
+        if proto_decoupled:
+            with torch.no_grad():
+                proto_mu_now = self.model.get_prototypes().detach().cpu()
+                # mean L2 distance each proto moved this epoch
+                proto_move = (proto_mu_now - _proto_mu_epoch_start).norm(dim=1).mean().item()
+                # usage spread: coefficient of variation of running counts (high = uneven = risk of collapse)
+                counts = self._proto_running_count
+                usage_cv = (counts.std() / counts.mean().clamp(min=1e-8)).item()
+                # dead protos: weight < 10% of uniform share
+                dead = (counts / counts.sum().clamp(min=1e-8) < 0.1 / self.nmb_prototypes).sum().item()
+                total_metrics['proto_move']  = proto_move
+                total_metrics['proto_usage_cv'] = usage_cv
+                total_metrics['proto_dead']  = dead
+
         s['epoch'] += 1
         return total_metrics
 
@@ -1326,6 +1498,10 @@ class SCProtoTrainer(AdoptiveTrainer):
             extra += f" | proto_usage={metrics['proto_usage']:.4f}"
         if getattr(self, 'usage_norm_sim', 0) == 5 and 'mode5_c_min' in metrics:
             extra += f" | c_min={metrics['mode5_c_min']:.3f} corr={metrics['mode5_corr_max']:.2f}"
+        if 'proto_move' in metrics:
+            extra += (f" | pmove={metrics['proto_move']:.4f}"
+                      f" cv={metrics['proto_usage_cv']:.2f}"
+                      f" dead={int(metrics['proto_dead'])}")
         effk_str = f" | effk={metrics['effk']:.1f}" if 'effk' in metrics else ""
         unused_str = f" | unused_proto={metrics['n_unused_protos']:.0f}" if 'n_unused_protos' in metrics else ""
         bentropy_str = f" | bentropy={metrics['batch_entropy']:.3f}" if 'batch_entropy' in metrics else ""
@@ -1512,19 +1688,24 @@ class SCProtoTrainer(AdoptiveTrainer):
         if path is None:
             path = os.path.join(self.get_dump_path(), 'umap_checkpoint.pth')
         checkpoint = torch.load(path, map_location=self.device)
+
+        # Step 1: restore pretrain weights + init prototypes — matches the state at which
+        # epsilon was originally calibrated (before UMAP training began).
+        self.load_pretrain_checkpoint()
+        self.init_prototypes()
+
+        # Step 2: rebuild training objects and calibrate epsilon on pretrain+proto state.
+        self._setup_umap_edges(init_prototypes=False, skip_calibration=False)
+
+        # Step 3: overwrite model weights with the fully trained UMAP checkpoint.
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.model.to(self.device)
-
-        # Rebuild training objects (dataset, loader, loss_fn, optimizer)
-        # init_prototypes=False: model weights already loaded above
-        # skip_calibration=True: reuse epsilon/_dist_a/_dist_b from the original training setup
-        self._setup_umap_edges(init_prototypes=False, skip_calibration=True)
         self._umap_state['epoch'] = checkpoint['epoch']
 
         if checkpoint.get('optimizer_state_dict') is not None:
             self._umap_state['optimizer'].load_state_dict(checkpoint['optimizer_state_dict'])
 
-        print(f"Loaded UMAP checkpoint from {path} (resuming from epoch {checkpoint['epoch']})")
+        print(f"Loaded UMAP checkpoint from {path} (epoch {checkpoint['epoch']})")
 
     def save_modularity(self):
         import json
@@ -1541,7 +1722,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         print(f"Saved modularity={result['modularity']:.4f} to {path}")
         return result
 
-    def eval_metacell_quality(self, assignments=None, label='proto'):
+    def eval_metacell_quality(self, assignments=None, label='proto', soft_metrics=False):
         """Compute and save cell-type purity, batch entropy, and modularity per metacell.
 
         Purity and batch entropy are computed per metacell (per-mc Series), then
@@ -1557,17 +1738,50 @@ class SCProtoTrainer(AdoptiveTrainer):
         """
         import json
         import pandas as pd
+        import torch.nn.functional as F
 
-        assignments, label = self._get_assignments(assignments, label)
+        # Encode once; derive hard assignments AND (optionally) soft matrix S.
+        proto_trained = getattr(self, 'umap_similarity', 'embedding') == 'proto'
+        protos = self.model.get_prototypes()
+        S = None  # (N, K) soft assignment matrix — set below when soft_metrics=True
+
+        with torch.no_grad():
+            z = self.encode_adata(self.train_ds.adata, self.model, z_idx=1)
+            if proto_trained and protos is not None and protos.shape[0] > 0:
+                scores = self.model.prototypes(z)          # (N, K)
+                if soft_metrics:
+                    print(f"[soft metrics] using epsilon={self.epsilon:.6f} for soft assignments")
+                    S = F.softmax(scores / self.epsilon, dim=1).cpu().numpy()
+                if assignments is None:
+                    assignments = scores.argmax(dim=1).cpu().numpy()
+                    label = label or 'proto'
+            elif assignments is None:
+                from sklearn.cluster import KMeans
+                z_np = z.cpu().numpy()
+                km = KMeans(n_clusters=self.nmb_prototypes, n_init=3, random_state=42).fit(z_np)
+                assignments = km.labels_
+                label = label or 'kmeans'
+
+        label = label or 'custom'
+
         obs = self.train_ds.adata.obs.copy()
         obs['_mc'] = assignments
 
         dump = self.get_dump_path()
 
+        # Re-save clusters.npz here so it always matches the assignments used for metrics
+        # (train_umap_edges saves it from the last epoch; this overwrites with best-checkpoint assignments)
+        self.save_clusters(assignments=assignments, label=label)
+
         # --- Unused prototypes ---
         n_unused = int(self.nmb_prototypes - len(np.unique(assignments)))
         unused_ratio = n_unused / self.nmb_prototypes
         print(f"[{label}] unused protos: {n_unused}/{self.nmb_prototypes} ({unused_ratio:.2%})")
+
+        # --- Metacell sizes (save once, reuse for weighted stats) ---
+        mc_sizes = obs['_mc'].astype(str).value_counts().rename('size')
+        mc_sizes.index.name = 'metacell'
+        mc_sizes.to_csv(os.path.join(dump, 'size_per_mc.csv'))
 
         # --- Cell-type purity per metacell ---
         lk = self.dataset.label_key
@@ -1576,9 +1790,15 @@ class SCProtoTrainer(AdoptiveTrainer):
             purity_per_mc.index.name = 'metacell'
             purity_per_mc.to_csv(os.path.join(dump, 'purity_per_mc.csv'))
             mean_purity = float(purity_per_mc.mean())
-            print(f"[{label}] mean cell-type purity: {mean_purity:.4f}")
+            weights_p = mc_sizes.reindex(purity_per_mc.index).fillna(0)
+            w_sum_p = weights_p.sum()
+            weighted_mean_purity = float((purity_per_mc * weights_p).sum() / w_sum_p)
+            weighted_std_purity = float(np.sqrt(((purity_per_mc - weighted_mean_purity) ** 2 * weights_p).sum() / w_sum_p))
+            print(f"[{label}] mean cell-type purity: {mean_purity:.4f}  (size-weighted: {weighted_mean_purity:.4f} ± {weighted_std_purity:.4f})")
         else:
             mean_purity = None
+            weighted_mean_purity = None
+            weighted_std_purity = None
             print(f"[{label}] cell-type purity: label key '{lk}' not in obs, skipped")
 
         # --- Niche purity per metacell ---
@@ -1588,10 +1808,18 @@ class SCProtoTrainer(AdoptiveTrainer):
             niche_purity_per_mc.index.name = 'metacell'
             niche_purity_per_mc.to_csv(os.path.join(dump, 'niche_purity_per_mc.csv'))
             mean_niche_purity = float(niche_purity_per_mc.mean())
-            print(f"[{label}] mean niche purity: {mean_niche_purity:.4f}")
+            weights_n = mc_sizes.reindex(niche_purity_per_mc.index).fillna(0)
+            w_sum_n = weights_n.sum()
+            weighted_mean_niche_purity = float((niche_purity_per_mc * weights_n).sum() / w_sum_n)
+            weighted_std_niche_purity = float(np.sqrt(((niche_purity_per_mc - weighted_mean_niche_purity) ** 2 * weights_n).sum() / w_sum_n))
+            print(f"[{label}] mean niche purity: {mean_niche_purity:.4f}  (size-weighted: {weighted_mean_niche_purity:.4f} ± {weighted_std_niche_purity:.4f})")
             self._log_metric('mean_niche_purity', mean_niche_purity)
+            self._log_metric('weighted_mean_niche_purity', weighted_mean_niche_purity)
+            self._log_metric('weighted_std_niche_purity', weighted_std_niche_purity)
         else:
             mean_niche_purity = None
+            weighted_mean_niche_purity = None
+            weighted_std_niche_purity = None
             if nk:
                 print(f"[{label}] niche purity: niche key '{nk}' not in obs, skipped")
 
@@ -1602,10 +1830,66 @@ class SCProtoTrainer(AdoptiveTrainer):
             entropy_per_mc.index.name = 'metacell'
             entropy_per_mc.to_csv(os.path.join(dump, 'batch_entropy_per_mc.csv'))
             mean_entropy = float(entropy_per_mc.mean())
-            print(f"[{label}] mean batch entropy: {mean_entropy:.4f}")
+            weights = mc_sizes.reindex(entropy_per_mc.index).fillna(0)
+            w_sum = weights.sum()
+            weighted_mean_entropy = float((entropy_per_mc * weights).sum() / w_sum)
+            weighted_std_entropy = float(np.sqrt(((entropy_per_mc - weighted_mean_entropy) ** 2 * weights).sum() / w_sum))
+            print(f"[{label}] mean batch entropy: {mean_entropy:.4f}  (size-weighted: {weighted_mean_entropy:.4f} ± {weighted_std_entropy:.4f})")
         else:
             mean_entropy = None
+            weighted_mean_entropy = None
+            weighted_std_entropy = None
             print(f"[{label}] batch entropy: batch key not found, skipped")
+
+        # --- Soft assignment metrics (proto mode only) ---
+        soft_purity_per_mc = None
+        soft_niche_purity_per_mc = None
+        soft_entropy_per_mc = None
+        if S is not None:
+            K_soft = S.shape[1]
+            effective_sizes = S.sum(axis=0)  # (K,) — soft cell count per proto
+
+            pd.Series(effective_sizes, index=[str(k) for k in range(K_soft)], name='effective_size') \
+              .rename_axis('metacell').to_csv(os.path.join(dump, 'effective_size_per_mc.csv'))
+
+            if lk in obs.columns:
+                lbl_cat = pd.Categorical(obs[lk].values)
+                onehot = np.eye(len(lbl_cat.categories))[lbl_cat.codes]  # (N, L)
+                lbl_weights = S.T @ onehot                                 # (K, L)
+                soft_purity_k = lbl_weights.max(axis=1) / np.maximum(effective_sizes, 1e-10)
+
+                soft_purity_per_mc = pd.Series(
+                    soft_purity_k, index=[str(k) for k in range(K_soft)], name='soft_purity'
+                ).rename_axis('metacell')
+                soft_purity_per_mc.to_csv(os.path.join(dump, 'soft_purity_per_mc.csv'))
+
+                soft_mean_pur   = float(soft_purity_k.mean())
+                soft_wmean_pur  = float((soft_purity_k * effective_sizes).sum() / effective_sizes.sum())
+                soft_wstd_pur   = float(np.sqrt(((soft_purity_k - soft_wmean_pur) ** 2 * effective_sizes).sum() / effective_sizes.sum()))
+                print(f"[{label}] soft mean cell-type purity: {soft_mean_pur:.4f}  (effective-size-weighted: {soft_wmean_pur:.4f} ± {soft_wstd_pur:.4f})")
+                self._log_metric('soft_mean_cell_type_purity',          soft_mean_pur)
+                self._log_metric('soft_weighted_mean_cell_type_purity', soft_wmean_pur)
+                self._log_metric('soft_weighted_std_cell_type_purity',  soft_wstd_pur)
+
+            if bk and bk in obs.columns:
+                bat_cat    = pd.Categorical(obs[bk].values)
+                bat_onehot = np.eye(len(bat_cat.categories))[bat_cat.codes]  # (N, B)
+                bat_weights = S.T @ bat_onehot                                 # (K, B)
+                bat_dist    = bat_weights / np.maximum(effective_sizes[:, None], 1e-10)
+                soft_entropy_k = -np.sum(bat_dist * np.log(bat_dist + 1e-10), axis=1)
+
+                soft_entropy_per_mc = pd.Series(
+                    soft_entropy_k, index=[str(k) for k in range(K_soft)], name='soft_batch_entropy'
+                ).rename_axis('metacell')
+                soft_entropy_per_mc.to_csv(os.path.join(dump, 'soft_batch_entropy_per_mc.csv'))
+
+                soft_mean_ent  = float(soft_entropy_k.mean())
+                soft_wmean_ent = float((soft_entropy_k * effective_sizes).sum() / effective_sizes.sum())
+                soft_wstd_ent  = float(np.sqrt(((soft_entropy_k - soft_wmean_ent) ** 2 * effective_sizes).sum() / effective_sizes.sum()))
+                print(f"[{label}] soft mean batch entropy: {soft_mean_ent:.4f}  (effective-size-weighted: {soft_wmean_ent:.4f} ± {soft_wstd_ent:.4f})")
+                self._log_metric('soft_mean_batch_entropy',          soft_mean_ent)
+                self._log_metric('soft_weighted_mean_batch_entropy', soft_wmean_ent)
+                self._log_metric('soft_weighted_std_batch_entropy',  soft_wstd_ent)
 
         # --- Modularity ---
         mod_result = self.modularity(assignments=assignments, label=label)
@@ -1618,25 +1902,45 @@ class SCProtoTrainer(AdoptiveTrainer):
         with open(mod_path, 'w') as f:
             json.dump(mod_result, f, indent=2, default=_convert)
 
+        # --- Per-batch modularity ---
+        mean_batch_mod = std_batch_mod = None
+        if bk and bk in obs.columns:
+            from interpretable_ssl.evaluation.mc_metric_utils import calc_modularity_per_batch
+            A_full = self.train_ds.aff_raw if hasattr(self.train_ds, 'aff_raw') else self.train_ds.aff
+            batch_mod_s = calc_modularity_per_batch(A_full, assignments, obs[bk].values)
+            batch_mod_s.to_csv(os.path.join(dump, 'modularity_per_batch.csv'))
+            mean_batch_mod = float(batch_mod_s.mean())
+            std_batch_mod = float(batch_mod_s.std())
+            print(f"[{label}] per-batch modularity: mean={mean_batch_mod:.4f}, std={std_batch_mod:.4f}")
+
         # --- Log scalar summaries ---
         if mean_purity is not None:
             self._log_metric('mean_cell_type_purity', mean_purity)
+            self._log_metric('weighted_mean_cell_type_purity', weighted_mean_purity)
+            self._log_metric('weighted_std_cell_type_purity', weighted_std_purity)
         if mean_entropy is not None:
             self._log_metric('mean_batch_entropy', mean_entropy)
+            self._log_metric('weighted_mean_batch_entropy', weighted_mean_entropy)
+            self._log_metric('weighted_std_batch_entropy', weighted_std_entropy)
         self._log_metric('modularity', mod_result['modularity'])
         self._log_metric('n_unused_protos', n_unused)
         self._log_metric('unused_proto_ratio', unused_ratio)
+        if mean_batch_mod is not None:
+            self._log_metric('mean_modularity_batch', mean_batch_mod)
+            self._log_metric('std_modularity_batch', std_batch_mod)
 
         return {
-            'purity': purity_per_mc,
-            'niche_purity': niche_purity_per_mc,
+            'purity':        purity_per_mc,
+            'soft_purity':   soft_purity_per_mc,
+            'niche_purity':  niche_purity_per_mc,
             'batch_entropy': entropy_per_mc,
-            'modularity': mod_result,
-            'n_unused_protos': n_unused,
+            'soft_entropy':  soft_entropy_per_mc,
+            'modularity':    mod_result,
+            'n_unused_protos':  n_unused,
             'unused_proto_ratio': unused_ratio,
         }
 
-    def eval_task2_metrics(self, mc_ad=None):
+    def eval_task2_metrics(self, mc_ad=None, soft_metrics=False):
         """Compute and save task 2 metacell representation metrics.
 
         Metrics: coverage, DGE consistency (RBO/Kendall/Jaccard), scGraph.
@@ -1661,27 +1965,43 @@ class SCProtoTrainer(AdoptiveTrainer):
         if mc_ad is None:
             import anndata
             mc_path = os.path.join(dump, 'metacells.h5ad')
-            mc_ad = anndata.read_h5ad(mc_path) if os.path.exists(mc_path) else self.save_metacells()
+            mc_ad_all = anndata.read_h5ad(mc_path) if os.path.exists(mc_path) else self.save_metacells()
+        else:
+            mc_ad_all = mc_ad.copy()
 
-        # Attach majority-vote cell-type labels; drop unused prototypes (no cells assigned)
-        proto_labels = self.label_prototypes(lk)['labels']  # Series: proto_id -> label
-        mc_ad.obs[lk] = mc_ad.obs['prototype_id'].map(proto_labels)
-        mc_ad = mc_ad[mc_ad.obs[lk].notna()].copy()
-
-        # PCA embedding for scGraph
-        sc.tl.pca(mc_ad)
         obsm_key = f"{name}_mc_pca"
-        mc_ad.obsm[obsm_key] = mc_ad.obsm["X_pca"]
 
-        scalars = calc_task2_metrics(ad, mc_ad, lk, bk, [obsm_key], name, dump)
+        # --- Hard labels: majority vote, drop unused protos ---
+        proto_labels = self.label_prototypes(lk)['labels']  # Series: proto_id -> label
+        mc_ad_hard = mc_ad_all.copy()
+        mc_ad_hard.obs[lk] = mc_ad_hard.obs['prototype_id'].map(proto_labels)
+        mc_ad_hard = mc_ad_hard[mc_ad_hard.obs[lk].notna()].copy()
+        sc.tl.pca(mc_ad_hard)
+        mc_ad_hard.obsm[obsm_key] = mc_ad_hard.obsm["X_pca"]
 
-        # Log scalar summaries
+        scalars = calc_task2_metrics(ad, mc_ad_hard, lk, bk, [obsm_key], name, dump)
         for metric_name, value in scalars.items():
             if value is not None:
                 self._log_metric(metric_name, value)
                 print(f"[task2] {metric_name}: {value:.4f}")
 
-        return scalars
+        # --- Soft labels: weighted vote, all protos get a label ---
+        soft_scalars = {}
+        if soft_metrics and getattr(self, 'umap_similarity', 'embedding') == 'proto':
+            soft_proto_labels = self.label_prototypes_soft(lk)['labels']  # all K protos labeled
+            mc_ad_soft = mc_ad_all.copy()
+            mc_ad_soft.obs[lk] = mc_ad_soft.obs['prototype_id'].map(soft_proto_labels)
+            sc.tl.pca(mc_ad_soft)
+            mc_ad_soft.obsm[obsm_key] = mc_ad_soft.obsm["X_pca"]
+            soft_dump = os.path.join(dump, 'soft')
+            os.makedirs(soft_dump, exist_ok=True)
+            soft_scalars = calc_task2_metrics(ad, mc_ad_soft, lk, bk, [obsm_key], name + '_soft', soft_dump)
+            for metric_name, value in soft_scalars.items():
+                if value is not None:
+                    self._log_metric(f'soft_{metric_name}', value)
+                    print(f"[task2/soft] {metric_name}: {value:.4f}")
+
+        return {**scalars, **{f'soft_{k}': v for k, v in soft_scalars.items()}}
 
     def eval_task3_metrics(self, mc_ad=None):
         """Compute and save task 3 spatial metrics (niche DGE consistency).
@@ -2881,7 +3201,13 @@ class SCProtoTrainer(AdoptiveTrainer):
         )
 
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        mc_adata.write_h5ad(path)
+        # Write to a temp path then rename to avoid h5py "file already open" errors
+        # (stale handles from prior Colab cell runs cause ACC_TRUNC to fail on the same path)
+        tmp_path = path + '.tmp'
+        mc_adata.write_h5ad(tmp_path)
+        if os.path.exists(path):
+            os.remove(path)
+        os.rename(tmp_path, path)
         print(f"Saved metacells ({K} prototypes) to {path}")
         return mc_adata
 
@@ -2912,6 +3238,39 @@ class SCProtoTrainer(AdoptiveTrainer):
             'labels': majority_labels,
             'purity': purity,
             'counts': counts,
+        }
+
+    def label_prototypes_soft(self, label_key):
+        """Label every prototype via soft-assignment weighted voting.
+
+        S = softmax(scores / epsilon).  Every proto gets a label (no filtering).
+        Purity = max class weight / effective size of that proto.
+        """
+        import torch.nn.functional as F
+        with torch.no_grad():
+            z      = self.encode_adata(self.train_ds.adata, self.model, z_idx=1)
+            scores = self.model.prototypes(z)
+            print(f"[label_prototypes_soft] using epsilon={self.epsilon:.6f}")
+            S      = F.softmax(scores / self.epsilon, dim=1).cpu().numpy()  # (N, K)
+
+        labels  = self.train_ds.adata.obs[label_key].values
+        K       = S.shape[1]
+        lbl_cat = pd.Categorical(labels)
+        onehot  = np.eye(len(lbl_cat.categories))[lbl_cat.codes]  # (N, L)
+        lbl_weights    = S.T @ onehot                              # (K, L)
+        effective_sizes = S.sum(axis=0)                            # (K,)
+
+        winner_codes   = lbl_weights.argmax(axis=1)
+        majority_labels = pd.Series(
+            lbl_cat.categories[winner_codes],
+            index=np.arange(K),
+            name=label_key,
+        )
+        soft_purity = lbl_weights.max(axis=1) / np.maximum(effective_sizes, 1e-10)
+        return {
+            'labels':          majority_labels,
+            'purity':          pd.Series(soft_purity, index=np.arange(K)),
+            'effective_sizes': effective_sizes,
         }
 
     def prototype_dge(self, niche_key, celltype_key, method='wilcoxon'):

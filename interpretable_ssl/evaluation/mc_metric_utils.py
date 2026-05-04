@@ -65,6 +65,58 @@ def spatial_compactness(
     return pd.DataFrame({"spatial_compactness": comp, "size": sizes})
 
 
+def compute_aff_dc_compactness(aff, mc_ids, batches):
+    """Compute per-(metacell, batch) compactness in diffusion component space.
+
+    aff: scipy sparse CSR affinity matrix (n_cells x n_cells), diagonal=0 is fine —
+         we set it to 1 internally before running diffusion maps.
+    mc_ids: array of metacell assignment per cell
+    batches: array of batch label per cell
+
+    Returns
+    -------
+    comp_df : pd.DataFrame  shape (n_metacells, n_batches)
+        compactness[m, b] = mean squared dist of cells in (metacell m, batch b)
+        from their centroid. NaN if fewer than 2 cells.
+    counts_df : pd.DataFrame  shape (n_metacells, n_batches)
+        number of cells per (metacell, batch). 0 if absent.
+    """
+    import palantir
+
+    K = aff.tocsr(copy=True)
+    K.setdiag(1)
+
+    dm_res = palantir.utils.diffusion_maps_from_kernel(K, n_components=10)
+    dc = palantir.utils.determine_multiscale_space(dm_res, n_eigs=10)
+    X = dc.values
+
+    unique_mcs = np.unique(mc_ids)
+    unique_batches = np.unique(batches)
+
+    comp_rows = {}
+    count_rows = {}
+    for mc in unique_mcs:
+        comp_row = {}
+        count_row = {}
+        for b in unique_batches:
+            idx = np.where((mc_ids == mc) & (batches == b))[0]
+            count_row[b] = len(idx)
+            if len(idx) == 0:
+                comp_row[b] = np.nan       # batch absent from metacell — exclude
+            elif len(idx) == 1:
+                comp_row[b] = 0.0          # single cell: zero variance, CVAE-aligned
+            else:
+                X_mb = X[idx]
+                mu = X_mb.mean(0)
+                comp_row[b] = float(((X_mb - mu) ** 2).sum() / len(X_mb))
+        comp_rows[mc] = comp_row
+        count_rows[mc] = count_row
+
+    comp_df = pd.DataFrame(comp_rows, dtype=float).T   # (n_metacells, n_batches)
+    counts_df = pd.DataFrame(count_rows, dtype=float).T
+    return comp_df, counts_df
+
+
 def compute_mc_compactness_and_separation(X, mc_ids, batches):
     compact_vals = []
     for mc in np.unique(mc_ids):
@@ -133,6 +185,62 @@ def calc_batch_entropy(df, batch_key, mc_key="SEACell", return_per_mc=False):
     if return_per_mc:
         return pd.Series(ents, index=pd.Index(groups.groups.keys(), dtype=str), name="batch_entropy")
     return float(np.mean(ents))
+
+
+def calc_modularity_per_batch(A, assignments, batch_labels):
+    """Compute modularity for each batch on an edge-filtered subgraph.
+
+    For each batch: keep all edges where at least one endpoint belongs to the
+    batch, then run standard Newman weighted modularity on that graph.
+
+    Args:
+        A:             scipy sparse adjacency (n_cells x n_cells). Symmetrized
+                       internally — pass the raw affinity matrix.
+        assignments:   integer cluster labels, shape (n_cells,).
+        batch_labels:  batch label per cell, shape (n_cells,).
+
+    Returns:
+        pd.Series indexed by batch name, values are modularity scores.
+        Returns None if A has no edges.
+    """
+    import scipy.sparse as sp
+
+    A = sp.csr_matrix(A)
+    A = (A + A.T) / 2
+    A_coo = A.tocoo()
+
+    n = A.shape[0]
+    cluster_ids = np.unique(assignments)
+    batch_ids = np.unique(batch_labels)
+    batch_mod_vals = {}
+
+    for batch in batch_ids:
+        in_batch = np.zeros(n, dtype=bool)
+        in_batch[batch_labels == batch] = True
+
+        keep = in_batch[A_coo.row] | in_batch[A_coo.col]
+        A_b = sp.coo_matrix(
+            (A_coo.data[keep], (A_coo.row[keep], A_coo.col[keep])),
+            shape=(n, n),
+        ).tocsr()
+
+        degrees_b = np.array(A_b.sum(axis=1)).ravel()
+        two_m_b = float(degrees_b.sum())
+        if two_m_b == 0:
+            batch_mod_vals[str(batch)] = 0.0
+            continue
+
+        Q_b = 0.0
+        for c in cluster_ids:
+            mask_c = (assignments == c)
+            e_k = float(A_b[mask_c][:, mask_c].sum())
+            d_k = float(degrees_b[mask_c].sum())
+            Q_b += (e_k - d_k * d_k / two_m_b) / two_m_b
+        batch_mod_vals[str(batch)] = float(Q_b)
+
+    s = pd.Series(batch_mod_vals, name='modularity')
+    s.index.name = 'batch'
+    return s
 
 
 def mc_label_purity(ad, lk, mc_key="SEACell", name="model", save_path=None):

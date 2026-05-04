@@ -38,8 +38,9 @@ def get_code_dir():
     return CODE_DIR
 
 
-def get_seacell_model_dir(ds_id):
-    return os.path.join(MODEL_DIR, ds_id, 'seacell/')
+def get_seacell_model_dir(ds_id, build_kernel_on="X_pca"):
+    dir_name = "seacell" if build_kernel_on == "X_pca" else f"seacell_{build_kernel_on}"
+    return os.path.join(MODEL_DIR, ds_id, dir_name)
 
 
 def get_dataset_model_dir(ds_id):

@@ -5,6 +5,14 @@ Colab boilerplate — run this at the top of every notebook:
 import sys, os, importlib
 from importlib import reload
 
+# Auto-reload any changed module before every cell — no need to re-run nb_setup
+try:
+    ip = get_ipython()
+    ip.run_line_magic('load_ext', 'autoreload')
+    ip.run_line_magic('autoreload', '2')
+except Exception:
+    pass
+
 PROJECT_ROOT = '/content/drive/MyDrive/codes/interpretable-prototype'
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
@@ -27,7 +35,7 @@ mpl.rcParams['figure.dpi'] = 150
 
 def reload_interpretable_ssl():
     for m in list(sys.modules):
-        if m.startswith("interpretable_ssl") or m == "constants":
+        if m.startswith("interpretable_ssl") or m in ("constants", "seacell_train"):
             del sys.modules[m]
 
 # Make tasks available directly after %run nb_setup.py
@@ -43,7 +51,17 @@ from interpretable_ssl.experiments.tasks import (
     LAMBDA_PROTO_CTX_UMAP,
 )
 
-print("nb_setup done. Available: get_trainer, run_mc_task, LAMBDA_PROTO_UMAP, LAMBDA_PROTO_UMAP_PRECON, LAMBDA_PARAM_UMAP, LAMBDA_RECON_ONLY")
+from seacell_train import (
+    train_seacell,
+    eval_seacell_task1,
+    eval_seacell_task2,
+    eval_seacell_task3,
+)
+
+from interpretable_ssl.evaluation.paper_figures import *
+from interpretable_ssl.evaluation.metric_helpers.result_tables import *
+
+print("nb_setup done. Available: get_trainer, run_mc_task, fig_*, LAMBDA_PROTO_UMAP, LAMBDA_PROTO_UMAP_PRECON, LAMBDA_PARAM_UMAP, LAMBDA_RECON_ONLY")
 print("Configs:", {
     'LAMBDA_PROTO_UMAP': LAMBDA_PROTO_UMAP,
     'LAMBDA_PARAM_UMAP': LAMBDA_PARAM_UMAP,

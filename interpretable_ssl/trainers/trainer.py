@@ -437,7 +437,7 @@ class Trainer(TrainerBase):
             w_label=w_label,
         )
 
-    def plot_umap_simple(self, adata=None, color_key=None, model=None, max_cells=50000, figsize=(6, 5), show_proto_nums=True):
+    def plot_umap_simple(self, adata=None, color_key=None, model=None, max_cells=50000, figsize=(6, 5), show_proto_nums=True, soft_labels=False):
         """
         Simple UMAP plot: cells colored by label, prototypes labeled by majority vote.
         No density panel.
@@ -456,7 +456,6 @@ class Trainer(TrainerBase):
         """
         import matplotlib.pyplot as plt
         from collections import Counter
-        from scipy.spatial.distance import cdist
 
         if adata is None:
             adata = getattr(self, 'train_ds', None)
@@ -474,20 +473,38 @@ class Trainer(TrainerBase):
 
         ad = adata.copy() if adata.n_obs <= max_cells else adata[np.random.choice(adata.n_obs, max_cells, replace=False)].copy()
 
-        z = self.encode_adata(ad, model, z_idx=1).detach().cpu().numpy()
+        z_tensor = self.encode_adata(ad, model, z_idx=1).detach()
+        z = z_tensor.cpu().numpy()
         proto = model.get_prototypes().detach().cpu().numpy()
         n_protos = proto.shape[0]
 
-        # Assignment by closest proto (Euclidean)
-        assignments = np.argmin(cdist(z, proto), axis=1)
+        # Assignment by dotp (matches model's nn.Linear scoring used everywhere else)
+        import torch.nn.functional as F
+        scores_tensor = model.prototypes(z_tensor)              # (N, K)
+        assignments   = scores_tensor.argmax(dim=1).cpu().numpy()
+        if soft_labels:
+            eps = getattr(self, 'epsilon', 1.0)
+            print(f"[plot_umap_simple] soft_labels=True, using epsilon={eps:.6f}")
+            S   = F.softmax(scores_tensor / eps, dim=1).detach().cpu().numpy()  # (N, K)
 
         # Joint UMAP (compute once, reuse for all plots)
+        n_cells = len(z)
         combined = np.vstack([z, proto])
         tmp_ad = sc.AnnData(combined)
-        sc.pp.neighbors(tmp_ad, use_rep='X', n_neighbors=15, random_state=42)
+        sc.pp.neighbors(tmp_ad, use_rep='X', n_neighbors=15, metric='cosine', random_state=42)
+
+        # Force cell↔assigned-prototype edges so UMAP keeps them together.
+        from scipy.sparse import lil_matrix
+        conn = tmp_ad.obsp['connectivities'].tolil()
+        for cell_idx, proto_idx in enumerate(assignments):
+            node = n_cells + proto_idx
+            conn[cell_idx, node] = 1.0
+            conn[node, cell_idx] = 1.0
+        tmp_ad.obsp['connectivities'] = conn.tocsr()
+
         sc.tl.umap(tmp_ad, random_state=42)
-        z_umap = tmp_ad.obsm['X_umap'][:len(z)]
-        proto_umap = tmp_ad.obsm['X_umap'][len(z):]
+        z_umap = tmp_ad.obsm['X_umap'][:n_cells]
+        proto_umap = tmp_ad.obsm['X_umap'][n_cells:]
 
         # Create subplots
         n_plots = len(color_keys)
@@ -505,14 +522,24 @@ class Trainer(TrainerBase):
             ax = axes[idx]
             labels = ad.obs[ck].values
 
-            # Majority vote labels for this color key
+            # Proto labels: hard majority vote, or soft weighted vote
             proto_labels = []
-            proto_sizes = []
-            for p in range(n_protos):
-                mask = assignments == p
-                n = mask.sum()
-                proto_sizes.append(n)
-                proto_labels.append(Counter(labels[mask]).most_common(1)[0][0] if n > 0 else None)
+            proto_sizes  = []
+            if soft_labels:
+                import pandas as pd
+                lbl_cat    = pd.Categorical(labels)
+                onehot     = np.eye(len(lbl_cat.categories))[lbl_cat.codes]  # (N, L)
+                lbl_weights = S.T @ onehot                                     # (K, L)
+                eff_sizes   = S.sum(axis=0)                                    # (K,)
+                for p in range(n_protos):
+                    proto_sizes.append(eff_sizes[p])
+                    proto_labels.append(lbl_cat.categories[lbl_weights[p].argmax()])
+            else:
+                for p in range(n_protos):
+                    mask = assignments == p
+                    n    = mask.sum()
+                    proto_sizes.append(n)
+                    proto_labels.append(Counter(labels[mask]).most_common(1)[0][0] if n > 0 else None)
 
             all_proto_labels[ck] = proto_labels
 
@@ -547,6 +574,97 @@ class Trainer(TrainerBase):
         if len(color_keys) == 1:
             return fig, all_proto_labels[color_keys[0]]
         return fig, all_proto_labels
+
+    def save_umap_data(self, save_dir=None, model=None, max_cells=50000):
+        """Compute UMAP and save output files to save_dir.
+
+        umap_cells.csv      — UMAP subset (≤max_cells): cell_id, umap_1, umap_2, metacell_id, label/batch cols
+        umap_protos.csv     — one row per prototype: proto_id, umap_1, umap_2, n_cells, majority_{label_key}
+        proto_vectors.npy   — prototype latent vectors, shape (n_protos, latent_dim)
+        cell_assignments.csv — ALL cells: cell_id, metacell_id, label/batch cols (no subsampling)
+        """
+        import pandas as pd
+        from collections import Counter
+
+        if save_dir is None:
+            save_dir = self.get_dump_path()
+        if model is None:
+            model = self.model
+
+        adata = getattr(self, 'train_ds', None)
+        adata = adata.adata if adata else self.dataset.adata
+
+        ad = adata.copy() if adata.n_obs <= max_cells else adata[np.random.choice(adata.n_obs, max_cells, replace=False)].copy()
+
+        z_tensor = self.encode_adata(ad, model, z_idx=1).detach()
+        z = z_tensor.cpu().numpy()
+        proto = model.get_prototypes().detach().cpu().numpy()
+        n_protos = proto.shape[0]
+
+        assignments = model.prototypes(z_tensor).argmax(dim=1).cpu().numpy()
+
+        n_cells = len(z)
+        combined = np.vstack([z, proto])
+        tmp_ad = sc.AnnData(combined)
+        sc.pp.neighbors(tmp_ad, use_rep='X', n_neighbors=15, metric='cosine', random_state=42)
+
+        # Force cell↔assigned-prototype edges so UMAP keeps them together.
+        # Without this, dense clusters fill all 15 NN slots with other cells
+        # and prototypes end up with no graph edge to their assigned cells.
+        # Use cosine similarity as the edge weight, consistent with the metric.
+        from sklearn.preprocessing import normalize
+        z_norm = normalize(z, norm='l2')
+        proto_norm = normalize(proto, norm='l2')
+        conn = tmp_ad.obsp['connectivities'].tolil()
+        for cell_idx, proto_idx in enumerate(assignments):
+            weight = float(np.dot(z_norm[cell_idx], proto_norm[proto_idx]))
+            node = n_cells + proto_idx
+            conn[cell_idx, node] = max(conn[cell_idx, node], weight)
+            conn[node, cell_idx] = max(conn[node, cell_idx], weight)
+        tmp_ad.obsp['connectivities'] = conn.tocsr()
+
+        sc.tl.umap(tmp_ad, random_state=42)
+        z_umap = tmp_ad.obsm['X_umap'][:n_cells]
+        proto_umap = tmp_ad.obsm['X_umap'][n_cells:]
+
+        label_key = self.dataset.label_key
+        batch_key = self.dataset.batch_key
+
+        cells_df = pd.DataFrame({'cell_id': ad.obs_names, 'umap_1': z_umap[:, 0], 'umap_2': z_umap[:, 1], 'metacell_id': assignments})
+        for col in [label_key, batch_key]:
+            if col and col in ad.obs.columns:
+                cells_df[col] = ad.obs[col].values
+        cells_df.to_csv(os.path.join(save_dir, 'umap_cells.csv'), index=False)
+
+        # Save assignments for ALL cells (no subsampling) so any loaded ad can be joined by barcode.
+        all_ad = adata
+        all_z = self.encode_adata(all_ad, model, z_idx=1).detach()
+        all_assignments = model.prototypes(all_z).argmax(dim=1).cpu().numpy()
+        assign_df = pd.DataFrame({'cell_id': all_ad.obs_names, 'metacell_id': all_assignments})
+        for col in [label_key, batch_key]:
+            if col and col in all_ad.obs.columns:
+                assign_df[col] = all_ad.obs[col].values
+        assign_df.to_csv(os.path.join(save_dir, 'cell_assignments.csv'), index=False)
+
+        # Use all_assignments/all_ad for counts and majority labels so they reflect the full dataset.
+        niche_key = getattr(self.dataset, 'niche_key', None)
+        lk_vals = all_ad.obs[label_key].values if label_key and label_key in all_ad.obs.columns else None
+        nk_vals = all_ad.obs[niche_key].values if niche_key and niche_key in all_ad.obs.columns else None
+        proto_rows = []
+        for p in range(n_protos):
+            mask = all_assignments == p
+            n = int(mask.sum())
+            row = {'proto_id': p, 'umap_1': proto_umap[p, 0], 'umap_2': proto_umap[p, 1], 'n_cells': n}
+            if lk_vals is not None:
+                row[f'majority_{label_key}'] = Counter(lk_vals[mask]).most_common(1)[0][0] if n > 0 else None
+            if nk_vals is not None:
+                row[f'majority_{niche_key}'] = Counter(nk_vals[mask]).most_common(1)[0][0] if n > 0 else None
+            proto_rows.append(row)
+        pd.DataFrame(proto_rows).to_csv(os.path.join(save_dir, 'umap_protos.csv'), index=False)
+
+        np.save(os.path.join(save_dir, 'proto_vectors.npy'), proto)
+
+        print(f"UMAP data saved to {save_dir}")
 
     def plot_ref_umap(self, save_plot=True, name_postfix=None, model=None):
 
