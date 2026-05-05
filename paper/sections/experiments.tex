@@ -1,0 +1,42 @@
+\section{Experimental Setup}
+
+\subsection{Datasets}
+
+We use three publicly available single-cell RNA-seq datasets for non-spatial evaluations~\citep{luecken2020benchmarking}:
+\textbf{Pancreas} (16,382 cells, 9 technologies, 14 cell types),
+\textbf{PBMC (immune)} (30k cells, 5 batches, 9 cell types),
+and a \textbf{Lung} dataset (30k cells, 16 batches, 17 cell types).
+For spatial evaluations, we additionally use a \textbf{non-small cell lung cancer (NSCLC)} spatial transcriptomics dataset~\citep{pentimalli2025combining} (28,804 cells, 18 cell types, 9 niches).
+The original dataset comprises 6 slides; we select slide 28, subsample 30,000 cells stratified by cell type and niche label, and remove cells assigned to excluded niche labels, yielding the final 28,804 cells.
+Detailed dataset statistics are provided in Appendix~\ref{app:datasets}.
+
+\subsection{Affinity Construction}
+
+We construct cell--cell affinity graphs to define the community structure to be preserved by scProto.
+For transcriptomic experiments, affinities are computed using an adaptive Gaussian kernel on PCA embeddings, following prior work~\citep{seacells}.
+For spatial experiments, we use the same adaptive Gaussian kernel but apply it to spatially aggregated features, obtained by averaging the PCA embeddings of neighboring cells within a fixed spatial radius.
+This incorporates local microenvironmental context directly into the affinity, allowing scProto to learn metacells that reflect tissue organization rather than transcriptomic similarity alone.
+
+\subsection{Baselines}
+
+We compare scProto against three baselines:
+\textbf{SEACells}~\citep{seacells}, a state-of-the-art metacell method based on archetypal analysis;
+\textbf{CVAE}, a reconstruction-only variant that omits affinity guidance, isolating the effect of the affinity loss;
+and \textbf{Parametric UMAP}, which preserves data geometry by aligning pairwise cell--cell relationships in the embedding space.
+For spatial experiments, we additionally evaluate \textbf{SEACells (spatial)}, trained on the same spatial affinity graph as scProto, to ensure a fair comparison.
+All baselines are configured to produce the same number of metacells $K$ as scProto.
+Unlike scProto, neither CVAE nor Parametric UMAP includes a prototype or clustering mechanism; metacell assignments for these baselines are obtained by applying $K$-means clustering to their learned embeddings.
+
+\subsection{Evaluation Protocol}
+
+We evaluate scProto along three axes: community structure preservation, cross-batch integration, and representation of rare cell populations.
+For spatial experiments, we additionally assess capture of microenvironmental structure.
+
+To assess whether learned metacells respect the community structure of the input affinity graph, we report \textbf{modularity} of the metacell assignments with respect to the graph.
+\textbf{Batch entropy} measures the diversity of batch labels within each metacell; higher values indicate more uniform mixing of cells across batches.
+\textbf{Cell-type purity} measures the homogeneity of each metacell with respect to annotated cell types.
+
+For rare cell types (defined as the bottom 25th percentile by frequency), we additionally report \textbf{coverage}---whether each rare cell type is represented by at least one metacell---and the \textbf{purity} of the corresponding metacells.
+
+For spatial experiments, we evaluate \textbf{niche purity} alongside cell-type purity, measuring whether metacells reflect local tissue organization.
+Detailed metric definitions are provided in Appendix~\ref{app:metrics}.

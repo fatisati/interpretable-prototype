@@ -1,0 +1,182 @@
+\section{Method}
+
+\subsection{Overview}
+
+We introduce scProto, a framework for learning cross-batch metacells from single-cell gene expression data.
+
+\paragraph{Problem Setup.}
+We consider a dataset of cells $\{x_i\}_{i=1}^N$ with $B \geq 1$ batches, where $x_i \in \mathbb{R}^G$ denotes gene expression and each cell has a batch label $b_i \in \{1, \dots, B\}$. Our goal is to learn metacells that aggregate similar cells while preserving biological community structure.
+
+A key challenge is that similarity relationships are reliable primarily within batches due to batch effects. This makes it difficult to aggregate cells across datasets, especially for rare cell states.
+
+\paragraph{Key Idea.}
+scProto is designed to achieve two goals simultaneously: (i) preserve within-batch similarity structure, and (ii) align shared cell states across batches.
+
+To preserve local structure, we encourage highly connected communities in the input similarity graph to map to the same prototype. This is achieved by defining similarity in the latent space based on prototype assignments and matching it to the input graph.
+
+To align shared cell states across batches, we use a conditional reconstruction objective, which learns a shared latent representation that can be decoded consistently across datasets.
+
+\paragraph{scProto Framework.}
+The model consists of: (i) a batch-conditional encoder that maps cells to a shared latent space, (ii) a set of shared prototypes representing metacells (i.e., communities of cells with similar states), and (iii) a batch-conditional decoder that reconstructs gene expression from prototypes conditioned on the batch label, ensuring batch-specific variation is handled at decoding rather than absorbed into the shared prototypes.
+
+The objective combines community structure preservation, reconstruction for cross-batch alignment, and prototype regularization to ensure compact and distinct metacells.
+
+\subsection{Model Components}
+
+\paragraph{Input.}
+We assume gene expression profiles $x_i \in \mathbb{R}^G$ with batch labels $b_i$, and a precomputed similarity graph $P \in \mathbb{R}^{N \times N}$ capturing local relationships.
+If the affinity is computed per batch, the resulting graphs can simply be concatenated to form a block-diagonal $P$; even when computed globally across all cells, batch effects make cross-batch similarities negligible, so $P$ is approximately block-diagonal in either case (see Appendix~\ref{app:graph_structure}).
+
+\paragraph{Encoder.}
+A conditional encoder maps each cell to latent space:
+\[
+z_i = f_\theta(x_i, b_i) \in \mathbb{R}^d.
+\]
+
+\paragraph{Prototypes.}
+We introduce $K$ learnable prototypes $\{c_k\}_{k=1}^K$, $c_k \in \mathbb{R}^d$, representing metacells in the latent space.
+
+\paragraph{Soft Assignment.}
+Each cell is represented as a soft mixture of prototypes:
+\[
+s_{ik} =
+\frac{\exp\left( \frac{z_i^\top c_k}{\tau} \right)}
+{\sum_{k'} \exp\left( \frac{z_i^\top c_{k'}}{\tau} \right)},
+\]
+where $\tau > 0$ is a temperature parameter controlling assignment sharpness. Rather than treating $\tau$ as a fixed hyperparameter, we calibrate it from data after pretraining and prototype initialization (see Appendix~\ref{app:calibration}).
+
+The assignment vector $s_i \in \mathbb{R}^K$ encodes how a cell is composed of metacell components. This representation is used to preserve similarity structure by mapping highly connected cells to similar assignment vectors.
+
+\paragraph{Community Structure Preservation.}
+To preserve local similarity structure, we define similarity between cells based on prototype assignments:
+\[
+q_{ij} = s_i^\top s_j.
+\]
+
+We match this similarity to the input graph using a binary cross-entropy objective:
+\[
+\mathcal{L}_{\text{community}}
+=
+-\sum_{i,j}
+\Big[
+P_{ij}\log \tilde q_{ij}
++
+(1-P_{ij})\log(1-\tilde q_{ij})
+\Big],
+\]
+where $\tilde q_{ij}$ is a clipped version of $q_{ij}$ for numerical stability.
+
+This objective encourages cells that are strongly connected in the affinity graph to share prototype assignments, mapping highly connected communities to the same prototype.
+
+In practice, we optimize this loss stochastically, sampling positive edges from $P_{ij}$ and negative pairs within each batch.
+Since $P$ is block-diagonal and negative pairs are sampled within each batch, both attraction and repulsion operate within individual datasets, making no assumption about cross-batch dissimilarity. Cross-batch alignment is instead delegated to the encoder, which is initialized from a batch-corrected pretrained space and further refined by the reconstruction objective during joint training.
+
+\paragraph{Decoder and Reconstruction.}
+Each prototype is decoded into gene expression space:
+\[
+\hat{x}_k^{(b)} = g_\phi(c_k,\, b),
+\]
+and each cell is reconstructed as:
+\[
+\tilde{x}_i = \sum_{k=1}^K s_{ik}\, \hat{x}_k^{(b_i)}.
+\]
+
+We optimize:
+\[
+\mathcal{L}_{\text{rec}} = \frac{1}{N} \sum_i \|x_i - \tilde{x}_i\|_2^2.
+\]
+
+In practice, we stop the gradient through $s_{ik}$ when optimizing $\mathcal{L}_{\text{rec}}$, so that reconstruction gradients reach only the decoder $g_\phi$ and prototypes $\{c_k\}$, not the encoder $f_\theta$.
+This ensures the encoder is shaped exclusively by $\mathcal{L}_{\text{community}}$, avoiding conflicting gradient directions between the two objectives (see Appendix~\ref{app:training}).
+
+By conditioning the decoder on the batch label $b_i$, batch-specific variation is handled at the decoding stage, allowing the shared prototypes $\{c_k\}$ to capture batch-invariant biological states.
+
+\paragraph{Prototype Regularization.}
+
+\textbf{Batch-aware normalized association.}
+
+Let $S \in \mathbb{R}^{N \times K}$ denote the assignment matrix.
+For each batch $b$, we define a batch-specific edge matrix:
+\[
+W^{(b)}_{ij} =
+\begin{cases}
+P_{ij} & \text{if } b_i = b \;\text{or}\; b_j = b, \\0 & \text{otherwise}.
+\end{cases}
+\]
+
+Let $d^{(b)}$ denote the corresponding degree vector, where
+\[
+d^{(b)}_i = \sum_j W^{(b)}_{ij}.
+\]
+
+We then compute:
+\[
+A^{(b)} = S^\top W^{(b)} S, \quad
+\mathrm{vol}^{(b)} = S^\top d^{(b)},
+\]
+\[
+M^{(b)}_{kj} =
+\frac{A^{(b)}_{kj}}
+{\sqrt{\mathrm{vol}^{(b)}_k \, \mathrm{vol}^{(b)}_j}}.
+\]
+
+The diagonal terms measure how compact each prototype is within a batch: $M^{(b)}_{kk} \in [0,1]$, with values close to 1 indicating that the affinity edges of cells assigned to prototype $k$ are concentrated within that prototype---a tight, well-connected community. Off-diagonal terms $M^{(b)}_{kj}$ measure inter-prototype connectivity, with values close to 0 indicating distinct, non-overlapping prototypes and values close to 1 indicating strong mixing.
+
+To aggregate across batches, we use:
+\[
+M_{kj} = \max_b M^{(b)}_{kj}.
+\]
+
+This has two effects:
+- For diagonal terms, a prototype is considered good if it forms a compact community in at least one batch.
+- For off-diagonal terms, minimizing the maximum ensures that no batch exhibits strong mixing between different prototypes.
+
+The loss is:
+\[
+\mathcal{L}_{\text{nassoc}} =
+\frac{1}{K} \sum_k (M_{kk} - 1)^2
++
+\alpha \cdot \frac{1}{K(K-1)} \sum_{k \neq j} M_{kj}^2.
+\]
+
+\textbf{Prototype usage.}
+To prevent inactive prototypes, we penalize those with low maximum assignment weight.
+Rather than using a noisy per-mini-batch estimate, we maintain a scalar exponential moving average (EMA) $u_k \in \mathbb{R}$ across mini-batches with momentum $m \in (0,1)$:
+\[
+u_k \leftarrow m\, u_k + (1-m)\, \max_i s_{ik},
+\]
+and penalize underused prototypes:
+\[
+\mathcal{L}_{\text{usage}} = \frac{1}{K} \sum_k -\log(u_k).
+\]
+
+Together with the normalized association objective, this ensures that each prototype represents a distinct and meaningful community.
+
+\paragraph{Total Objective.}
+\[
+\mathcal{L} =
+\mathcal{L}_{\text{community}}
++
+\lambda \mathcal{L}_{\text{rec}}
++
+\lambda_n \mathcal{L}_{\text{nassoc}}
++
+\lambda_u \mathcal{L}_{\text{usage}}.
+\]
+
+\paragraph{Training Procedure.}
+
+\textbf{Stage 1: Pretraining.}
+We pretrain the encoder and decoder using scPoli~\citep{scpoli}, a CVAE-based architecture for single-cell data that encodes batch identity via trainable batch embeddings rather than fixed one-hot vectors, enabling effective batch effect correction.
+We optimize a per-cell MSE reconstruction loss on log-normalized gene expression:
+\[
+\mathcal{L}_{\text{CVAE}} =
+\frac{1}{N}\sum_i \|x_i - g_\phi(z_i, b_i)\|_2^2,
+\]
+where $z_i = f_\theta(x_i, b_i)$. This stage trains the encoder and batch embeddings before prototypes are introduced (see Appendix~\ref{app:training} for architecture and hyperparameter details).
+
+\textbf{Stage 2: Prototype initialization and learning.}
+Prototypes are initialized using waypoint initialization following SEACells~\citep{seacells}: $K$ cells are selected via greedy MaxMin in the diffusion map space of the affinity graph, ensuring coverage of all topological regions including rare populations. The pretrained encoder embeddings of the selected cells are then used as initial prototype vectors. The temperature $\tau$ is then calibrated from the current encoder embeddings to match the affinity structure of the data before joint optimization begins (Appendix~\ref{app:calibration}). The full objective $\mathcal{L}$ is then optimized jointly. The KL term is omitted in this stage: since the latent space is already regularized by pretraining, removing KL yields deterministic representations that produce more stable prototype assignments.
+
+This two-stage procedure stabilizes training and yields prototypes that preserve within-batch structure, align shared cell states across batches, and represent compact, distinct communities.
+Full hyperparameter details, loss weights, and guidance on selecting $K$ are provided in Appendix~\ref{app:training}.

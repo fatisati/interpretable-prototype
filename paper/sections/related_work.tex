@@ -1,0 +1,31 @@
+\section{Related Work}
+
+\paragraph{Metacell methods.}
+Metacell approaches address the sparsity and noise in single-cell data by aggregating highly similar cells into stable representative profiles.
+The standard pipeline constructs a cell--cell affinity graph---typically a $k$-nearest-neighbor graph with kernel-based similarity on PCA embeddings---and then partitions it into coherent groups.
+MetaCell~\citep{metacell} introduced this paradigm by partitioning a kNN graph into balanced, densely connected groups using community detection algorithms~\citep{louvain, traag2019leiden} that operate on graph topology alone, without incorporating gene expression features directly.
+SEACells~\citep{seacells} refines the affinity with an adaptive Gaussian kernel that accounts for local density variations, and applies archetypal analysis~\citep{cutler1994archetypal} to identify extreme points on the data manifold as representative cell groups.
+Other methods such as Metacell-2~\citep{metacell2} and SuperCell~\citep{supercell} similarly aggregate cells based on transcriptomic graph structure, but like MetaCell, they remain restricted to within-batch similarity.
+
+These methods share two limitations.
+First, because batch effects induce systematic shifts across datasets, the affinity graph is reliable only within individual batches, and metacells remain batch-specific even when the underlying cell states are shared across datasets.
+Second, groupings are defined purely by affinity structure, with no learning objective that validates whether the grouped cells share coherent gene expression patterns.
+MetaQ~\citep{metaq} attempts to address the second limitation by replacing graph construction with end-to-end representation learning via a vector-quantization objective~\citep{vqvae}, but without an explicit batch correction mechanism the model can reduce its loss by learning batch-specific metacells---an always-available signal---rather than shared biological states.
+SURE~\citep{sure} takes a generative approach that jointly constructs metacells and removes batch effects, but like MetaQ, optimizes reconstruction without affinity guidance, failing to preserve local cell--cell similarity structure---a limitation shared more broadly by dedicated batch effect correction methods.
+
+\paragraph{Batch effect correction.}
+Other VAE-based methods such as scVI~\citep{scvi} similarly use conditional variational autoencoders~\citep{cvae} to disentangle biological variation from batch effects, but optimize a global reconstruction loss without affinity guidance, causing rare cell states to be absorbed into larger clusters.
+scPoli~\citep{scpoli} partially addresses this by anchoring prototypes to known cell types, though this requires accurate annotations, which are often incomplete or inconsistent in practice.
+Non-VAE approaches such as Harmony~\citep{harmony} and BBKNN~\citep{bbknn} take different strategies---iterative embedding alignment and graph-level connectivity enforcement, respectively---but introduce their own distortions: Harmony can disrupt within-batch cell-type structure, while BBKNN assumes all cell types are present in every batch.
+Taken together, none of these methods incorporate an affinity graph during training---they align cells but do not explicitly preserve the community structure defined by cell--cell relationships within each dataset.
+Preserving such structure requires objectives that operate at the level of groups rather than individual cell distances, which connects to the literature on deep clustering.
+
+\paragraph{Deep clustering and prototype-based learning.}
+Deep clustering methods~\citep{deepcluster} jointly learn embeddings and cluster assignments, alternating between assigning cells to clusters and updating the network to predict those assignments.
+SeLa~\citep{asano2019self} replaces k-means with Sinkhorn--Knopp~\citep{sinkhorn} assignment for balanced pseudo-labels; SwAV~\citep{swav} extends this online with learnable prototypes.
+However, this enforces uniform usage across prototypes---which does not reflect the highly variable cluster sizes in biological data---and defines positive structure through data augmentation rather than input-defined similarity, providing no information about how similar two cells actually are; in single-cell settings, a cell--cell affinity graph provides a more principled source of structure.
+Graph-based methods such as Parametric UMAP~\citep{parametric_umap} do incorporate such a graph, learning embeddings that preserve pairwise affinities, but target distances between individual cells rather than cluster-level assignments---in metacell learning, what matters is which cells are grouped together, not the precise geometry of the embedding space.
+A prior version of this work~\citep{golpayegani2025interpretable} adapted SwAV-style prototype learning to single-cell transcriptomics using an affinity graph, demonstrating that shared prototypes can yield interpretable representations, but shares the same limitation of uniform prototype usage.
+A related failure mode across prototype-based methods is prototype collapse, where a subset of prototypes captures most cells and the rest go unused. Arteaga et al.~\citep{arteaga2026prototypes} address this via decoupled prototype updates modelled as a Gaussian mixture, though without enforcing distinctness, prototypes may remain redundant rather than capturing distinct clusters.
+
+Existing approaches thus leave a gap: affinity-preserving methods remain restricted to within-batch aggregation and rely solely on graph topology without incorporating feature information, preventing a balance between affinity-based and expression-based grouping; methods that align cells across batches do not preserve affinity structure; and prototype-based methods that could bridge both enforce uniform prototype usage via balanced assignment, limiting their ability to capture biological communities of varying sizes.

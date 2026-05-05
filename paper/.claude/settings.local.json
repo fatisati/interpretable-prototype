@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -c '\\\\\\\\begin{figure' \"G:/.shortcut-targets-by-id/1nUSrrvX0QPGoRflBV8uoFtis4P4zyk_3/codes/interpretable-prototype/paper/sections/results.tex\")",
+      "Bash(grep -c '\\\\\\\\begin{table' \"G:/.shortcut-targets-by-id/1nUSrrvX0QPGoRflBV8uoFtis4P4zyk_3/codes/interpretable-prototype/paper/sections/results.tex\")",
+      "Bash(grep -c '\\\\\\\\begin{figure' \"G:/.shortcut-targets-by-id/1nUSrrvX0QPGoRflBV8uoFtis4P4zyk_3/codes/interpretable-prototype/paper/sections/method.tex\")",
+      "Bash(grep -c '\\\\\\\\begin{figure\\\\*\\\\|\\\\\\\\begin{table\\\\*\\\\|\\\\\\\\begin{figure}\\\\|\\\\\\\\begin{table}' \"G:/.shortcut-targets-by-id/1nUSrrvX0QPGoRflBV8uoFtis4P4zyk_3/codes/interpretable-prototype/paper/sections/results.tex\")",
+      "Bash(grep -n '\\\\\\\\begin{figure\\\\|\\\\\\\\begin{table' \"G:/.shortcut-targets-by-id/1nUSrrvX0QPGoRflBV8uoFtis4P4zyk_3/codes/interpretable-prototype/paper/sections/results.tex\")",
+      "Bash(Select-String -Path \"G:\\\\.shortcut-targets-by-id\\\\1nUSrrvX0QPGoRflBV8uoFtis4P4zyk_3\\\\codes\\\\interpretable-prototype\\\\paper\\\\references.bib\" -Pattern \"^@\")",
+      "Bash(Measure-Object)",
+      "Bash(Select-Object -ExpandProperty Count)",
+      "Bash(grep -ho '\\\\\\\\cite[tp]*{[^}]*}' \"G:\\\\.shortcut-targets-by-id\\\\1nUSrrvX0QPGoRflBV8uoFtis4P4zyk_3\\\\codes\\\\interpretable-prototype\\\\paper\\\\sections\"/*.tex \"G:\\\\.shortcut-targets-by-id\\\\1nUSrrvX0QPGoRflBV8uoFtis4P4zyk_3\\\\codes\\\\interpretable-prototype\\\\paper\\\\neurips_2026.tex\")",
+      "Bash(grep -ho '\\\\\\\\cite[tp]*{[^}]*}' \"G:\\\\.shortcut-targets-by-id\\\\1nUSrrvX0QPGoRflBV8uoFtis4P4zyk_3\\\\codes\\\\interpretable-prototype\\\\paper\\\\appendix\"/*.tex)"
+    ]
+  }
+}

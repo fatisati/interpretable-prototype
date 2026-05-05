@@ -1,0 +1,9 @@
+\section{Discussion and Conclusion}
+
+Our results show that jointly preserving within-dataset affinity structure while aligning cells across batches leads to improved metacell construction. The combination of a community-preserving objective with reconstruction-based alignment produces metacells that better reflect biological community structure, enabling more faithful aggregation across datasets. Importantly, reconstruction-only objectives are insufficient to preserve affinity-defined structure: due to variations in manifold density, rare cell populations can be absorbed into denser regions of the latent space, and spatially meaningful relationships may be lost. Incorporating an affinity-guided objective mitigates these issues by explicitly enforcing community structure.
+
+These findings highlight limitations in existing approaches. Most methods operate within individual datasets, restricting the number of samples available per cellular state and limiting coverage of rare populations. Reconstruction-based models align cells across batches but do not preserve community structure, while affinity-based methods preserve structure but remain restricted to within-batch aggregation. scProto addresses both by combining affinity guidance with cross-batch alignment.
+
+Despite these advantages, the number of metacells $K$ must be specified in advance, which may not be optimal across datasets. An important direction for future work is to develop methods that automatically determine $K$ and jointly learn similarity structure and representation.
+
+The framework operates on an affinity graph constructed in PCA space, which reflects both biological variation and technical batch effects—a deliberate design choice, since the batch-conditional encoder is responsible for disentangling these signals during training.
