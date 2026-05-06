@@ -7,28 +7,26 @@ We evaluate on three multi-batch single-cell RNA-seq datasets~\citep{luecken2020
 and a \textbf{Lung} dataset (30k cells, 16 batches, 17 cell types).
 For spatial evaluations, we use a \textbf{non-small cell lung cancer (NSCLC)} spatial transcriptomics dataset~\citep{pentimalli2025combining}.
 The original dataset comprises 6 slides; we select slide 28, subsample 30,000 cells stratified by cell type and niche label, and exclude cells assigned to uninformative niche labels, yielding 28,804 cells across 18 cell types and 9 niches.
+Niche labels are defined by clustering cells based on the local cell-type composition of their spatial neighborhood, providing a measure of microenvironmental context that is related to but distinct from the spatial affinity used during training.
 All datasets are preprocessed with Scanpy~\citep{wolf2018scanpy} by normalizing total counts, applying log1p transformation, and selecting 4,000 highly variable genes.
-Detailed statistics are in Appendix~\ref{app:datasets}.
+% TODO: add dataset statistics table to appendix (app:datasets) and uncomment the following line
+% Detailed statistics are in Appendix~\ref{app:datasets}.
 
 \paragraph{Affinity construction.}
 For transcriptomic experiments, cell--cell affinities are computed using an adaptive Gaussian kernel on PCA embeddings, following prior work~\citep{seacells}.
-For spatial experiments, we apply the same kernel to spatially aggregated features, obtained by averaging the PCA embeddings of neighboring cells within a fixed spatial radius, thereby incorporating microenvironmental context into the affinity.
+For spatial experiments, we apply the same kernel to spatially aggregated features, obtained by averaging the PCA embeddings of neighboring cells within a fixed spatial radius, thereby incorporating microenvironmental context into the affinity (see Appendix~\ref{app:spatial_affinity} for details).
 
 \paragraph{Baselines.}
 We compare against \textbf{SEACells}~\citep{seacells}, a metacell method based on archetypal analysis;
 \textbf{CVAE}, a reconstruction-only variant without affinity guidance, isolating the effect of the affinity loss;
 and \textbf{Parametric UMAP}, which preserves data geometry by aligning pairwise relationships in the embedding space.
 Since CVAE and Parametric UMAP do not produce discrete cluster assignments, we apply $K$-means clustering on their learned embedding spaces to obtain metacells, using the same $K$ as scProto.
-For spatial experiments, we additionally evaluate \textbf{SEACells (spatial)}, trained on the same spatial affinity graph as scProto.
+For spatial experiments, we additionally evaluate \textbf{SEACells (spatial)}, which replaces SEACells' default PCA-based affinity graph with the spatial context affinity while keeping the archetypal analysis step unchanged.
 
 \paragraph{Evaluation protocol.}
-scProto outputs soft prototype assignments $s_i \in \mathbb{R}^K$; each cell is assigned to the prototype with the highest assignment score (argmax), and each metacell is labeled by majority voting over its assigned cells.
-We evaluate through a sequence of analyses aligned with the model's design goals.
-First, we assess whether learned metacells respect the community structure of the input affinity graph using \textbf{modularity}, computed on per-batch subgraphs (all edges incident to at least one cell in the batch); mean and standard deviation are reported across batches.
-Second, we evaluate cross-batch aggregation by measuring \textbf{batch entropy} of each metacell, defined as the Shannon entropy of its batch label distribution: $H(m) = -\sum_b p_b \log p_b$, where $p_b$ is the fraction of cells in metacell $m$ from batch $b$.
-Third, we examine whether cross-batch alignment preserves biological signal using \textbf{cell-type purity}, defined as the fraction of cells in a metacell belonging to the most frequent cell type: $\text{purity}(m) = \frac{1}{|m|} \max_{c} \sum_{i \in m} \mathbf{1}[y_i = c]$.
-We then focus on underrepresented populations, measuring \textbf{coverage}---whether each rare cell type is represented by at least one metacell---and \textbf{rare purity}, where rare cell types are defined as the bottom 25th percentile by frequency.
-For spatial data, we additionally evaluate \textbf{niche purity} alongside cell-type purity to assess capture of microenvironmental structure.
+scProto outputs soft prototype assignments $s_i \in \mathbb{R}^K$; each cell is assigned to the prototype with the highest score (argmax), and each metacell is labeled by majority voting.
+We assess community structure using \textbf{modularity}, cross-batch integration using \textbf{batch entropy}, biological signal preservation using \textbf{cell-type purity}, rare cell representation using \textbf{coverage} and \textbf{rare purity}, and for spatial data, microenvironmental structure using \textbf{niche purity}.
+Formal definitions are provided in Appendix~\ref{app:metrics}.
 
 \subsection{scProto recovers community structure while integrating cells across batches}
 
@@ -171,41 +169,27 @@ scProto
 \end{tabular}
 \end{table*}
 
-\subsection{scProto captures microenvironmental and spatial structure}
+\subsection{scProto captures microenvironmental structure while preserving cell-type identity}
 
-We evaluate whether incorporating spatial information enables scProto to capture microenvironmental structure while preserving cell-type identity.
+We evaluate whether defining cell--cell affinity from spatial context enables scProto to capture microenvironmental structure without sacrificing cell-type identity.
 
-As shown in Fig.~\ref{fig:spatial_heatmap}, scProto achieves a strong balance between cell-type purity and niche purity, indicating that it captures spatially relevant structure without compromising biological identity. In contrast, SEACells trained on transcriptomic similarity fails to capture spatial organization, resulting in low niche purity. While SEACells trained on spatial affinity improves niche purity, it does so at the expense of cell-type purity, suggesting a loss of biological specificity.
+As shown in Fig.~\ref{fig:spatial_tradeoff} for four cell types spanning the malignant, stromal, and immune compartments of the NSCLC tumor microenvironment, scProto achieves higher niche purity than transcriptomics-only methods---SEACells and MetaQ---which fail to capture spatial organization, while maintaining substantially higher cell-type purity than SEACells trained on spatial affinity, which improves niche purity at the cost of biological specificity.
+This balance arises because scProto's reconstruction objective anchors prototypes to gene expression even when guided by spatial affinity: the model identifies expression patterns that correlate with the local microenvironment without losing cell-type identity.
+In contrast, transcriptomics-only methods receive no spatial signal and cannot recover niche structure, while SEACells trained on spatial affinity lacks a reconstruction constraint, allowing spatial proximity to dominate over transcriptional identity.
+
+These results show that scProto captures niche-correlated transcriptional programs---expression variation associated with the local cellular microenvironment---while remaining faithful to cell-type identity.
+This is distinct from modeling direct cell-cell communication; rather, defining affinity spatially guides scProto to discover gene expression structure that reflects microenvironmental context, a signal that transcriptomic similarity alone cannot recover.
+Spatial visualizations for the same three cell types in Fig.~\ref{fig:spatial} (Appendix) further confirm that scProto groups cells from the same niches while maintaining coherent cell-type structure. A per-cell-type breakdown for additional cell types is provided in Fig.~\ref{fig:spatial_heatmap} (Appendix).
+
 \begin{figure*}[t]
 \centering
-\includegraphics[width=\textwidth]{figures/heatmap.png}
+\includegraphics[width=\textwidth]{figures/tradeoff.png}
 \caption{
-Cell type-- and niche-specific evaluation of niche purity and cell-type purity using size-weighted metrics.
-Each entry shows mean $\pm$ standard deviation across metacells.
+Trade-off between cell-type purity and niche purity for four cell types spanning the malignant, stromal, and immune compartments of the NSCLC tumor microenvironment: Tumor cells, Fibroblasts, Macrophages, and Cytotoxic T cells.
+Top: mean $\pm$ SE of niche purity vs.\ cell-type purity across metacells of each cell type.
+Middle and bottom: distributions of niche purity and cell-type purity across metacells; significance brackets show one-sided Mann-Whitney U tests comparing scProto against each method ($*$~$p{<}0.05$, $**$~$p{<}0.01$, $***$~$p{<}0.001$).
+scProto achieves higher niche purity than transcriptomics-only methods while maintaining substantially higher cell-type purity than SEACells trained on spatial affinity.
+Results for additional cell types are shown in Fig.~\ref{fig:spatial_heatmap} (Appendix).
 }
-\label{fig:spatial_heatmap}
+\label{fig:spatial_tradeoff}
 \end{figure*}
-
-These differences are further illustrated in Fig.~\ref{fig:spatial} (Appendix), where spatial visualizations show that scProto groups cells from the same niches while maintaining coherent cell-type structure. This indicates that incorporating spatial affinity enables scProto to capture gene expression patterns associated with microenvironmental context---signals that are not recoverable from transcriptomic similarity alone.
-
-
-% \begin{figure*}[t]
-% \centering
-% \includegraphics[width=\textwidth]{figures/tradeoff.png}
-% \caption{
-% Trade-off between cell-type purity and niche purity across metacells.
-% Each point represents a metacell, colored by method, and star markers indicate method centroids.
-% Arrows indicate the effect of incorporating spatial context by comparing scProto trained on transcriptomic similarity with scProto trained on spatial similarity.
-% }
-% \label{fig:spatial_tradeoff}
-% \end{figure*}
-
-% \begin{figure*}[t]
-% \centering
-% \includegraphics[width=\textwidth]{figures/niche_box.png}
-% \caption{
-% Comparison of niche purity and cell-type purity across methods for selected cell types using size-weighted metrics.
-% scProto improves niche purity compared to transcriptomics-only methods while maintaining substantially higher cell-type purity than the spatial SEACells baseline.
-% }
-% \label{fig:spatial_boxplots}
-% \end{figure*}

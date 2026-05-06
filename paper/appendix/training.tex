@@ -22,6 +22,39 @@ The batch-conditional encoder disentangles these signals during training.
 \end{figure}
 
 
+\section{Spatial Affinity Construction}
+\label{app:spatial_affinity}
+
+For spatial experiments, the cell--cell affinity is computed from spatially aggregated features rather than individual cell transcriptomes.
+Concretely, for each cell $i$ we identify all cells within a fixed spatial radius $r$ (in physical coordinates) and compute the average of their PCA embeddings:
+\[
+\tilde{x}_i = \frac{1}{|\mathcal{N}_r(i)|} \sum_{j \in \mathcal{N}_r(i)} \mathrm{PCA}(x_j),
+\]
+where $\mathcal{N}_r(i) = \{j : \|p_i - p_j\|_2 \leq r\}$ and $p_i$ denotes the physical coordinates of cell $i$.
+This contextual feature vector $\tilde{x}_i$ encodes the local microenvironmental composition of cell $i$ by averaging the transcriptomic profiles of its spatial neighbors.
+The same adaptive Gaussian (RBF) kernel used for transcriptomic affinity is then applied to these aggregated features to construct the spatial affinity graph.
+
+The key property of this construction is that cells in similar spatial microenvironments receive high affinity---regardless of their individual transcriptomic state.
+Because the model receives only the cell's own gene expression as input, the community-preserving objective forces the encoder to identify gene expression patterns that correlate with microenvironmental context, while the reconstruction objective keeps prototypes faithful to overall gene expression, preventing spatial context from overriding cell-type identity.
+
+This construction is intentionally simple and serves as a proof of concept that scProto's affinity framework generalizes beyond transcriptomic similarity.
+More principled affinities---for example, based on ligand--receptor interaction scores or cell-type composition of the local neighborhood---are natural extensions left for future work.
+
+Figure~\ref{fig:affinity_comparison} compares the transcriptomic RBF affinity and the spatial affinity on the NSCLC dataset~\citep{pentimalli2025combining}.
+Using spatial affinity yields substantially better niche separation, at the cost of slightly increased mixing of cell types within niches---consistent with the fact that cells in the same niche can belong to different cell types.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{figures/nsclc_affinity_comparison.png}
+\caption{
+UMAP of the two affinity graphs on the NSCLC dataset, colored by cell type (left) and niche label (right).
+Top: transcriptomic RBF affinity. Bottom: spatial affinity (RBF on neighborhood-averaged PCA).
+Spatial affinity produces substantially cleaner niche separation, while the transcriptomic affinity preserves sharper cell-type boundaries.
+}
+\label{fig:affinity_comparison}
+\end{figure}
+
+
 \section{Training Details and Hyperparameters}
 \label{app:training}
 
@@ -64,24 +97,7 @@ Users may increase $K$ for finer resolution or decrease it for coarser summaries
 \paragraph{Graph construction.}
 The affinity graph uses an adaptive Gaussian (RBF) kernel in 50-dimensional PCA space, with 15 nearest neighbors used to estimate per-cell bandwidth, following the SEACells protocol~\citep{seacells}.
 All graph hyperparameters are kept at their SEACells defaults across all experiments.
-
-For spatial experiments, the affinity is computed on spatially aggregated features rather than individual cell PCA embeddings.
-Specifically, for each cell $i$, we identify all cells within a fixed spatial radius $r$ (in physical coordinates), and compute the average of their PCA embeddings as the cell's contextual feature vector.
-The same adaptive Gaussian kernel is then applied to these aggregated features to construct the affinity graph.
-This encodes microenvironmental context into the affinity: cells embedded in similar spatial neighborhoods---regardless of their individual transcriptomic state---are encouraged to share prototype assignments.
-
-Figure~\ref{fig:spatial_graph_umap} visualizes the resulting affinity on the NSCLC dataset~\citep{pentimalli2025combining}: a UMAP of the spatial affinity matrix reveals that the graph captures both niche structure and cell-type organization, confirming that spatially aggregated features encode microenvironmental context beyond individual transcriptomic identity.
-
-\begin{figure}[h]
-\centering
-\includegraphics[width=\textwidth]{figures/spatial_graph_umap}
-\caption{
-UMAP of the precomputed spatial affinity graph on the NSCLC dataset.
-Left: colored by cell type. Right: colored by niche label.
-The affinity captures both cell-type identity and niche-level spatial organization, motivating its use as an alternative similarity signal for metacell construction.
-}
-\label{fig:spatial_graph_umap}
-\end{figure}
+For spatial experiments, see Appendix~\ref{app:spatial_affinity}.
 
 \section{Temperature Calibration}
 \label{app:calibration}
@@ -113,8 +129,46 @@ The target $K_\mathrm{eff}$ is derived from the median effective number of neigh
 
 Calibration runs once on the full dataset immediately after prototype initialization and before joint optimization begins.
 
+\section{Evaluation Metrics}
+\label{app:metrics}
+
+\paragraph{Modularity.}
+We compute modularity of the metacell assignments with respect to the per-batch affinity subgraph (all edges incident to at least one cell in the batch). Mean and standard deviation are reported across batches.
+
+\paragraph{Batch entropy.}
+For each metacell $m$, batch entropy is the Shannon entropy of its batch label distribution:
+\[
+H(m) = -\sum_b p_b \log p_b,
+\]
+where $p_b$ is the fraction of cells in $m$ from batch $b$. Higher values indicate more uniform mixing across batches.
+
+\paragraph{Cell-type purity.}
+Purity measures the fraction of cells in a metacell belonging to its most frequent cell type:
+\[
+\text{purity}(m) = \frac{1}{|m|} \max_{c} \sum_{i \in m} \mathbf{1}[y_i = c].
+\]
+
+\paragraph{Coverage and rare purity.}
+Rare cell types are defined as those in the bottom 25th percentile by frequency. Coverage reports whether each rare cell type is represented by at least one metacell. Rare purity reports the mean purity of metacells assigned to rare cell types.
+
+\paragraph{Niche purity.}
+Analogous to cell-type purity but computed with respect to spatial niche labels: each metacell is assigned a majority niche label, and niche purity is the fraction of its member cells sharing that label.
+Unlike cell-type purity and batch entropy, niche purity is computed without size weighting, treating each metacell as an equal spatial unit.
+This is appropriate because niche-driven expression changes can be subtle, and the metacells capturing them tend to be small; size-weighting would suppress exactly these rare and spatially specific structures.
+
 \section{Additional Results}
 \label{app:results}
+
+\begin{figure*}[h]
+\centering
+\includegraphics[width=\textwidth]{figures/heatmap.png}
+\caption{
+Cell-type- and niche-specific breakdown of niche purity and cell-type purity for six key cell types in the NSCLC tumor microenvironment, selected for visual clarity.
+Each entry shows mean $\pm$ standard deviation across metacells assigned to that cell type (unweighted; see Appendix~\ref{app:metrics}).
+scProto consistently achieves higher niche purity than SEACells (transcriptomic) while maintaining higher cell-type purity than SEACells (spatial).
+}
+\label{fig:spatial_heatmap}
+\end{figure*}
 
 \begin{figure*}[h]
 \centering

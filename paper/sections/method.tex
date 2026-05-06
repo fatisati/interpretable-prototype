@@ -1,31 +1,14 @@
 \section{Method}
 
-\subsection{Overview}
-
-We introduce scProto, a framework for learning cross-batch metacells from single-cell gene expression data.
-
-\paragraph{Problem Setup.}
-We consider a dataset of cells $\{x_i\}_{i=1}^N$ with $B \geq 1$ batches, where $x_i \in \mathbb{R}^G$ denotes gene expression and each cell has a batch label $b_i \in \{1, \dots, B\}$. Our goal is to learn metacells that aggregate similar cells while preserving biological community structure.
-
-A key challenge is that similarity relationships are reliable primarily within batches due to batch effects. This makes it difficult to aggregate cells across datasets, especially for rare cell states.
-
-\paragraph{Key Idea.}
-scProto is designed to achieve two goals simultaneously: (i) preserve within-batch similarity structure, and (ii) align shared cell states across batches.
-
-To preserve local structure, we encourage highly connected communities in the input similarity graph to map to the same prototype. This is achieved by defining similarity in the latent space based on prototype assignments and matching it to the input graph.
-
-To align shared cell states across batches, we use a conditional reconstruction objective, which learns a shared latent representation that can be decoded consistently across datasets.
-
-\paragraph{scProto Framework.}
-The model consists of: (i) a batch-conditional encoder that maps cells to a shared latent space, (ii) a set of shared prototypes representing metacells (i.e., communities of cells with similar states), and (iii) a batch-conditional decoder that reconstructs gene expression from prototypes conditioned on the batch label, ensuring batch-specific variation is handled at decoding rather than absorbed into the shared prototypes.
-
-The objective combines community structure preservation, reconstruction for cross-batch alignment, and prototype regularization to ensure compact and distinct metacells.
+We consider a dataset of cells $\{x_i\}_{i=1}^N$ with $B \geq 1$ batches, where $x_i \in \mathbb{R}^G$ denotes gene expression and $b_i \in \{1, \dots, B\}$ is the batch label. The model consists of a batch-conditional encoder mapping cells to a shared latent space, a set of learnable prototypes representing metacells, and a batch-conditional decoder reconstructing gene expression from prototypes, so that batch-specific variation is handled at decoding rather than absorbed into shared prototypes.
 
 \subsection{Model Components}
 
 \paragraph{Input.}
 We assume gene expression profiles $x_i \in \mathbb{R}^G$ with batch labels $b_i$, and a precomputed similarity graph $P \in \mathbb{R}^{N \times N}$ capturing local relationships.
 If the affinity is computed per batch, the resulting graphs can simply be concatenated to form a block-diagonal $P$; even when computed globally across all cells, batch effects make cross-batch similarities negligible, so $P$ is approximately block-diagonal in either case (see Appendix~\ref{app:graph_structure}).
+Since the affinity is constructed in PCA space, it reflects both biological variation and technical batch effects; disentangling these signals is delegated to the batch-conditional encoder during training.
+More broadly, the affinity can encode any biologically meaningful similarity---including spatial context---allowing the model to capture microenvironmental structure while remaining grounded in gene expression via the reconstruction objective (see Appendix~\ref{app:spatial_affinity}).
 
 \paragraph{Encoder.}
 A conditional encoder maps each cell to latent space:
