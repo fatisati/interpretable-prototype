@@ -19,13 +19,14 @@ This incorporates local microenvironmental context directly into the affinity, a
 
 \subsection{Baselines}
 
-We compare scProto against three baselines:
+We compare scProto against four baselines:
 \textbf{SEACells}~\citep{seacells}, a state-of-the-art metacell method based on archetypal analysis;
-\textbf{CVAE}, a reconstruction-only variant that omits affinity guidance, isolating the effect of the affinity loss;
+\textbf{MetaQ}~\citep{metaq}, which learns discrete metacell representations end-to-end via vector quantization but lacks explicit batch correction;
+\textbf{scPoli (cVAE)}, scPoli's cVAE trained without its supervised prototype loss, providing a reconstruction-only baseline that isolates the contribution of scProto's additional objectives;
 and \textbf{Parametric UMAP}, which preserves data geometry by aligning pairwise cell--cell relationships in the embedding space.
 For spatial experiments, we additionally evaluate \textbf{SEACells (spatial)}, trained on the same spatial affinity graph as scProto, to ensure a fair comparison.
 All baselines are configured to produce the same number of metacells $K$ as scProto.
-Unlike scProto, neither CVAE nor Parametric UMAP includes a prototype or clustering mechanism; metacell assignments for these baselines are obtained by applying $K$-means clustering to their learned embeddings.
+Unlike scProto, neither scPoli (cVAE) nor Parametric UMAP includes a prototype or clustering mechanism; metacell assignments for these baselines are obtained by applying $K$-means clustering to their learned embeddings.
 
 \subsection{Evaluation Protocol}
 

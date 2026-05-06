@@ -18,9 +18,10 @@ For spatial experiments, we apply the same kernel to spatially aggregated featur
 
 \paragraph{Baselines.}
 We compare against \textbf{SEACells}~\citep{seacells}, a metacell method based on archetypal analysis;
-\textbf{CVAE}, a reconstruction-only variant without affinity guidance, isolating the effect of the affinity loss;
+\textbf{MetaQ}~\citep{metaq}, which learns discrete metacell representations end-to-end via vector quantization but lacks explicit batch correction;
+\textbf{scPoli (cVAE)}, scPoli's cVAE trained without its supervised prototype loss, providing a reconstruction-only baseline that isolates the contribution of scProto's additional objectives;
 and \textbf{Parametric UMAP}, which preserves data geometry by aligning pairwise relationships in the embedding space.
-Since CVAE and Parametric UMAP do not produce discrete cluster assignments, we apply $K$-means clustering on their learned embedding spaces to obtain metacells, using the same $K$ as scProto.
+Since scPoli (cVAE) and Parametric UMAP do not produce discrete cluster assignments, we apply $K$-means clustering on their learned embedding spaces to obtain metacells, using the same $K$ as scProto.
 For spatial experiments, we additionally evaluate \textbf{SEACells (spatial)}, which replaces SEACells' default PCA-based affinity graph with the spatial context affinity while keeping the archetypal analysis step unchanged.
 
 \paragraph{Evaluation protocol.}
@@ -32,7 +33,7 @@ Formal definitions are provided in Appendix~\ref{app:metrics}.
 
 As shown in Table~\ref{tab:graph_batch}, scProto achieves modularity comparable to SEACells, indicating that it recovers the community structure of the input affinity graph. At the same time, it exhibits substantially higher batch entropy, demonstrating effective mixing of cells across batches. Importantly, this is achieved without compromising biological identity, as scProto maintains cell-type purity comparable to competing methods.
 
-In contrast, SEACells attains similar modularity and purity but exhibits very low batch entropy, indicating that it forms batch-specific metacells without meaningful cross-batch aggregation. Conversely, CVAE and parametric UMAP achieve high batch entropy and purity but show significantly lower modularity, suggesting that they fail to recover the community structure encoded in the affinity graph.
+In contrast, SEACells attains similar modularity and purity but exhibits very low batch entropy, indicating that it forms batch-specific metacells without meaningful cross-batch aggregation. Conversely, scPoli (cVAE) and Parametric UMAP achieve high batch entropy and purity but show significantly lower modularity, suggesting that they fail to recover the community structure encoded in the affinity graph.
 
 These differences are further illustrated in Fig.~\ref{fig:pancreas_umap}, where UMAP~\citep{mcinnes2018umap} visualizations of pancreas metacells show that scProto forms clusters that are well aligned across batches while remaining consistent with cell-type structure, whereas SEACells produces clusters that are largely separated by batch.
 Per-metacell distributions of purity and batch entropy are shown in Fig.~\ref{fig:purity_entropy} (Appendix).
@@ -82,7 +83,7 @@ MetaQ
 & $0.28 \pm 0.11$ & $0.63 \pm 0.50$ & $0.81 \pm 0.15$
 & $0.42 \pm 0.14$ & $0.53 \pm 0.54$ & $0.91 \pm 0.13$ \\
 
-CVAE
+scPoli (cVAE)
 & $0.23 \pm 0.07$ & $\underline{1.38 \pm 0.41}$ & $0.97 \pm 0.07$
 & $0.26 \pm 0.14$ & $0.81 \pm 0.40$ & $0.87 \pm 0.14$
 & $0.32 \pm 0.05$ & $\underline{1.33 \pm 0.43}$ & $0.86 \pm 0.18$ \\
@@ -112,7 +113,7 @@ As shown in Table~\ref{tab:rare_cells}, scProto achieves consistently higher or 
 
 To further analyze performance across the frequency spectrum, we stratify cell types by frequency and evaluate metacell purity within each bin (Fig.~\ref{fig:rare_purity}, Appendix). scProto maintains high purity even for the rarest cell types, whereas SEACells shows a noticeable degradation in low-frequency bins. This suggests that restricting aggregation within batches limits the ability to form reliable metacells when only few samples are available per batch.
 
-In contrast, reconstruction-based methods such as CVAE, and structure-preserving methods such as parametric UMAP, do not explicitly enforce community-level structure during training. As a result, they tend to merge rare cell states into larger, denser clusters, leading to reduced purity for low-frequency populations.
+In contrast, reconstruction-based methods such as scPoli (cVAE), and structure-preserving methods such as Parametric UMAP, do not explicitly enforce community-level structure during training. As a result, they tend to merge rare cell states into larger, denser clusters, leading to reduced purity for low-frequency populations.
 
 
 \begin{table*}[t]
@@ -148,7 +149,7 @@ MetaQ
 & $\mathbf{1.00}$ & $0.78 \pm 0.05$
 & $0.00$ & -- \\
 
-CVAE
+scPoli (cVAE)
 & $\underline{0.75}$ & $0.54 \pm 0.09$
 & $0.75$ & $0.58 \pm 0.21$
 & $\underline{0.67}$ & $0.82 \pm 0.13$ \\
