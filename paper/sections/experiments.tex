@@ -12,10 +12,13 @@ Detailed dataset statistics are provided in Appendix~\ref{app:datasets}.
 
 \subsection{Affinity Construction}
 
-We construct cell--cell affinity graphs to define the community structure to be preserved by scProto.
-For transcriptomic experiments, affinities are computed using an adaptive Gaussian kernel on PCA embeddings, following prior work~\citep{seacells}.
-For spatial experiments, we use the same adaptive Gaussian kernel but apply it to spatially aggregated features, obtained by averaging the PCA embeddings of neighboring cells within a fixed spatial radius.
-This incorporates local microenvironmental context directly into the affinity, allowing scProto to learn metacells that reflect tissue organization rather than transcriptomic similarity alone.
+We demonstrate scProto's flexibility with two biologically complementary affinity graphs, each encoding a distinct signal that manifests in gene expression.
+For transcriptomic experiments, we use an adaptive Gaussian kernel on PCA embeddings~\citep{seacells}, which scales each cell's bandwidth to its local neighborhood distance.
+This corrects for the density variability inherent in single-cell data: rare cell types occupy low-density regions where a fixed bandwidth would underestimate their local similarities, and the adaptive kernel ensures they form well-connected communities in the graph.
+Combined with scProto's cross-batch alignment, which pools cells from multiple batches, this enables stable metacells to form for rare cell types that are too sparsely represented within any individual batch---a limitation of within-batch methods even when using the same affinity.
+Rare cell representation is assessed via coverage and rare purity.
+For spatial experiments, we apply the same kernel to spatially aggregated features---the PCA embeddings of each cell averaged with those of its spatial neighbors within a fixed radius---incorporating microenvironmental context into the affinity (see Appendix~\ref{app:spatial_affinity}).
+This encodes tissue organization rather than cell-type identity, a signal that transcriptomic similarity alone cannot recover; we assess it via niche purity.
 
 \subsection{Baselines}
 
@@ -37,7 +40,7 @@ To assess whether learned metacells respect the community structure of the input
 \textbf{Batch entropy} measures the diversity of batch labels within each metacell; higher values indicate more uniform mixing of cells across batches.
 \textbf{Cell-type purity} measures the homogeneity of each metacell with respect to annotated cell types.
 
-For rare cell types (defined as the bottom 25th percentile by frequency), we additionally report \textbf{coverage}---whether each rare cell type is represented by at least one metacell---and the \textbf{purity} of the corresponding metacells.
+For rare cell types (defined as those whose mean per-batch frequency falls more than one standard deviation below the mean across all cell types; see Appendix~\ref{app:metrics}), we additionally report \textbf{coverage}---whether each rare cell type is represented by at least one metacell---and the \textbf{purity} of the corresponding metacells.
 
 For spatial experiments, we evaluate \textbf{niche purity} alongside cell-type purity, measuring whether metacells reflect local tissue organization.
 Detailed metric definitions are provided in Appendix~\ref{app:metrics}.

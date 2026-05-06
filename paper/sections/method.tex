@@ -49,10 +49,7 @@ P_{ij}\log \tilde q_{ij}
 \]
 where $\tilde q_{ij}$ is a clipped version of $q_{ij}$ for numerical stability.
 
-This objective encourages cells that are strongly connected in the affinity graph to share prototype assignments, mapping highly connected communities to the same prototype.
-
-In practice, we optimize this loss stochastically, sampling positive edges from $P_{ij}$ and negative pairs within each batch.
-Since $P$ is block-diagonal and negative pairs are sampled within each batch, both attraction and repulsion operate within individual datasets, making no assumption about cross-batch dissimilarity. Cross-batch alignment is instead delegated to the encoder, which is initialized from a batch-corrected pretrained space and further refined by the reconstruction objective during joint training.
+This objective encourages cells strongly connected in the affinity graph to share prototype assignments. In practice, we optimize stochastically, sampling positive edges from $P_{ij}$ and negative pairs within each batch; since both operate within individual datasets, no assumption is made about cross-batch dissimilarity, and cross-batch alignment is delegated to the encoder via the reconstruction objective.
 
 \paragraph{Decoder and Reconstruction.}
 Each prototype is decoded into gene expression space:
@@ -69,10 +66,7 @@ We optimize:
 \mathcal{L}_{\text{rec}} = \frac{1}{N} \sum_i \|x_i - \tilde{x}_i\|_2^2.
 \]
 
-In practice, we stop the gradient through $s_{ik}$ when optimizing $\mathcal{L}_{\text{rec}}$, so that reconstruction gradients reach only the decoder $g_\phi$ and prototypes $\{c_k\}$, not the encoder $f_\theta$.
-This ensures the encoder is shaped exclusively by $\mathcal{L}_{\text{community}}$, avoiding conflicting gradient directions between the two objectives (see Appendix~\ref{app:training}).
-
-By conditioning the decoder on the batch label $b_i$, batch-specific variation is handled at the decoding stage, allowing the shared prototypes $\{c_k\}$ to capture batch-invariant biological states.
+In practice, we stop the gradient through $s_{ik}$ when optimizing $\mathcal{L}_{\text{rec}}$, so the encoder is shaped exclusively by $\mathcal{L}_{\text{community}}$ (see Appendix~\ref{app:training}).
 
 \paragraph{Prototype Regularization.}
 
@@ -110,9 +104,7 @@ To aggregate across batches, we use:
 M_{kj} = \max_b M^{(b)}_{kj}.
 \]
 
-This has two effects:
-- For diagonal terms, a prototype is considered good if it forms a compact community in at least one batch.
-- For off-diagonal terms, minimizing the maximum ensures that no batch exhibits strong mixing between different prototypes.
+For diagonal terms, a prototype is considered compact if it forms a tight community in at least one batch; for off-diagonal terms, minimizing the maximum ensures no batch exhibits strong mixing between prototypes.
 
 The loss is:
 \[
@@ -150,16 +142,16 @@ Together with the normalized association objective, this ensures that each proto
 \paragraph{Training Procedure.}
 
 \textbf{Stage 1: Pretraining.}
-We pretrain the encoder and decoder using scPoli~\citep{scpoli}, a CVAE-based architecture for single-cell data that encodes batch identity via trainable batch embeddings rather than fixed one-hot vectors, enabling effective batch effect correction.
+We pretrain the encoder and decoder using scPoli~\citep{scpoli}, a cVAE-based architecture for single-cell data that encodes batch identity via trainable batch embeddings rather than fixed one-hot vectors, enabling effective batch effect correction.
 We optimize a per-cell MSE reconstruction loss on log-normalized gene expression:
 \[
-\mathcal{L}_{\text{CVAE}} =
+\mathcal{L}_{\text{cVAE}} =
 \frac{1}{N}\sum_i \|x_i - g_\phi(z_i, b_i)\|_2^2,
 \]
 where $z_i = f_\theta(x_i, b_i)$. This stage trains the encoder and batch embeddings before prototypes are introduced (see Appendix~\ref{app:training} for architecture and hyperparameter details).
 
 \textbf{Stage 2: Prototype initialization and learning.}
-Prototypes are initialized using waypoint initialization following SEACells~\citep{seacells}: $K$ cells are selected via greedy MaxMin in the diffusion map space of the affinity graph, ensuring coverage of all topological regions including rare populations. The pretrained encoder embeddings of the selected cells are then used as initial prototype vectors. The temperature $\tau$ is then calibrated from the current encoder embeddings to match the affinity structure of the data before joint optimization begins (Appendix~\ref{app:calibration}). The full objective $\mathcal{L}$ is then optimized jointly. The KL term is omitted in this stage: since the latent space is already regularized by pretraining, removing KL yields deterministic representations that produce more stable prototype assignments.
+Prototypes are initialized via waypoint initialization~\citep{seacells}: $K$ cells selected by greedy MaxMin in diffusion map space, with pretrained encoder embeddings as initial prototype vectors. The temperature $\tau$ is calibrated before joint optimization (Appendix~\ref{app:calibration}), and the KL term is omitted since pretraining already regularizes the latent space.
 
 This two-stage procedure stabilizes training and yields prototypes that preserve within-batch structure, align shared cell states across batches, and represent compact, distinct communities.
 Full hyperparameter details, loss weights, and guidance on selecting $K$ are provided in Appendix~\ref{app:training}.
