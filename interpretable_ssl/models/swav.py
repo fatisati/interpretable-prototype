@@ -198,6 +198,59 @@ class SwavBase(nn.Module):
         with torch.no_grad():
             self.prototypes.weight.copy_(w)
 
+    def init_sim_decoder(self, output_dim, hidden_dim=256):
+        """Build the cell-cell similarity decoder (opt-in, used by lambda_sim_recon).
+
+        Maps a prototype embedding to a predicted target used by the
+        similarity-reconstruction loss. `output_dim` depends on
+        `sim_recon_target`:
+          - 'full':      output_dim = n_cells — a predicted row of the affinity
+                         graph (similarity to every cell). The final layer's
+                         output width equals the dataset size so that at
+                         training time only the columns needed for the current
+                         minibatch can be sliced out of its weight/bias — see
+                         `decode_sim_profiles` — instead of paying for a full
+                         (K, n_cells) forward pass every step.
+          - 'diffusion': output_dim = n_eigs — a predicted diffusion-map
+                         coordinate (a compact, precomputed summary of the
+                         cell's position in the affinity graph). Small and
+                         fixed-size regardless of dataset size, so no column
+                         slicing is needed; `decode_sim_profiles` is called
+                         with col_idx=None in this mode.
+
+        No batch/condition conditioning: unlike gene expression, the affinity
+        graph has no technical-batch confound to correct for, so this decoder
+        is a plain function of the prototype embedding.
+
+        Idempotent — safe to call more than once (e.g. if training setup is
+        re-entered); does not reset an already-built decoder.
+        """
+        if hasattr(self, "sim_decoder_trunk"):
+            return
+        self.sim_decoder_trunk = nn.Sequential(
+            nn.Linear(self.latent_dim, hidden_dim),
+            nn.ReLU(),
+        )
+        self.sim_decoder_out = nn.Linear(hidden_dim, output_dim)
+
+    def decode_sim_profiles(self, protos, col_idx=None):
+        """Decode prototypes into predicted affinity values.
+
+        protos:  (K, latent_dim) prototype embeddings.
+        col_idx: optional 1D LongTensor of cell indices to restrict the output
+                 columns to (e.g. the current minibatch's cells). Slicing the
+                 final layer's weight/bias before the matmul means only the
+                 requested columns are ever computed.
+
+        Returns (K, n_cells) if col_idx is None, else (K, len(col_idx)).
+        """
+        h = self.sim_decoder_trunk(protos)
+        if col_idx is None:
+            return self.sim_decoder_out(h)
+        w = self.sim_decoder_out.weight[col_idx]  # (n_sel, hidden)
+        b = self.sim_decoder_out.bias[col_idx]    # (n_sel,)
+        return h @ w.T + b
+
     def prototypes_avg_distance(self):
         """
         Calculate the average of the average distances for each tensor in a (p, d) tensor.

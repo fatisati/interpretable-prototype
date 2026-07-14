@@ -35,7 +35,7 @@ mpl.rcParams['figure.dpi'] = 150
 
 def reload_interpretable_ssl():
     for m in list(sys.modules):
-        if m.startswith("interpretable_ssl") or m in ("constants", "seacell_train"):
+        if m.startswith("interpretable_ssl") or m in ("constants", "seacell_train", "metaq_train", "sure_train"):
             del sys.modules[m]
 
 # Make tasks available directly after %run nb_setup.py
@@ -58,10 +58,20 @@ from seacell_train import (
     eval_seacell_task3,
 )
 
+from metaq_train import train_metaq, eval_metaq_task1
+
+from sure_train import (
+    train_sure,
+    eval_sure_task1,
+    eval_sure_task2,
+    eval_sure_task3,
+)
+
 from interpretable_ssl.evaluation.paper_figures import *
 from interpretable_ssl.evaluation.metric_helpers.result_tables import *
+from interpretable_ssl.augmenters.graph_generator import generate_affinity, save_affinity
 
-print("nb_setup done. Available: get_trainer, run_mc_task, fig_*, LAMBDA_PROTO_UMAP, LAMBDA_PROTO_UMAP_PRECON, LAMBDA_PARAM_UMAP, LAMBDA_RECON_ONLY")
+print("nb_setup done. Available: get_trainer, run_mc_task, fig_*, LAMBDA_PROTO_UMAP, LAMBDA_PROTO_UMAP_PRECON, LAMBDA_PARAM_UMAP, LAMBDA_RECON_ONLY, train_sure, eval_sure_task1/2/3")
 print("Configs:", {
     'LAMBDA_PROTO_UMAP': LAMBDA_PROTO_UMAP,
     'LAMBDA_PARAM_UMAP': LAMBDA_PARAM_UMAP,

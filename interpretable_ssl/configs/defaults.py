@@ -125,6 +125,7 @@ def get_defaults():
         "knn_method": 'faiss',
         
         "affinity_type": "uctx",
+        "covet_alpha": None,
         'cell_w_mode': 'uniform',
         "model": "swav",  # swav specific
         "lambda_align": 0,
@@ -143,6 +144,7 @@ def get_defaults():
         'lambda_proto_entropy': 0.0,
         
         "lambda_proto_recon": 0.0,
+        "proto_recon_hard": False,
         "lambda_umap": 1,
         'umap_similarity': 'embedding',
         'assignment_metric': 'dotp',
@@ -211,6 +213,11 @@ def get_defaults():
         'nassoc_agg': 'mean',            # how to aggregate per-batch M matrices: 'mean' (avg loss) or 'max' (element-wise max of M, then loss) or 'pbch' (loss per batch then avg; no cross-batch constraint, use mse diagonal)
         'nassoc_diag_loss': 'mse',       # diagonal loss form: 'mse' = (diag-1)^2, 'nll' = -log(avg_diag), 'nll2' = -log(avg_b[1-(d_b-1)^2]) rewards multi-batch moderate usage
         'nassoc_diag': True,             # whether to include diagonal (purity) term; set False to keep only off-diagonal (redundancy) term
+        # --- Cell-cell similarity reconstruction (resolution pressure nassoc can't provide) ---
+        'lambda_sim_recon': 0.0,         # off by default; decodes prototypes -> per-cell similarity target, reconstructed within each minibatch (S and prototypes both get gradient)
+        'sim_recon_hidden_dim': 256,     # hidden width of the similarity decoder trunk
+        'sim_recon_target': 'full',      # 'full': reconstruct each cell's actual aff_raw row (most literal match to SEACells); 'diffusion': regress to a precomputed per-cell diffusion-map coordinate instead (cheaper, compare both)
+        'sim_recon_n_eigs': 10,          # diffusion-map dimensionality when sim_recon_target='diffusion'; unused for 'full'
         # --- Decoupled prototype learning (prevents proto collapse) ---
         'proto_decoupled': False,        # True: protos updated via online GMM EM; detached from all losses
         'gmm_eta': 0.1,                  # initial forgetting factor η (schedule: gmm_eta → gmm_eta_end over training)

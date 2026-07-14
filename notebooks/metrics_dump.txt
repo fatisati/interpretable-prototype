@@ -1,0 +1,177 @@
+type: execute_result
+                purity niche_purity batch_entropy modularity  coverage  \
+arbf          0.861939     0.855989          -0.0   0.465298       1.0   
+mean_product  0.846721     0.779293          -0.0   0.597905       1.0   
+banksy0.5     0.945485      0.95569          -0.0   0.632364  0.722222   
+
+             dge_rbo_avg dge_kendall_avg dge_jaccard_avg scgraph_corr_avg  \
+arbf            0.174486        0.056277         0.09334         0.353693   
+mean_product    0.153277        0.160676        0.089083         0.198371   
+banksy0.5       0.078521        0.220593        0.072176         0.791192   
+
+             ct_niche_rbo_avg  ... fibroblasts_vascular_stroma_coverage  \
+arbf                  0.03028  ...                              0.00413   
+mean_product         0.037869  ...                             0.004589   
+banksy0.5            0.013433  ...                             0.002295   
+
+             fibroblasts_vascular_stroma_homogeneity  \
+arbf                                        0.342359   
+mean_product                                0.372648   
+banksy0.5                                   0.374943   
+
+             tumor_cells_macrophage_islands_purity  \
+arbf                                      0.031912   
+mean_product                              0.047418   
+banksy0.5                                 0.042511   
+
+             tumor_cells_macrophage_islands_coverage  \
+arbf                                        0.008651   
+mean_product                                0.008651   
+banksy0.5                                    0.00173   
+
+             tumor_cells_macrophage_islands_homogeneity  \
+arbf                                            0.34083   
+mean_product                                   0.477509   
+banksy0.5                                      0.297578   
+
+             tumor_tumor_core_celltype_purity tumor_tumor_core_niche_purity  \
+arbf                                   0.8029                        0.3349   
+mean_product                           0.9224                        0.3319   
+banksy0.5                               0.953                        0.3273   
+
+             tumor_tumor_surface_celltype_purity  \
+arbf                                      0.6775   
+mean_product                              0.8759   
+banksy0.5                                 0.9187   
+
+             tumor_tumor_surface_niche_purity tumor_pseudotime_spread_mean  
+arbf                                   0.3446                       0.1876  
+mean_product                            0.439                       0.1456  
+banksy0.5                              0.4525                       0.1614  
+
+[3 rows x 38 columns]
+--- HTML (truncated) ---
+
+  <div id="df-a4a193b3-9bca-47ff-b6b0-3d34706bdf23" class="colab-df-container">
+    <div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>purity</th>
+      <th>niche_purity</th>
+      <th>batch_entropy</th>
+      <th>modularity</th>
+      <th>coverage</th>
+      <th>dge_rbo_avg</th>
+      <th>dge_kendall_avg</th>
+      <th>dge_jaccard_avg</th>
+      <th>scgraph_corr_avg</th>
+      <th>ct_niche_rbo_avg</th>
+      <th>...</th>
+      <th>fibroblasts_vascular_stroma_coverage</th>
+      <th>fibroblasts_vascular_stroma_homogeneity</th>
+      <th>tumor_cells_macrophage_islands_purity</th>
+      <th>tumor_cells_macrophage_islands_coverage</th>
+      <th>tumor_cells_macrophage_islands_homogeneity</th>
+      <th>tumor_tumor_core_celltype_purity</th>
+      <th>tumor_tumor_core_niche_purity</th>
+      <th>tumor_tumor_surface_celltype_purity</th>
+      <th>tumor_tumor_surface_niche_purity</th>
+      <th>tumor_pseudotime_spread_mean</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>arbf</th>
+      <td>0.861939</td>
+      <td>0.855989</td>
+      <td>-0.0</td>
+      <td>0.465298</td>
+      <td>1.0</td>
+      <td>0.174486</td>
+      <td>0.056277</td>
+      <td>0.09334</td>
+      <td>0.353693</td>
+      <td>0.03028</td>
+      <td>...</td>
+      <td>0.00413</td>
+      <td>0.342359</td>
+      <td>0.031912</td>
+      <td>0.008651</td>
+      <td>0.34083</td>
+      <td>0.8029</td>
+      <td>0.3349</td>
+      <td>0.6775</td>
+      <td>0.3446</td>
+      <td>0.1876</td>
+    </tr>
+    <tr>
+      <th>mean_product</th>
+      <td>0.846721</td>
+      <td>0.779293</td>
+      <td>-0.0</td>
+      <td>0.597905</td>
+      <td>1.0</td>
+      <td>0.153277</td>
+      <td>0.160676</td>
+      <td>0.089083</td>
+      <td>0.198371</td>
+      <td>0.037869</td>
+      <td>...</td>
+      <td>0.004589</td>
+      <td>0.372648</td>
+      <td>0.047418</td>
+      <td>0.008651</td>
+      <td>0.477509</td>
+      <td>0.9224</td>
+      <td>0.3319</td>
+      <td>0.8759</td>
+      <td>0.439</td>
+      <td>0.1456</td>
+    </tr>
+    <tr>
+      <th>banksy0.5</th>
+      <td>0.945485</td>
+      <td>0.95569</td>
+      <td>-0.0</td>
+      <td>0.632364</td>
+      <td>0.722222</td>
+      <td>0.078521</td>
+      <td>0.220593</td>
+      <td>0.072176</td>
+      <td>0.791192</td>
+      <td>0.013433</td>
+      <td>...</td>
+      <td>0.002295</td>
+      <td>0.374943</td>
+      <td>0.042511</td>
+      <td>0.00173</td>
+      <td>0.297578</td>
+      <td>0.953</td>
+      <td>0.3273</td>
+      <td>0.9187</td>
+      <td>0.4525</td>
+      <td>0.1614</td>
+    </tr>
+  </tbody>
+</table>
+<p>3 rows × 38 columns</p>
+</div>
+    <div class="colab-df-buttons">
+
+  <div class="colab-df-container">
+    <button class="colab-df-convert" onclick="co

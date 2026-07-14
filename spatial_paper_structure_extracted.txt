@@ -1,0 +1,187 @@
+
+Niche-Aware Metacells Reveal Microenvironment-DrivenTranscriptional Programs in Spatial Transcriptomics
+Nature Methods — Paper Structure &amp; Required Results Blueprint
+The Story (One-Paragraph Pitch)
+Metacell methods compress single-cell data by grouping transcriptomically similar cells — but cell state is shaped by both intrinsic identity and local microenvironment. A macrophage in a tumor core and a macrophage at the tumor-stroma boundary may share nearly identical gene expression profiles, yet harbor distinct functional programs driven by the different cell types surrounding them. Because existing metacell methods define similarity from a cell's own gene expression alone, these niche-driven programs are averaged away when such cells are merged. We introduce niche-aware metacells: by defining cell–cell affinity from the COVET embedding — a second-order statistic that encodes the compositional fingerprint of each cell's spatial neighborhood (which cell types co-occur nearby, and in what proportion) — we guide aggregation toward cells sharing similar microenvironmental context. Plugging this affinity into scProto yields metacells that preserve both cell-type identity and niche structure, revealing transcriptional programs that transcriptomics-only methods cannot recover.
+────────────────────────────────────────────────────────────────────────────────
+Abstract
+Three sentences:
+(1) The biological problem — metacells from transcriptomics miss niche-driven programs.
+(2) What you do — COVET affinity (second-order neighborhood statistic) + scProto = niche-aware metacells.
+(3) What you find — reveals niche-correlated transcriptional programs while preserving cell-type identity.
+End with: software availability.
+────────────────────────────────────────────────────────────────────────────────
+Introduction (4 Paragraphs)
+Paragraph 1 — Metacells as a tool
+Metacells compress noisy scRNA-seq into stable cell states.
+Standard approach: aggregate by transcriptomic similarity.
+Used widely for denoising, atlas building, downstream analysis.
+Paragraph 2 — The microenvironment shapes cell state
+Spatial transcriptomics reveals that identical cell types in different tissue contexts express different programs.
+Cite: tumor microenvironment immune exclusion, cortical layer specialization, fibroblast activation at boundaries.
+This is established biology. Current methods ignore it entirely.
+Paragraph 3 — The gap
+Existing metacell methods (MetaCell, SEACells, MetaQ, SuperSpot) define similarity from transcriptomics or spatial proximity alone. Neither captures niche composition.
+Two cells with the same transcriptome but different neighbors are merged; niche-driven programs are diluted.
+Concretely: a metacell spanning tumor core and tumor margin macrophages will show no differential expression between niches even if real programs exist.
+Paragraph 4 — What you do + contributions
+COVET affinity: second-order neighborhood statistic encodes niche composition as a matrix fingerprint; cells in similar microenvironments → similar affinity regardless of their own transcriptome.
+scProto framework: plug-in affinity enables niche-aware grouping with reconstruction anchor (preserves cell-type identity). Cite Hashemi et al. NeurIPS 2026.
+Result: niche-aware metacells reveal niche-correlated transcriptional programs invisible to existing approaches.
+Available as open-source tool.
+────────────────────────────────────────────────────────────────────────────────
+Results
+Each section is a biological claim, not a technical description. Note on structure: Result 1 is a combined before/after overview — it shows the problem AND your solution side-by-side. It is not just 'others are bad'. Every result section should include at least one panel where your method wins.
+Revised results order at a glance:
+R1 — Overview: problem + solution side-by-side (spatial maps, before/after)
+R2 — Why COVET: second-order captures niche composition better than PCA or BANKSY
+R3 — Benchmark: quantitative proof yours wins (table + trade-off scatter)
+R4 — Biology: DE genes between niche metacells — the discovery payoff
+R5 — Downstream: ligand-receptor or cross-sample reproducibility
+Result 1: Niche-aware metacells resolve spatial structure that transcriptomics-only methods miss — overview
+Claim: Transcriptomics-only metacells merge cells from distinct niches; niche-aware metacells (scProto+COVET) resolve this. Shown side-by-side as a visual before/after.
+Panel A — The problem (others fail)
+Spatial map of NSCLC tissue colored by SEACells metacell assignment.
+Highlight 2–3 metacells that span multiple spatially separated, niche-distinct regions.
+Inset: bar showing niche purity distribution of SEACells metacells (many metacells contain cells from ≥2 niches).
+Key number: 'X% of SEACells metacells contain cells from ≥2 distinct niches'.
+Panel B — Your solution
+Same spatial map, now colored by scProto+COVET metacell assignment.
+Show the same spatial regions are now resolved into niche-coherent metacells.
+Inset: niche purity distribution of scProto+COVET metacells — shifted right vs SEACells.
+Panel C — Schematic (optional but recommended)
+Cartoon: two cells with similar transcriptomes but different neighborhoods.
+Left path (transcriptomics-only): merged into one metacell, niche signal lost.
+Right path (COVET affinity): kept in separate metacells, niche signal preserved.
+Purpose
+Immediately conveys the contribution visually — a reviewer understands the paper from this one figure. Opens with the problem but closes with your solution. Sets up everything that follows.
+Result 2: COVET embedding captures niche composition, not just diversity
+Claim: COVET encodes a compositional fingerprint of the microenvironment; it separates niches within a cell type better than PCA or mean-aggregation (BANKSY).
+Figures / analyses needed
+UMAP of three embeddings for the same cells:
+(a) own PCA  (b) BANKSY / mean context  (c) COVET
+Color by cell type AND niche separately — show PCA separates cell types but not niches; COVET separates niches within a cell type.
+Quantification: silhouette score or kNN purity for niche label vs cell-type label in each embedding space.
+Optional: eigenspectrum of COVET matrices for cells in homogeneous vs heterogeneous neighborhoods — illustrate the compositional fingerprint idea.
+Purpose
+Justifies the choice of COVET over simpler spatial features. This is your 'why second-order' evidence.
+Result 3: Niche-aware metacells achieve superior niche–identity trade-off
+Claim: scProto+COVET achieves higher niche purity than all baselines while maintaining cell-type purity. No existing method achieves both simultaneously.
+Main benchmark table — across ≥3 datasets
+Compare the following methods:
+SEACells (transcriptomic affinity)
+MetaQ
+SuperSpot (spot-based; include for Visium dataset)
+SEACells + spatial affinity (proximity only)
+SEACells + BANKSY affinity (first-order context)
+scProto + COVET (yours)
+Metrics: niche purity, cell-type purity, compactness, modularity.
+Hero figure — trade-off scatter plot
+x-axis = cell-type purity,  y-axis = niche purity,  one point per method.
+Your method should be Pareto-dominant (top-right corner).
+This is the single most memorable figure in the paper.
+Ablation table
+scProto + PCA only
+scProto + BANKSY (first-order context)
+scProto + COVET (α=1.0, covet-only)
+scProto + concat(PCA, COVET) (yours)
+Isolates the affinity contribution from the framework contribution.
+Purpose
+Core quantitative result. The trade-off figure is your hero for this section.
+Result 4: Niche-aware metacells reveal niche-correlated transcriptional programs
+Claim: Differential expression between same-cell-type metacells from different niches recovers known niche-specific biology and reveals programs missed by standard analysis.
+Figures / analyses needed
+Volcano plot or dotplot: DE genes between niche-metacells of one cell type (e.g., macrophages in tumor core vs stroma).
+Annotate known niche-specific markers (hypoxia genes in core, immune checkpoint genes at boundary).
+Show these genes are NOT significant in standard cell-type DE (between all macrophages regardless of niche).
+Heatmap: top niche-correlated genes across niche-metacells, organized by niche label.
+Gene set enrichment: pathways enriched in niche-specific metacell programs (hypoxia, immune exclusion, ECM remodeling).
+Spatial validation: one gene with known spatial pattern — show expression map matches the niche-metacell assignment.
+Purpose — THE MOST IMPORTANT RESULT
+This is the biological payoff. Without this, you have a better metric but no discovery. Nature Methods requires demonstrated biological utility. If you can show one biologically meaningful gene program that existing methods miss and yours recovers, that IS the paper.
+Result 5: Downstream analyses benefit from niche-aware aggregation
+Claim: Niche-aware metacells improve sensitivity of downstream spatial analyses.
+Option A — Ligand–receptor interaction specificity
+Run CellChat or NicheNet on metacells from each method.
+Measure: interaction score ratio (within-niche / cross-niche) — higher = more specific.
+Show scProto+COVET metacells yield sharper, more spatially resolved interaction maps.
+Option B — Reproducibility across samples / batches
+If multiple slides/patients available: train on one, apply to another.
+Show niche-metacell programs are reproducible across samples.
+Connects back to scProto's cross-batch strength from NeurIPS paper.
+Purpose
+Shows the method enables new biology, not just better metrics. This separates a Nature Methods paper from a Bioinformatics paper.
+────────────────────────────────────────────────────────────────────────────────
+Discussion (1 page)
+What niche-aware metacells enable that wasn't possible before.
+When to use niche vs transcriptomic affinity (or both — concat).
+Limitations:
+COVET requires k ≥ 3×n_pcs cells per neighborhood; sparse spatial data degrades covariance estimation.
+K (number of metacells) must be set in advance.
+Single-slide COVET does not benefit from cross-batch alignment.
+Future directions:
+3D spatial data (already partially supported in code — z-axis scaling).
+Ligand–receptor-informed affinity.
+Integration with single-cell foundation model embeddings (cite scConcept, Richter et al. NMI 2025).
+────────────────────────────────────────────────────────────────────────────────
+Methods
+COVET affinity construction (full detail — your novel contribution)
+Spatial kNN construction (_covet_spatial_knn).
+Covariance of neighbor PCA embeddings (_covet_cov_flat).
+PCA reduction of flattened covariance + variance-balancing λ (_covet_apply).
+Adaptive bandwidth RBF kernel on COVET features (build_seacell_kernel).
+Parameter choices: k, n_pcs, α — sensitivity analysis in Supplementary.
+scProto framework
+Brief summary only — 'See Hashemi et al. NeurIPS 2026 for full methodological details'.
+Describe: encoder, soft assignment, community loss, reconstruction loss, prototype regularization.
+Datasets
+NSCLC CosMx (28,804 cells, 18 cell types, 9 niches) — already have.
+Brain MERFISH or Xenium — cortical layers as ground-truth niches.
+Visium dataset — for comparison with SuperSpot.
+Second tumor or tissue dataset — for generalizability claim.
+Baselines and configurations
+SEACells (transcriptomic), SEACells (spatial), SEACells (BANKSY).
+MetaQ.
+SuperSpot (Visium only).
+All configured to produce the same K as scProto.
+Statistical testing
+DE analysis: pseudobulk per niche-metacell, DESeq2 or edgeR.
+Niche/cell-type purity comparisons: Mann-Whitney U, reported with effect sizes.
+────────────────────────────────────────────────────────────────────────────────
+Datasets Needed — Summary
+Dataset
+Platform
+Why needed
+NSCLC CosMx (already have)
+Single-cell resolution
+Tumor microenvironment, multiple niches — hero dataset
+Brain (MERFISH or Xenium)
+Single-cell resolution
+Cortical layers = well-defined ground-truth niches
+Visium dataset
+Spot-based
+Comparison with SuperSpot
+Second tumor or tissue
+Any
+Generalizability claim across tissues/platforms
+────────────────────────────────────────────────────────────────────────────────
+Target Journal &amp; Submission Timeline
+Target journal: Nature Methods
+Rolling submissions — no fixed deadline.
+Best fit: SEACells, BANKSY, COVET all published here.
+Story is biology-first, method-second → Methods over Machine Intelligence.
+Cite NeurIPS paper as the ML backbone; this paper contributes the affinity + biology.
+Recommended timeline
+Now (June 2026): finalize datasets, run COVET affinity experiments.
+July–August 2026: produce all 5 results sections.
+September 2026: NeurIPS decisions arrive — update citation (in press / published).
+October 2026: submit to Nature Methods.
+Jan–Feb 2027: first review decision expected.
+Mid-2027: realistic publication target.
+Why not Nature Machine Intelligence
+NMI wants ML novelty as headline — the ML method is already at NeurIPS.
+Reviewers would ask: 'what is new ML-wise beyond the NeurIPS paper?'
+Nature Methods does not ask that — different story, different community.
+────────────────────────────────────────────────────────────────────────────────
+The Single Most Important Result
+Result 4 — the DE genes between same-cell-type niche metacells. Everything else is scaffolding. If you can show one biologically meaningful gene program that existing methods miss and yours recovers, that is your Nature Methods story. Find a gene that: (a) is known to be spatially regulated in your tissue, (b) is NOT significant in standard cell-type DE, (c) IS significant in your niche-metacell DE. That panel alone justifies the paper.

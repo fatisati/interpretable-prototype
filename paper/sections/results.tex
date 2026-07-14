@@ -6,18 +6,12 @@ We evaluate on three multi-batch single-cell RNA-seq datasets~\citep{luecken2020
 \textbf{PBMC (immune)} (30k cells, 5 batches, 9 cell types),
 and a \textbf{Lung} dataset (30k cells, 16 batches, 17 cell types).
 For spatial evaluations, we use a \textbf{non-small cell lung cancer (NSCLC)} spatial transcriptomics dataset~\citep{pentimalli2025combining}.
-The original dataset comprises 6 slides; we select slide 28, subsample 30,000 cells stratified by cell type and niche label, and exclude cells assigned to uninformative niche labels, yielding 28,804 cells across 18 cell types and 9 niches.
+After preprocessing (see Appendix~\ref{app:datasets}), this yields 28,804 cells across 18 cell types and 9 niches.
 Niche labels are defined by clustering cells based on the local cell-type composition of their spatial neighborhood, providing a measure of microenvironmental context that is related to but distinct from the spatial affinity used during training.
-All datasets are preprocessed with Scanpy~\citep{wolf2018scanpy} by normalizing total counts, applying log1p transformation, and selecting 4,000 highly variable genes.
-% TODO: add dataset statistics table to appendix (app:datasets) and uncomment the following line
-% Detailed statistics are in Appendix~\ref{app:datasets}.
 
 \paragraph{Affinity construction.}
-For transcriptomic experiments, cell--cell affinities are computed using an adaptive Gaussian kernel on PCA embeddings, following prior work~\citep{seacells}.
-The adaptive kernel scales each cell's bandwidth to its local neighborhood distance, correcting for density variability in single-cell data: rare cell types occupy low-density regions where a fixed bandwidth would underestimate local similarities, and the adaptive kernel ensures they form well-connected communities in the graph.
-Combined with scProto's cross-batch aggregation, this enables stable metacells to form for rare cell types that are underrepresented within individual batches --- a limitation of within-batch methods even when using the same affinity.
-For spatial experiments, we apply the same kernel to spatially aggregated features, obtained by averaging the PCA embeddings of neighboring cells within a fixed spatial radius, thereby incorporating microenvironmental context into the affinity (see Appendix~\ref{app:spatial_affinity} for details).
-This encodes tissue organization rather than cell-type identity, a signal that transcriptomic similarity alone cannot recover.
+For transcriptomic experiments, cell--cell affinities are computed using an adaptive Gaussian kernel on PCA embeddings~\citep{seacells}, which scales each cell's bandwidth to its local neighborhood density, ensuring rare cell types form well-connected communities despite occupying sparse regions; combined with scProto's cross-batch aggregation, this enables stable metacells for rare populations underrepresented in individual batches.
+For spatial experiments, we apply the same kernel to spatially aggregated features---PCA embeddings averaged over each cell's spatial neighborhood---encoding tissue organization rather than transcriptomic similarity alone (see Appendix~\ref{app:spatial_affinity}).
 
 \paragraph{Baselines.}
 We compare against \textbf{SEACells}~\citep{seacells}, a metacell method based on archetypal analysis;
@@ -30,15 +24,16 @@ All baselines are configured to produce the same number of metacells $K$ as scPr
 
 \paragraph{Evaluation protocol.}
 scProto outputs soft prototype assignments $s_i \in \mathbb{R}^K$; each cell is assigned to the prototype with the highest score (argmax), and each metacell is labeled by majority voting.
-We assess community structure using \textbf{modularity}, cross-batch integration using \textbf{batch entropy}, biological signal preservation using \textbf{cell-type purity}, rare cell representation using \textbf{coverage} and \textbf{rare purity}, and for spatial data, microenvironmental structure using \textbf{niche purity}.
-Rare cell types are defined as those whose mean per-batch frequency falls more than one standard deviation below the mean across all cell types.
+We assess community structure using \textbf{modularity}, cross-batch integration using \textbf{batch entropy}, biological signal preservation using \textbf{cell-type purity}, rare cell representation using \textbf{coverage} and \textbf{homogeneity}, and for spatial data, microenvironmental structure using \textbf{niche purity}.
+For all rare-cell metrics, rare cell types are identified \emph{within each batch separately}: a cell type is rare in a given batch if its within-batch frequency falls more than one standard deviation below the within-batch mean across all cell types (fallback: lowest quartile).
+Scores are computed per batch and reported as mean~$\pm$~std across batches.
 Formal definitions are provided in Appendix~\ref{app:metrics}.
 
 \subsection{scProto recovers community structure while integrating cells across batches}
 
-As shown in Table~\ref{tab:graph_batch}, scProto achieves modularity comparable to SEACells, indicating that it recovers the community structure of the input affinity graph. At the same time, it exhibits substantially higher batch entropy, demonstrating effective mixing of cells across batches. Importantly, this is achieved without compromising biological identity, as scProto maintains cell-type purity comparable to competing methods.
+As shown in Table~\ref{tab:graph_batch}, scProto matches or exceeds SEACells on modularity across all three datasets while substantially outperforming it on batch entropy, demonstrating that community structure recovery and cross-batch integration are not in conflict. Importantly, this is achieved without compromising biological identity, as scProto maintains cell-type purity comparable to competing methods.
 
-In contrast, SEACells attains similar modularity and purity but exhibits very low batch entropy, indicating that it forms batch-specific metacells without meaningful cross-batch aggregation. Conversely, scPoli (cVAE) and Parametric UMAP achieve high batch entropy and purity but show significantly lower modularity, suggesting that they fail to recover the community structure encoded in the affinity graph.
+In contrast, SEACells attains similar modularity and purity but exhibits very low batch entropy, indicating that it forms batch-specific metacells without meaningful cross-batch aggregation. Conversely, scPoli (cVAE) and Parametric UMAP achieve high batch entropy and purity but show significantly lower modularity, suggesting that they fail to recover the community structure encoded in the affinity graph. MetaQ achieves intermediate modularity and batch entropy across all three datasets, excelling at neither community structure recovery nor cross-batch integration.
 
 These differences are further illustrated in Fig.~\ref{fig:pancreas_umap}, where UMAP~\citep{mcinnes2018umap} visualizations of pancreas metacells show that scProto forms clusters that are well aligned across batches while remaining consistent with cell-type structure, whereas SEACells produces clusters that are largely separated by batch.
 Per-metacell distributions of purity and batch entropy are shown in Fig.~\ref{fig:purity_entropy} (Appendix).
@@ -102,23 +97,21 @@ scProto
 \setlength{\tabcolsep}{6pt}
 \end{table*}
 
-\subsection{Cross-Batch Metacells Improve Representation of Rare Cell Types}
+\subsection{Cross-Batch Aggregation Improves Coverage; Community Preservation Ensures Coherence}
 
-We next examine whether the combination of density-corrected affinity and cross-batch aggregation improves representation of rare cell types.
-The adaptive kernel ensures that rare populations form well-connected communities in the affinity graph; scProto then preserves those communities while pooling cells across batches, increasing effective sample size where individual batches fall short.
+We examine whether density-corrected affinity combined with cross-batch aggregation improves representation of rare cell types.
 
-As shown in Table~\ref{tab:rare_cells}, scProto achieves consistently higher or comparable coverage across datasets, indicating that aggregating cells across batches enables the formation of metacells for cell types that are underrepresented within individual batches. Importantly, scProto also attains higher or comparable purity for metacells corresponding to rare cell types, demonstrating that it groups cells more coherently despite limited per-batch samples.
-
-Per-frequency-bin purity analysis (Fig.~\ref{fig:rare_purity}, Appendix) shows that scProto maintains high purity even for the rarest cell types, whereas SEACells degrades in low-frequency bins.
-
-In contrast, reconstruction-based methods such as scPoli (cVAE), and structure-preserving methods such as Parametric UMAP, do not explicitly enforce community-level structure during training. As a result, they tend to merge rare cell states into larger, denser clusters, leading to reduced purity for low-frequency populations.
-
+As shown in Table~\ref{tab:rare_cells}, cross-batch methods broadly match or outperform the batch-restricted baselines in coverage, consistent with pooling cells across batches being necessary to recover rare populations underrepresented in individual batches.
+However, coverage alone does not fully characterize rare-cell representation---a method can achieve high coverage by assigning rare cells to large, impure metacells.
+The PBMC dataset makes this distinction most clearly: scProto, scPoli~(cVAE), and Parametric UMAP all achieve full coverage ($1.00 \pm 0.00$), yet scProto's homogeneity ($0.86 \pm 0.04$) substantially exceeds that of Parametric UMAP ($0.66 \pm 0.13$) and outperforms scPoli~(cVAE) ($0.77 \pm 0.12$).
+scProto achieves the highest homogeneity across all three datasets, demonstrating that community structure preservation ensures rare cells are not only discovered but grouped into coherent metacells.
 
 \begin{table*}[t]
 \centering
-\caption{Coverage and purity for rare (low-frequency) cell types. Purity: mean~$\pm$~std across metacells assigned to rare cell types. Bold: best; underlined: second-best.}
+\caption{Per-batch rare-cell coverage and homogeneity. Rare cell types are identified within each batch separately; both metrics are computed per batch and reported as mean~$\pm$~std across batches. Bold: best; underlined: second-best.}
 \label{tab:rare_cells}
 \tiny
+\setlength{\tabcolsep}{1pt}
 \begin{tabular}{lcc|cc|cc}
 \toprule
  & \multicolumn{2}{c}{Pancreas}
@@ -127,42 +120,43 @@ In contrast, reconstruction-based methods such as scPoli (cVAE), and structure-p
 \cmidrule(lr){2-3} \cmidrule(lr){4-5} \cmidrule(lr){6-7}
 Method
 & Coverage $\uparrow$
-& Rare Purity $\uparrow$
+& Homogeneity $\uparrow$
 & Coverage $\uparrow$
-& Rare Purity $\uparrow$
+& Homogeneity $\uparrow$
 & Coverage $\uparrow$
-& Rare Purity $\uparrow$ \\
+& Homogeneity $\uparrow$ \\
 \midrule
 
 SEACells
-& $0.50$ & $0.69 \pm 0.11$
-& $\mathbf{1.00}$ & $\mathbf{0.90 \pm 0.10}$
-& $\mathbf{1.00}$ & $\underline{0.92 \pm 0.13}$ \\
+& $0.43 \pm 0.27$ & $0.42 \pm 0.20$
+& $\mathbf{1.00 \pm 0.00}$ & $\underline{0.85 \pm 0.07}$
+& $0.52 \pm 0.23$ & $0.47 \pm 0.24$ \\
 
 MetaQ
-& $0.25$ & $\underline{0.71 \pm 0.00}$
-& $\mathbf{1.00}$ & $0.78 \pm 0.05$
-& $0.00$ & -- \\
+& $0.25 \pm 0.33$ & $0.20 \pm 0.12$
+& $\underline{0.95 \pm 0.10}$ & $0.60 \pm 0.12$
+& $0.70 \pm 0.24$ & $0.54 \pm 0.22$ \\
 
 scPoli (cVAE)
-& $\underline{0.75}$ & $0.54 \pm 0.09$
-& $0.75$ & $0.58 \pm 0.21$
-& $\underline{0.67}$ & $0.82 \pm 0.13$ \\
+& $\underline{0.56 \pm 0.28}$ & $\underline{0.46 \pm 0.17}$
+& $\mathbf{1.00 \pm 0.00}$ & $0.77 \pm 0.12$
+& $\mathbf{0.74 \pm 0.27}$ & $\underline{0.58 \pm 0.16}$ \\
 
 UMAP
-& $0.50$ & $0.55 \pm 0.15$
-& $\mathbf{1.00}$ & $0.61 \pm 0.12$
-& $\mathbf{1.00}$ & $0.84 \pm 0.18$ \\
+& $\underline{0.56 \pm 0.28}$ & $\underline{0.46 \pm 0.17}$
+& $\mathbf{1.00 \pm 0.00}$ & $0.66 \pm 0.13$
+& $\mathbf{0.74 \pm 0.27}$ & $\underline{0.58 \pm 0.16}$ \\
 
 \midrule
 
 scProto
-& $\mathbf{1.00}$ & $\mathbf{0.73 \pm 0.13}$
-& $\mathbf{1.00}$ & $\underline{0.88 \pm 0.13}$
-& $\mathbf{1.00}$ & $\mathbf{0.95 \pm 0.09}$ \\
+& $\mathbf{0.66 \pm 0.26}$ & $\mathbf{0.54 \pm 0.18}$
+& $\mathbf{1.00 \pm 0.00}$ & $\mathbf{0.86 \pm 0.04}$
+& $\underline{0.72 \pm 0.22}$ & $\mathbf{0.60 \pm 0.23}$ \\
 
 \bottomrule
 \end{tabular}
+\setlength{\tabcolsep}{6pt}
 \end{table*}
 
 \subsection{scProto captures microenvironmental structure while preserving cell-type identity}

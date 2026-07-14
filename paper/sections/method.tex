@@ -5,7 +5,7 @@ We consider a dataset of cells $\{x_i\}_{i=1}^N$ with $B \geq 1$ batches, where 
 \subsection{Model Components}
 
 \paragraph{Input.}
-We assume gene expression profiles $x_i \in \mathbb{R}^G$ with batch labels $b_i$, and a precomputed similarity graph $P \in \mathbb{R}^{N \times N}$ capturing local relationships.
+We assume gene expression profiles $x_i \in \mathbb{R}^G$ with batch labels $b_i$, and a precomputed cell--cell similarity graph $P \in \mathbb{R}^{N \times N}$. By default, $P$ is an adaptive Gaussian (RBF) kernel on PCA embeddings~\citep{seacells}, which corrects for local density variations to ensure rare cell types form well-connected communities.
 If the affinity is computed per batch, the resulting graphs can simply be concatenated to form a block-diagonal $P$; even when computed globally across all cells, batch effects make cross-batch similarities negligible, so $P$ is approximately block-diagonal in either case (see Appendix~\ref{app:graph_structure}).
 Since the affinity is constructed in PCA space, it reflects both biological variation and technical batch effects; disentangling these signals is delegated to the batch-conditional encoder during training.
 More broadly, the affinity can encode any biologically meaningful similarity---including spatial context---allowing the model to capture microenvironmental structure while remaining grounded in gene expression via the reconstruction objective (see Appendix~\ref{app:spatial_affinity}).
@@ -26,15 +26,17 @@ s_{ik} =
 \frac{\exp\left( \frac{z_i^\top c_k}{\tau} \right)}
 {\sum_{k'} \exp\left( \frac{z_i^\top c_{k'}}{\tau} \right)},
 \]
-where $\tau > 0$ is a temperature parameter controlling assignment sharpness. Rather than treating $\tau$ as a fixed hyperparameter, we calibrate it from data after pretraining and prototype initialization (see Appendix~\ref{app:calibration}).
+where $\tau > 0$ is a temperature parameter controlling assignment sharpness, and both $z_i$ and $c_k$ are $\ell_2$-normalized (see Appendix~\ref{app:training}). Rather than treating $\tau$ as a fixed hyperparameter, we calibrate it from data after pretraining and prototype initialization (see Appendix~\ref{app:calibration}).
 
-The assignment vector $s_i \in \mathbb{R}^K$ encodes how a cell is composed of metacell components. This representation is used to preserve similarity structure by mapping highly connected cells to similar assignment vectors.
+The assignment vector $s_i \in \mathbb{R}^K$ encodes the soft membership of cell $i$ across all $K$ prototypes. This representation is used to preserve similarity structure by mapping highly connected cells to similar assignment vectors.
 
 \paragraph{Community Structure Preservation.}
 To preserve local similarity structure, we define similarity between cells based on prototype assignments:
 \[
 q_{ij} = s_i^\top s_j.
 \]
+
+Since $s_i$ is a probability vector (softmax outputs are non-negative and sum to one), $q_{ij} \in [0,1]$, making it a natural similarity for binary cross-entropy.
 
 We match this similarity to the input graph using a binary cross-entropy objective:
 \[
@@ -47,9 +49,9 @@ P_{ij}\log \tilde q_{ij}
 (1-P_{ij})\log(1-\tilde q_{ij})
 \Big],
 \]
-where $\tilde q_{ij}$ is a clipped version of $q_{ij}$ for numerical stability.
+where $\tilde q_{ij}$ clips $q_{ij}$ away from 0 and 1 to avoid $\log(0)$.
 
-This objective encourages cells strongly connected in the affinity graph to share prototype assignments. In practice, we optimize stochastically, sampling positive edges from $P_{ij}$ and negative pairs within each batch; since both operate within individual datasets, no assumption is made about cross-batch dissimilarity, and cross-batch alignment is delegated to the encoder via the reconstruction objective.
+This objective encourages cells strongly connected in the affinity graph to share prototype assignments. In practice, we optimize stochastically, sampling positive edges from $P_{ij}$ and negative pairs within each batch; since both operate within individual datasets, no assumption is made about cross-batch similarity or dissimilarity, and cross-batch alignment is delegated to the encoder via the reconstruction objective.
 
 \paragraph{Decoder and Reconstruction.}
 Each prototype is decoded into gene expression space:
@@ -66,7 +68,7 @@ We optimize:
 \mathcal{L}_{\text{rec}} = \frac{1}{N} \sum_i \|x_i - \tilde{x}_i\|_2^2.
 \]
 
-In practice, we stop the gradient through $s_{ik}$ when optimizing $\mathcal{L}_{\text{rec}}$, so the encoder is shaped exclusively by $\mathcal{L}_{\text{community}}$ (see Appendix~\ref{app:training}).
+In practice, we stop the gradient through $s_{ik}$ when optimizing $\mathcal{L}_{\text{rec}}$, so the encoder receives no gradient from $\mathcal{L}_{\text{rec}}$, preventing reconstruction from conflicting with the affinity-based objectives (see Appendix~\ref{app:training}).
 
 \paragraph{Prototype Regularization.}
 
@@ -97,7 +99,7 @@ M^{(b)}_{kj} =
 {\sqrt{\mathrm{vol}^{(b)}_k \, \mathrm{vol}^{(b)}_j}}.
 \]
 
-The diagonal terms measure how compact each prototype is within a batch: $M^{(b)}_{kk} \in [0,1]$, with values close to 1 indicating that the affinity edges of cells assigned to prototype $k$ are concentrated within that prototype---a tight, well-connected community. Off-diagonal terms $M^{(b)}_{kj}$ measure inter-prototype connectivity, with values close to 0 indicating distinct, non-overlapping prototypes and values close to 1 indicating strong mixing.
+Diagonal terms $M^{(b)}_{kk} \in [0,1]$ measure within-batch prototype compactness (1 = tight, well-connected community); off-diagonal terms $M^{(b)}_{kj}$ measure inter-prototype connectivity (0 = distinct, non-overlapping).
 
 To aggregate across batches, we use:
 \[

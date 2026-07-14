@@ -30,3 +30,6 @@ dependencies = [
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["interpretable_ssl*"]
+
+[tool.jupytext]
+formats = "ipynb,py:percent"

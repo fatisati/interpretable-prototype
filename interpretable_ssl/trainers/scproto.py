@@ -318,7 +318,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             self.model.init_prototypes_kmeans(embeddings, self.nmb_prototypes)
         elif self.prot_init == "waypoint":
             logger.info("initializing prototypes using waypoint (topology-aware MaxMin)")
-            self._init_prototypes_waypoint()
+            self._init_prototypes_waypoint(n_eigs=getattr(self, 'waypoint_n_eigs', 10))
 
     def _init_prototypes_waypoint(self, n_eigs=10):
         """Topology-aware prototype init mirroring SEACells' initialize_archetypes().
@@ -341,20 +341,27 @@ class SCProtoTrainer(AdoptiveTrainer):
         K   = self.nmb_prototypes
         aff = self.train_ds.aff_raw if hasattr(self.train_ds, 'aff_raw') else self.train_ds.aff
         N   = aff.shape[0]
-        print(f"[waypoint init] N={N} cells, K={K} prototypes, n_eigs={n_eigs}")
 
         A  = sp.csr_matrix(aff)
         A  = (A + A.T) / 2
 
+        d    = np.array(A.sum(axis=1)).ravel()
+        nnz  = A.nnz
+        wmin, wmean, wmax = A.data.min(), A.data.mean(), A.data.max()
+        effk = nnz / N          # mean edges per row (both directions counted)
+        print(f"[waypoint init] N={N}  K={K}  n_eigs={n_eigs}  "
+              f"nnz={nnz}  nnz/row={effk:.1f}  "
+              f"w[min/mean/max]={wmin:.3e}/{wmean:.3e}/{wmax:.3e}  "
+              f"deg[min/mean/max]={d.min():.2f}/{d.mean():.2f}/{d.max():.2f}")
+
         # --- normalised affinity (same normalisation as SEACells) ---
         print("[waypoint init] computing diffusion map ...")
-        d          = np.array(A.sum(axis=1)).ravel()
         d_inv_sqrt = 1.0 / np.sqrt(d + 1e-8)
         D_inv_sqrt = sp.diags(d_inv_sqrt)
         L_sym      = D_inv_sqrt @ A @ D_inv_sqrt
 
         n_eigs = min(n_eigs, N - 2)
-        _, vecs = eigsh(L_sym, k=n_eigs, which='LM')   # [N, n_eigs]
+        _, vecs = eigsh(L_sym, k=n_eigs, which='LM', tol=1e-2)   # [N, n_eigs]
         print(f"[waypoint init] diffusion map done — {n_eigs} eigenvectors")
 
         # --- greedy MaxMin in diffusion space ---
@@ -787,6 +794,41 @@ class SCProtoTrainer(AdoptiveTrainer):
 
     # -- UMAP edge training: setup / epoch / public API ------------------
 
+    def _compute_sim_recon_diffusion_targets(self, aff_csr, cell_ds, n_eigs):
+        """Per-biological-batch diffusion coordinates — a compact, precomputed
+        (n_eigs-dim) summary of each cell's position in the affinity graph,
+        used as the regression target when sim_recon_target='diffusion'.
+
+        Computed once per biological batch (not globally over the whole,
+        block-diagonal affinity matrix): a single global eigsh call would let
+        a large batch dominate the shared top-n_eigs, starving smaller
+        batches of dimensions that actually describe their own structure.
+        Batches too small for n_eigs eigenvectors are left as zeros.
+
+        This intentionally does not reuse `_init_prototypes_waypoint`'s
+        (global) diffusion map — that one only needs rough coverage for
+        picking init seeds, whereas a regression target needs every cell's
+        coordinates to be meaningful.
+        """
+        import scipy.sparse as sp
+        from scipy.sparse.linalg import eigsh
+
+        N = aff_csr.shape[0]
+        coords = np.zeros((N, n_eigs), dtype=np.float32)
+        for b in np.unique(cell_ds):
+            idx_b = np.where(cell_ds == b)[0]
+            if len(idx_b) <= n_eigs + 1:
+                continue
+            A_b = aff_csr[idx_b][:, idx_b]
+            A_b = (A_b + A_b.T) / 2
+            d_b = np.array(A_b.sum(axis=1)).ravel()
+            D_inv_sqrt = sp.diags(1.0 / np.sqrt(d_b + 1e-8))
+            L_sym = D_inv_sqrt @ A_b @ D_inv_sqrt
+            k = min(n_eigs, len(idx_b) - 2)
+            _, vecs = eigsh(L_sym, k=k, which='LM', tol=1e-2)
+            coords[idx_b, :k] = vecs
+        return coords
+
     def _setup_umap_edges(self, epochs: int = None, init_prototypes: bool = True, skip_calibration: bool = False):
         """Build and cache all objects needed for edge-centric UMAP training."""
         epochs = epochs or getattr(self, 'umap_edge_epochs', 200)
@@ -861,11 +903,32 @@ class SCProtoTrainer(AdoptiveTrainer):
         self._cell_degree = torch.tensor(_deg, dtype=torch.float32)   # (N,)
         self._two_m = _two_m
 
+        lambda_sim_recon = getattr(self, 'lambda_sim_recon', 0.0)
+        if lambda_sim_recon > 0:
+            sim_recon_target = getattr(self, 'sim_recon_target', 'full')
+            if sim_recon_target == 'diffusion':
+                n_eigs = getattr(self, 'sim_recon_n_eigs', 10)
+                output_dim = n_eigs
+                coords = self._compute_sim_recon_diffusion_targets(_A, cell_ds, n_eigs)
+                self._sim_recon_diffusion_target = torch.from_numpy(coords)  # (N, n_eigs), CPU
+            else:
+                output_dim = _A.shape[0]
+                self._sim_recon_aff_csr = _A  # reused as the reconstruction target, no recompute
+
+            self.model.init_sim_decoder(
+                output_dim=output_dim,
+                hidden_dim=getattr(self, 'sim_recon_hidden_dim', 256),
+            )
+            self.model.sim_decoder_trunk.to(self.device)
+            self.model.sim_decoder_out.to(self.device)
+
         proto_decoupled = getattr(self, 'proto_decoupled', False) and umap_similarity == 'proto'
         if umap_similarity == 'proto' and not proto_decoupled:
             params = list(self.model.scpoli_cvae.parameters()) + list(self.model.prototypes.parameters())
         else:
             params = list(self.model.scpoli_cvae.parameters())
+        if lambda_sim_recon > 0:
+            params += list(self.model.sim_decoder_trunk.parameters()) + list(self.model.sim_decoder_out.parameters())
         params = [p for p in params if p.requires_grad]
         optimizer = torch.optim.Adam(params, lr=self.base_lr)
 
@@ -889,6 +952,15 @@ class SCProtoTrainer(AdoptiveTrainer):
         print(f"   lambda_umap={getattr(self, 'lambda_umap', 1.0)}, "
               f"lambda_recon={self.lambda_recon}, lambda_kl={self.lambda_kl}, "
               f"lambda_proto_recon={self.lambda_proto_recon}, lambda_r1r2={self.lambda_r1r2}")
+        _lambda_nassoc = getattr(self, 'lambda_nassoc', 0.0)
+        if _lambda_nassoc > 0:
+            _nassoc_diag_loss = getattr(self, 'nassoc_diag_loss', 'mse')
+            _nassoc_agg = getattr(self, 'nassoc_agg', 'mean')
+            _nassoc_diag = getattr(self, 'nassoc_diag', True)
+            _offdiag_mode = f'-log(1-sqrt(m))' if _nassoc_diag_loss == 'nll' else 'm²'
+            _diag_mode = f'-log(m)' if _nassoc_diag_loss == 'nll' else '(m-1)²'
+            print(f"   nassoc: λ={_lambda_nassoc}, agg={_nassoc_agg}, "
+                  f"diag={'ON' if _nassoc_diag else 'OFF'} [{_diag_mode}], offdiag=[{_offdiag_mode}]")
 
     # ------------------------------------------------------------------
     # Decoupled prototype learning (online GMM EM)
@@ -996,6 +1068,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         lambda_recon = self.lambda_recon
         lambda_kl = self.lambda_kl
         lambda_proto_recon = self.lambda_proto_recon
+        proto_recon_hard = getattr(self, 'proto_recon_hard', False)
         lambda_r1r2 = self.lambda_r1r2
         lambda_proto_attract = getattr(self, 'lambda_proto_attract', 0.0)
         lambda_proto_usage = getattr(self, 'lambda_proto_usage', 0.0)
@@ -1005,6 +1078,8 @@ class SCProtoTrainer(AdoptiveTrainer):
         nassoc_agg = getattr(self, 'nassoc_agg', 'mean')
         nassoc_diag_loss = getattr(self, 'nassoc_diag_loss', 'mse')
         nassoc_diag = getattr(self, 'nassoc_diag', True)
+        lambda_sim_recon = getattr(self, 'lambda_sim_recon', 0.0)
+        sim_recon_target = getattr(self, 'sim_recon_target', 'full')
         use_proto_sim = getattr(self, 'umap_similarity', 'embedding') == 'proto'
         proto_metric = getattr(self, 'umap_proto_metric', 'dotp')
         proto_decoupled = getattr(self, 'proto_decoupled', False) and use_proto_sim
@@ -1015,6 +1090,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             'loss': 0, 'umap': 0, 'q_pos': 0, 'q_neg': 0, 'margin': 0,
             'loss_pos': 0, 'loss_neg': 0, 'recon': 0, 'kl': 0,
             'proto_recon': 0, 'r1r2': 0, 'proto_attract': 0, 'nassoc': 0, 'proto_usage': 0, 'n_unused_protos': 0,
+            'nassoc_diag_val': 0, 'nassoc_offdiag_val': 0, 'sim_recon': 0,
         }
         # snapshot proto positions at epoch start to measure movement
         if proto_decoupled:
@@ -1269,11 +1345,20 @@ class SCProtoTrainer(AdoptiveTrainer):
                 cond_expanded = unique_conds.unsqueeze(1).expand(-1, K, -1).reshape(-1, unique_conds.size(1))
                 decoded_all = self.model.decode(proto_expanded, cond_expanded).view(n_unique_conds, K, n_genes)
                 recon_x_agg = torch.zeros(n_samples, n_genes, device=self.device)
+                if proto_recon_hard and not proto_decoupled:
+                    # soft scores with detached z — gradient flows to protos via score path, not encoder
+                    soft_scores_det = F.softmax(F.linear(z_unique.detach(), protos) / self.epsilon, dim=1)
+                    idx = soft_scores_det.argmax(dim=1)
+                    one_hot = F.one_hot(idx, K).float()
+                    # STE: hard forward, soft backward
+                    st_scores = one_hot - soft_scores_det.detach() + soft_scores_det
                 for c in range(n_unique_conds):
                     cmask = inverse_idx == c
                     if cmask.any():
                         if proto_decoupled:
                             recon_x_agg[cmask] = scores[cmask] @ decoded_all[c]
+                        elif proto_recon_hard:
+                            recon_x_agg[cmask] = st_scores[cmask] @ decoded_all[c]
                         else:
                             recon_x_agg[cmask] = scores[cmask].detach() @ decoded_all[c]
                 proto_recon_loss = F.mse_loss(recon_x_agg, X_batch, reduction="none").sum(dim=-1).mean()
@@ -1370,9 +1455,14 @@ class SCProtoTrainer(AdoptiveTrainer):
                                 return -torch.log((1 - (d - 1) ** 2).clamp(min=1e-8)).mean()
                             else:
                                 return ((d - 1) ** 2).mean()
+                        def _offdiag_loss(m):
+                            if nassoc_diag_loss == 'nll':
+                                return -torch.log((1 - m.clamp(max=1-1e-8) ** 0.5).clamp(min=1e-8)).mean()
+                            else:
+                                return (m ** 2).mean()
                         batch_losses = [
                             ((_diag_loss(M_b.diag()) if nassoc_diag else 0.0)
-                             + nassoc_alpha * (M_b[off_mask] ** 2).mean())
+                             + nassoc_alpha * _offdiag_loss(M_b[off_mask]))
                             for M_b in M_list
                         ]
                         nassoc_loss = torch.stack(batch_losses).mean()
@@ -1395,9 +1485,72 @@ class SCProtoTrainer(AdoptiveTrainer):
                             diag_term = -torch.log(avg_f.clamp(min=1e-8)).mean()
                         else:
                             diag_term = ((diag_M - 1) ** 2).mean()
-                        offdiag_term = nassoc_alpha * (M_agg[off_mask] ** 2).mean()
+                        if nassoc_diag_loss == 'nll':
+                            offdiag_term = nassoc_alpha * -torch.log((1 - M_agg[off_mask].clamp(max=1-1e-8) ** 0.5).clamp(min=1e-8)).mean()
+                        else:
+                            offdiag_term = nassoc_alpha * (M_agg[off_mask] ** 2).mean()
                         nassoc_loss = (diag_term if nassoc_diag else 0.0) + offdiag_term
+                        total_metrics['nassoc_diag_val'] += diag_M.mean().item()
+                        total_metrics['nassoc_offdiag_val'] += M_agg[off_mask].mean().item()
                     loss = loss + lambda_nassoc * nassoc_loss
+
+            sim_recon_loss = torch.tensor(0.0, device=self.device)
+            if lambda_sim_recon > 0 and use_proto_sim:
+                # Gives scProto the cell-level resolution pressure nassoc lacks
+                # (nassoc collapses everything to a K×K summary and so can't tell
+                # a genuinely heterogeneous prototype from a homogeneous one) —
+                # the same pressure SEACells' RSS objective gets from
+                # reconstructing full archetype rows. Two target modes:
+                #   'full'      — reconstruct each cell's actual row of the
+                #                 affinity graph (most literal match to SEACells).
+                #   'diffusion' — regress to a small precomputed per-cell
+                #                 diffusion-map coordinate instead (cheaper,
+                #                 no O(n_cells) decoder output, but the
+                #                 compression could in principle throw away
+                #                 some of the resolving signal — compare both).
+                #
+                # S and the prototypes both keep their gradient here in either
+                # mode (unlike proto_recon_loss's gene-expression decoder, which
+                # detaches S): the reconstruction target is itself derived from
+                # the same affinity graph the community/nassoc losses already
+                # use, so there's no competing objective to protect the encoder
+                # from — letting this loss move S is what lets it split a
+                # prototype whose assigned cells don't actually share a
+                # similarity pattern.
+                protos_sr = self.model.get_prototypes()
+
+                if sim_recon_target == 'diffusion':
+                    decoded = self.model.decode_sim_profiles(protos_sr)         # (K, n_eigs)
+                    predicted = soft_assign @ decoded                           # (n_unique, n_eigs)
+                    target = self._sim_recon_diffusion_target[unique_idx.cpu()].to(self.device)  # (n_unique, n_eigs)
+                    sim_recon_loss = F.mse_loss(predicted, target)
+                    loss = loss + lambda_sim_recon * sim_recon_loss
+                else:
+                    cell_ds_all_sr = self._umap_state['cell_ds']
+                    cell_batch_sr = cell_ds_all_sr[unique_idx.cpu()].to(self.device)
+                    aff_csr = self._sim_recon_aff_csr
+
+                    sr_losses = []
+                    for b in cell_batch_sr.unique():
+                        b_mask = cell_batch_sr == b
+                        if b_mask.sum() < 2:
+                            continue
+                        idx_b = unique_idx[b_mask]                                   # (n_b,) global cell ids
+                        # Slice the decoder's output layer to just this batch's cells —
+                        # never materializes the full (K, n_cells) profile.
+                        decoded_cols = self.model.decode_sim_profiles(protos_sr, col_idx=idx_b)  # (K, n_b)
+                        predicted = soft_assign[b_mask] @ decoded_cols               # (n_b, n_b)
+
+                        idx_b_np = idx_b.cpu().numpy()
+                        target = torch.from_numpy(
+                            np.asarray(aff_csr[idx_b_np][:, idx_b_np].todense())
+                        ).float().to(self.device)                                    # (n_b, n_b), sparse -> tiny dense block
+
+                        sr_losses.append(F.mse_loss(predicted, target))
+
+                    if sr_losses:
+                        sim_recon_loss = torch.stack(sr_losses).mean()
+                        loss = loss + lambda_sim_recon * sim_recon_loss
 
             proto_attract_loss = torch.tensor(0.0, device=self.device)
             if lambda_proto_attract > 0 and use_proto_sim:
@@ -1442,6 +1595,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             total_metrics['proto_attract'] += proto_attract_loss.item()
             total_metrics['nassoc'] += nassoc_loss.item()
             total_metrics['proto_usage'] += proto_usage_loss.item()
+            total_metrics['sim_recon'] += sim_recon_loss.item()
             for k, v in metrics.items():
                 if k in total_metrics:
                     total_metrics[k] += v
@@ -1493,9 +1647,11 @@ class SCProtoTrainer(AdoptiveTrainer):
         if getattr(self, 'lambda_proto_attract', 0) > 0:
             extra += f" | proto_attract={metrics['proto_attract']:.4f}"
         if getattr(self, 'lambda_nassoc', 0) > 0:
-            extra += f" | nassoc={metrics['nassoc']:.4f}"
+            extra += f" | nassoc={metrics['nassoc']:.4f} [diag={metrics['nassoc_diag_val']:.3f} offdiag={metrics['nassoc_offdiag_val']:.3f}]"
         if getattr(self, 'lambda_proto_usage', 0) > 0:
             extra += f" | proto_usage={metrics['proto_usage']:.4f}"
+        if getattr(self, 'lambda_sim_recon', 0) > 0:
+            extra += f" | sim_recon={metrics['sim_recon']:.4f}"
         if getattr(self, 'usage_norm_sim', 0) == 5 and 'mode5_c_min' in metrics:
             extra += f" | c_min={metrics['mode5_c_min']:.3f} corr={metrics['mode5_corr_max']:.2f}"
         if 'proto_move' in metrics:
@@ -1691,6 +1847,13 @@ class SCProtoTrainer(AdoptiveTrainer):
 
         # Step 1: restore pretrain weights + init prototypes — matches the state at which
         # epsilon was originally calibrated (before UMAP training began).
+        # Drop any sim-decoder submodules first: they're built lazily by
+        # _setup_umap_edges (step 2) and won't exist in a pretrain-only checkpoint,
+        # so a strict load_state_dict would fail if self.model already carries them
+        # from earlier in this session.
+        for attr in ("sim_decoder_trunk", "sim_decoder_out"):
+            if hasattr(self.model, attr):
+                delattr(self.model, attr)
         self.load_pretrain_checkpoint()
         self.init_prototypes()
 

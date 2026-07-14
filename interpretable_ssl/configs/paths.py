@@ -43,5 +43,35 @@ def get_seacell_model_dir(ds_id, build_kernel_on="X_pca"):
     return os.path.join(MODEL_DIR, ds_id, dir_name)
 
 
+def get_sure_model_dir(ds_id):
+    return os.path.join(MODEL_DIR, ds_id, "sure")
+
+
+def get_metaq_model_dir(ds_id):
+    return os.path.join(MODEL_DIR, ds_id, "metaq")
+
+
+def get_affinity_path(
+    ds_name,
+    n_cells,
+    n_components=50,
+    k_neighbors=50,
+    affinity_type='arbf',
+    graph_dir='./graphs',
+    spatial=False,
+    fold=0,
+    graph_mode='knn',
+):
+    name = f"affinity_{ds_name}{n_cells}_ncomp{n_components}_kneighbors{k_neighbors}_{affinity_type}"
+    if spatial:
+        name += "_spatial"
+    if fold != 0:
+        name += f"_fold{fold}"
+    if graph_mode != 'knn':
+        name += f"_{graph_mode}"
+    name += ".pkl"
+    return os.path.join(graph_dir, name)
+
+
 def get_dataset_model_dir(ds_id):
     return os.path.join(MODEL_DIR, ds_id)

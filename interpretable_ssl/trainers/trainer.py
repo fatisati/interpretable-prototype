@@ -629,9 +629,10 @@ class Trainer(TrainerBase):
 
         label_key = self.dataset.label_key
         batch_key = self.dataset.batch_key
+        niche_key = getattr(self.dataset, 'niche_key', None)
 
         cells_df = pd.DataFrame({'cell_id': ad.obs_names, 'umap_1': z_umap[:, 0], 'umap_2': z_umap[:, 1], 'metacell_id': assignments})
-        for col in [label_key, batch_key]:
+        for col in [label_key, batch_key, niche_key]:
             if col and col in ad.obs.columns:
                 cells_df[col] = ad.obs[col].values
         cells_df.to_csv(os.path.join(save_dir, 'umap_cells.csv'), index=False)
@@ -641,13 +642,12 @@ class Trainer(TrainerBase):
         all_z = self.encode_adata(all_ad, model, z_idx=1).detach()
         all_assignments = model.prototypes(all_z).argmax(dim=1).cpu().numpy()
         assign_df = pd.DataFrame({'cell_id': all_ad.obs_names, 'metacell_id': all_assignments})
-        for col in [label_key, batch_key]:
+        for col in [label_key, batch_key, niche_key]:
             if col and col in all_ad.obs.columns:
                 assign_df[col] = all_ad.obs[col].values
         assign_df.to_csv(os.path.join(save_dir, 'cell_assignments.csv'), index=False)
 
         # Use all_assignments/all_ad for counts and majority labels so they reflect the full dataset.
-        niche_key = getattr(self.dataset, 'niche_key', None)
         lk_vals = all_ad.obs[label_key].values if label_key and label_key in all_ad.obs.columns else None
         nk_vals = all_ad.obs[niche_key].values if niche_key and niche_key in all_ad.obs.columns else None
         proto_rows = []

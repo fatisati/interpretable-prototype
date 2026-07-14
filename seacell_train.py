@@ -12,28 +12,6 @@ def get_seacell_path(ds_id, build_kernel_on="X_pca"):
     return get_seacell_model_dir(ds_id, build_kernel_on)
 
 
-def _compute_modularity(ad, mc_idx):
-    """Newman weighted modularity using ad.obsp['connectivities']."""
-    if 'connectivities' not in ad.obsp:
-        sc.pp.neighbors(ad, use_rep='X_pca')
-    A = sp.csr_matrix(ad.obsp['connectivities'])
-    A = (A + A.T) / 2
-    degrees = np.array(A.sum(axis=1)).ravel()
-    two_m = degrees.sum()
-    if two_m == 0:
-        return {'modularity': 0.0, 'per_cluster_contribution': {}}
-    cluster_ids = np.unique(mc_idx)
-    Q = 0.0
-    per_cluster = {}
-    for c in cluster_ids:
-        mask = (mc_idx == c)
-        e_k = A[mask][:, mask].sum()
-        d_k = degrees[mask].sum()
-        contrib = float((e_k - d_k * d_k / two_m) / two_m)
-        per_cluster[int(c)] = contrib
-        Q += contrib
-    return {'modularity': float(Q), 'per_cluster_contribution': per_cluster}
-
 
 def _save_seacell_umap_data(ds_id, ad, mc_ad, build_kernel_on="X_pca"):
     """Compute joint cell+metacell UMAP and save umap_cells.csv + umap_protos.csv +
@@ -43,6 +21,7 @@ def _save_seacell_umap_data(ds_id, ad, mc_ad, build_kernel_on="X_pca"):
     save_path = get_seacell_path(ds_id, build_kernel_on)
     bk = DATASETS[ds_id].get('batch_key', None)
     lk = DATASETS[ds_id]['label_key']
+    nk = DATASETS[ds_id].get('niche_key', None)
 
     mc_idx = np.array([int(i.split('-')[-1]) for i in ad.obs['SEACell'].values])
     n_mc = len(mc_ad)
@@ -66,20 +45,19 @@ def _save_seacell_umap_data(ds_id, ad, mc_ad, build_kernel_on="X_pca"):
 
     # --- umap_cells.csv ---
     cells_df = pd.DataFrame({'cell_id': ad.obs_names, 'umap_1': z_umap[:, 0], 'umap_2': z_umap[:, 1], 'metacell_id': mc_idx})
-    for col in [lk, bk]:
+    for col in [lk, bk, nk]:
         if col and col in ad.obs.columns:
             cells_df[col] = ad.obs[col].values
     cells_df.to_csv(os.path.join(save_path, 'umap_cells.csv'), index=False)
 
     # --- cell_assignments.csv (all cells, for spatial figure join) ---
     assign_df = pd.DataFrame({'cell_id': ad.obs_names, 'metacell_id': mc_idx})
-    for col in [lk, bk]:
+    for col in [lk, bk, nk]:
         if col and col in ad.obs.columns:
             assign_df[col] = ad.obs[col].values
     assign_df.to_csv(os.path.join(save_path, 'cell_assignments.csv'), index=False)
 
     # --- umap_protos.csv ---
-    nk = DATASETS[ds_id].get('niche_key', None)
     lk_vals = ad.obs[lk].values if lk and lk in ad.obs.columns else None
     nk_vals = ad.obs[nk].values if nk and nk in ad.obs.columns else None
     proto_rows = []
@@ -110,17 +88,14 @@ def _save_seacell_umap_data(ds_id, ad, mc_ad, build_kernel_on="X_pca"):
     print(f"SEACell UMAP data saved to {save_path}")
 
 
-def eval_seacell_task1(ds_id, build_kernel_on="X_pca"):
-    """Load saved SEACell files and compute metacell quality metrics comparable to
-    t_proto.eval_metacell_quality(): purity, batch entropy, and modularity.
-
-    Returns dict with keys 'purity', 'batch_entropy', 'modularity'.
-    """
+def eval_seacell_task1(ds_id, build_kernel_on="X_pca", n_components=50, k_neighbors=50,
+                       affinity_type='arbf', graph_dir='./graphs'):
+    """Load saved SEACell files and compute task-1 metacell quality metrics."""
     from interpretable_ssl.evaluation.metric_helpers.embedding_metrics import load_seacell
+    from interpretable_ssl.evaluation.mc_metric_utils import compute_task1_metrics
 
     save_path = get_seacell_path(ds_id, build_kernel_on)
-    sc_file = os.path.join(save_path, 'seacell_sc.h5ad')
-    if not os.path.exists(sc_file):
+    if not os.path.exists(os.path.join(save_path, 'seacell_sc.h5ad')):
         raise FileNotFoundError(f"SEACell files not found at {save_path}. Run train mode first.")
 
     print(f"Loading SEACell from {save_path} ...")
@@ -128,174 +103,16 @@ def eval_seacell_task1(ds_id, build_kernel_on="X_pca"):
 
     bk = DATASETS[ds_id].get('batch_key', None)
     lk = DATASETS[ds_id]['label_key']
-
-    # integer mc index
-    mc_idx = np.array([int(i.split('-')[-1]) for i in ad.obs['SEACell'].values])
-    obs = ad.obs.copy()
-    obs['_mc'] = mc_idx
-
-    # --- Unused prototypes ---
-    n_total_mc = mc_idx.max() + 1
-    n_unused = int(n_total_mc - len(np.unique(mc_idx)))
-    unused_ratio = n_unused / n_total_mc
-    print(f"[seacell] unused protos: {n_unused}/{n_total_mc} ({unused_ratio:.2%})")
-
-    # --- Metacell sizes (save once, reuse for weighted stats) ---
-    mc_sizes = obs['_mc'].astype(str).value_counts().rename('size')
-    mc_sizes.index.name = 'metacell'
-    mc_sizes.to_csv(os.path.join(save_path, 'size_per_mc.csv'))
-
-    # --- Cell-type purity ---
-    purity_per_mc = calc_purity(obs, label_key=lk, mc_key='_mc', return_per_mc=True)
-    if purity_per_mc is not None:
-        purity_per_mc.index.name = 'metacell'
-        purity_per_mc.to_csv(os.path.join(save_path, 'purity_per_mc.csv'))
-        weights_p = mc_sizes.reindex(purity_per_mc.index).fillna(0)
-        w_sum_p = weights_p.sum()
-        weighted_mean_purity = float((purity_per_mc * weights_p).sum() / w_sum_p)
-        weighted_std_purity = float(np.sqrt(((purity_per_mc - weighted_mean_purity) ** 2 * weights_p).sum() / w_sum_p))
-        print(f"[seacell] mean cell-type purity: {purity_per_mc.mean():.4f}  (size-weighted: {weighted_mean_purity:.4f} ± {weighted_std_purity:.4f})")
-    else:
-        weighted_mean_purity = None
-        weighted_std_purity = None
-        print(f"[seacell] cell-type purity: label key '{lk}' not in obs, skipped")
-
-    # --- Niche purity ---
     nk = DATASETS[ds_id].get('niche_key')
-    niche_purity_per_mc = calc_purity(obs, label_key=nk, mc_key='_mc', return_per_mc=True) if nk else None
-    if niche_purity_per_mc is not None:
-        niche_purity_per_mc.index.name = 'metacell'
-        niche_purity_per_mc.to_csv(os.path.join(save_path, 'niche_purity_per_mc.csv'))
-        weights_n = mc_sizes.reindex(niche_purity_per_mc.index).fillna(0)
-        w_sum_n = weights_n.sum()
-        weighted_mean_niche_purity = float((niche_purity_per_mc * weights_n).sum() / w_sum_n)
-        weighted_std_niche_purity = float(np.sqrt(((niche_purity_per_mc - weighted_mean_niche_purity) ** 2 * weights_n).sum() / w_sum_n))
-        print(f"[seacell] mean niche purity: {niche_purity_per_mc.mean():.4f}  (size-weighted: {weighted_mean_niche_purity:.4f} ± {weighted_std_niche_purity:.4f})")
+    mc_idx = np.array([int(i.split('-')[-1]) for i in ad.obs['SEACell'].values])
 
-    # --- Batch entropy ---
-    entropy_per_mc = None
-    if bk is not None:
-        entropy_per_mc = calc_batch_entropy(obs, batch_key=bk, mc_key='_mc', return_per_mc=True)
-    if entropy_per_mc is not None:
-        entropy_per_mc.index.name = 'metacell'
-        entropy_per_mc.to_csv(os.path.join(save_path, 'batch_entropy_per_mc.csv'))
-        weights = mc_sizes.reindex(entropy_per_mc.index).fillna(0)
-        w_sum = weights.sum()
-        weighted_mean_entropy = float((entropy_per_mc * weights).sum() / w_sum)
-        weighted_std_entropy = float(np.sqrt(((entropy_per_mc - weighted_mean_entropy) ** 2 * weights).sum() / w_sum))
-        print(f"[seacell] mean batch entropy: {entropy_per_mc.mean():.4f}  (size-weighted: {weighted_mean_entropy:.4f} ± {weighted_std_entropy:.4f})")
-    else:
-        weighted_mean_entropy = None
-        weighted_std_entropy = None
-        print(f"[seacell] batch entropy: batch key not found, skipped")
-
-    # --- Modularity ---
-    mod_result = _compute_modularity(ad, mc_idx)
-    print(f"[seacell] modularity: {mod_result['modularity']:.4f}")
-    def _convert(o):
-        if isinstance(o, np.ndarray): return o.tolist()
-        if isinstance(o, (np.integer,)): return int(o)
-        if isinstance(o, (np.floating,)): return float(o)
-        raise TypeError(f'Not serializable: {type(o)}')
-    with open(os.path.join(save_path, 'modularity.json'), 'w') as f:
-        json.dump(mod_result, f, indent=2, default=_convert)
-
-    # --- Per-batch modularity ---
-    mean_batch_mod = std_batch_mod = None
-    if bk is not None and bk in ad.obs.columns:
-        from interpretable_ssl.evaluation.mc_metric_utils import calc_modularity_per_batch
-        A = sp.csr_matrix(ad.obsp['connectivities'])
-        batch_mod_s = calc_modularity_per_batch(A, mc_idx, ad.obs[bk].values)
-        batch_mod_s.to_csv(os.path.join(save_path, 'modularity_per_batch.csv'))
-        mean_batch_mod = float(batch_mod_s.mean())
-        std_batch_mod = float(batch_mod_s.std())
-        print(f"[seacell] per-batch modularity: mean={mean_batch_mod:.4f}, std={std_batch_mod:.4f}")
-
-    # --- Summary metrics.json (read-then-update to preserve task2 metrics) ---
-    metrics_path = os.path.join(save_path, 'metrics.json')
-    if os.path.exists(metrics_path):
-        with open(metrics_path) as f:
-            metrics = json.load(f)
-    else:
-        metrics = {}
-    if purity_per_mc is not None:
-        metrics['mean_cell_type_purity'] = float(purity_per_mc.mean())
-        metrics['weighted_mean_cell_type_purity'] = weighted_mean_purity
-        metrics['weighted_std_cell_type_purity'] = weighted_std_purity
-    if niche_purity_per_mc is not None:
-        metrics['mean_niche_purity'] = float(niche_purity_per_mc.mean())
-    if entropy_per_mc is not None:
-        metrics['mean_batch_entropy'] = float(entropy_per_mc.mean())
-        metrics['weighted_mean_batch_entropy'] = weighted_mean_entropy
-        metrics['weighted_std_batch_entropy'] = weighted_std_entropy
-    metrics['modularity'] = mod_result['modularity']
-    metrics['n_unused_protos'] = n_unused
-    metrics['unused_proto_ratio'] = unused_ratio
-    if mean_batch_mod is not None:
-        metrics['mean_modularity_batch'] = mean_batch_mod
-        metrics['std_modularity_batch'] = std_batch_mod
-
-    # --- Aff-DC compactness (same method as trainer) ---
-    try:
-        import pickle
-        from interpretable_ssl.evaluation.mc_metric_utils import compute_aff_dc_compactness
-
-        n_components = 50   # augmenter default
-        k_neighbors  = 50   # augmenter default
-        affinity_type = 'arbf'
-        graph_dir = './graphs'
-        ds_name = ds_id  # str(sc_ds) = sc_ds.name = ds_id for known datasets
-        n_cells = len(ad)
-        graph_name = f"affinity_{ds_name}{n_cells}_ncomp{n_components}_kneighbors{k_neighbors}_{affinity_type}.pkl"
-        graph_path = os.path.join(graph_dir, graph_name)
-        print(f"[aff_dc_compactness] looking for graph at: {graph_path}")
-
-        if not os.path.exists(graph_path):
-            print(f"[aff_dc_compactness] graph not found, skipping compactness. "
-                  f"Run trainer with affinity_type='arbf' first to generate it.")
-        else:
-            with open(graph_path, 'rb') as f:
-                aff = pickle.load(f)
-            aff = sp.csr_matrix(aff)
-            # diagonal is 0 in aff_raw; set to 1 for diffusion maps
-            aff_for_dc = aff.copy()
-            aff_for_dc.setdiag(1)
-
-            mc_ids_arr = ad.obs['SEACell'].astype(str).values
-            batches_arr = ad.obs[bk].values if bk is not None else np.zeros(len(ad), dtype=str)
-
-            comp_df, counts_df = compute_aff_dc_compactness(aff_for_dc, mc_ids_arr, batches_arr)
-            valid_counts = counts_df.where(comp_df.notna(), 0)
-            per_mc_mean = (comp_df.fillna(0) * valid_counts).sum(axis=1) / valid_counts.sum(axis=1)
-            per_batch_mean = (comp_df.fillna(0) * valid_counts).sum(axis=0) / valid_counts.sum(axis=0)
-
-            out_df = comp_df.copy()
-            out_df['weighted_mean'] = per_mc_mean
-            csv_path = os.path.join(save_path, 'aff_dc_compactness.csv')
-            out_df.to_csv(csv_path)
-
-            metrics['aff_compactness_mean'] = float(per_mc_mean.mean())
-            metrics['aff_compactness_per_batch'] = {str(b): float(v) for b, v in per_batch_mean.items()}
-            print(f"[aff_dc_compactness] mean={metrics['aff_compactness_mean']:.4f} | saved to {csv_path}")
-    except Exception as e:
-        import traceback
-        print(f"Warning: aff_dc_compactness failed: {e}")
-        traceback.print_exc()
-
-    with open(metrics_path, 'w') as f:
-        json.dump(metrics, f, indent=2)
-
-    print(f"Saved metrics to {save_path}")
+    result = compute_task1_metrics(
+        ad, mc_idx, lk, bk, nk, save_path, ds_id, 'seacell',
+        n_components=n_components, k_neighbors=k_neighbors,
+        affinity_type=affinity_type, graph_dir=graph_dir,
+    )
     _save_seacell_umap_data(ds_id, ad, SEACell_ad, build_kernel_on)
-
-    return {
-        'purity': purity_per_mc,
-        'niche_purity': niche_purity_per_mc,
-        'batch_entropy': entropy_per_mc,
-        'modularity': mod_result,
-        'n_unused_protos': n_unused,
-        'unused_proto_ratio': unused_ratio,
-    }
+    return result
 
 
 def eval_seacell_task2(ds_id, build_kernel_on="X_pca"):
@@ -406,6 +223,165 @@ def load_dataset(ds_id):
         conf["label_key"],
         conf["num_prototypes"],
     )
+
+
+def train_seacell_spatial(
+    ds_id,
+    build_kernel_on='X_covet',
+    affinity_type=None,
+    n_SEACells=None,
+    n_components=50,
+    k_neighbors=50,
+    graph_dir='./graphs',
+    target_groups=None,
+    celltype_key='celltypes',
+    niche_key='niches_3D',
+    covet_k=100,
+    covet_n_pcs=25,
+    load_seacell=False,
+):
+    """Run SEACell using COVET spatial embedding.
+
+    When build_kernel_on contains 'covet', automatically computes COVET features
+    (k=covet_k spatial neighbours, n_pcs=covet_n_pcs, alpha=1.0 covet-only, n_comps=auto)
+    and stores them in ad.obsm[build_kernel_on] before building the kernel.
+
+    If affinity_type is None: builds the SEACells kernel directly from build_kernel_on.
+    If affinity_type is given: loads a precomputed affinity .pkl instead.
+
+    Saves to: MODEL_DIR/{ds_id}/seacell_{build_kernel_on}/
+
+    Args:
+        ds_id:           dataset name in DATASETS (e.g. 's28nsc')
+        build_kernel_on: ad.obsm key for kernel construction (default 'X_covet')
+        affinity_type:   if set, load precomputed affinity .pkl instead of building from embedding
+        n_SEACells:      number of metacells; defaults to DATASETS[ds_id]['num_prototypes']
+        n_components:    must match save_affinity (default 50)
+        k_neighbors:     must match save_affinity (default 50)
+        graph_dir:       directory where affinity .pkl lives (default './graphs')
+        target_groups:   list of 'celltype | niche' strings to evaluate.
+                         Defaults to NSCLC_EVAL_GROUPS (all 12 biologically motivated pairs).
+        celltype_key:    obs column for cell type labels
+        niche_key:       obs column for niche labels
+        covet_k:         spatial neighbours for COVET (default 100, sweep-optimal)
+        covet_n_pcs:     PCA dims for COVET covariance (default 25, sweep-optimal)
+        load_seacell:    if True, skip training and load from saved seacell_sc.h5ad.
+                         Use this to recompute metrics without retraining.
+
+    Returns:
+        flat metrics dict
+    """
+    import scanpy as sc
+    from interpretable_ssl.evaluation.spatial_immune_task import (
+        compute_target_group_metrics, NSCLC_EVAL_GROUPS,
+    )
+
+    if target_groups is None:
+        target_groups = NSCLC_EVAL_GROUPS
+
+    conf = DATASETS[ds_id]
+    save_dir = get_seacell_model_dir(ds_id, build_kernel_on)
+    os.makedirs(save_dir, exist_ok=True)
+
+    n_proto = n_SEACells or conf['num_prototypes']
+    lk = conf['label_key']
+    bk = conf.get('batch_key', None)
+
+    # --- Load mode: skip training, read saved h5ad ---
+    if load_seacell:
+        sc_path = os.path.join(save_dir, 'seacell_sc.h5ad')
+        if not os.path.exists(sc_path):
+            raise FileNotFoundError(
+                f"load_seacell=True but no saved model found at {sc_path}. "
+                f"Run without load_seacell=True first."
+            )
+        print(f"Loading saved SEACell from {sc_path} ...")
+        from interpretable_ssl.evaluation.metric_helpers.embedding_metrics import (
+            load_seacell as _load_seacell,
+        )
+        ad, SEACell_ad = _load_seacell(ds_id, build_kernel_on=build_kernel_on)
+    else:
+        from interpretable_ssl.evaluation.metric_helpers.metacell_metrics import (
+            compute_seacells, compute_seacells_from_affinity, agg_obs, save_seacell,
+        )
+
+        ad = sc.read_h5ad(conf['path'])
+        if not conf.get('normalized', False):
+            sc.pp.normalize_total(ad)
+            sc.pp.log1p(ad)
+        if 'X_pca' not in ad.obsm:
+            sc.tl.pca(ad)
+
+        if 'covet' in build_kernel_on.lower():
+            from interpretable_ssl.augmenters.graph_generator import compute_covet_features
+            print(f"Computing COVET: k={covet_k}, n_pcs={covet_n_pcs}, alpha=1.0, n_comps=auto ...")
+            compute_covet_features(
+                ad, k=covet_k, n_pcs=covet_n_pcs,
+                alpha=1.0, n_comps=None, obsm_key=build_kernel_on,
+            )
+
+        if affinity_type is None:
+            print(f"Building SEACells kernel from {build_kernel_on} ...")
+            ad, SEACell_ad, model = compute_seacells(
+                ad, n_SEACells=n_proto, build_kernel_on=build_kernel_on,
+            )
+        else:
+            print(f"Loading precomputed affinity ({affinity_type}) ...")
+            ad, SEACell_ad, model = compute_seacells_from_affinity(
+                ad, n_SEACells=n_proto,
+                ds_name=ds_id, affinity_type=affinity_type,
+                n_components=n_components, k_neighbors=k_neighbors,
+                graph_dir=graph_dir, build_kernel_on=build_kernel_on,
+            )
+
+        agg_obs(SEACell_ad, ad, lk)
+        if bk is not None:
+            agg_obs(SEACell_ad, ad, bk)
+
+        save_seacell(ad, SEACell_ad, ds_id, build_kernel_on=build_kernel_on)
+        print(f"Saved SEACell to {save_dir}")
+
+    method_name = f'SEACell ({affinity_type or build_kernel_on})'
+    metrics = compute_target_group_metrics(
+        ad, mc_key='SEACell',
+        target_groups=target_groups,
+        celltype_key=celltype_key,
+        niche_key=niche_key,
+        method_name=method_name,
+    )
+
+    # --- Tumor niche evaluation (core vs surface cell type purity + niche purity) ---
+    try:
+        from interpretable_ssl.evaluation.spatial_immune_task import tumor_niche_metacell_eval
+        tn_res = tumor_niche_metacell_eval(
+            ad,
+            mc_key='SEACell',
+            celltype_key=celltype_key,
+            niche_key=niche_key,
+            plot=False,
+            method_name=method_name,
+        )
+        metrics.update(tn_res['flat'])
+        per_cell_df = tn_res.get('per_cell')
+        if per_cell_df is not None and len(per_cell_df) > 0:
+            csv_path = os.path.join(save_dir, 'tumor_niche_per_cell.csv')
+            per_cell_df.to_csv(csv_path, index=False)
+            print(f"[tumor_niche] per-cell CSV saved to {csv_path}")
+    except Exception as e:
+        import traceback
+        print(f"Warning: tumor_niche_metacell_eval failed: {e}")
+        traceback.print_exc()
+
+    metrics['build_kernel_on'] = build_kernel_on
+    metrics['affinity_type'] = affinity_type
+    metrics['n_SEACells'] = n_proto
+
+    metrics_path = os.path.join(save_dir, 'metrics.json')
+    with open(metrics_path, 'w') as f:
+        json.dump(metrics, f, indent=2)
+    print(f"Metrics saved to {metrics_path}")
+
+    return metrics
 
 
 def train_seacell(ds_id, mode, k=50, build_kernel_on="X_pca"):

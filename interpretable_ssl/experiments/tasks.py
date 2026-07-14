@@ -43,9 +43,9 @@ LAMBDA_PROTO_UMAP_PRECON = dict(
     lambda_nassoc=1,
     usage_norm_sim=0,
     proto_usage_mode='ema',
-    lambda_proto_usage = 0.1,
+    lambda_proto_usage=0.1,
     umap_similarity='proto',
-    nassoc_agg = 'max'
+    nassoc_agg='max',
 )
 
 LAMBDA_RECON_ONLY = dict(
@@ -139,6 +139,9 @@ def find_metacells(
     freeze_decoder=False,
     soft_metrics=False,
     trainer_kwargs=None,
+    target_groups=None,
+    skip_metrics=None,
+    covet_alpha=None,
 ):
     """Train and evaluate metacell quality for one dataset.
 
@@ -200,6 +203,17 @@ def find_metacells(
     if label_key is None:
         raise ValueError("label_key is required — pass the adata.obs column name with cell-type labels.")
 
+    # covet_alpha: encode into affinity_type tag and expose to model naming
+    if covet_alpha is not None:
+        base_aff = affinity_type or lambda_config.get('affinity_type', 'covet')
+        if base_aff in (None, 'covet') or base_aff.startswith('covet'):
+            if covet_alpha == 1.0:
+                affinity_type = 'covet'
+            else:
+                affinity_type = f'covet_a{int(round(covet_alpha * 10))}'
+        trainer_kwargs = dict(trainer_kwargs or {})
+        trainer_kwargs['covet_alpha'] = covet_alpha
+
     if affinity_type is not None:
         lambda_config['affinity_type'] = affinity_type
 
@@ -255,25 +269,26 @@ def find_metacells(
         )
 
     # --- Eval ---
+    skip = set(skip_metrics or [])
     t.load_umap_checkpoint()
-    res1 = t.eval_metacell_quality(soft_metrics=soft_metrics)
-    res2 = t.eval_task2_metrics(soft_metrics=soft_metrics)
-    res3 = t.eval_task3_metrics()
+    res1 = t.eval_metacell_quality(soft_metrics=soft_metrics) if 'task1' not in skip else {}
+    res2 = t.eval_task2_metrics(soft_metrics=soft_metrics)    if 'task2' not in skip else {}
+    res3 = t.eval_task3_metrics()                             if 'task3' not in skip else {}
 
     metrics = {
         # Task 1
-        'purity':             float(res1['purity'].mean())        if res1['purity'] is not None else None,
-        'niche_purity':       float(res1['niche_purity'].mean())  if res1['niche_purity'] is not None else None,
-        'batch_entropy':      float(res1['batch_entropy'].mean()) if res1['batch_entropy'] is not None else None,
-        'modularity':         float(res1['modularity']['modularity']),
+        'purity':           float(res1['purity'].mean())        if res1.get('purity') is not None else None,
+        'niche_purity':     float(res1['niche_purity'].mean())  if res1.get('niche_purity') is not None else None,
+        'batch_entropy':    float(res1['batch_entropy'].mean()) if res1.get('batch_entropy') is not None else None,
+        'modularity':       float(res1['modularity']['modularity']) if res1.get('modularity') is not None else None,
         # Task 2
-        'coverage':           res2['coverage'],
-        'dge_rbo_avg':        res2['dge_rbo_avg'],
-        'dge_kendall_avg':    res2['dge_kendall_avg'],
-        'dge_jaccard_avg':    res2['dge_jaccard_avg'],
-        'scgraph_corr_avg':   res2['scgraph_corr_avg'],
+        'coverage':         res2.get('coverage'),
+        'dge_rbo_avg':      res2.get('dge_rbo_avg'),
+        'dge_kendall_avg':  res2.get('dge_kendall_avg'),
+        'dge_jaccard_avg':  res2.get('dge_jaccard_avg'),
+        'scgraph_corr_avg': res2.get('scgraph_corr_avg'),
         # Task 3 (spatial only)
-        'ct_niche_rbo_avg':   res3.get('ct_niche_rbo_avg'),
+        'ct_niche_rbo_avg': res3.get('ct_niche_rbo_avg'),
     }
 
     # --- Attach metacell ID to original adata ---
@@ -281,32 +296,63 @@ def find_metacells(
     t.train_ds.adata.obs['metacell_id'] = assignments
 
     # --- Aff-DC compactness: diffusion map on raw affinity graph ---
-    try:
-        from interpretable_ssl.evaluation.mc_metric_utils import compute_aff_dc_compactness
-        aff = t.train_ds.aff_raw if hasattr(t.train_ds, 'aff_raw') else t.train_ds.aff
-        batches_arr = t.train_ds.adata.obs[t.train_ds.batch_key].values
-        # comp_df/counts_df shape: (n_metacells, n_batches)
-        aff_comp_df, counts_df = compute_aff_dc_compactness(aff, assignments, batches_arr)
-        # per-metacell compactness: weighted mean over batches by cell count
-        # zero out counts where compactness is NaN (< 2 cells), then weighted sum / total cells
-        valid_counts = counts_df.where(aff_comp_df.notna(), 0)
-        per_mc_mean = (aff_comp_df.fillna(0) * valid_counts).sum(axis=1) / valid_counts.sum(axis=1)
-        # per-batch mean: weighted by cell count across metacells
-        per_batch_mean = (aff_comp_df.fillna(0) * valid_counts).sum(axis=0) / valid_counts.sum(axis=0)
-        metrics['aff_compactness_per_batch'] = {str(b): float(v) for b, v in per_batch_mean.items()}
-        metrics['aff_compactness_mean'] = float(per_mc_mean.mean())
-        # save CSV: per-batch compactness columns + weighted_mean column for comparison
-        csv_dir = result_save_path if result_save_path is not None else t.get_dump_path()
-        os.makedirs(csv_dir, exist_ok=True)
-        csv_path = os.path.join(csv_dir, 'aff_dc_compactness.csv')
-        out_df = aff_comp_df.copy()
-        out_df['weighted_mean'] = per_mc_mean  # overall metacell compactness for comparison
-        out_df.to_csv(csv_path)
-        print(f"[aff_dc_compactness] mean={metrics['aff_compactness_mean']:.4f} | saved to {csv_path}")
-    except Exception as e:
-        import traceback
-        print(f"Warning: aff_dc_compactness failed: {e}")
-        traceback.print_exc()
+    if 'aff_compactness' not in skip:
+        try:
+            from interpretable_ssl.evaluation.mc_metric_utils import compute_aff_dc_compactness
+            aff = t.train_ds.aff_raw if hasattr(t.train_ds, 'aff_raw') else t.train_ds.aff
+            batches_arr = t.train_ds.adata.obs[t.train_ds.batch_key].values
+            aff_comp_df, counts_df = compute_aff_dc_compactness(aff, assignments, batches_arr)
+            valid_counts = counts_df.where(aff_comp_df.notna(), 0)
+            per_mc_mean = (aff_comp_df.fillna(0) * valid_counts).sum(axis=1) / valid_counts.sum(axis=1)
+            per_batch_mean = (aff_comp_df.fillna(0) * valid_counts).sum(axis=0) / valid_counts.sum(axis=0)
+            metrics['aff_compactness_per_batch'] = {str(b): float(v) for b, v in per_batch_mean.items()}
+            metrics['aff_compactness_mean'] = float(per_mc_mean.mean())
+            csv_dir = result_save_path if result_save_path is not None else t.get_dump_path()
+            os.makedirs(csv_dir, exist_ok=True)
+            csv_path = os.path.join(csv_dir, 'aff_dc_compactness.csv')
+            out_df = aff_comp_df.copy()
+            out_df['weighted_mean'] = per_mc_mean
+            out_df.to_csv(csv_path)
+            print(f"[aff_dc_compactness] mean={metrics['aff_compactness_mean']:.4f} | saved to {csv_path}")
+        except Exception as e:
+            import traceback
+            print(f"Warning: aff_dc_compactness failed: {e}")
+            traceback.print_exc()
+
+    # --- Group-level metacell quality (purity / coverage / homogeneity per target group) ---
+    if target_groups is not None and niche_key is not None and 'group_metrics' not in skip:
+        from interpretable_ssl.evaluation.spatial_immune_task import compute_target_group_metrics
+        group_metrics = compute_target_group_metrics(
+            t.train_ds.adata, mc_key='metacell_id',
+            target_groups=target_groups,
+            celltype_key=label_key, niche_key=niche_key,
+            method_name='scProto',
+        )
+        metrics.update(group_metrics)
+
+    # --- Tumor niche evaluation (core vs surface cell type purity + niche purity) ---
+    if niche_key is not None and 'tumor_niche' not in skip:
+        try:
+            from interpretable_ssl.evaluation.spatial_immune_task import tumor_niche_metacell_eval
+            tn_res = tumor_niche_metacell_eval(
+                t.train_ds.adata,
+                mc_key='metacell_id',
+                celltype_key=label_key,
+                niche_key=niche_key,
+                plot=False,
+                method_name='scProto',
+            )
+            metrics.update(tn_res['flat'])
+            per_cell_df = tn_res.get('per_cell')
+            if per_cell_df is not None and len(per_cell_df) > 0:
+                csv_path = os.path.join(t.get_dump_path(), 'tumor_niche_per_cell.csv')
+                os.makedirs(t.get_dump_path(), exist_ok=True)
+                per_cell_df.to_csv(csv_path, index=False)
+                print(f"[tumor_niche] per-cell CSV saved to {csv_path}")
+        except Exception as e:
+            import traceback
+            print(f"Warning: tumor_niche_metacell_eval failed: {e}")
+            traceback.print_exc()
 
     # --- Get metacell gene expression AnnData ---
     mc_adata = t.save_metacells()

@@ -1017,6 +1017,69 @@ def plot_aff(ad, aff, celltype=None, niches=None, celltype_key='cell_type',
     return ad
 
 
+def plot_aff_compare(ad, aff1, aff2, color=None, row_titles=None,
+                     celltype_key='cell_type', niche_key='niches_2D',
+                     k=None, random_state=0, figsize=None, wspace=0.4, hspace=0.4,
+                     **plot_kwargs):
+    """Plot two affinities as UMAP rows in a single figure.
+
+    Args:
+        ad: AnnData object
+        aff1: sparse affinity matrix for row 1
+        aff2: sparse affinity matrix for row 2
+        color: list of obs columns to colour by (one panel per entry per row)
+        row_titles: list of 2 strings labelling each row (optional)
+        k: subsample to k cells (None = all)
+        random_state: random seed for subsampling
+        figsize: (width, height) — defaults to (5*ncols, 4*2)
+        wspace / hspace: spacing between panels / rows
+        **plot_kwargs: passed to sc.pl.umap (e.g. size=)
+
+    Returns:
+        fig
+    """
+    if color is None:
+        color = [niche_key]
+    color = list(color)
+    ncols = len(color)
+
+    if figsize is None:
+        figsize = (5 * ncols, 4 * 2)
+
+    fig, axes = plt.subplots(2, ncols, figsize=figsize)
+    if ncols == 1:
+        axes = axes[:, None]  # keep 2-D indexing
+    fig.subplots_adjust(wspace=wspace, hspace=hspace)
+
+    def _prepare(aff):
+        a = ad.copy()
+        if k is not None and k < a.n_obs:
+            rng = np.random.default_rng(random_state)
+            idx = rng.choice(a.n_obs, size=k, replace=False)
+            a = a[idx].copy()
+            aff = aff[idx][:, idx]
+        a.obsp['connectivities'] = aff.tocsr()
+        a.uns['neighbors'] = {
+            'connectivities_key': 'connectivities',
+            'distances_key': None,
+            'params': {'method': 'precomputed'},
+        }
+        sc.tl.umap(a)
+        return a
+
+    for row, aff in enumerate([aff1, aff2]):
+        a = _prepare(aff)
+        for col, c in enumerate(color):
+            ax = axes[row, col]
+            title = c if row_titles is None else (f'{row_titles[row]} — {c}' if ncols > 1 else row_titles[row])
+            sc.pl.umap(a, color=c, ax=ax, show=False, title=title,
+                       legend_loc='right margin',
+                       **plot_kwargs)
+
+    plt.show()
+    return fig
+
+
 def _jaccard(a, b):
     sa, sb = set(a), set(b)
     return len(sa & sb) / len(sa | sb) if sa | sb else 0.0

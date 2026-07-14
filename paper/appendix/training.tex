@@ -1,3 +1,12 @@
+\section{Dataset Preprocessing Details}
+\label{app:datasets}
+
+The three scRNA-seq datasets (Pancreas, PBMC, Lung) are taken from the benchmarking collection of \citet{luecken2020benchmarking}.
+For the NSCLC spatial transcriptomics dataset~\citep{pentimalli2025combining}, the original data comprises 6 slides; we select slide 28, subsample 30,000 cells stratified by cell type and niche label, and exclude cells assigned to uninformative niche labels, yielding 28,804 cells across 18 cell types and 9 niches.
+Niche labels are defined by clustering cells based on the local cell-type composition of their spatial neighborhood.
+All datasets are preprocessed with Scanpy~\citep{wolf2018scanpy} by normalizing total counts and applying log1p transformation.
+For the scRNA-seq datasets, 4,000 highly variable genes are selected; for NSCLC, HVG selection is omitted as the panel comprises approximately 950 genes.
+
 \section{Affinity Graph and Batch Structure}
 \label{app:graph_structure}
 
@@ -8,9 +17,6 @@ This confirms that the input graph is not batch-free, and motivates the batch-co
 
 \begin{figure}[h]
 \centering
-% TODO: insert figure -- UMAP computed from the RBF affinity matrix on the Pancreas dataset,
-% colored by (left) batch label and (right) cell type.
-% In scanpy: set adata.obsp['connectivities'] = P, then sc.tl.umap(adata).
 \includegraphics[width=\textwidth]{figures/pancreas_aff.png}
 \caption{
 UMAP of the precomputed RBF affinity graph on the Pancreas dataset.
@@ -61,6 +67,10 @@ Spatial affinity produces substantially cleaner niche separation, while the tran
 \paragraph{Architecture.}
 The encoder and decoder follow the scPoli architecture~\citep{scpoli} with default settings: hidden dimension 64, latent dimension 8, and 50 PCA components as input features.
 
+\paragraph{$\ell_2$ normalization.}
+Following \citet{swav}, both cell embeddings $z_i$ and prototype vectors $c_k$ are projected onto the unit hypersphere before computing soft assignments, so the dot product $z_i^\top c_k$ is bounded in $[-1,1]$.
+Prototype vectors are re-normalized at the start of each mini-batch, immediately after the preceding gradient update.
+
 \paragraph{Optimizer.}
 We use Adam~\citep{adam} with learning rate $3 \times 10^{-4}$, $\varepsilon = 0.01$, and weight decay $10^{-5}$.
 Batch embedding parameters are excluded from weight decay to avoid penalizing dataset-specific offsets.
@@ -70,7 +80,7 @@ A linear warmup over 5 epochs is followed by cosine learning rate decay.
 Mini-batches contain 1024 cells sampled uniformly across batches.
 
 \paragraph{Training stages.}
-Stage 1 (cVAE pretraining) runs for 25 epochs.
+Stage 1 (cVAE pretraining) runs for 50 epochs.
 Stage 2 (joint prototype learning) uses early stopping based on modularity, evaluated every few epochs, with a minimum improvement threshold of 0.005 and 1000 gradient steps per epoch.
 
 \paragraph{Loss weights.}
@@ -86,10 +96,10 @@ These values were chosen to balance community structure preservation against rec
 Although the soft assignments $s_{ik}$ depend on the encoder output $z_i$, we stop the gradient through $s_{ik}$ when backpropagating $\mathcal{L}_{\text{rec}}$.
 Reconstruction gradients therefore reach only the decoder $g_\phi$ and the prototype vectors $\{c_k\}$ (via their role as decoder inputs); the encoder $f_\theta$ receives no gradient from $\mathcal{L}_{\text{rec}}$.
 The motivation is to keep the two objectives from pulling the encoder in conflicting directions: $\mathcal{L}_{\text{community}}$ encourages encoder outputs to reflect affinity-graph structure, while an unconstrained $\mathcal{L}_{\text{rec}}$ gradient could push the encoder toward assignments that minimise reconstruction error regardless of graph proximity.
-By stopping the gradient, the encoder is shaped exclusively by $\mathcal{L}_{\text{community}}$, while the prototypes are jointly regularised by both objectives: they must sit at the centre of well-connected cell communities \emph{and} be decodable to meaningful gene-expression profiles.
+By stopping the gradient, the encoder receives no gradient from $\mathcal{L}_{\text{rec}}$, preventing reconstruction from conflicting with the affinity-based objectives; the prototypes are jointly regularised by all objectives: they must sit at the centre of well-connected cell communities \emph{and} be decodable to meaningful gene-expression profiles.
 
 \paragraph{Number of prototypes $K$.}
-Following SEACells~\citep{seacells}, we set $K = \lceil N / 75 \rceil$, where $N$ is the total number of cells.
+Following SEACells~\citep{seacells}, we set $K \approx N / 75$, where $N$ is the total number of cells.
 This yields approximately one metacell per 75 cells and provides a natural starting point for unannotated datasets.
 The ratio of 75 cells per metacell reflects a target aggregation granularity that preserves rare populations while achieving meaningful compression.
 Users may increase $K$ for finer resolution or decrease it for coarser summaries.
@@ -148,12 +158,21 @@ Purity measures the fraction of cells in a metacell belonging to its most freque
 \text{purity}(m) = \frac{1}{|m|} \max_{c} \sum_{i \in m} \mathbf{1}[y_i = c].
 \]
 
-\paragraph{Coverage and rare purity.}
-Rare cell types are identified by a statistical outlier rule on per-batch-averaged frequencies.
-For each cell type $c$, let $\bar{f}_c$ be its mean frequency across batches (fraction of cells per batch, averaged over batches).
-A cell type is rare if $\bar{f}_c < \bar{f} - \sigma_f$, where $\bar{f}$ and $\sigma_f$ are the mean and standard deviation of $\{\bar{f}_c\}$ across all cell types.
-If no cell type satisfies this criterion (indicating a near-uniform distribution), we fall back to the 25th percentile of $\{\bar{f}_c\}$ as the threshold.
-Coverage reports whether each rare cell type is represented by at least one metacell. Rare purity reports the mean purity of metacells assigned to rare cell types.
+\paragraph{Rare cell type metrics.}
+All rare-cell metrics identify rare cell types \emph{within each batch separately}.
+Let $f_c^{(b)}$ be the frequency of cell type $c$ in batch $b$ (fraction of cells).
+A cell type is locally rare in $b$ if $f_c^{(b)} < \bar{f}^{(b)} - \sigma_f^{(b)}$, where $\bar{f}^{(b)}$ and $\sigma_f^{(b)}$ are the mean and standard deviation of within-batch cell-type frequencies.
+If no cell type satisfies this criterion, we fall back to the 25th percentile of $\{f_c^{(b)}\}$.
+All per-batch scores are aggregated as mean~$\pm$~std across batches.
+
+\textbf{Coverage} (per batch) is the fraction of locally-rare cell types for which at least one cell of that type in the current batch is assigned to a metacell whose majority label is that cell type.
+
+For each cell $i$ with a locally-rare label $c$ in batch $b$, the \textbf{homogeneity score} is the fraction of cells in $i$'s metacell $m(i)$ that share label $c$ (across all batches):
+\[
+h_i = \frac{1}{|m(i)|}\sum_{j \in m(i)} \mathbf{1}[y_j = c].
+\]
+The per-batch \textbf{homogeneity} is the mean of $h_i$ over all locally-rare cells in batch $b$.
+Unlike coverage, which only checks whether a dedicated metacell exists, homogeneity measures how coherently each rare cell is grouped---a method can achieve full coverage while assigning rare cells to large, impure metacells, which homogeneity captures.
 
 \paragraph{Niche purity.}
 Analogous to cell-type purity but computed with respect to spatial niche labels: each metacell is assigned a majority niche label, and niche purity is the fraction of its member cells sharing that label.
@@ -185,18 +204,6 @@ Right: Distribution of batch entropy (size-weighted violin).
 scProto achieves higher batch entropy while maintaining comparable purity to SEACells.
 }
 \label{fig:purity_entropy}
-\end{figure*}
-
-\begin{figure*}[h]
-\centering
-\includegraphics[width=\textwidth]{figures/freq_purities.png}
-\caption{
-Metacell purity stratified by cell-type frequency.
-Cell types are grouped into frequency bins (quantiles), with lower-frequency bins corresponding to rare cell types.
-Each point represents a metacell, and boxplots summarize the distribution.
-scProto maintains high purity across all frequency bins, while SEACells shows a clear degradation in purity for rare cell types.
-}
-\label{fig:rare_purity}
 \end{figure*}
 
 \begin{figure*}[h]

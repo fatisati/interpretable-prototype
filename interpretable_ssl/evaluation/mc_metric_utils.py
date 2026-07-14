@@ -501,6 +501,224 @@ def save_all_mc_metrics(
     summarize_metacell_quality(ad, bk, lk, save_path, name)
 
 
+def compute_modularity(ad, mc_idx):
+    """Newman weighted modularity using ad.obsp['connectivities']."""
+    import scipy.sparse as sp
+    if 'connectivities' not in ad.obsp:
+        sc.pp.neighbors(ad, use_rep='X_pca')
+    A = sp.csr_matrix(ad.obsp['connectivities'])
+    A = (A + A.T) / 2
+    degrees = np.array(A.sum(axis=1)).ravel()
+    two_m = degrees.sum()
+    if two_m == 0:
+        return {'modularity': 0.0, 'per_cluster_contribution': {}}
+    Q = 0.0
+    per_cluster = {}
+    for c in np.unique(mc_idx):
+        mask = (mc_idx == c)
+        e_k = A[mask][:, mask].sum()
+        d_k = degrees[mask].sum()
+        contrib = float((e_k - d_k * d_k / two_m) / two_m)
+        per_cluster[int(c)] = contrib
+        Q += contrib
+    return {'modularity': float(Q), 'per_cluster_contribution': per_cluster}
+
+
+def compute_task1_metrics(
+    ad,
+    mc_idx,
+    lk,
+    bk,
+    nk,
+    save_path,
+    ds_id,
+    method_tag,
+    n_components=50,
+    k_neighbors=50,
+    affinity_type='arbf',
+    graph_dir='./graphs',
+):
+    """Compute and save task-1 metacell quality metrics for any metacell method.
+
+    Args:
+        ad:            Original adata with obs containing label/batch columns.
+                       Must have obsp['connectivities'] or X_pca for modularity.
+        mc_idx:        Integer array (n_cells,) of metacell assignments.
+        lk:            Label (cell-type) key in ad.obs.
+        bk:            Batch key in ad.obs, or None.
+        nk:            Niche key in ad.obs, or None.
+        save_path:     Directory to write CSVs and metrics.json.
+        ds_id:         Dataset ID string (used for affinity path lookup).
+        method_tag:    Short name for print prefixes, e.g. 'seacell' or 'metaq'.
+        n_components:  Affinity graph n_components (default 50).
+        k_neighbors:   Affinity graph k_neighbors (default 50).
+        affinity_type: Affinity graph type (default 'arbf').
+        graph_dir:     Directory where affinity .pkl files live (default './graphs').
+
+    Returns:
+        dict with keys purity, niche_purity, batch_entropy, modularity,
+        n_unused_protos, unused_proto_ratio.
+    """
+    import json
+    import pickle
+    import scipy.sparse as sp
+    from interpretable_ssl.configs.paths import get_affinity_path
+
+    os.makedirs(save_path, exist_ok=True)
+    obs = ad.obs.copy()
+    obs['_mc'] = mc_idx
+
+    # --- unused protos ---
+    n_total_mc = int(mc_idx.max()) + 1
+    n_unused = int(n_total_mc - len(np.unique(mc_idx)))
+    unused_ratio = n_unused / n_total_mc
+    print(f"[{method_tag}] unused protos: {n_unused}/{n_total_mc} ({unused_ratio:.2%})")
+
+    mc_sizes = obs['_mc'].astype(str).value_counts().rename('size')
+    mc_sizes.index.name = 'metacell'
+    mc_sizes.to_csv(os.path.join(save_path, 'size_per_mc.csv'))
+
+    # --- cell-type purity ---
+    purity_per_mc = calc_purity(obs, label_key=lk, mc_key='_mc', return_per_mc=True)
+    weighted_mean_purity = weighted_std_purity = None
+    if purity_per_mc is not None:
+        purity_per_mc.index.name = 'metacell'
+        purity_per_mc.to_csv(os.path.join(save_path, 'purity_per_mc.csv'))
+        w = mc_sizes.reindex(purity_per_mc.index).fillna(0)
+        wsum = w.sum()
+        weighted_mean_purity = float((purity_per_mc * w).sum() / wsum)
+        weighted_std_purity = float(np.sqrt(((purity_per_mc - weighted_mean_purity) ** 2 * w).sum() / wsum))
+        print(f"[{method_tag}] mean cell-type purity: {purity_per_mc.mean():.4f}  "
+              f"(size-weighted: {weighted_mean_purity:.4f} ± {weighted_std_purity:.4f})")
+    else:
+        print(f"[{method_tag}] cell-type purity: label key '{lk}' not in obs, skipped")
+
+    # --- niche purity ---
+    niche_purity_per_mc = calc_purity(obs, label_key=nk, mc_key='_mc', return_per_mc=True) if nk else None
+    if niche_purity_per_mc is not None:
+        niche_purity_per_mc.index.name = 'metacell'
+        niche_purity_per_mc.to_csv(os.path.join(save_path, 'niche_purity_per_mc.csv'))
+        w = mc_sizes.reindex(niche_purity_per_mc.index).fillna(0)
+        wsum = w.sum()
+        wm = float((niche_purity_per_mc * w).sum() / wsum)
+        ws = float(np.sqrt(((niche_purity_per_mc - wm) ** 2 * w).sum() / wsum))
+        print(f"[{method_tag}] mean niche purity: {niche_purity_per_mc.mean():.4f}  "
+              f"(size-weighted: {wm:.4f} ± {ws:.4f})")
+
+    # --- batch entropy ---
+    entropy_per_mc = None
+    weighted_mean_entropy = weighted_std_entropy = None
+    if bk is not None:
+        entropy_per_mc = calc_batch_entropy(obs, batch_key=bk, mc_key='_mc', return_per_mc=True)
+    if entropy_per_mc is not None:
+        entropy_per_mc.index.name = 'metacell'
+        entropy_per_mc.to_csv(os.path.join(save_path, 'batch_entropy_per_mc.csv'))
+        w = mc_sizes.reindex(entropy_per_mc.index).fillna(0)
+        wsum = w.sum()
+        weighted_mean_entropy = float((entropy_per_mc * w).sum() / wsum)
+        weighted_std_entropy = float(np.sqrt(((entropy_per_mc - weighted_mean_entropy) ** 2 * w).sum() / wsum))
+        print(f"[{method_tag}] mean batch entropy: {entropy_per_mc.mean():.4f}  "
+              f"(size-weighted: {weighted_mean_entropy:.4f} ± {weighted_std_entropy:.4f})")
+    else:
+        print(f"[{method_tag}] batch entropy: batch key not found, skipped")
+
+    # --- coverage ---
+    coverage = None
+    if lk in ad.obs.columns:
+        majority_labels = obs.groupby('_mc')[lk].agg(lambda x: x.mode()[0])
+        coverage = majority_labels.nunique() / ad.obs[lk].nunique()
+        print(f"[{method_tag}] coverage: {coverage:.4f}")
+
+    # --- modularity ---
+    mod_result = compute_modularity(ad, mc_idx)
+    print(f"[{method_tag}] modularity: {mod_result['modularity']:.4f}")
+
+    def _convert(o):
+        if isinstance(o, np.ndarray): return o.tolist()
+        if isinstance(o, np.integer): return int(o)
+        if isinstance(o, np.floating): return float(o)
+        raise TypeError(f'Not serializable: {type(o)}')
+
+    with open(os.path.join(save_path, 'modularity.json'), 'w') as f:
+        json.dump(mod_result, f, indent=2, default=_convert)
+
+    # --- per-batch modularity ---
+    mean_batch_mod = std_batch_mod = None
+    if bk is not None and bk in ad.obs.columns:
+        A = sp.csr_matrix(ad.obsp['connectivities'])
+        batch_mod_s = calc_modularity_per_batch(A, mc_idx, ad.obs[bk].values)
+        batch_mod_s.to_csv(os.path.join(save_path, 'modularity_per_batch.csv'))
+        mean_batch_mod = float(batch_mod_s.mean())
+        std_batch_mod = float(batch_mod_s.std())
+        print(f"[{method_tag}] per-batch modularity: mean={mean_batch_mod:.4f}, std={std_batch_mod:.4f}")
+
+    # --- aff-DC compactness ---
+    metrics_aff = {}
+    try:
+        graph_path = get_affinity_path(ds_id, len(ad), n_components, k_neighbors, affinity_type, graph_dir)
+        print(f"[aff_dc_compactness] looking for graph at: {graph_path}")
+        if not os.path.exists(graph_path):
+            print("[aff_dc_compactness] graph not found, skipping.")
+        else:
+            with open(graph_path, 'rb') as f:
+                aff = pickle.load(f)
+            aff = sp.csr_matrix(aff)
+            aff_for_dc = aff.copy()
+            aff_for_dc.setdiag(1)
+            batches_arr = ad.obs[bk].values if bk is not None else np.zeros(len(ad), dtype=str)
+            comp_df, counts_df = compute_aff_dc_compactness(aff_for_dc, mc_idx.astype(str), batches_arr)
+            valid_counts = counts_df.where(comp_df.notna(), 0)
+            per_mc_mean = (comp_df.fillna(0) * valid_counts).sum(axis=1) / valid_counts.sum(axis=1)
+            per_batch_mean = (comp_df.fillna(0) * valid_counts).sum(axis=0) / valid_counts.sum(axis=0)
+            out_df = comp_df.copy()
+            out_df['weighted_mean'] = per_mc_mean
+            csv_path = os.path.join(save_path, 'aff_dc_compactness.csv')
+            out_df.to_csv(csv_path)
+            metrics_aff['aff_compactness_mean'] = float(per_mc_mean.mean())
+            metrics_aff['aff_compactness_per_batch'] = {str(b): float(v) for b, v in per_batch_mean.items()}
+            print(f"[aff_dc_compactness] mean={metrics_aff['aff_compactness_mean']:.4f} | saved to {csv_path}")
+    except Exception as e:
+        import traceback
+        print(f"Warning: aff_dc_compactness failed: {e}")
+        traceback.print_exc()
+
+    # --- metrics.json (read-then-update to preserve task2 metrics) ---
+    metrics_path = os.path.join(save_path, 'metrics.json')
+    metrics = json.load(open(metrics_path)) if os.path.exists(metrics_path) else {}
+    if purity_per_mc is not None:
+        metrics['mean_cell_type_purity'] = float(purity_per_mc.mean())
+        metrics['weighted_mean_cell_type_purity'] = weighted_mean_purity
+        metrics['weighted_std_cell_type_purity'] = weighted_std_purity
+    if niche_purity_per_mc is not None:
+        metrics['mean_niche_purity'] = float(niche_purity_per_mc.mean())
+    if entropy_per_mc is not None:
+        metrics['mean_batch_entropy'] = float(entropy_per_mc.mean())
+        metrics['weighted_mean_batch_entropy'] = weighted_mean_entropy
+        metrics['weighted_std_batch_entropy'] = weighted_std_entropy
+    if coverage is not None:
+        metrics['coverage'] = float(coverage)
+    metrics['modularity'] = mod_result['modularity']
+    metrics['n_unused_protos'] = n_unused
+    metrics['unused_proto_ratio'] = unused_ratio
+    if mean_batch_mod is not None:
+        metrics['mean_modularity_batch'] = mean_batch_mod
+        metrics['std_modularity_batch'] = std_batch_mod
+    metrics.update(metrics_aff)
+    with open(metrics_path, 'w') as f:
+        json.dump(metrics, f, indent=2)
+    print(f"[{method_tag}] saved metrics to {save_path}")
+
+    return {
+        'purity': purity_per_mc,
+        'niche_purity': niche_purity_per_mc,
+        'batch_entropy': entropy_per_mc,
+        'modularity': mod_result,
+        'coverage': coverage,
+        'n_unused_protos': n_unused,
+        'unused_proto_ratio': unused_ratio,
+    }
+
+
 def calc_task2_metrics(ad, mc_ad, lk, bk, obsm_keys, name, save_path):
     """
     Task 2: Metacell representation quality.

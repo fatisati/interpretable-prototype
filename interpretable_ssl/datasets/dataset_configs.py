@@ -203,10 +203,11 @@ DATASETS = {
         "batch_key": "section",
         "label_key": "celltypes",
         "label_encoder_path": os.path.join(CODE_DIR, "data/NSCLC_3D_section_28.pkl"),
-        "num_prototypes": 700,
+        "num_prototypes": 800,
         "batch_size": 1024,
         "ft_epochs": 0,
-        "batch_key": "section",
+        "normalized": True,
+        'niche_key': 'niches_2D'
     },
     "s28f": {
         "path": Path(DATA_DIR) / "spatial/s28f.h5ad",
