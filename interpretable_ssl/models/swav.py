@@ -233,7 +233,7 @@ class SwavBase(nn.Module):
         )
         self.sim_decoder_out = nn.Linear(hidden_dim, output_dim)
 
-    def decode_sim_profiles(self, protos, col_idx=None):
+    def decode_sim_profiles(self, protos, col_idx=None, nonneg=True):
         """Decode prototypes into predicted affinity values.
 
         protos:  (K, latent_dim) prototype embeddings.
@@ -241,15 +241,31 @@ class SwavBase(nn.Module):
                  columns to (e.g. the current minibatch's cells). Slicing the
                  final layer's weight/bias before the matmul means only the
                  requested columns are ever computed.
+        nonneg:  apply softplus to keep the output non-negative. Set False for
+                 sim_recon_target='diffusion', whose targets are signed eigsh
+                 eigenvector coordinates — forcing non-negativity there makes
+                 roughly half the target values structurally unreachable and
+                 pushes the decoder toward collapsing near 0 (cheap to do
+                 since diffusion-coordinate magnitudes are tiny regardless of
+                 sign, being unit-norm over all cells).
 
         Returns (K, n_cells) if col_idx is None, else (K, len(col_idx)).
+
+        Output is passed through softplus so predicted similarities stay
+        non-negative, matching the target affinity's own range (raw kernel
+        values are always >= 0). Plain ReLU is avoided here because the
+        target is >99.8% zero — clipped units would risk the same dead-
+        gradient collapse the class-balanced weighting was added to fix.
+        This only applies when nonneg=True (the 'full' target).
         """
         h = self.sim_decoder_trunk(protos)
         if col_idx is None:
-            return self.sim_decoder_out(h)
-        w = self.sim_decoder_out.weight[col_idx]  # (n_sel, hidden)
-        b = self.sim_decoder_out.bias[col_idx]    # (n_sel,)
-        return h @ w.T + b
+            out = self.sim_decoder_out(h)
+        else:
+            w = self.sim_decoder_out.weight[col_idx]  # (n_sel, hidden)
+            b = self.sim_decoder_out.bias[col_idx]    # (n_sel,)
+            out = h @ w.T + b
+        return F.softplus(out) if nonneg else out
 
     def prototypes_avg_distance(self):
         """

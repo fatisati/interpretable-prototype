@@ -218,6 +218,7 @@ def get_defaults():
         'sim_recon_hidden_dim': 256,     # hidden width of the similarity decoder trunk
         'sim_recon_target': 'full',      # 'full': reconstruct each cell's actual aff_raw row (most literal match to SEACells); 'diffusion': regress to a precomputed per-cell diffusion-map coordinate instead (cheaper, compare both)
         'sim_recon_n_eigs': 10,          # diffusion-map dimensionality when sim_recon_target='diffusion'; unused for 'full'
+        'sim_recon_neg_sample': 0,       # 'full' only: if >0, decode/reconstruct against each row's true-neighbor columns plus a random sample of this many zero columns (fresh sample each step) instead of every column in the batch — same loss, cheaper per step. 0 = original behavior (all columns)
         # --- Decoupled prototype learning (prevents proto collapse) ---
         'proto_decoupled': False,        # True: protos updated via online GMM EM; detached from all losses
         'gmm_eta': 0.1,                  # initial forgetting factor η (schedule: gmm_eta → gmm_eta_end over training)

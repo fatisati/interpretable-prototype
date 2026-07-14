@@ -139,6 +139,7 @@ ABBREVIATIONS = {
     'sim_recon_hidden_dim': 'srhd',
     'sim_recon_target': 'srt',
     'sim_recon_n_eigs': 'srne',
+    'sim_recon_neg_sample': 'srns',
     'jsd_min_dist': 'jsdmd',
     'dist_min_dist': 'dstmd',
     'dist_spread': 'dstsp',

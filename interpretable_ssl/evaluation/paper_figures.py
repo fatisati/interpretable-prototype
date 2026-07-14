@@ -4241,11 +4241,11 @@ def fig_all_celltype_niche_heatmap(ds_id, model_keywords, celltype_key='celltype
                     m, lo = center_pivots[name].values[r, c], lo_pivots[name].values[r, c]
                     hi = hi_pivots[name].values[r, c] if hi_pivots is not None else np.nan
                     if np.isnan(m):
-                        annot_matrix.values[r, c] = ''
+                        annot_matrix.iat[r, c] = ''
                     elif np.isnan(lo) or np.isnan(hi):
-                        annot_matrix.values[r, c] = f'{m:{fmt}}'
+                        annot_matrix.iat[r, c] = f'{m:{fmt}}'
                     else:
-                        annot_matrix.values[r, c] = f'{m:{fmt}}\n[{lo:{fmt}},{hi:{fmt}}]'
+                        annot_matrix.iat[r, c] = f'{m:{fmt}}\n[{lo:{fmt}},{hi:{fmt}}]'
             std_kwarg = dict(annot_matrix=annot_matrix)
         elif annot:
             std_kwarg = dict(std_matrix=lo_pivots[name])

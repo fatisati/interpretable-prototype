@@ -39,15 +39,10 @@
 #   an assumption, which is why both get trained and compared side by side
 #   rather than picking one up front.
 #
-# **Scope for this pass: BANKSY only.** BANKSY was the affinity that already
-# showed the highest niche purity in earlier affinity-comparison work, and is
-# the highest-value place to first find out whether either sim-recon target
-# actually closes the gap with SEACells — testing all three main affinities
-# up front is 6–9 scProto runs, too much before knowing the mechanism helps at
-# all. This trains exactly 3 scProto configs (BANKSY baseline, +full,
-# +diffusion) plus SEACells. A ready-to-uncomment section at the bottom
-# extends the same pattern to `arbf` / `mean_product` once BANKSY results
-# justify the extra Colab time.
+# **Scope for this pass: `arbf` only.** This trains exactly 3 scProto configs
+# (arbf baseline, +full, +diffusion) plus SEACells — one affinity at a time
+# keeps each pass cheap and isolates whether either sim-recon target closes
+# the gap with SEACells before spending Colab time on other affinities.
 #
 # Runs are matched for evaluation by **exact** saved model directory name
 # (captured right after training/loading), not by keyword substring — a
@@ -79,13 +74,13 @@ from interpretable_ssl.evaluation.spatial_immune_task import NSCLC_EVAL_GROUPS
 import pandas as pd
 
 DS_ID = 's28nsc'
-AFFINITY = 'banksy0.5'
+AFFINITY = 'arbf'
 
 # lambda_sim_recon=1.0 is a first guess — affinity values already live in
 # ~[0,1], comparable scale to nassoc's own terms. Tune from here if purity
 # doesn't move, or moves too aggressively at the cost of the other losses.
 LAMBDA_SIM_RECON = 1.0
-SIM_RECON_N_EIGS = 10  # only used by sim_recon_target='diffusion'
+SIM_RECON_N_EIGS = 128  # only used by sim_recon_target='diffusion'
 
 COMMON_KWARGS = dict(
     cvae_epochs=50,
@@ -99,7 +94,7 @@ COMMON_KWARGS = dict(
     lambda_config=LAMBDA_PROTO_UMAP_PRECON | {'nassoc_agg': 'max'},
 )
 
-# Baseline: set True if you already trained banksy0.5 in
+# Baseline: set True if you already trained arbf in
 # train_scproto_spatial.ipynb and just want to reload that checkpoint here.
 # Set False to train it fresh in this notebook (fully self-contained, just slower).
 LOAD_BASELINE = True
@@ -127,7 +122,7 @@ def train_or_load(label, affinity_type, load, extra_lambda=None):
 
 
 # %% [markdown]
-# ## Train / load — BANKSY, three configs
+# ## Train / load — arbf, three configs
 #
 # Each cell is independent — skip/re-run any one without affecting the others.
 
@@ -135,7 +130,7 @@ def train_or_load(label, affinity_type, load, extra_lambda=None):
 # ### Baseline (no sim-recon)
 
 # %%
-train_or_load('banksy0.5', AFFINITY, load=LOAD_BASELINE)
+train_or_load('arbf', AFFINITY, load=LOAD_BASELINE)
 
 # %% [markdown]
 # ### +sim-recon (`full` target)
@@ -144,7 +139,7 @@ train_or_load('banksy0.5', AFFINITY, load=LOAD_BASELINE)
 # ablation. Reconstructs each cell's actual affinity-graph row.
 
 # %%
-train_or_load('banksy0.5+full', AFFINITY, load=LOAD_SIMRECON,
+train_or_load('arbf+full', AFFINITY, load=LOAD_SIMRECON,
                extra_lambda={'lambda_sim_recon': LAMBDA_SIM_RECON, 'sim_recon_target': 'full'})
 
 # %% [markdown]
@@ -156,7 +151,7 @@ train_or_load('banksy0.5+full', AFFINITY, load=LOAD_SIMRECON,
 # compression costs any of the resolution benefit the `full` target gives.
 
 # %%
-train_or_load('banksy0.5+diffusion', AFFINITY, load=LOAD_SIMRECON,
+train_or_load('arbf+diffusion', AFFINITY, load=LOAD_SIMRECON,
                extra_lambda={'lambda_sim_recon': LAMBDA_SIM_RECON, 'sim_recon_target': 'diffusion',
                               'sim_recon_n_eigs': SIM_RECON_N_EIGS})
 
@@ -201,10 +196,10 @@ os.makedirs(GRAPH_DIR, exist_ok=True)
 # Exact model directory names, captured right after training/loading above —
 # see the top-of-notebook note on why this must be exact, not a keyword.
 MODEL_KEYWORDS = {
-    model_names['banksy0.5']:           'scProto (BANKSY)',
-    model_names['banksy0.5+full']:      'scProto + sim-recon/full (BANKSY)',
-    model_names['banksy0.5+diffusion']: 'scProto + sim-recon/diffusion (BANKSY)',
-    'seacell':                          'SEACells (PCA)',
+    model_names['arbf']:           'scProto (arbf)',
+    model_names['arbf+full']:      'scProto + sim-recon/full (arbf)',
+    model_names['arbf+diffusion']: 'scProto + sim-recon/diffusion (arbf)',
+    'seacell':                     'SEACells (PCA)',
 }
 MODEL_KEYWORDS
 
@@ -234,9 +229,9 @@ fig_all_celltype_niche_heatmap(
 )
 
 # %% [markdown]
-# ### 3. Difference heatmap — does sim-recon beat the plain-BANKSY baseline?
+# ### 3. Difference heatmap — does sim-recon beat the plain-arbf baseline?
 #
-# (model − BANKSY-baseline) per (cell type, niche) cell — same convention as
+# (model − arbf-baseline) per (cell type, niche) cell — same convention as
 # `scproto_spatial_comparison.ipynb`. Two things to read off this one:
 # - Are `+full`/`+diffusion` redder than the baseline — the actual
 #   single-variable ablation this notebook exists to answer.
@@ -245,7 +240,7 @@ fig_all_celltype_niche_heatmap(
 
 # %%
 fig_celltype_niche_heatmap_diff(
-    DS_ID, MODEL_KEYWORDS, reference=model_names['banksy0.5'],
+    DS_ID, MODEL_KEYWORDS, reference=model_names['arbf'],
     celltype_key=CELLTYPE_KEY, niche_key=NICHE_KEY,
     min_cells=MIN_CELLS, metric='niche_purity', min_n=5,
     save_path=os.path.join(GRAPH_DIR, 'sim_recon_niche_diff_heatmap.pdf'),
@@ -299,21 +294,3 @@ for name, t in trainers.items():
         color_key=['celltypes', 'niches_3D'],
         show_proto_nums=False,
     )
-
-# %% [markdown]
-# ## Optional — extend to the other two affinities
-#
-# Only run this section once BANKSY results above show the mechanism actually
-# helps — it's another 6 scProto runs (arbf + mean_product, each ×3 configs).
-# Same `train_or_load` helper, same pattern; uncomment and run, then add the
-# four new labels to `MODEL_KEYWORDS` above (via `model_names[...]`) and
-# re-run the comparison cells to pull them in.
-
-# %%
-# for aff in ['arbf', 'mean_product']:
-#     train_or_load(aff, aff, load=LOAD_BASELINE)
-#     train_or_load(f'{aff}+full', aff, load=LOAD_SIMRECON,
-#                    extra_lambda={'lambda_sim_recon': LAMBDA_SIM_RECON, 'sim_recon_target': 'full'})
-#     train_or_load(f'{aff}+diffusion', aff, load=LOAD_SIMRECON,
-#                    extra_lambda={'lambda_sim_recon': LAMBDA_SIM_RECON, 'sim_recon_target': 'diffusion',
-#                                   'sim_recon_n_eigs': SIM_RECON_N_EIGS})

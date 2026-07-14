@@ -809,6 +809,39 @@ class SCProtoTrainer(AdoptiveTrainer):
         (global) diffusion map — that one only needs rough coverage for
         picking init seeds, whereas a regression target needs every cell's
         coordinates to be meaningful.
+
+        Every eigenvector is kept at equal (unweighted) scale — no
+        eigenvalue^t diffusion-time weighting. This isn't a placeholder: the
+        point of sim_recon is catching a prototype that secretly glues
+        together two internally-cohesive but mutually disconnected
+        sub-communities, and that signal lives in the fine/local, small-
+        eigenvalue directions. Upweighting the coarse/global (large-
+        eigenvalue) directions instead would drown out exactly the thing
+        this loss needs to see, so equal weighting is the correct setting
+        for this use case, not a default waiting to be tuned.
+
+        eigsh returns each eigenvector with Sum(v_i**2) == 1 (unit L2 norm)
+        — that's an arbitrary solver convention, not a biological constraint:
+        the eigenvector equation L_sym @ v == lambda * v is satisfied equally
+        by any scalar multiple of v, so eigsh just has to pick one to return
+        a unique answer. Left as-is, that convention makes the *target's*
+        scale shrink as the batch gets bigger (same total squared length of
+        1 spread over more entries -> RMS entry ~ 1/sqrt(N_b)), which has
+        nothing to do with how meaningful the direction is and just makes
+        MSE targets numerically tinier — and gradients along with them — for
+        larger batches. Multiplying by sqrt(N_b) (the batch's cell count)
+        converts that to mean(v_i**2) == 1, i.e. an O(1) RMS entry
+        regardless of batch size, so target scale reflects batch size
+        instead of an eigsh bookkeeping artifact.
+
+        We also drop the single leading eigenvector (eigenvalue ~1 for a
+        connected graph, direction ~ sqrt(degree)). It's the trivial
+        "how well-connected is this cell overall" direction shared by every
+        graph of this type — not discriminative between cells the way the
+        rest of the spectrum is — so keeping it would waste one of the
+        n_eigs target dimensions on a near-constant signal. eigsh('LM')
+        returns eigenvalues in ascending order (not sorted by magnitude), so
+        we re-sort descending first to reliably identify and drop it.
         """
         import scipy.sparse as sp
         from scipy.sparse.linalg import eigsh
@@ -817,15 +850,21 @@ class SCProtoTrainer(AdoptiveTrainer):
         coords = np.zeros((N, n_eigs), dtype=np.float32)
         for b in np.unique(cell_ds):
             idx_b = np.where(cell_ds == b)[0]
-            if len(idx_b) <= n_eigs + 1:
+            if len(idx_b) <= n_eigs + 2:
                 continue
             A_b = aff_csr[idx_b][:, idx_b]
             A_b = (A_b + A_b.T) / 2
             d_b = np.array(A_b.sum(axis=1)).ravel()
             D_inv_sqrt = sp.diags(1.0 / np.sqrt(d_b + 1e-8))
             L_sym = D_inv_sqrt @ A_b @ D_inv_sqrt
-            k = min(n_eigs, len(idx_b) - 2)
-            _, vecs = eigsh(L_sym, k=k, which='LM', tol=1e-2)
+            # request one extra eigenvector so we can drop the trivial
+            # leading one below and still keep n_eigs discriminative ones
+            k_request = min(n_eigs + 1, len(idx_b) - 2)
+            vals, vecs = eigsh(L_sym, k=k_request, which='LM', tol=1e-2)
+            order = np.argsort(-vals)  # descending: largest eigenvalue first
+            vecs = vecs[:, order][:, 1:]  # drop the trivial leading eigenvector (largest eigenvalue)
+            k = vecs.shape[1]
+            vecs = vecs * np.sqrt(len(idx_b))  # undo eigsh's unit-norm convention -> O(1) RMS entry, independent of batch size
             coords[idx_b, :k] = vecs
         return coords
 
@@ -911,9 +950,17 @@ class SCProtoTrainer(AdoptiveTrainer):
                 output_dim = n_eigs
                 coords = self._compute_sim_recon_diffusion_targets(_A, cell_ds, n_eigs)
                 self._sim_recon_diffusion_target = torch.from_numpy(coords)  # (N, n_eigs), CPU
+                print(f"   sim_recon diffusion target: n_eigs={n_eigs}, "
+                      f"RMS entry={coords.std():.4f} (should be O(1), not ~1/sqrt(N))")
             else:
                 output_dim = _A.shape[0]
-                self._sim_recon_aff_csr = _A  # reused as the reconstruction target, no recompute
+                # Reconstruction target only: a cell is maximally "similar" to
+                # itself, so the diagonal is 1 here (SEACells RSS convention).
+                # This is a separate copy from _A — _A's diagonal stays 0 for
+                # degree/sampling/UMAP/nassoc, which all use the no-self-loop
+                # convention.
+                self._sim_recon_aff_csr = _A.copy()
+                self._sim_recon_aff_csr.setdiag(1)
 
             self.model.init_sim_decoder(
                 output_dim=output_dim,
@@ -961,6 +1008,9 @@ class SCProtoTrainer(AdoptiveTrainer):
             _diag_mode = f'-log(m)' if _nassoc_diag_loss == 'nll' else '(m-1)²'
             print(f"   nassoc: λ={_lambda_nassoc}, agg={_nassoc_agg}, "
                   f"diag={'ON' if _nassoc_diag else 'OFF'} [{_diag_mode}], offdiag=[{_offdiag_mode}]")
+        if lambda_sim_recon > 0:
+            _sr_diag_note = "target diagonal=1 (self-similarity)" if sim_recon_target != 'diffusion' else "no self-loop (diffusion target)"
+            print(f"   sim_recon: λ={lambda_sim_recon}, target={sim_recon_target}, {_sr_diag_note}")
 
     # ------------------------------------------------------------------
     # Decoupled prototype learning (online GMM EM)
@@ -1091,6 +1141,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             'loss_pos': 0, 'loss_neg': 0, 'recon': 0, 'kl': 0,
             'proto_recon': 0, 'r1r2': 0, 'proto_attract': 0, 'nassoc': 0, 'proto_usage': 0, 'n_unused_protos': 0,
             'nassoc_diag_val': 0, 'nassoc_offdiag_val': 0, 'sim_recon': 0,
+            'sim_recon_pred_std': 0, 'sim_recon_target_std': 0,
         }
         # snapshot proto positions at epoch start to measure movement
         if proto_decoupled:
@@ -1496,57 +1547,118 @@ class SCProtoTrainer(AdoptiveTrainer):
 
             sim_recon_loss = torch.tensor(0.0, device=self.device)
             if lambda_sim_recon > 0 and use_proto_sim:
-                # Gives scProto the cell-level resolution pressure nassoc lacks
-                # (nassoc collapses everything to a K×K summary and so can't tell
-                # a genuinely heterogeneous prototype from a homogeneous one) —
-                # the same pressure SEACells' RSS objective gets from
-                # reconstructing full archetype rows. Two target modes:
-                #   'full'      — reconstruct each cell's actual row of the
-                #                 affinity graph (most literal match to SEACells).
-                #   'diffusion' — regress to a small precomputed per-cell
-                #                 diffusion-map coordinate instead (cheaper,
-                #                 no O(n_cells) decoder output, but the
-                #                 compression could in principle throw away
-                #                 some of the resolving signal — compare both).
+                # Gives scProto the cell-level resolution pressure nassoc lacks.
+                # nassoc's diagonal already uses real cell-cell edges, but only as
+                # a single summed scalar per prototype (in-cluster edge weight /
+                # volume) — it can't tell a genuinely homogeneous prototype from
+                # one that secretly glues together two internally-cohesive but
+                # mutually disconnected sub-communities, since summing throws away
+                # *which* cells the edges connect. sim_recon targets exactly that
+                # gap: one shared decoded profile per prototype has to reconstruct
+                # every one of its cells' individual neighbor rows, which a
+                # two-sub-community prototype structurally cannot satisfy at once.
+                # 'diffusion' mode (regress to precomputed per-cell diffusion-map
+                # coordinates) is unused for now — see notebook discussion.
                 #
-                # S and the prototypes both keep their gradient here in either
-                # mode (unlike proto_recon_loss's gene-expression decoder, which
-                # detaches S): the reconstruction target is itself derived from
-                # the same affinity graph the community/nassoc losses already
-                # use, so there's no competing objective to protect the encoder
-                # from — letting this loss move S is what lets it split a
-                # prototype whose assigned cells don't actually share a
-                # similarity pattern.
+                # S and the prototypes both keep their gradient here (unlike
+                # proto_recon_loss's gene-expression decoder, which detaches S):
+                # the reconstruction target is itself derived from the same
+                # affinity graph the community/nassoc losses already use, so
+                # there's no competing objective to protect the encoder from —
+                # letting this loss move S is what lets it split a prototype
+                # whose assigned cells don't actually share a similarity pattern.
                 protos_sr = self.model.get_prototypes()
 
                 if sim_recon_target == 'diffusion':
-                    decoded = self.model.decode_sim_profiles(protos_sr)         # (K, n_eigs)
+                    decoded = self.model.decode_sim_profiles(protos_sr, nonneg=False)  # (K, n_eigs)
                     predicted = soft_assign @ decoded                           # (n_unique, n_eigs)
                     target = self._sim_recon_diffusion_target[unique_idx.cpu()].to(self.device)  # (n_unique, n_eigs)
                     sim_recon_loss = F.mse_loss(predicted, target)
                     loss = loss + lambda_sim_recon * sim_recon_loss
+                    # Cheap collapse check: if pred_std stays near 0 while
+                    # target_std doesn't, the decoder is outputting a
+                    # near-constant profile and free-riding on the target's
+                    # scale rather than actually predicting per-cell structure.
+                    total_metrics['sim_recon_pred_std'] += predicted.detach().std().item()
+                    total_metrics['sim_recon_target_std'] += target.std().item()
                 else:
+                    # Per-batch, same reasoning as nassoc's per-batch M_list:
+                    # cross-batch affinity entries are structurally absent from
+                    # aff_raw (no edge was ever computed across sections), not
+                    # genuine negatives — including them would let the model
+                    # claim free credit for "dissimilarity" that was never
+                    # actually evaluated. So each cell only ever gets
+                    # reconstructed against cells from its own batch.
                     cell_ds_all_sr = self._umap_state['cell_ds']
                     cell_batch_sr = cell_ds_all_sr[unique_idx.cpu()].to(self.device)
                     aff_csr = self._sim_recon_aff_csr
+                    sim_recon_neg_sample = getattr(self, 'sim_recon_neg_sample', 0)
 
                     sr_losses = []
                     for b in cell_batch_sr.unique():
                         b_mask = cell_batch_sr == b
                         if b_mask.sum() < 2:
                             continue
-                        idx_b = unique_idx[b_mask]                                   # (n_b,) global cell ids
-                        # Slice the decoder's output layer to just this batch's cells —
-                        # never materializes the full (K, n_cells) profile.
-                        decoded_cols = self.model.decode_sim_profiles(protos_sr, col_idx=idx_b)  # (K, n_b)
-                        predicted = soft_assign[b_mask] @ decoded_cols               # (n_b, n_b)
-
+                        idx_b = unique_idx[b_mask]                                    # (n_b,) sampled cells from batch b
                         idx_b_np = idx_b.cpu().numpy()
-                        target = torch.from_numpy(
-                            np.asarray(aff_csr[idx_b_np][:, idx_b_np].todense())
-                        ).float().to(self.device)                                    # (n_b, n_b), sparse -> tiny dense block
 
-                        sr_losses.append(F.mse_loss(predicted, target))
+                        # Reconstruct against *all* cells in this batch (matching
+                        # SEACells' full-scope RSS within the batch), not just the
+                        # other cells sampled into this minibatch — a
+                        # minibatch-sized block under-represents each cell's true
+                        # (sparse) neighbor set, since only a small fraction of
+                        # its real neighbors would land in any given random block.
+                        all_batch_cols = np.where(cell_ds_all_sr.numpy() == b.item())[0]  # all cell ids in batch b
+
+                        if sim_recon_neg_sample and sim_recon_neg_sample < len(all_batch_cols):
+                            # Column-subsampling: decode/compare against only each
+                            # row's true-neighbor columns (always kept — the
+                            # informative "yes" cases, and cheap since real degree is
+                            # tiny) plus a random sample of zero columns, instead of
+                            # every column in the batch. A fresh random sample is
+                            # drawn each step, so nothing is permanently discarded
+                            # the way a fixed diffusion-map basis would be — over
+                            # many steps the model still sees the full negative
+                            # population, same as ordinary minibatching. The
+                            # class-balanced weighting below is computed from
+                            # whatever ends up in this reduced target, so it
+                            # self-adjusts to the smaller column count with no
+                            # separate reweighting needed.
+                            pos_cols = np.unique(aff_csr[idx_b_np].indices)
+                            neg_pool = np.setdiff1d(all_batch_cols, pos_cols, assume_unique=True)
+                            n_neg_sample = min(sim_recon_neg_sample, len(neg_pool))
+                            neg_cols = np.random.choice(neg_pool, size=n_neg_sample, replace=False)
+                            batch_cols = np.union1d(pos_cols, neg_cols)
+                        else:
+                            batch_cols = all_batch_cols
+
+                        batch_cols_t = torch.from_numpy(batch_cols).to(self.device)
+
+                        decoded_cols = self.model.decode_sim_profiles(protos_sr, col_idx=batch_cols_t)  # (K, n_sel)
+                        predicted = soft_assign[b_mask] @ decoded_cols                # (n_b, n_sel)
+
+                        target = torch.from_numpy(
+                            np.asarray(aff_csr[idx_b_np][:, batch_cols].todense())
+                        ).float().to(self.device)                                     # (n_b, n_sel); n_sel == n_batch unless sim_recon_neg_sample subsampled it
+
+                        # Class-balanced weighting: true neighbors are a tiny
+                        # fraction of each row, so plain MSE lets the model
+                        # minimize loss by predicting near-zero everywhere — the
+                        # overwhelming majority of zero-target entries outvote
+                        # the few real ones. Weight each row's positive
+                        # (true-neighbor) entries by that row's own
+                        # n_negative/n_positive ratio so positives and negatives
+                        # contribute comparably regardless of that cell's degree
+                        # — no sampling, no normalization, every entry counted.
+                        pos_mask = target > 0
+                        n_pos = pos_mask.sum(dim=1, keepdim=True).clamp(min=1).float()  # (n_b, 1)
+                        n_neg = (target.shape[1] - n_pos).clamp(min=1)
+                        pos_weight_row = n_neg / n_pos                                  # (n_b, 1)
+                        weight = torch.where(
+                            pos_mask, pos_weight_row.expand_as(target), torch.ones_like(target)
+                        )
+
+                        sr_losses.append((weight * (predicted - target) ** 2).mean())
 
                     if sr_losses:
                         sim_recon_loss = torch.stack(sr_losses).mean()
@@ -1652,6 +1764,12 @@ class SCProtoTrainer(AdoptiveTrainer):
             extra += f" | proto_usage={metrics['proto_usage']:.4f}"
         if getattr(self, 'lambda_sim_recon', 0) > 0:
             extra += f" | sim_recon={metrics['sim_recon']:.4f}"
+            if getattr(self, 'sim_recon_target', 'full') == 'diffusion':
+                # pred_std << target_std means the decoder collapsed to a
+                # near-constant output and is coasting on the target's own
+                # scale rather than predicting real per-cell structure.
+                extra += (f" [pred_std={metrics['sim_recon_pred_std']:.3f} "
+                          f"target_std={metrics['sim_recon_target_std']:.3f}]")
         if getattr(self, 'usage_norm_sim', 0) == 5 and 'mode5_c_min' in metrics:
             extra += f" | c_min={metrics['mode5_c_min']:.3f} corr={metrics['mode5_corr_max']:.2f}"
         if 'proto_move' in metrics:
