@@ -301,11 +301,32 @@ class MultiCropsDataset(MultiConditionAnnotatedDataset):
                 self.save_path,
                 lock_path,
             ],
-            stdout=None,
-            stderr=None,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
         )
-        while not os.path.exists(self.save_path):
-            time.sleep(1)
+        # Stream the child's output line-by-line through our own print() -- a bare
+        # inherited fd (the old stdout=None) doesn't reliably surface in a notebook cell,
+        # since the subprocess sits outside the kernel's stdout-capture hook. This also
+        # replaces a real hang risk: the old code just polled os.path.exists(self.save_path)
+        # forever with no exit-code check, so a crashed child left the parent spinning
+        # silently with no error and no way to see why.
+        for line in proc.stdout:
+            print(f"[graph_generator pid={proc.pid}] {line}", end="")
+        proc.wait()
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"graph_generator subprocess exited with code {proc.returncode} "
+                f"(affinity_type={self.affinity_type}) -- see the streamed log above "
+                f"for the actual error."
+            )
+        if not os.path.exists(self.save_path):
+            raise RuntimeError(
+                f"graph_generator subprocess exited cleanly (code 0) but "
+                f"{self.save_path} was never written -- unexpected, check the "
+                f"streamed log above."
+            )
 
         # Load result
         with open(self.save_path, "rb") as f:

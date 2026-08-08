@@ -1,0 +1,59 @@
+
+
+
+
+experiments:
+scproto with scvi standards: running
+scproto with d = 50 vs harmney defualt [whatever it is - what is harmoney default is]: still waiting for dim = 20 results
+also report results for other spatial dataset: need run
+report var across seeds - some results please [maybe less epoch - just 1 dataset - to show stablity]: we have sig - still waiting for seed
+
+
+ac:
+we thank - check example and use best parctice to start
+as revwer mentioned we added ---
+1 line summary of what we see genral pattern - when scproto works well- and why [encode wht i said in this]
+we tried to address we added ablation and we see --- [say those from sig test results]
+explain which component drive the gain - and brin numebrs - do not redudnat [choose now or before]
+we also added several 2 step baseines as discused 
+[now its hard to say what we get - scproto outperform scvi and hamrney and other baslines asked by revwers when using same 8 dim 
+however increaisng the dim would not have same effect on all mehtod and lower th scproto advanatge
+for example in higher dim batch mixing goal may be in favor of hamrney to recovery of rare cell types [can you say this in a postive tune]
+[so that what scproto is good at looks well]
+[i think we shoud also somhow mention scvi baseline defualts]
+[we tink scproto can solve overcorrcetion challnege where we know may hppen in some rare ct cases -
+ hence showing it can be difficalu specaly because in bilogy labels are mostly output of algothm wichih cthey alos have their limitaions -
+  but our label free compariosn which is preserving moduality [mention held out edge and held out nodes] of the affinity grpah we can see the win in all cases in in the cases that the defualt config was from other mehtods]
+  so althug we agree that scproto perfomance is limited by quality of the afifity graph - we think when thea afifnty graph mathces what we want it can do what other mthdos cannot
+again we agree that if the afifnty graph does not encode naything more than what the recontion loss would give the model - the stage2 may not add that much
+but we think that the many cases that we have a good affinity where a vae not respcet and we wnat that [somehow say the problem is real - maybe use their workinf i dont know]
+eviewers further note that cross-batch alignment may be inherited mainly from Stage 1, since the Stage 2 reconstruction path does not update the encoder through the prototype assignments.: answer this based on what i told reviwers and they said they are ok
+ The concerns raised about the use of modularity and the baseline clustering choices also have merit. : mention our 2 expeirmtn
+
+
+rev1:
+The fairness of the new baseline comparison also requires clarification, since restricting all methods to (d=8) and replacing scVI’s standard count likelihood with a Gaussian likelihood may disadvantage methods under nonstandard settings;
+[if scproto was better]: we did tested with scvi defualt - still we can see - bring results an dsignifncats
+[if not that much]: we sy use of zinb and dim = 8 can somehow solve the sparse to dense collapse issue - 
+however modularity metrics show us scproto can presrve the graph much better and in cases where there is a signal in the graph wher too noisy in gene expression
+and a recon loss would omit it the scproto loyalty to graph can help
+and final note try to cover his main concersn and concice him to icnrease his score - check exmaple
+
+
+
+
+rev2:
+First, variance in the ablations is reported across batches rather than seeds,: explain this base on what we have in final comment evidcen - say why we did this
+to evlauate more statiflay we did ... sig test: show results
+Moreover, the new results on Lung and Immune datasets do not report variance at al: [incude the var of this in teh latter result - mention we did that]
+ L_nassoc on purity (.972±.09 -> .962±.09) and the stop-gradient on modularity (.615±.08 .> .555±.07).: eplxain this 2 cases clarey 
+ Reporting variance over seeds and for all datasets would make these results clearer.: say we will do for camera ready 
+ epxain hamenry based on the note we have now
+
+
+ rev3:
+ Modularity against SEACells is not significant on any of the three datasets: epxlain this
+ community-structure result reads as a tie rather than a win: this should be eplxian specaly on heldout maybe?
+
+matched-dimension question Reviewer nG29 raises is still open: in all evlaution mehtods idmention are amtched - we alos included evlaution on hgier dims based on baslie defualt 
+[explain what we see]

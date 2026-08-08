@@ -1,0 +1,70 @@
+why i cant find this any more:
+1. Coverage-union — this is the strongest piece, and it's exactly your hypothesis.
+
+scProto uniquely recovers 6 pairs neither SEACells variant can even test (arbf: 1 unique pair, weak, r=0.10; bk08: 2 unique pairs, decent, r=0.71-0.77; scProto: 6 unique pairs, and 4 of them are strong):
+
+┌──────────────────────────────────────────┬───────────┐
+│                   pair                   │ scProto r │
+├──────────────────────────────────────────┼───────────┤
+│ Vascular endothelium × T cell aggregates │ 0.942     │
+├──────────────────────────────────────────┼───────────┤
+│ Vascular endothelium × Vascular stroma   │ 0.915     │
+├──────────────────────────────────────────┼───────────┤
+│ Macrophages × Alveolar spaces            │ 0.916     │
+├──────────────────────────────────────────┼───────────┤
+│ Tumor cells × Desmoplastic stroma        │ 0.783     │
+├──────────────────────────────────────────┼───────────┤
+│ Macrophages × Desmoplastic stroma        │ 0.797     │
+├──────────────────────────────────────────┼───────────┤
+│ Macrophages × Airways                    │ 0.459     │
+└──────────────────────────────────────────┴───────────┘
+what is correct way of reportng this?
+2. Beats-both — smaller, but a real, rigorous head-to-head win.
+
+Out of only 5 pairs where all three methods are comparable at a strict robustness bar (n_pos_mc≥3), 2 beat both SEACells variants with a real margin:
+
+┌───────────────────────────────────┬─────────┬───────┬───────┬────────────┐
+│               pair                │ scProto │ arbf  │ bk08  │ min margin │
+├───────────────────────────────────┼─────────┼───────┼───────┼────────────┤
+│ Macrophages × Macrophage islands  │ 0.764   │ 0.526 │ 0.654 │ +0.109     │
+├───────────────────────────────────┼─────────┼───────┼───────┼────────────┤
+│ Fibroblasts × Desmoplastic stroma │ 0.879   │ 0.799 │ 0.809 │ +0.070     │
+└───────────────────────────────────┴─────────┴───────┴───────┴────────────┘
+
+And the genes behind them are genuinely clean, textbook markers, not noise:
+- Macrophage islands: SPP1, MARCO, CD68, ITGAM, GPNMB — canonical tumor-associated-macrophage/tissue-macrophage markers.
+- Desmoplastic stroma: COL14A1, COL15A1, CXCL12, WNT2 — canonical cancer-associated-fibroblast/desmoplastic-stroma markers.
+
+Good call — this substantially strengthens the case, and surfaced something even better than generic confirmation.
+
+Macrophage islands (SPP1, GPNMB)
+
+- Lung-specific, and exactly this gene pair: "Gpnmb and Spp1 mark a conserved macrophage injury response... in the lung" (JCI Insight). This isn't pan-cancer generic — it's the same two genes, together, specifically in lung tissue, independent of the NSCLC source paper entirely.
+- Lung cancer specific: "The Significance of SPP1 in Lung Cancers and Its Impact as a Marker for Protumor Tumor-Associated Macrophages" (PMC10136569) — SPP1+ TAMs linked to poor prognosis and chemo resistance specifically in lung adenocarcinoma.
+- GPNMB mechanism: independently confirmed as "a hallmark of lipid-associated macrophages... GPNMB+ TAMs are enriched in pathways of matrix degradation, angiogenesis, and lipid metabolism" — matches the source paper's own description ("lipid-laden marker... typical of tissue-repair and pro-tumoral macrophages") almost verbatim, from a completely separate literature base.
+
+This is now about as solid as a two-gene signature gets: same genes, same direction, confirmed in lung tissue specifically, by work unconnected to your source dataset.
+
+Desmoplastic stroma (COL14A1, IGF1, CXCL12)
+
+- COL14A1: confirmed as a marker of inflammatory CAFs (iCAFs) specifically — "the most upregulated collagen compared to all other CAF subtypes" in that subtype — and separately appears in a 36-protein desmoplastic-stroma signature paper. Real, independent confirmation.
+- CXCL12: very well established broadly as a CAF-secreted factor across multiple cancer types (pancreatic, gastric) — "CXCL12 alone is enough to reprogram normal fibroblasts into cancer-associated fibroblasts." Strong, cross-tumor-type support, though not lung-specific in what surfaced.
+- IGF1: the weakest of the three here — didn't independently surface as a headline CAF marker in general search (results pointed to adjacent pathways like TGF-β/IGFBP7 instead). It's still named directly by the NSCLC source paper itself, just not as strongly corroborated elsewhere as the other two.
+
+Net effect on the rebuttal draft
+
+This is good news for the macrophage-islands example especially — I'd upgrade that one from "confirmed by the source paper" to "confirmed by the source paper and independently by lung-specific literature unconnected to this dataset," which preempts an obvious reviewer objection ("well of course it matches, it's the same data"). I'd revise the paragraph to add one line distinguishing the two: cite the source paper for the niche-specific finding, and note SPP1/GPNMB's independent lung literature backing as the stronger claim. The desmoplastic-stroma example stays as-is (source-paper-confirmed, IGF1 slightly weaker than the other two) — still solid, just don't oversell all three genes equally.
+
+Want me to fold this into the drafted paragraph now, or wait until the remaining 3 coverage-union gene lists come back so you can decide on the final example set in one pass?
+
+Sources:
+- The Significance of SPP1 in Lung Cancers and Its Impact as a Marker for Protumor Tumor-Associated Macrophages
+- Characterizing Intercellular Communication of Pan-Cancer Reveals SPP1+ Tumor-Associated Macrophage
+- JCI Insight - Gpnmb and Spp1 mark a conserved macrophage injury response... in the lung
+- The janus-faced biology of GPNMB: from tissue homeostasis to cancer pathogenesis
+- High-Resolution Analysis of Mononuclear Phagocytes Reveals GPNMB as a Prognostic Marker
+- Frontiers | Fibroblast-derived matrix models desmoplastic properties and forms a prognostic signature in cancer progression
+- The collagen landscape in cancer: profiling collagens in tumors and in circulation
+- CXCL12 in Pancreatic Cancer: Its Function and Potential as a Therapeutic Drug Target
+- CXCL12 alone is enough to Reprogram Normal Fibroblasts into Cancer-Associated Fibroblasts
+

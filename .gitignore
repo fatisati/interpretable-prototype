@@ -25,3 +25,28 @@ dc
 desktop.ini
 tmp_*.h5ad
 baselines/*
+
+# --- Large artifacts kept out of git (they live on Drive) ---
+# Generated held-out datasets — ~2.5 GB of .h5ad, regenerable from the prep notebooks.
+node_heldout_data
+rare_heldout_data
+# Third-party PDFs (downloaded papers, not our work) — ~176 MB.
+literature
+neurips_manuscript/rebuttle/other-papers
+neurips_manuscript/rebuttle/examples
+# Notebook carrying ~39 MB of embedded outputs. Remove this line and re-add after
+# stripping outputs if the demo itself needs to be tracked.
+demo.ipynb
+# Google Drive cloud placeholders — not real files, git cannot read them.
+*.gdoc
+*.gsheet
+*.gslides
+*.gform
+*.gdraw
+*.glink
+# Drive sync conflict copies.
+*.conflict*
+# Computed niche tables >5 MB (the smaller celltype_niches_*.csv stay tracked).
+files/celltype_niches_full.csv
+files/celltype_niches_full_s28nsc.csv
+files/celltype_niches_3d_full_s28nsc.csv

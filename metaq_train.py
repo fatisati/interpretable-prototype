@@ -149,8 +149,8 @@ def train_metaq(ds_id, mode, data_type='RNA', batch_size=None, train_epochs=None
             ]
 
     os.makedirs(save_path, exist_ok=True)
-    ad.write_h5ad(os.path.join(save_path, 'metaq_sc.h5ad'))
-    mc_ad.write_h5ad(os.path.join(save_path, 'metaq_mc.h5ad'))
+    ad.write_h5ad(os.path.join(save_path, 'metaq_sc.h5ad'), compression="gzip")
+    mc_ad.write_h5ad(os.path.join(save_path, 'metaq_mc.h5ad'), compression="gzip")
     print(f"Saved to {save_path}")
 
     try:
@@ -338,12 +338,14 @@ def eval_metaq_task3(ds_id):
 
     summary, _ = celltype_niche_dge(ad, mc_ad, lk, nk, 'metaq', save_path)
     ct_niche_rbo_avg = float(summary.values.mean())
-    print(f"[metaq task3] mean ct-niche RBO: {ct_niche_rbo_avg:.4f}")
+    std_ct_niche_rbo = float(summary.values.std(ddof=1)) if summary.values.size > 1 else 0.0
+    print(f"[metaq task3] mean ct-niche RBO: {ct_niche_rbo_avg:.4f} ± {std_ct_niche_rbo:.4f}")
 
     metrics_path = os.path.join(save_path, 'metrics.json')
     metrics = json.load(open(metrics_path)) if os.path.exists(metrics_path) else {}
     metrics['ct_niche_rbo_avg'] = ct_niche_rbo_avg
+    metrics['std_ct_niche_rbo'] = std_ct_niche_rbo
     with open(metrics_path, 'w') as f:
         json.dump(metrics, f, indent=2)
 
-    return {'ct_niche_rbo_avg': ct_niche_rbo_avg}
+    return {'ct_niche_rbo_avg': ct_niche_rbo_avg, 'std_ct_niche_rbo': std_ct_niche_rbo}

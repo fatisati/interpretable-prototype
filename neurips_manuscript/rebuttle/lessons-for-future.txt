@@ -1,0 +1,291 @@
+LESSONS FOR FUTURE — scProto / NeurIPS 2026 rebuttal
+=====================================================
+Written Aug 2026, after the discussion period closed.
+Sections marked [orig] are my own observations from the first draft.
+
+
+0. THE COSTLIEST MISTAKE HAPPENED BEFORE SUBMISSION
+---------------------------------------------------
+The paper shipped without ablations.
+
+All three reviewers AND the AC independently flagged this. The AC made it the
+headline of the meta-review: "all reviewers identify the lack of ablations as a
+major weakness... the missing controls and ablations appear substantial."
+
+Those experiments took me three weeks during the rebuttal. They were runnable
+all along. If they had been in the submission, the reviews would have started
+1-2 points higher, and the whole rebuttal would have been a different game —
+converting borderline-accepts instead of arguing up from borderline-rejects.
+
+RULE: a paper claiming a multi-term objective ships with leave-one-term-out
+ablations. No exceptions. Same for significance tests on the headline tables.
+
+Second version of the same mistake: my headline metric (modularity) was also my
+training objective AND my early-stopping criterion. Two reviewers independently
+called circularity. A self-scoring metric needs a held-out protocol IN THE
+PAPER, not invented under fire.
+
+
+1. WHAT I ACTUALLY DID WELL — KEEP DOING THIS
+----------------------------------------------
+- Reported nulls and unfavourable results as plainly as the wins. Reviewer e9Ho
+  said so explicitly: "I appreciate that the null and unfavourable results were
+  reported as plainly as the rest." Reviewers almost never say this. It is the
+  most valuable thing I produced and it carries beyond this paper.
+- Conceded real errors: l.229 overclaim, l.150-152 mechanism, "never reverse",
+  the nassoc-on-purity claim that didn't hold.
+- Enormous experimental throughput in 3 weeks — more than any of the 7
+  comparison papers I studied, including the accepted ones.
+- Mechanistic thinking, not just benchmark-stacking. "The objective adds
+  wherever the graph carries signal the reconstruction likelihood does not" is
+  a falsifiable claim about WHEN the method helps — and it held, including
+  where it predicted I would stop winning.
+- Structured the AC-facing comment around the AC's own points, in their order.
+
+
+2. MY MAIN WEAKNESS
+--------------------
+I treated the rebuttal as an EVIDENCE-PRODUCTION problem when it was an
+ARGUMENT problem.
+
+Evidence accumulated; the thesis never consolidated. Symptoms:
+- Best conceptual sentence appeared ONCE, as a §2 subheading, in one reviewer's
+  thread, posted the day after that reviewer stopped reading. The fuller version
+  (in ac-comment.md) was never posted at all.
+- No common-response post. 4 of the 7 papers I studied used one — it is how an
+  AC sees a single argument instead of three dense threads.
+- The claim moved under pressure ("modularity wasn't my claim", "rare cells were
+  a proxy") instead of being stated once upfront and held.
+- Responses got LONGER over the rounds, not sharper.
+
+Calibration so I don't over-blame myself: this was real but probably not
+decisive. Starting position dominates. A rebuttal amplifies where you already
+are — in all 7 cases I studied, no paper moved from reject to accept on the
+strength of a response. The accepted ones were already at the line.
+
+
+3. THE LOOP, REVISED
+---------------------
+[orig] My loop was:
+  read reviews -> decide what to answer/run -> experiment plan -> run ->
+  results don't look good -> think of NEW experiments -> run again ->
+  looks fine -> write
+
+[orig] What I skipped: interpreting the results myself before drafting.
+
+Two changes:
+
+(a) MOVE INTERPRETATION BEFORE THE EXPERIMENT.
+    Before running anything, write down: "if this comes back X it supports the
+    claim; if it comes back Y the claim has to change to Z."
+    Then an unfavourable result is INFORMATION, not a crisis — and the reflex
+    to run something else disappears. This single rule also prevents the
+    overclaiming pattern that cost me four separate concessions.
+
+(b) WRITE THE ONE-SENTENCE THESIS FIRST, THEN THE TABLES.
+    Every strong response I studied had one. Mine had it sometimes; the
+    responses where it was missing read as number dumps.
+
+Revised loop:
+  read reviews
+  -> TRIAGE each point by type (section 4)
+  -> for each: state in advance what would support / falsify
+  -> run only what the triage says needs running
+  -> interpret MYSELF: what does this mean for the claim?
+  -> write the thesis sentence
+  -> draft myself (rough is fine)
+  -> ask Claude to sharpen / compress / attack
+
+
+4. TRIAGE — FOUR KINDS OF REVIEWER OBJECTION
+---------------------------------------------
+I defaulted to "run an experiment" for all four. They need different responses.
+
+(1) FACTUAL ERROR / MISREADING
+    -> One-sentence correction. Concede immediately and completely.
+    Example: l.229 overclaim. I conceded — correct.
+
+(2) GENUINE EVIDENTIAL GAP
+    -> Run the experiment.
+    Example: the ablations. Correct.
+
+(3) VALUE DISAGREEMENT about what should be measured
+    -> A reframe, not data.
+    Example: e9Ho on scIB metrics. I wrote the argument AND ran kBET/iLISI.
+    The argument was the right answer; the metrics were optional.
+
+(4) PHILOSOPHICAL OBJECTION with no fully satisfying answer
+    -> Concede the limit and scope the claim. Do not keep adding protocols.
+    Example: F5RB on held-out-edge independence. Any held-out test within one
+    dataset shares the generating process. I kept adding evidence to answer
+    something partly unfalsifiable.
+
+CONCEDE FIRST, THEN RE-RUN. scRatio (ICML 2026) was accused of unfair baseline
+tuning, replied "Apologies... we overlooked tuning the SB variance", and re-ran
+with a proper validation split. BOTH reviewers cited that as the decisive
+moment. I argued first on Harmony ("dimensionality bug") and had to be pushed
+into the fairer comparison. Arguing first costs the credit.
+
+
+5. PLACEMENT AND TIMING
+------------------------
+- STRONGEST EVIDENCE GOES IN THE FIRST RESPONSE, NOT THE LAST.
+  My scVI-backbone result — the single best thing I produced, and the one that
+  answers the AC's OWN question — landed Aug 4, after every reviewer's final
+  comment. Nobody rebutted it because nobody read it.
+
+- PUT THE BEST SENTENCE WHERE IT GETS READ: abstract, first line of the AC
+  comment, first line of each reviewer reply. Not a subheading in §2 of the
+  last post.
+
+- WRITE A COMMON-RESPONSE POST for concerns shared by 2+ reviewers.
+
+- WRITE AN AC-FACING SUMMARY at the end, organised in the AC's own order.
+  (I did this — keep it.)
+
+- NUDGE SILENT REVIEWERS. Every accepted paper I studied did this, some twice.
+
+
+6. WHAT DECIDES THE OUTCOME (from 7 OpenReview threads)
+--------------------------------------------------------
+Papers studied: FlatVI (ICLR'25 reject / ICML'25 spotlight — same paper),
+CFGen (ICLR'25), scRatio (ICML'26), NicheFlow (NeurIPS'25),
+FrameShield (NeurIPS'25), SGD-shortcut (ICLR'26).
+
+THE RULE THAT EXPLAINS ALL SEVEN: acceptance tracks whether at least ONE
+reviewer affirmatively advocates. Not scores, not movement, not effort.
+- The only rejection (FlatVI at ICLR) had the HIGHEST raw scores (6,6,5,5) and
+  no advocate — its top score said "would not mind if paper is rejected".
+- The same paper at ICML, with two weak-rejects and a silent reviewer, was a
+  SPOTLIGHT three months later.
+- SGD-shortcut was accepted at 4/6/8 with ZERO score movement and a reviewer
+  who never replied — because one reviewer wrote "I recommend acceptance".
+- scRatio's AC: "I am basing this meta-review on the substance of the reviews
+  and ensuing discussions, rather than directly on the current scores...
+  reviewer U3Wf has advocated for publication."
+
+Corollaries:
+- Silent or hostile reviewers did not block acceptance in 4 of 6 accepts.
+- EVERY accepted paper had results that came back against them. Ties and nulls
+  are not disqualifying.
+- Volume is not the lever. NicheFlow refused the held-out evaluation, declined
+  three requested baselines, never revised the PDF — and was accepted.
+- A rejection is not a verdict on the science. FlatVI: rejected at ICLR with an
+  AC note "I encourage the authors to... submit again", spotlight at ICML.
+
+
+7. WORKING WITH AI ON REBUTTALS
+--------------------------------
+[orig] Always, before asking Claude: clarify for myself exactly what I want to
+say and in what detail. Even if the detail is a lot, it is easier than asking
+for a million changes after Claude has drafted it.
+
+This is measured, not just intuition. From "Defend: Automated Rebuttals for
+Peer Review with Minimal Author Guidance" (arXiv 2603.27360):
+
+    approach                          factual correctness   strength of refutation
+    direct end-to-end LLM generation        0.45                  0.12
+    segment-wise generation                 0.58                  0.29
+    author-guided structured pipeline       0.74                  0.76
+
+Strength of refutation collapses 6x when the LLM generates from raw material
+instead of author-supplied structure. Their conclusion: "rebuttal writing is
+not a simple generative task"; "LLMs often struggle to perform targeted
+refutation and maintain accurate factual grounding."
+
+Their pipeline is finer than mine and the extra step is the triage in §4:
+  segment review -> is this a real deficiency? -> what KIND of error?
+  -> choose response strategy -> only then generate.
+
+DIVISION OF LABOUR THAT WORKS:
+  I own: the claim, the interpretation, what each result means.
+  Claude owns: structure, compression, adversarial pressure.
+
+  Good prompt: "here is what I think this result shows and why — attack it"
+  Bad prompt: "here are the numbers, write something"
+  The first gets a stress-tested argument. The second gets fluent prose with
+  no spine.
+
+USE IT EARLIER. Reading the submitted paper in June, an adversarial pass would
+have flagged the circularity of modularity, the abstract/Table-1 mismatch, and
+the missing ablations. None of that needed the reviews to become visible.
+Cheapest, highest-leverage hour available.
+
+
+8. PRE-SUBMISSION CHECKLIST FOR NEXT TIME
+------------------------------------------
+[ ] Leave-one-term-out ablation on EVERY dataset, in the main text
+[ ] Significance tests on every headline table
+[ ] Headline metric is NOT the training objective or the stopping criterion
+    (or a held-out protocol is in the paper)
+[ ] Every abstract claim checked line-by-line against the tables
+[ ] Claims stated as the honest result (trade-off if it's a trade-off) — the
+    honest framing is usually STRONGER as well as true
+[ ] Baselines run at their own recommended configurations, not only mine
+[ ] Best conceptual sentence appears in the abstract
+[ ] Someone adversarial reads it and tries to reject it before submission
+[ ] Primary area chosen to draw reviewers who value the problem, not a novelty
+    bar the method can't clear
+
+
+=========================================================================
+9. THE CORRECT LOOP  <<< THE ONE THING TO REREAD BEFORE THE NEXT REBUTTAL
+=========================================================================
+
+  STEP 0 — READ EVERYTHING ONCE, WRITE NOTHING
+    Read all reviews + meta-review. Do not open a doc. Do not run anything.
+    The AC's meta-review is the priority list — it says what would change
+    the AC's mind. Answer that first, in the AC's own order.
+
+  STEP 1 — TRIAGE EVERY POINT BY TYPE  (do this before any experiment)
+    For each reviewer point, label it:
+      (1) factual error / misreading  -> one-sentence correction, concede now
+      (2) genuine evidential gap      -> run the experiment
+      (3) value disagreement          -> reframe, not data
+      (4) unfalsifiable objection     -> concede the limit, scope the claim
+    Only type (2) becomes an experiment. This is the step I skipped.
+
+  STEP 2 — WRITE THE THESIS SENTENCE, BEFORE ANY RESULTS EXIST
+    One sentence: what is true about my method, stated honestly, including
+    its limits. If it's a trade-off, say trade-off.
+    Everything downstream is arranged around this sentence.
+
+  STEP 3 — PRE-REGISTER EACH EXPERIMENT
+    Before running: "if X, the claim holds; if Y, the claim becomes Z."
+    Write Y down. Committing to Y in advance is what stops the
+    result-looks-bad -> run-something-else loop.
+
+  STEP 4 — RUN
+    Only what Step 1 marked as type (2). Nothing else.
+
+  STEP 5 — INTERPRET MYSELF  (no AI yet)
+    For each result: does this support, narrow, or break the thesis?
+    If it narrows it -> narrow the thesis NOW, in my own words.
+    Do not proceed until I can say out loud what every table means.
+
+  STEP 6 — DRAFT MYSELF, ROUGH
+    Bullet points are fine. But the claim, the interpretation and the
+    ordering must be mine.
+
+  STEP 7 — AI: SHARPEN, COMPRESS, ATTACK
+    "Here is what I think this shows and why — attack it."
+    Never: "here are the numbers, write something."
+    Then have it compress and check every claim against every table.
+
+  STEP 8 — PLACE IT PROPERLY
+    - thesis sentence = FIRST line of every reply, not a subheading
+    - strongest evidence = FIRST response, not the last
+    - shared concerns    = one common-response post
+    - AC summary         = organised in the AC's own order
+    - nudge silent reviewers, twice if needed
+
+  STEP 9 — POST EARLY, THEN ITERATE
+    Engage in round 1 so reviewers have time to respond and reconsider.
+    Evidence posted after a reviewer's last comment is evidence nobody read.
+
+  ---------------------------------------------------------------------
+  THE TWO SENTENCES THAT MATTER MOST:
+
+    Decide what the result MEANS before you decide what to write.
+    Decide what would FALSIFY the claim before you run the experiment.
+  ---------------------------------------------------------------------

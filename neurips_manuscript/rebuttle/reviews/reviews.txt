@@ -1,0 +1,728 @@
+scProto: Affinity-Guided Prototype Learning for Cross-Batch Metacell Construction
+Download PDF
+Fatemeh S. Hashemi-Golpayegani, Till Richter, Alejandro Tejada Lapuerta, Maiia Shulman, Lennard Halle, Alessandro Palma, Mahmoud Ghandi, Mohammad Lotfollahi, Fabian J Theis 
+03 May 2026 (modified: 28 May 2026)
+NeurIPS 2026 Conference Submission
+Conference, Senior Area Chairs, Area Chairs, Reviewers, Authors
+Revisions
+CC BY 4.0
+TL;DR: scProto combines a CVAE for cross-batch alignment with an affinity-guided community objective that maps connected cells to shared prototypes, improving batch integration, rare cell coverage, and spatial structure capture.
+Abstract:
+Single-cell transcriptomics data are sparse and noisy; among approaches to address this, cell aggregation methods group similar cells into representative profiles termed metacells. Yet current methods define similarity from transcriptomics alone and operate within individual batches: in multi-batch settings, batch effects limit cross-batch aggregation even when biological states are shared; moreover, niche-specific transcriptional programs encoded in spatial organization are invisible to transcriptomic similarity, and methods that optimize purely on affinity structure cannot incorporate spatial context without sacrificing cell-type identity. We introduce scProto, a framework that learns metacells by combining a reconstruction objective with a community-preserving objective that aligns prototype assignments with a cell--cell affinity graph encoding biologically meaningful similarity (e.g., density-corrected transcriptomic or spatial). Experiments on single-cell and spatial transcriptomics datasets show that scProto improves cross-batch aggregation while preserving community structure and cell-type purity, better captures rare cell populations, and---by incorporating spatial affinity---identifies niche-correlated transcriptional programs while preserving cell-type identity.
+
+Checklist Confirmation: I confirm that I have included a paper checklist in the paper PDF.
+Financial Support:  Fatemeh S. Hashemi-Golpayegani
+Responsible Reviewing: We acknowledge the responsible reviewing obligations as authors.
+Primary Area: Deep learning advancements (e.g., architectures, optimizers, representation learning)
+Secondary Area: AI for health and biotechnology (e.g., digital medicine, computational biology, public health)
+Contribution Type: General: Most submissions will fall into this type.
+Academic Integrity: I acknowledge that I have read the NeurIPS Handbook and commit to adhering to all policies in the Handbook (https://neurips.cc/Conferences/2026/MainTrackHandbook), the NeurIPS Code of Conduct and the NeurIPS Academic Integrity Policy.
+LLM Usage: Editing (e.g., grammar, spelling, word choice), Drafting sections of the paper, Understanding technical concepts, Visualizing results for submission, Implementing standard methods
+Declaration: I confirm that the above information is accurate.
+Reviewer Nomination:  Till Richter
+LLM Feedback Request:  Fatemeh S. Hashemi-Golpayegani
+Submission Number: 15985
+Discussion
+Filter by reply type...
+Filter by author...
+Search keywords...
+
+Sort: Newest First
+24 / 24 replies shown
+Add:
+Meta Review of Submission15985 by Area Chair FTYx
+Meta Reviewby Area Chair FTYx19 Jul 2026, 10:27 (modified: 23 Jul 2026, 21:27)Senior Area Chairs, Area Chairs, Authors, Reviewers Submitted, Program Chairs, Area Chair FTYxRevisions
+Metareview:
+The paper proposes scProto, an affinity-guided prototype learning method for constructing cross-batch metacells from single-cell and spatial transcriptomics data. The problem is important and the design is well motivated. However, all reviewers identify the lack of ablations as a major weakness; without those, it is difficult to determine which components drive the gains. Reviewer F5RB requests a stronger two-step baseline, while Reviewers nG29 and e9Ho question the fairness and completeness of the baseline comparisons. Reviewers further note that cross-batch alignment may be inherited mainly from Stage 1, since the Stage 2 reconstruction path does not update the encoder through the prototype assignments. The concerns raised about the use of modularity and the baseline clustering choices also have merit. The rebuttal should address these points but the missing controls and ablations appear substantial.
+
+Official Comment by Authors
+Official Commentby Authors (Fatemeh S. Hashemi-Golpayegani, Alessandro Palma, Mohammad Lotfollahi, Fabian J Theis, +5 more)04 Aug 2026, 15:28 (modified: 04 Aug 2026, 16:04)Senior Area Chairs, Area Chairs, Authors, Reviewers Submitted, Program ChairsRevisions
+Comment:
+We thank the Area Chair and the reviewers. Every point in the meta-review has been addressed, and the changes go into the camera-ready: the ablation on all three datasets with paired significance tests, the two-step baselines at matched and native configurations, the Stage-1/Stage-2 mechanism separated experimentally, modularity re-scored on held-out structure, and a second spatial benchmark that reproduces Fig. 3. Reviewer nG29 raised their score; F5RB and e9Ho recorded the corresponding concerns answered.
+
+1. Which components drive the gains
+
+Every term earns its place; the community loss is largest.
+
+The 8-arm leave-one-term-out ablation covers all three datasets, with a paired per-batch Wilcoxon test (BH-corrected). Dropping the community loss gives the largest modularity drop of any arm everywhere: Pancreas 0.615→0.449 (8/9 batches, p=0.008), Lung 0.655→0.483 (16/16, p=3.1e-5), Immune 0.623→0.379 (5/5; at n=5 the smallest returnable p is 0.0625, so Immune is reported by win-count). Removing the usage loss collapses capacity to 63/220, 77/300 and 48/300 active prototypes. Removing the stop-gradient drops Pancreas modularity in 9 of 9 batches, p=0.0039. Removing reconstruction leaves modularity flat, as the stop-gradient predicts, showing instead in decoded-prototype fidelity (scGraph 0.91→0.85). Sweeps of all four weights and of K, tuned identically across methods, show no setting to be delicate: the gains come from which terms are present, not tuning.
+
+2. Baseline completeness and configuration
+
+Unchanged at the baselines' settings.
+
+scVI, Harmony, BBKNN and ComBat each now run with SEACells and Leiden on top at scProto's latent dimension, alongside SuperCell, Metacell-2 (K set by its own outlier policy, reported for reference) and SEACells/Leiden on our frozen Stage-1 embedding. At that setting scProto's rare-cell advantage is significant on Pancreas and Lung on both metrics, never reversing on Immune.
+
+Re-run at each baseline's own configuration the picture is the same. Against Harmony at its package default of 20 PCs, scProto leads on every metric (Pancreas modularity 0.615 vs 0.500, rare F1 0.65 vs 0.54); at 50 PCs, scProto at the matching latent dimension, modularity 0.611 vs 0.432 Pancreas (9/9, p=0.012), 0.654 vs 0.470 Lung (16/16, p<0.001), 0.631 vs 0.322 Immune (5/5). Against scVI at its defaults as Stage-1 backbone, roughly two-fold on all three (0.616 vs 0.296/0.379; 0.650 vs 0.327/0.522; 0.618 vs 0.240/0.364), with scProto highest on Immune on both rare-cell metrics. Rare-cell metrics are otherwise level, with no significant difference either way.
+
+3. Cross-batch alignment and Stage 2
+
+Confirmed, and Stage 2's contribution measured.
+
+Lines 150–152 will be corrected, and all three reviewers accepted this. On an identical frozen Stage-1 embedding neither SEACells nor Leiden reaches scProto on any dataset, and the scVI run above shows the same with scPoli absent — that encoder scores 0.394/0.342/0.251 before any Stage-2 step against 0.699/0.727/0.674 after.
+
+4. Modularity and the baseline clusterer
+
+No longer scored on the training graph.
+
+K-means is replaced by Leiden and SEACells, K tuned identically. Masking 20% of edges before training and scoring only the hidden 20%, both methods fit on the identical 80%: 0.59/0.66/0.62 against 0.47/0.52/0.39. Excluding 20% of cells entirely from graph construction and training, then scoring them through a frozen encoder that never saw them: 0.599/0.655/0.620 against 0.31–0.50 for Leiden on the scPoli-Stage-1 and scVI latents, SEACells structurally unable to enter this test. On the second spatial dataset, scored on a graph scProto never trains on, 0.510 against 0.363 and 0.103. On the full graph, scored on structure both were fit to, the two are level — the one comparison in which the other does no batch correction (batch entropy 0.16–0.41 against 0.94–1.39).
+
+Scope. scProto's gains scale with what the affinity graph encodes: where the graph adds nothing beyond what reconstruction already recovers, Stage 2 has less to contribute, and where it carries more — the common case — Stage 2 is what preserves it.
+
+In summary, scProto learns metacells under one objective that pools cells across batches while keeping their assignments faithful to a cell–cell affinity graph, transcriptomic or spatial, with no change to the loss. Existing methods give one side or the other: batch correction mixes batches but flattens local structure, metacell construction preserves it but stays within a batch. The results above show scProto holding both at once, across three scRNA-seq datasets, two spatial platforms, two Stage-1 backbones and every dimensionality tested — which is what makes it useful precisely where structure is easiest to lose and most worth keeping: rare cell states and spatial niches. We are grateful to the reviewers and the Area Chair: every point raised produced new evidence or a sharper claim, and the paper is stronger for it.
+
+Official Review of Submission15985 by Reviewer F5RB
+Official Reviewby Reviewer F5RB26 Jun 2026, 15:06 (modified: 04 Aug 2026, 17:00)Program Chairs, Senior Area Chairs, Area Chairs, Reviewers Submitted, Authors, Reviewer F5RBRevisions
+Summary:
+The paper addresses a real gap between metacell construction and batch correction. Existing metacell methods often preserve local transcriptomic neighborhoods, but the resulting metacells are still largely batch-specific. Batch-correction methods can mix batches, but they may also weaken local communities or rare cell states. I find this motivation convincing.
+
+The prototype-based design is also reasonable. It gives a clear connection between cells, prototypes, and metacells. The affinity-guided objective is easy to understand, and the framework can in principle use different affinity graphs, including transcriptomic and spatial graphs. These are useful design choices.
+
+My main concern is that the paper sometimes gives a stronger mechanistic story than the current method and experiments can support. In particular, the cross-batch alignment seems to come mainly from the Stage 1 scPoli-style pretraining. In Stage 2, the reconstruction loss stops the gradient through the prototype assignment, so it does not directly update the encoder through this path. This makes the method look more like affinity-guided prototype refinement on a pretrained batch-corrected latent space, rather than a fully joint model for reconstruction, batch alignment, and community preservation.
+
+The evaluation also needs stronger controls. Modularity is closely related to the training affinity graph. It is also used for early stopping and then reported as a main result. This makes the modularity evidence less independent. The paper is promising, but stronger baselines, clearer ablations, and less circular validation are needed.
+
+Contribution Type: General: Most submissions will fall into this type.
+Strengths And Weaknesses:
+Strengths
+
+Existing metacell methods can preserve local neighborhoods, but they often build metacells within each batch. This is not ideal when related cell states are split across batches. Batch-correction methods can improve mixing, but they may also blur local communities or rare states. The paper identifies this tension clearly and studies a useful problem.
+Each cell is softly assigned to prototypes, and the prototypes are used as metacells. This design is easy to follow. The affinity loss also has a clear meaning: cells that are close in the input graph should have similar prototype assignments. This makes the method relatively interpretable.
+The experiments do not rely on only one metric. The paper reports community structure, batch mixing, cell-type purity, rare-cell coverage, rare-cell homogeneity, and spatial niche purity. These metrics cover several important aspects of metacell quality. This makes the empirical study more informative than a simple clustering comparison.
+Weaknesses
+
+The training design does not fully support the mechanism claimed in the paper. The manuscript suggests that reconstruction helps cross-batch alignment during prototype learning. However, the reconstruction loss stops the gradient through the assignment s_{ik}. Therefore, this loss does not update the encoder through the prototype assignment in Stage 2. The encoder is mainly shaped by the affinity/community objective after pretraining. The cross-batch correction seems to be largely inherited from the Stage 1 scPoli-style model. This point should be stated more clearly.
+The modularity result is not fully independent from the training objective. The community loss directly encourages prototype assignment similarity to match the input affinity graph. Later, modularity is computed using the per-batch affinity subgraph. Modularity is also used for early stopping. Because of this, high modularity is partly expected. It is still a useful diagnostic, but it is not strong enough as independent evidence of biological metacell quality.
+The most important baseline is missing. A natural comparison would be: first apply a batch-correction method, such as scPoli, scVI, Harmony, or BBKNN, and then run an existing graph-based metacell method such as SEACells on the corrected latent space. The current “scPoli + K-means” baseline is weaker. K-means is not designed to preserve graph communities. Without a corrected-latent-space plus graph-metacell baseline, it is hard to know whether scProto improves over a simple combination of existing tools.
+The spatial claim is stronger than the current evidence. The paper says that scProto captures niche-correlated transcriptional programs. The presented results mainly show niche purity and cell-type purity. This is useful, but it does not yet prove discovery of transcriptional programs. Also, the niche labels are defined from local cell-type composition, and the spatial affinity graph is built from neighborhood-averaged PCA features. Therefore, the evaluation is not fully independent from the training signal.
+The ablation study does not isolate the main components well enough. The method contains several important parts, including the community loss, reconstruction loss, normalized association regularization, usage loss, temperature calibration, and waypoint initialization. These components are not separately tested in a complete way. As a result, it is unclear which component is responsible for the main improvement.
+Quality: 3: good
+Clarity: 3: good
+Significance: 3: good
+Originality: 3: good
+Questions:
+Where does the cross-batch alignment mainly come from? Since L_{\mathrm{rec}} does not update the encoder through the prototype assignment in Stage 2, is the alignment mostly inherited from Stage 1 scPoli-style pretraining? Please compare scProto with stronger two-step baselines, such as scPoli latent + SEACells, scVI latent + SEACells, Harmony latent + SEACells, and BBKNN graph + SEACells.
+Can the authors provide less circular evidence for community preservation? Modularity is related to the training graph and is also used for early stopping. It would be helpful to report held-out-edge graph preservation, evaluation on an independently constructed affinity graph, or results with an early-stopping rule that does not use modularity.
+Which component gives the main gain? Please include a fuller ablation study. Important variants include removing L_{\mathrm{community}}, removing L_{\mathrm{rec}}, allowing reconstruction gradients to update the encoder, removing L_{\mathrm{nassoc}}, removing L_{\mathrm{usage}}, using random prototype initialization, and using fixed instead of calibrated temperature.
+What is the biological evidence for spatial programs? The niche-purity result is interesting, but it does not by itself prove that scProto discovers niche-correlated transcriptional programs. Can the authors show niche-specific marker genes, pathway enrichment, ligand–receptor analysis, or validation on additional slides?
+Limitations:
+yes
+
+Confidence: 3: You are fairly confident in your assessment. It is possible that you did not understand some parts of the submission or that you are unfamiliar with some pieces of related work. Math/other details were not carefully checked.
+Ethical Concerns: NO or VERY MINOR ethics concerns only
+Paper Formatting Concerns:
+None
+
+Code Of Conduct Acknowledgement: Yes
+Responsible Reviewing Acknowledgement: Yes
+Rebuttal by Authors
+Rebuttalby Authors (Fatemeh S. Hashemi-Golpayegani, Alessandro Palma, Mohammad Lotfollahi, Fabian J Theis, +5 more)28 Jul 2026, 15:15 (modified: 28 Jul 2026, 17:02)Program Chairs, Senior Area Chairs, Area Chairs, Reviewers Submitted, AuthorsRevisions
+Rebuttal:
+We thank the reviewer for a precise, constructive review. Below: where cross-batch alignment comes from, why Stage 2 is a distinct mechanism rather than a re-derivation of Stage 1, and controlled experiments backing both — including where current phrasing understates the modularity evidence.
+
+1. Where cross-batch alignment comes from (Weaknesses 1 & 3; Question 1)
+Alignment comes from Stage 1, not Stage 2. Stage 1 (scPoli-style pretraining) conditions the decoder on batch, so the encoder discards batch-specific technical variation it doesn't need for reconstruction — giving scProto a good initial, batch-corrected latent space, the real source of cross-batch alignment. But that objective favors dense, high-abundance states: its reconstruction gradient is summed over cells, so common states dominate, and a low-density population can get absorbed into a denser neighbor as a side effect, though often biologically important — the well-documented over-correction/over-integration phenomenon [1, 2].
+
+This is why batch-correct-then-cluster isn't a fix: once Stage 1 scatters a rare state into a denser neighbor, any downstream step — K-means, Leiden, even SEACells' archetypal analysis — only partitions a geometry that already lost the signal. Stage 2 avoids this by continuing to train the encoder and prototypes so assignment similarity matches a cell-cell affinity graph built separately within each batch, where technical noise cancels out and only real biology remains. Prototypes are shared across batches by construction, so pulling each batch's cells toward them using only that batch's own affinity signal pools structure across batches without comparing raw expression directly — how a rare state too sparse in one batch to resist the dense bias can still accumulate into a shared prototype (specifics in Section 3). We agree the manuscript (l.150–152) currently credits reconstruction with alignment, contradicting the stop-gradient at l.156–157; we will revise this for camera-ready to state plainly that alignment comes from Stage 1, not reconstruction.
+
+We tested this with the requested two-step baselines on scProto's Stage-1 embedding (held fixed, only the downstream step varies), scored on two metrics restricted to the paper's locally-rare cell types (Appendix F), each capturing a different aspect of the failure mode above. Common types are excluded, not down-weighted, so a method can't compensate elsewhere. Homogeneity is per-cell, graded: how much of a rare cell's metacell, wherever it landed, shares its type — no dedicated prototype need exist. F1 is stricter, per-type — does a dedicated prototype for that type exist at all: recall_c catches a type that never clears a 50% majority anywhere; precision_c catches one whose dedicated prototype, once formed, is impure. Let M_c be the metacells whose majority label is c: precision_c = (1/|M_c|) * sum over m in M_c of purity(m), recall_c = |{i : y_i = c, m(i) in M_c}| / |{i : y_i = c}|, F1_c their harmonic mean; "macro" averages per-type scores equally, not by cell count, across a batch then across batches:
+
+Method (Pancreas / Lung / Immune)	F1 (macro)	Rare-cell homogeneity
+scProto	0.56±.22 / 0.57±.22 / 0.91±.02	0.54±.18 / 0.60±.23 / 0.86±.04
+SEACells on Stage-1 embedding	0.40±.23 / 0.55±.25 / 0.89±.06	0.40±.20 / 0.53±.21 / 0.83±.09
+Leiden on Stage-1 embedding	0.55±.18 / 0.54±.20 / 0.78±.15	0.50±.18 / 0.52±.18 / 0.70±.11
+SEACells and Leiden on scProto's Stage-1 embedding cannot close the gap — scProto leads both on both metrics, all three datasets. We deliberately omit a raw modularity column here: scProto's modularity is scored against the exact graph L_community trains it to match, so a full-graph comparison here would reopen Weakness 2's circularity concern before we've earned the right to use it as evidence — that requires the held-out-edge protocol in §2, scoring scProto only on edges it never trained on. Harmony/scVI/BBKNN+SEACells (embedding fixed across downstream methods) are still running; only scVI is encoder-based, so Stage 2 can continue training it like scPoli above — Harmony/BBKNN lack an encoder, so those two are necessarily full-pipeline comparisons, not an isolated Stage-2 test.
+
+2. Less circular evidence for community preservation (Weakness 2; Question 2)
+We think scProto's affinity guidance does more than memorize trained edges: the affinity losses act on each cell's expression-derived embedding, not edge identity, so the encoder learns a mapping from expression to assignment — not a per-edge lookup — that should transfer to edges it never saw. We tested this with a held-out-edge protocol: on each RNA-seq dataset we masked a random 20% of affinity-graph edges before training (symmetric, per-cell floor so no neighborhood is starved), trained scProto and fit SEACells on the identical masked 80%, and scored modularity only on the hidden 20%:
+
+Held-out-edge modularity (per-batch mean±std)	Pancreas	Lung	Immune
+scProto (trained on masked graph)	0.59±.09	0.66±.02	0.62±.06
+SEACells (identical masked graph)	0.47±.08	0.52±.07	0.39±.02
+SEACells on scPoli-Stage1 embedding	0.25±.07	0.31±.05	0.21±.03
+Leiden on scPoli-Stage1 embedding	0.36±.06	0.49±.08	0.45±.18
+scProto's modularity on unseen edges stays close to its headline number and ahead of SEACells on the identical masked graph, SEACells on the scPoli Stage-1 embedding, and Leiden on that embedding — not an artifact of scoring against its own training objective. The separation is clean (non-overlapping per-batch ranges) on Pancreas and Lung; on Immune, Leiden's per-batch variance (±.18) edges into scProto's range, though scProto's mean leads.
+
+3. Fuller ablation (Weakness 5; Question 3)
+Pancreas only so far; extending to Lung/Immune. Purity is cell-count weighted (Appendix F); rare coverage/homogeneity carry the rare-state signal instead.
+
+Removed / changed	Intended role	What changed, and why
+L_community	Matches assignments to the affinity graph	Modularity collapses (0.615±.08→0.449±.04, largest drop of any arm) — this term drives community structure directly. Rare coverage (0.69±.22→0.50±.23) and homogeneity (0.63±.16→0.41±.23) drop too.
+L_nassoc	Keeps prototypes tight and non-redundant	Rare homogeneity drops (0.63±.16→0.51±.19) — prototypes become looser/more redundant without this term. Purity drops too, most of any arm, though modest (0.972±.09→0.962±.09).
+L_usage	Anti-collapse penalty for rare states	Rare coverage and homogeneity drop sharply (0.69±.22→0.43±.27; 0.63±.16→0.40±.21) — exactly the rare-state capacity this term exists to protect.
+L_rec (removed entirely)	Grounds prototype content in real expression (claimed under spatial-affinity guidance)	Decoded-prototype fidelity drops most of any arm (gene-expression-space scGraph [3] variant, 0.91→0.85 on Pancreas) — since L_rec's gradient is stopped before the encoder, it shapes decoder content only, so purity/modularity stay flat (0.972±.09→0.970±.07 / 0.615±.08→0.614±.08). On the spatial dataset (NSCLC), the one setting this loss should also protect cell-type identity, purity (0.50±.21→0.49±.20, weighted) and niche purity (0.91±.19→0.87±.22, unweighted) drop modestly too (single run).
+Stop-gradient (removed, recon gradient reaches encoder)	Prevents recon's dense-favoring bias fighting community/nassoc over the shared encoder	Modularity and homogeneity drop (0.615±.08→0.555±.07; 0.63±.16→0.51±.16) once reconstruction reaches the encoder — it fights the affinity objectives, as designed to prevent. Ranges overlap; purity doesn't move (0.972±.09→0.976±.07, within noise).
+Waypoint init (→ random init)	SEACells-style informed init — seeds prototypes to cover sparse/rare regions	Rare coverage and homogeneity drop with random init (0.69±.22→0.56±.28; 0.63±.16→0.48±.22) — losing the head start on sparse regions. Modularity drops too (0.615±.08→0.594±.07).
+Fixed 
+ (no calibration)	Calibrates assignment temperature (avoids too-diffuse/sharp assignments)	Only rare homogeneity drops (0.63±.16→0.56±.16) — specific to homogeneity. Purity (0.972±.09→0.979±.05), modularity (0.615±.08→0.623±.08), and rare coverage (0.69±.22→0.72±.21) stay flat or improve.
+L_rec's non-effect on assignment is expected either way: the affinity graph is itself built from expression, so community/nassoc stay anchored to it regardless of L_rec. This is a gene-expression-space variant of scGraph [3]: PCA of decoded-prototype expression, cell-type-pairwise distances correlated against scGraph's own per-batch real-expression consensus graph.
+
+4. Biological evidence for spatial programs (Weakness 4; Question 4)
+Marker-gene, pathway-enrichment, and ligand–receptor analyses are a natural next step, building on the niche/purity results already shown. We will try to run these and share results in the discussion comments.
+
+Ref
+[1] Luecken, M. D., et al. "Benchmarking atlas-level data integration in single-cell genomics." Nature Methods 19 (2022): 41–50.
+
+[2] Büttner, M., et al. "A test metric for assessing single-cell RNA-seq batch correction." Nature Methods 16 (2019): 43–49.
+
+[3] Wang, H., Leskovec, J., & Regev, A. "Limitations of cell embedding metrics assessed using drifting islands." Nature Biotechnology 44 (2026): 574–577.
+
+Official Comment by Reviewer F5RB
+Official Commentby Reviewer F5RB30 Jul 2026, 07:02Program Chairs, Senior Area Chairs, Area Chairs, Reviewers Submitted, Authors
+Comment:
+Thank you for the detailed rebuttal. The clarification that cross-batch alignment primarily comes from Stage 1, while Stage 2 preserves and refines community structure, resolves an important ambiguity. The new two-step baselines, held-out-edge evaluation, and expanded ablations are helpful, although the requested scVI/Harmony/BBKNN comparisons remain incomplete and the held-out edges from the same graph are not fully independent. The spatial evidence still supports niche preservation rather than discovery of niche-correlated transcriptional programs, so this claim should be narrowed unless further biological analyses are provided. Overall, the rebuttal improves the paper, but the main evaluation concerns are only partially resolved; I therefore retain my current rating.
+
+ Replying to Official Comment by Reviewer F5RB
+Response to Reviewer F5RB's follow-up: complete scVI/Harmony/BBKNN baselines and held-out-edge clarification
+Official Commentby Authors (Fatemeh S. Hashemi-Golpayegani, Alessandro Palma, Mohammad Lotfollahi, Fabian J Theis, +5 more)31 Jul 2026, 19:14Program Chairs, Senior Area Chairs, Area Chairs, Reviewers Submitted, Authors
+Comment:
+We thank the reviewer for the follow-up and for confirming the Stage 1/Stage 2 clarification resolves the ambiguity. Below: the scVI/Harmony/BBKNN comparisons now complete, why the held-out-edge test is already independent, and where the spatial analysis stands.
+
+1. scVI, Harmony, and BBKNN baselines, now complete
+
+All three now run at scProto's own latent dimension (d=8; Harmony/BBKNN previously used d=50, ~6x more room), with SEACells on top — the two-step baseline requested in Question 1 — plus ComBat, as Reviewer nG29 asked. scVI is also loss-matched (Gaussian likelihood, to mirror scProto's MSE reconstruction), not run with its ZINB default. Rare-cell F1 (macro) and homogeneity, mean±std, paired one-sided Wilcoxon vs. scProto, Bonferroni-corrected per dataset per metric (wins in parentheses):
+
+Dataset	Metric	scProto	+Harmony	+scVI	+BBKNN	+ComBat
+Pancreas (n=8)	F1	0.54±.21 (ref)	0.32±.16, p=.035* (7/8)	0.18±.31, p=.039* (7/8)	0.18±.22, p=.0195* (8/8)	0.35±.21, p=.039* (7/8)
+Pancreas (n=8)	Homog.	0.56±.16 (ref)	0.29±.12, p=.012* (8/8)	0.19±.30, p=.039* (7/8)	0.20±.07, p=.0195* (8/8)	0.29±.08, p=.020* (8/8)
+Lung (n=15)	F1	0.60±.18 (ref)	0.36±.14, p=.0023** (13/15)	0.35±.20, p<.001*** (15/15)	0.39±.22, p<.01** (13/15)	0.33±.21, p=.011* (14/15)
+Lung (n=15)	Homog.	0.58±.22 (ref)	0.40±.12, p=.006** (14/15)	0.39±.20, p<.001*** (14/15)	0.40±.16, p<.01** (13/15)	0.40±.25, p=.017* (14/15)
+Immune (n=5)	F1	0.85±.14 (ref)	0.75±.16, ns (4/5)	0.62±.18, ns (5/5)	0.61±.21, ns (4/5)	0.86±.06, ns (3/5)
+Immune (n=5)	Homog.	0.83±.10 (ref)	0.68±.19, ns (5/5)	0.57±.13, ns (5/5)	0.55±.22, ns (5/5)	0.75±.15, ns (4/5)
+All four independent correction mechanisms show the same pattern at matched dimension: scProto's advantage is significant on Pancreas and Lung, both metrics, against all four. Immune is non-significant only because n=5 batches is underpowered for Bonferroni; win-counts (3-5/5) still favor scProto, never reverse.
+
+The reason is consistent across all four: each leans on a batch- or cluster-wide correction statistic that can't distinguish a real sparse population from a technical outlier the way a rare state's own cell-cell affinities can (mechanism specifics for Harmony and ComBat in our reply to Reviewer nG29, §3–§4). scProto has no such global step — a cell's placement is conditioned on its own local, per-batch affinity graph, so a rare state's signal isn't averaged away before scProto sees it.
+
+2. Held-out-edge independence
+
+Fair point. scProto and SEACells are both fit on the visible 80% of each affinity graph's edges; reported modularity comes only from the hidden 20%, which enters neither method's loss nor its stopping criterion. scProto's encoder maps each cell to a latent position from its own gene expression alone, with no access to the affinity graph at inference, so a held-out edge is scored from two embeddings computed independently of which edges were masked, not looked up through neighboring edges. scProto's held-out modularity stays close to its headline number and ahead of every baseline, including Leiden. We mask edges rather than holding out whole cells or batches because SEACells has no encoder — its kernel and archetypal fit are defined only over the cells present when it is built, with no way to place a cell or batch it never saw — so edge-masking within a shared, fully-observed node set is the version of this test both methods can actually be scored on. We're exploring whether an independent-graph version of this test is feasible, and will share results in this thread if it comes together during the discussion period.
+
+3. Spatial claim
+
+We're actively running a clearer experiment to test discovery of niche-correlated transcriptional programs, and will share results in this thread if it completes during the discussion period.
+
+ Replying to Response to Reviewer F5RB's follow-up: complete scVI/Harmony/BBKNN baselines and held-out-edge clarification
+Official Comment by Reviewer F5RB
+Official Commentby Reviewer F5RB03 Aug 2026, 18:27Program Chairs, Senior Area Chairs, Area Chairs, Reviewers Submitted, Authors
+Comment:
+Thank you for completing the scVI, Harmony, BBKNN, and ComBat comparisons. These additional baselines substantially strengthen the empirical evaluation. However, several concerns remain. The held-out-edge protocol removes direct use of the evaluated edges during training and early stopping, but the hidden and visible edges are still derived from the same cells, expression matrix, and graph-construction procedure; moreover, the learned encoder parameters depend on the remaining 80% of the graph. I therefore view this experiment as evidence of within-graph edge generalization rather than fully independent validation of community preservation. The fairness of the new baseline comparison also requires clarification, since restricting all methods to (d=8) and replacing scVI’s standard count likelihood with a Gaussian likelihood may disadvantage methods under nonstandard settings; results using recommended or separately tuned configurations would be informative. Please also revise the statement that scProto has “no global step,” as the full pipeline still relies on Stage 1 scPoli-style batch correction, and moderate the claim that the Immune results “never reverse,” given that ComBat has a slightly higher mean F1. Finally, the spatial results still support preservation of predefined niche composition rather than discovery of niche-correlated transcriptional programs, so this claim should be narrowed unless the pending biological analyses provide direct evidence. Overall, the new experiments improve the paper, but the main concerns are only partially resolved, and I retain my current rating.
+
+ Replying to Official Comment by Reviewer F5RB
+Response to Reviewer F5RB
+Official Commentby Authors (Fatemeh S. Hashemi-Golpayegani, Alessandro Palma, Mohammad Lotfollahi, Fabian J Theis, +5 more)04 Aug 2026, 01:42Program Chairs, Senior Area Chairs, Area Chairs, Reviewers Submitted, Authors
+Comment:
+We thank the reviewer for the feedback.
+
+1. Held-out-edge independence
+
+To strengthen the edge-level cross-validation already presented, we also ran a cell-level cross-validation: train on 80% of cells, test on the remaining 20%. The gap between cross-validation and full-data modularity was minimal (0.617/0.672/0.630 vs. 0.621/0.669/0.620 for Pancreas/Lung/ Immune), so the reported metrics are not inflated by leakage or overfitting. scProto also outperforms Leiden on scPoli-Stage1/scVI latents scored the same way. This test applies to scProto specifically, since it requires an encoder -- SEACells has none.
+
+Node-held-out modularity (per-batch mean±std, modularity on edges touching only held-out cells)
+
+Method	Pancreas	Lung	Immune
+scProto (node-holdout)	0.599±.072	0.655±.034	0.620±.051
+Leiden (scPoli-Stage1)	0.358±.053	0.495±.083	0.314±.215
+Leiden (scVI)	0.341±.116	0.501±.083	0.326±.209
+2. Baseline configuration (d=8, Gaussian likelihood)
+
+Reasonable point. We set every baseline to d=8 with a Gaussian likelihood so all methods share one configuration. Other configurations are testable: we can adapt scProto to each baseline's native setting -- higher latent dimension, NB reconstruction loss -- and compare at baselines' standard configuration (d=50, ZINB). We will include this in the camera-ready version.
+
+3. Wording corrections
+
+Both noted. "No global step": Stage 1 (scPoli pretraining) is global; the claim is that Stage 2 -- scProto's rare-cell mechanism -- adds no additional global correction, unlike Harmony/ComBat/scVI. "Never reverse": ComBat's mean F1 (0.86) is marginally, non-significantly higher than scProto's (0.85) on Immune, though scProto wins more batches (3/5). Win-counts favor scProto everywhere except this one non-significant case.
+
+4. Spatial niche recovery
+
+To test whether scProto's metacells discover niche-correlated transcriptional programs rather than just preserve predefined composition, we ran MetaQ's recovery protocol [1]: for each (cell type, niche) pair with enough real single cells, we derived ground-truth differential expression, then checked whether scProto's metacells recover the same genes (log fold-change correlation). scProto trains on a spatial affinity graph built with adaptive-RBF on BANKSY [2] embeddings (spatial + transcriptional information); we compare against SEACells on this same graph and on SEACells' original adaptive-RBF-on-PCA graph (no spatial information). Niche labels come only from local cell-type composition, never gene expression, so recovering the correct genes is independent evidence.
+
+Why neither baseline can test these. Testing a pair requires isolating cells from that niche into their own metacells, so there is an expression profile to compare against ground truth. For 6 pairs, scProto does this but neither baseline can: the PCA baseline has no spatial information, so it cannot separate niches within a cell type when the difference is subtle -- scProto's graph carries that information. The BANKSY-graph baseline trains on the identical graph as scProto but is purely archetypal, unable to tell a real niche edge from an adjacent same-cell-type edge; scProto's encoder is pretrained on reconstruction before the graph signal is added and keeps training throughout, so it starts from real expression. This is a head start, not a guarantee -- how strong it is in practice is still open.
+
+Biological validation. Genes behind two of the six describe coherent, independently-recognized programs, not isolated markers picked out after the fact:
+
+Vascular endothelium x "T cell aggregates" (r=0.94): ACKR1 and MHC class II genes (HLA-DRA, CD74, HLA-DPA1) rise while KDR/FLT1 fall -- consistent with high endothelial venules specialized for lymphocyte recruitment, described in tertiary lymphoid structures in tumors [3].
+Macrophages x "alveolar spaces" (r=0.92): CCL18, a well-established marker of tissue-resident alveolar macrophages [4], recovered as upregulated -- consistent with normal resident-macrophage identity in this non-tumor lung compartment.
+Outside these six, neither method consistently outperforms the other -- not a claim scProto is broadly better at spatial recovery. We plan to extend this to more datasets for camera-ready.
+
+[1] Li, Y., Li, H., Lin, Y., et al., "MetaQ: fast, scalable and accurate metacell inference via single-cell quantization," Nature Communications, 2025.
+
+[2] Singhal, V., Chou, N., Lee, J., et al., "BANKSY unifies cell typing and tissue domain segmentation for scalable spatial omics data analysis," Nature Genetics 56, 2024: 431-441.
+
+[3] Vella, G., Guelfi, S., Bergers, G., "High Endothelial Venules: A Vascular Perspective on Tertiary Lymphoid Structures in Cancer," Frontiers in Immunology, 2021.
+
+[4] Chenivesse, C., Tsicopoulos, A., "CCL18 -- beyond chemotaxis," Cytokine 109, 2018: 52-56.
+
+Official Comment by Authors
+Official Commentby Authors (Fatemeh S. Hashemi-Golpayegani, Alessandro Palma, Mohammad Lotfollahi, Fabian J Theis, +5 more)04 Aug 2026, 15:25 (modified: 04 Aug 2026, 16:00)Program Chairs, Senior Area Chairs, Area Chairs, Reviewers Submitted, AuthorsRevisions
+Comment:
+We have completed the baseline comparisons at their default configurations — scVI at ZINB/n_latent=10, Harmony at 20 and 50 PCs. scProto's graph-preservation advantage holds at every one of them; on the rare-cell metrics the methods come out level there.
+
+1. scVI at its own defaults
+
+Highest modularity of any arm on all three datasets; level on rare cells, as you anticipated.
+
+scProto is an objective, not an architecture: here it is applied to scVI's own encoder at scVI's own defaults (ZINB, n_latent=10, 50 epochs), while SEACells and Leiden cluster the identical embedding. Only the objective differs, and nothing in the comparison is configured by us. Paired one-sided Wilcoxon across batches, BH-corrected.
+
+scVI defaults (d=10, ZINB)	Modularity	Rare F1 (macro)	Rare homogeneity
+Pancreas (K=220, n=8)			
+scProto (scVI)	0.616±0.082	0.614±0.218	0.601±0.173
+SEACells (scVI)	0.296±0.078	0.639±0.196, ns (3/8)	0.588±0.180, ns (3/8)
+Leiden (scVI)	0.379±0.122	0.258±0.276, p=.012*	0.317±0.242, p=.012*
+Lung (K=300, n=15)			
+scProto (scVI)	0.650±0.039	0.557±0.255	0.560±0.257
+SEACells (scVI)	0.327±0.053	0.682±0.162, ns (1/15)	0.658±0.180, ns (2/15)
+Leiden (scVI)	0.522±0.077	0.689±0.167, ns (4/15)	0.635±0.182, ns (4/15)
+Immune (K=300, n=5)			
+scProto (scVI)	0.618±0.059	0.897±0.030	0.859±0.064
+SEACells (scVI)	0.240±0.130	0.892±0.049, ns (3/5)	0.819±0.082, ns (4/5)
+Leiden (scVI)	0.364±0.183	0.855±0.108, ns (4/5)	0.729±0.158, ns (5/5)
+scProto has the highest modularity of any arm on all three datasets, and the highest rare-metacell precision on Pancreas and Lung (0.919 and 0.853 against 0.72 and 0.81) — purer rare metacells. On the rare-cell averages scProto is highest on Immune on both metrics and on Pancreas homogeneity, and nothing is significant in either direction except Leiden on Pancreas.
+
+We read that as you do: a ZINB likelihood represents a sparse, low-count population on its own scale, so scVI at its own setting already recovers rare types well — its rare F1 rises from 0.18 to 0.64 on Pancreas — leaving less for our objective to add on that axis. Its effect appears in the graph instead: on that same encoder it roughly doubles preserved community structure, 0.394/0.342/0.251 before it is applied against 0.699/0.727/0.674 after. What it captures there the rare-cell metrics cannot register, since cell-type labels are coarse and annotation-dependent and structure finer than a label cannot appear in a label-based score.
+
+This run also answers your Stage-1 question directly. With scPoli absent from the pipeline entirely, the objective reaches the modularity the paper reports for scProto itself — 0.616/0.650/0.618 against 0.615/0.654/0.631 — so what produces that structure is the objective, not our pretraining.
+
+Harmony gives the same picture at both of its settings (tables in our reply to Reviewer nG29). At its package default of 20 PCs scProto leads on every metric on Pancreas: modularity 0.615 vs 0.500, rare F1 0.65 vs 0.54, rare precision 0.76 vs 0.57, cell-type purity 0.976 vs 0.965. At 50 PCs the modularity separation holds on all three — 0.611 vs 0.432 Pancreas (9/9, p=0.012), 0.654 vs 0.470 Lung (16/16, p<0.001), 0.631 vs 0.322 Immune (5/5 batches).
+
+2. The graph result holds at every configuration
+
+The objective adds wherever the graph carries signal the reconstruction likelihood does not.
+
+scProto aligns prototype assignments with the affinity graph, so it contributes exactly where that graph holds information a VAE loss cannot recover on its own. In these comparisons, once scVI uses its own count likelihood, that margin is small on the rare-cell metrics, which is why they come out level here. Community structure is such a case — no reconstruction term encodes it — and there the separation holds on both backbones and at every dimensionality we tested.
+
+The evidence is scored on structure the model never trained on. Masking 20% of affinity edges: 0.59/0.66/0.62 against 0.47/0.52/0.39. Excluding 20% of cells from graph construction and from training entirely, then scoring them through a frozen encoder: 0.599/0.655/0.620 against 0.31–0.50 for Leiden on the scPoli-Stage-1 and scVI latents. We rely on this measure because it needs no cell-type labels, which are themselves clustering outputs carrying the biases of the pipelines that produced them — precisely where a sparse population absorbed into a denser one is hardest to see.
+
+The ablation gives the same account on all three datasets under the same paired test: removing the community loss is the largest single effect in the study (Lung 0.655→0.483, 16/16 batches, p=3.1e-5), and removing the stop-gradient you flagged degrades modularity in every Pancreas batch (9/9, p=0.0039).
+
+We hope this addresses the remaining concerns.
+
+Official Review of Submission15985 by Reviewer nG29
+Official Reviewby Reviewer nG2924 Jun 2026, 14:57 (modified: 04 Aug 2026, 17:00)Program Chairs, Senior Area Chairs, Area Chairs, Reviewers Submitted, Authors, Reviewer nG29Revisions
+Summary:
+This manuscript introduces scProto, a deep clustering method to construct metacells from single-cell transcriptomics data that is robust to batch effects. The method starts by constructing a batch-specific affinity graph, with affinities defined either by gene expression alone, or by a combination of gene expression and spatial information. The method then learns a set of prototypes that represent the metacells, and soft-assigns cells to these prototypes in latent space. Cell representations are augmented by concatenated batch embeddings, which are also learnable vectors. A decoder (also exposed to batch information) is then used to reconstruct the original gene expression for each prototype, and individual cells are then reconstructed as a weighted combination of the prototypes they originally mapped to. The provided loss mainly includes a community term, which encourages cells that are connected in the initial affinity graph to be assigned to the same prototype, and a reconstruction term, which encourages the prototypes to be representative of the cells assigned to them. Other auxiliary loss terms are also included, such as a prototype usage penalization that discourages prototype collapse. scProto is evaluated on several single-cell transcriptomics datasets, including a spatial one, and is benchmarked against a plethora of baselines across a relevant set of metrics, including modularity, cell-type purity of the prototypes, and batch entropy.
+
+Contribution Type: General: Most submissions will fall into this type.
+Strengths And Weaknesses:
+Strengths
+
+The problem this manuscript attempts to address is significant, well-framed, and well-motivated. Batch effects are one of the largest sources of technical variation in single-cell experiments, and the proposed method aims to distill real biological variation in the presence of batched contexts (which most datasets have). The inclusion of a spatial dataset is a nice addition, and opens the door for expanding the definition of affinity beyond gene expression. The presented results are competitive when it comes to modularity and batch entropy, and the trade-off between these two metrics is well-discussed. The presented results on coverage and homogeneity for rare cell types are strong.
+
+Weaknesses
+
+While the method is well-motivated and the results are promising, there are several issues that limit the impact of this work. The main issue is that the evaluation is incomplete, and the authors do not provide ablation studies to justify their design choices. The most important example in my opinion is the lack of ablation studies for the loss function terms. The authors include four different tems (community, reconstruction, batch-aware normalization, and prototype usage penalization, which they indeed properly discuss), and neither ablations not hyperparameter sweeps are provided to show how each term affects performance. The same applies to the number of prototypes, which in the discussion is described as a key hyperparameter that can affect performance, but there is no presented tuning or sensitivity analysis to justify this claim. In all these cases a set of fixed hyperparameters are reported in appendix D, with the only justification based on prior literature. The lack of ablation studies makes it difficult to assess the contribution of each component of the method, and limits the reproducibility of the work. Moreover, while results are competitive, I believe the text mildly overstates the performance of the method especially on the pancreas dataset (line 229). Here scProto is second best in terms of modularity, and second-to-last in batch entropy, which contradicts the claim that it is "matches or exceeds SEACells on modularity across all three datasets while substantially outperforming it on batch entropy". I would suggest to tone down these claims, and provide a more balanced discussion of the results. Regarding originality, the method is a combination of existing ideas, and the novelty seems incremental. The main original contribution is how they deal with batch effects, but performance in this regard is still debatable (as mentioned for pancreas), and there exist other methods which also incorporate batch information in the latent space (https://www.nature.com/articles/s41467-025-63915-z, https://www.nature.com/articles/s41592-018-0229-2). A comparison to these methods (or a justification on why the authors may think they are not relevant) would be highly appreciated.
+
+Finally, there are several issues with presentation (none critical and all hopefully fixable, though). I list them below as bullet points for clarity (since I believe it will make it easier for the authors to go through them):
+
+Most figure labels and legends are too small and difficult to read.
+the PBMC dataset is often referred to as "Immune" (this is a minor thing, but easily addressable).
+Spatial niches are not defined, and the term might be confusing to the non-expert reader.
+In line 194, the pancreas dataset is described as having 9 "technologies". Are these equivalent to batches? If so, replace the term; if not, please explain.
+The cell-cell similarity matrix is referred to as a "similarity graph" even before thresholding, which is confusing. While I understand this is not technically incorrect (as we could think of it as a fully connected graph), I think it would be clearer to refer to it as a similarity matrix, and only call it a graph after thresholding. This is just a suggestion, though.
+Equations are not numbered
+Quality: 2: not good
+Clarity: 2: not good
+Significance: 3: good
+Originality: 2: not good
+Questions:
+How much would the performance of scProto change if the loss function was ablated to remove one or more of the terms? For example, how much would performance change if the prototype usage penalization term was removed? Ablation studies on the loss function would shed light on the contribution of each term to overall performance. My score would increase if these ablations were included.
+How optimal is the choice of K (the number of prototypes)? How sensitive is performance to this hyperparameter? A sensitivity analysis on K would shed light on the robustness of the method. My score would increase if this analysis was included. NOTE: K should of course be tuned on all relevant baselines too, not just scProto, to ensure a fair comparison.
+How would batch-correction preprocessing affect the comparison to other baselines? It would be interesting to see how the performance of scProto would compare to other baselines if batch effects were removed a priori (for example with Harmony or ComBat). My score would increase if this analysis was included.
+Limitations:
+Yes. Limitations are discussed in the discussion section, and in my opinion the main issues with the presented method are addressed. The discussion on potential negative societal impact is missing, but I think this is a relatively low-risk area.
+
+Confidence: 4: You are confident in your assessment, but not absolutely certain. It is unlikely, but not impossible, that you did not understand some parts of the submission or that you are unfamiliar with some pieces of related work.
+Ethical Concerns: NO or VERY MINOR ethics concerns only
+Paper Formatting Concerns:
+none
+
+Code Of Conduct Acknowledgement: Yes
+Responsible Reviewing Acknowledgement: Yes
+Rebuttal by Authors
+Rebuttalby Authors (Fatemeh S. Hashemi-Golpayegani, Alessandro Palma, Mohammad Lotfollahi, Fabian J Theis, +5 more)28 Jul 2026, 15:24 (modified: 28 Jul 2026, 17:02)Program Chairs, Senior Area Chairs, Area Chairs, Reviewers Submitted, AuthorsRevisions
+Rebuttal:
+We thank the reviewer for recognizing the problem is significant and well-motivated, and address each point below.
+
+1. Ablation of loss terms (Weakness 1; Question 1)
+Pancreas only so far, extending to Lung/Immune:
+
+Removed / changed	Intended role	Ablation result
+Pulls affinity-graph neighbors toward shared assignments	modularity 0.615±.08→0.449±.04 (largest drop); rare coverage 0.69±.22→0.50±.23; rare homogeneity 0.63±.16→0.41±.23
+Keeps prototypes tight and non-redundant	purity 0.972±.09→0.962±.09 (largest purity drop, though modest); rare homogeneity 0.63±.16→0.51±.19
+Anti-collapse penalty, preserves capacity for rare states	rare coverage 0.69±.22→0.43±.27; rare homogeneity 0.63±.16→0.40±.21
+ (removed)	Grounds prototype content in real, denoised expression	Pancreas: purity/modularity flat (0.972→0.970, 0.615→0.614) — expected, see below; decoded-prototype fidelity drops instead (gene-expression-space scGraph [1] variant, 0.91→0.85). Spatial (NSCLC): purity 0.50→0.49 and niche purity 0.91→0.87 both drop
+Stop-gradient removed	Prevents recon's dense-favoring bias from fighting community/nassoc over the shared encoder	modularity 0.615±.08→0.555±.07, rare homogeneity 0.63±.16→0.51±.16 both drop; purity flat
+Waypoint init → random	Seeds prototypes to cover sparse/rare regions from the start	rare coverage 0.69±.22→0.56±.28; rare homogeneity 0.63±.16→0.48±.22; modularity 0.615±.08→0.594±.07
+Fixed 
+ (no calibration)	Calibrates assignment sharpness	rare homogeneity 0.63±.16→0.56±.16 drops; purity, modularity, rare coverage flat or improve
+Every term earns its place: community/nassoc/usage each protect a different metric; the stop-gradient ablation shows the training-signal separation from reconstruction is load-bearing, not incidental. 
+'s null effect on purity/modularity is expected (the affinity graph is itself expression-derived, so community/nassoc stay anchored without it) — its real effect shows up in the gene-expression-space scGraph [1] variant instead, and on the spatial dataset, where that anchor disappears.
+
+2. K sensitivity (Weakness 2; Question 2)
+We swept K over {0.25×, 0.5×, 1×, 2×, 4×} the paper's own K (Pancreas: 55/110/220/440/880), tuned identically across scProto and the three baselines the reviewer names, not just scProto — SEACells on raw PCA (our own Table 1 baseline), SEACells on the scPoli Stage-1 embedding, and Leiden on that same embedding. Cells are Modularity / Batch Entropy, mean ± std across batches (Tables 1–2's convention) — the two metrics this reviewer's own Strength 3 singles out:
+
+Method	K=55	K=110	K=220 (paper's K)	K=440	K=880
+scProto	.663±.06 / 1.224±.61	.618±.07 / 0.880±.61	.617±.09 / 1.249±.64	.620±.09 / 1.237±.61	.644±.08 / 1.269±.50
+SEACells (PCA)	.704±.06 / 0.580±.52	.725±.05 / 0.319±.41	.673±.05 / 0.202±.31	.593±.05 / 0.144±.26	.487±.04 / 0.111±.23
+SEACells (Stage-1)	.547±.06 / 1.525±.39	.461±.07 / 1.356±.40	.368±.07 / 1.249±.42	.285±.07 / 1.129±.43	.216±.06 / 1.023±.46
+Leiden (Stage-1)	.592±.08 / 1.482±.40	.515±.08 / 1.400±.41	.445±.07 / 1.298±.43	.392±.08 / 1.223±.52	.382±.08 / 1.192±.60
+Both metrics are flat for scProto across a 16-fold range of K; every baseline degrades, SEACells (PCA) most sharply on batch entropy (0.58→0.11). Cell-type purity converges across every method and K (0.86-0.98, all four ≥0.94 by K≥110), so not tabled separately. Rare-cell coverage/homogeneity/F1 improve with K for every method, but rank inconsistently, so we draw no K-robustness conclusion from it. Pancreas only so far; extending to Lung/Immune.
+
+3. Overstated claim on Pancreas (Weakness 3)
+Fair — on Pancreas SEACells leads modularity (0.67 vs. 0.61), so "matches or exceeds SEACells on modularity across all three datasets" is wrong as written; we'll fix the wording for camera-ready. But the claim behind it — that scProto gets community structure without sacrificing batch mixing — still holds: every existing method picks one side of that trade-off. SEACells preserves community structure but barely mixes batches; scPoli-cVAE and UMAP mix batches but flatten community structure. scProto's modularity is near SEACells (Pancreas 0.61 vs. 0.67, Immune 0.62 vs. 0.55, Lung 0.67 vs. 0.67) and 2-2.6x higher than scPoli-cVAE/UMAP everywhere (Pancreas 0.61 vs. 0.23/0.26); its batch mixing is far higher than SEACells (Pancreas 1.04 vs. 0.19) and comparable to scPoli-cVAE/UMAP everywhere (Pancreas 1.04 vs. 1.38/1.51, Immune 0.94 vs. 0.81/0.80, Lung 1.39 vs. 1.33/1.32).
+
+This isn't a clustering-quality gap either. To avoid the same circularity concern Reviewer 1 (F5RB) raised, we score on held-out edges only (20% masked before training; full protocol in our response to Reviewer 1 (F5RB) §2). On Pancreas (our own K=220): SEACells and Leiden on the scPoli-Stage1 embedding score 0.25±.07 and 0.36±.06 on held-out edges — both well below scProto's own 0.59±.09 — with batch entropy 1.24±.43 and 1.30±.43. Once Stage-1 has distorted the affinity structure, no downstream clustering method recovers it (same mechanism, Reviewer 1 (F5RB) §1).
+
+4. Originality (Weakness 4)
+scProto solves something no prior objective does: cross-batch metacells whose assignments respect real, affinity-defined community structure — not just batch-mixing — using a signal from any modality, transcriptomic or spatial, with zero change to the objective. That structure is exactly what's easiest to lose, and often the most biologically important: rare cell states and spatial niches.
+
+No prior method protects it. scVI/SURE/MetaQ reconstruct without ever referencing an affinity graph, so a rare state numerically thin in every batch has nothing shielding it from being swamped by dominant states. SEACells/MetaCell have no cross-batch mechanism at all: SEACells' kernel is density-corrected against exactly this swamping, but stays within-batch; MetaCell partitions by topology without using expression directly. The two batch-aware latent methods the reviewer names lack a piece too: Harmony [2] corrects per soft-cluster, and its clustering step rewards clusters that mix batches — a rare population too thin to form its own cluster gets pooled under, and corrected toward, whatever larger cluster it's nearest to: the same swamping risk as scVI/SURE/MetaQ, by a different mechanism. SpatialMETA (Nat. Commun. 2025) shares scProto's CVAE-style backbone, but nothing in its training objective ties assignment to an affinity/community-preserving signal the way scProto's does — the same gap as scVI/SURE, for a different problem (modality fusion, not metacell learning).
+
+This is a real gap, not an asserted one: no existing embedding, downstream-clustered by a strong graph-aware method (§5), closes it on its own. The stop-gradient ablation (§1) is direct proof the pieces don't compose for free: without it, reconstruction's dense-favoring bias fights the affinity-driven terms over the shared encoder. Generality shows the combination is load-bearing, not arbitrary glue: the identical loss accepts spatial affinity in place of transcriptomic affinity with zero redesign, producing niche-correlated metacells while keeping cell-type purity (Fig. 3) — SEACells' own archetypal analysis can take that swap but trades away purity for niche purity without a reconstruction term anchoring it to real expression. scProto is the only method that keeps both.
+
+5. Batch-correction preprocessing comparison (Question 3)
+First, scPoli's own Stage-1 pretraining (reconstruction + KL only, no affinity-graph training) as the correction step, with two strong graph-aware clusterers (SEACells, Leiden) applied to the resulting embedding — replacing the paper's original K-means-only comparison:
+
+Method (Pancreas / Lung / Immune)	F1 (macro)	Rare-cell homogeneity
+scProto	0.56±.22 / 0.57±.22 / 0.91±.02	0.54±.18 / 0.60±.23 / 0.86±.04
+SEACells on Stage-1 embedding	0.40±.23 / 0.55±.25 / 0.89±.06	0.40±.20 / 0.53±.21 / 0.83±.09
+Leiden on Stage-1 embedding	0.55±.18 / 0.54±.20 / 0.78±.15	0.50±.18 / 0.52±.18 / 0.70±.11
+Neither baseline closes the gap on this identical, already-corrected embedding — scProto leads on both metrics, all three datasets.
+
+Second, Harmony — the reviewer's suggested example. Our mechanistic account (Stage 1's reconstruction-dominated-by-common-states bias) is specific to VAE-style correction (scPoli, scVI); Harmony instead corrects PCA embeddings via iterative soft-clustering and per-cluster linear regression, not reconstruction, so it doesn't predict Harmony's rare-state behavior. We lack a first-principles account for what we see: SEACells-on-Harmony's F1 is mixed — ahead of scProto on some datasets, behind on others. The claim we rest on is the architecture-level generality argued in §4, which Harmony has no path to.
+
+6. Presentation (minor issues)
+All noted presentation issues (figure legibility, naming consistency, undefined terms, the l.194 ambiguity, matrix terminology, equation numbering) will be fixed for camera-ready; no new experiments needed.
+
+Ref
+[1] Wang, H., Leskovec, J., & Regev, A. "Limitations of cell embedding metrics assessed using drifting islands." Nature Biotechnology 44 (2026): 574–577.
+
+[2] Korsunsky, I., Millard, N., Fan, J., et al. "Fast, sensitive and accurate integration of single-cell data with Harmony." Nature Methods 16 (2019): 1289–1296.
+
+Official Comment by Reviewer nG29
+Official Commentby Reviewer nG2930 Jul 2026, 07:43Program Chairs, Senior Area Chairs, Area Chairs, Reviewers Submitted, Authors
+Comment:
+I thank the authors for their posted rebuttal. Some of my concerns have been addressed.
+
+First, loss ablations are included and thorough, showing that most terms are important in the final loss function. Ablations are provided in pancreas only. I'll wait for the promised results on lung and PBMC datasets. On this matter, hyperparameter sweeps or details on hyperparameter tuning (which were also mentioned as part of this concern) are still missing.
+
+Second, I highly appreciate the sensitivity analysis around the number of prototypes (K). The authors thoroughly implemented what I suggested, and scProto seems to be more stable with respect to K than the tested baselines.
+
+Regarding the batch correction preprocessing comparison, the authors provide a comparison to SEACells and Leiden using their own Stage-1 embedding as the correction step. I take the architectural level generality argued by the authors as an advantage over methods like Harmony, but the rebuttal cites "mixed results, ahead of scProto on some datasets, behind in others". These results are not included in the rebuttal, and it would be great to see them. Furthermore, there is no mention of ComBat, which I also had mentioned in my original review.
+
+Finally, my concerns on originality are addressed.
+
+All in all, this first rebuttal addresses some of my concerns. I remain attentive waiting for further results on questions 1 (loss term ablations on lung and PBMC) and 5 (batch correction).
+
+ Replying to Official Comment by Reviewer nG29
+Response to Reviewer nG29's follow-up: full ablation, hyperparameter sweep, and corrected Harmony/ComBat baselines
+Official Commentby Authors (Fatemeh S. Hashemi-Golpayegani, Alessandro Palma, Mohammad Lotfollahi, Fabian J Theis, +5 more)31 Jul 2026, 19:16Program Chairs, Senior Area Chairs, Area Chairs, Reviewers Submitted, Authors
+Comment:
+Thanks for the follow-up, and for confirming the K-sensitivity and originality points are resolved.
+
+1. Loss ablation on Lung and Immune (PBMC)
+
+Same 8-arm ablation, all three datasets (per-batch mean±std). L_community removal is the largest modularity drop everywhere (Pancreas .615→.449, Lung .655→.483, Immune .623→.379) and drops rare homogeneity too (.63→.41, .56→.54, .90→.70). L_nassoc removal drops homogeneity on all three (.63→.51, .56→.48, .90→.76). L_usage removal drops coverage/homogeneity sharply on Pancreas (.69→.43, .63→.40), milder on Lung/Immune homogeneity (.56→.52, .90→.79). L_rec removal leaves purity/modularity flat everywhere (expected — stop-gradient blocks it) but drops decoded-prototype fidelity (scGraph corr. .91→.85, .85→.78, .84→.67). Two arms are Pancreas-only: removing the stop-gradient drops modularity only on Pancreas (.615→.555, flat on Lung/Immune); removing waypoint init drops Pancreas modularity (.615→.594, flat elsewhere) and homogeneity on Pancreas+Immune (.63→.48, .90→.81, flat on Lung). Fixed τ only drops Pancreas homogeneity (.63→.56), flat/better elsewhere.
+
+2. Hyperparameter tuning
+
+All four weights swept, 5 points each, all three datasets (community loss is the fixed reference weight). λ_usage∈{0,.03,.1,.3,1}(.1): controls collapse directly — 70-86% unused at 0 (Pancreas .70, Lung .80, Immune .86), rare F1 drops with it (Pancreas .49 vs .62 at paper's value); by .1, collapse is gone (.005/.017/.037) and F1 recovers; 1.0 keeps F1 flat/better (.66/.64/.91) with only a mild modularity cost (largest: Pancreas .65→.56). λ_recon∈{0,.003,.01,.03,.1}(.01): purity/modularity flat across the whole range, all three datasets. α∈{0,.25,.5,1,2}(1): purity/modularity flat everywhere, no sensitivity to this sub-weight. λ_nassoc∈{0,.3,1,3,10}(1): modularity/entropy flat from 0 through the paper's value (Pancreas modularity .65→.62), only trading off once pushed 3-10x past it (down to .50). τ isn't swept — it's calibrated from data after pretraining/init, not hand-set, so a sweep would just re-discover that calibration; the fixed-τ ablation arm above is the control for it.
+
+3. Harmony, corrected
+
+The "mixed" framing was a dimensionality bug: Harmony ran at 50-dim PCA vs. scProto's 8-dim latent. Rerun at matched d=8, SEACells/Leiden on top:
+
+Dataset	Metric	scProto	SEACells (Harmony)	Leiden (Harmony)
+Pancreas (n=8)	F1	.54±.21 (ref)	.32±.16, p=.035* (7/8)	.22±.17, p=.012* (8/8)
+Pancreas (n=8)	Homog.	.56±.16 (ref)	.29±.12, p=.012* (8/8)	.22±.09, p=.012* (8/8)
+Lung (n=15)	F1	.60±.18 (ref)	.36±.14, p=.002** (13/15)	.28±.14, p<.001*** (13/15)
+Lung (n=15)	Homog.	.58±.22 (ref)	.40±.12, p=.006** (14/15)	.34±.08, p=.002** (13/15)
+Immune (n=5)	F1	.85±.14 (ref)	.75±.16, ns (4/5)	.75±.17, ns (4/5)
+Immune (n=5)	Homog.	.83±.10 (ref)	.68±.19, ns (5/5)	.64±.13, ns (5/5)
+Immune's non-significance is underpowered (n=5), not reversed (4-5/5 wins). Two reasons: Harmony's clustering step can absorb a sparse rare state into a denser cluster before correction sees it, which scProto's density-corrected affinity graph avoids; and its diversity-rewarding objective [1] can force a batch-exclusive state into a mixed cluster with unrelated cells, which scProto never faces, since each batch's cells reach shared prototypes using only that batch's own affinity graph.
+
+4. ComBat
+
+ComBat corrects gene expression directly (not an embedding, unlike Harmony), then we PCA the corrected matrix to d=8:
+
+Dataset	Metric	scProto	SEACells (ComBat)	Leiden (ComBat)
+Pancreas (n=8)	F1	.54±.21 (ref)	.35±.21, p=.039* (7/8)	.15±.07, p=.020* (8/8)
+Pancreas (n=8)	Homog.	.56±.16 (ref)	.29±.08, p=.020* (8/8)	.23±.10, p=.020* (8/8)
+Lung (n=15)	F1	.60±.18 (ref)	.33±.21, p=.011* (14/15)	.38±.19, p=.003** (13/15)
+Lung (n=15)	Homog.	.58±.22 (ref)	.40±.25, p=.017* (14/15)	.40±.21, p=.013* (14/15)
+Immune (n=5)	F1	.85±.14 (ref)	.86±.06, ns (3/5)	.80±.19, ns (4/5)
+Immune (n=5)	Homog.	.83±.10 (ref)	.75±.15, ns (4/5)	.75±.18, ns (4/5)
+Same pattern: significant on Pancreas/Lung; Immune underpowered, not reversed (SEACells+ComBat ties scProto on F1, .86 vs .85). ComBat fits one shift/scale per gene per batch, without cell-type labels like every baseline here, so it can't tell a technical effect from a real state concentrated in one batch, and applies that shift uniformly regardless of cell type. scProto has no equivalent global step — a cell's placement comes from the affinity graph, not a batch-wide statistic.
+
+Ref
+
+[1] Korsunsky, I., Millard, N., Fan, J., et al. "Fast, sensitive and accurate integration of single-cell data with Harmony." Nature Methods 16 (2019): 1289–1296.
+
+ Replying to Response to Reviewer nG29's follow-up: full ablation, hyperparameter sweep, and corrected Harmony/ComBat baselines
+Official Comment by Reviewer nG29
+Official Commentby Reviewer nG2903 Aug 2026, 18:13Program Chairs, Senior Area Chairs, Area Chairs, Reviewers Submitted, Authors
+Comment:
+I thank the authors for their second response to my comments. What I asked for has now been delivered: the loss ablation covering all three datasets, the added hyperparameter sweeps, the Harmony results, and the addition of ComBat. The previous K-sensitivity analysis remains the strongest addition, in my opinion.
+
+Several concerns remain, however, some of which might not be compatible with the current revision period:
+
+First, variance in the ablations is reported across batches rather than seeds, which makes deriving conclusions from these results difficult. Moreover, the new results on Lung and Immune datasets do not report variance at all and are only mentioned in prose. The authors conclude that every term earns its place, but on the one dataset where spread is reported, several arms show differences with overlapping standard deviations, such as L_nassoc on purity (.972±.09 -> .962±.09) and the stop-gradient on modularity (.615±.08 .> .555±.07). Reporting variance over seeds and for all datasets would make these results clearer.
+
+Second, while the new Harmony results are appreciated, running Harmony at 8 PCs to match scProto's latent dimensionality is questionable in my opinion. Harmony is conventionally used at ~50 PCs, so restricting it to 8 handicaps the comparison in the authors' favour; I would characterise the original 50-dim run as the fairer comparison rather than a dimensionality bug. Reporting both dimensionalities would remove the concern entirely, whichever way it resolves.
+
+In light of all this, I believe these results do improve the manuscript, but several issues remain to meet the required standards for NeurIPS. I will raise my score from 2 to 3.
+
+Official Comment by Authors
+Official Commentby Authors (Fatemeh S. Hashemi-Golpayegani, Alessandro Palma, Mohammad Lotfollahi, Fabian J Theis, +5 more)04 Aug 2026, 15:28 (modified: 04 Aug 2026, 16:02)Program Chairs, Senior Area Chairs, Area Chairs, Reviewers Submitted, AuthorsRevisions
+Comment:
+Thank you for the follow-up and for raising your score. Both points are answered below.
+
+1. Variance in the ablations
+
+Every effect we claim is now tested the same way — paired per batch, Wilcoxon, BH-corrected, on every arm and all three datasets — with win-counts and p-values. The ± you were reading is across-batch spread, not the uncertainty of the effect: the same batches appear in the full and ablated runs, so they pair, and a 0.06 drop repeated in every batch is consistent even where the spread is 0.08.
+
+Arm removed	Metric	Pancreas	Lung	Immune
+Community loss	Modularity	0.615→0.449, 8/9, p=.008	0.655→0.483, 16/16, p=3.1e-5	0.623→0.379, 5/5
+Usage loss	Active prototypes	220→63	300→77	300→48
+Reconstruction	Modularity	flat, 5/9, ns	flat, 5/16, ns	flat, 3/5, ns
+Stop-gradient	Modularity	0.615→0.555, 9/9, p=.0039	no drop	no drop
+Three conclusions hold on all three datasets: the community loss is the largest single effect in the study; the usage loss is what prevents prototype collapse; and removing reconstruction leaves modularity unchanged, as the stop-gradient predicts. On Immune, with 5 batches, we report win-counts rather than p-values.
+
+Lung and Immune with variance:
+
+Dataset	Variant	Purity	Modularity
+Lung	Full model	0.837±0.199	0.655±0.030
+Lung	– community loss	0.916±0.127	0.483±0.049
+Lung	– nassoc	0.804±0.196	0.708±0.033
+Lung	– usage loss	0.824±0.212	0.698±0.022
+Lung	Stop-grad off	0.855±0.167	0.667±0.029
+Immune	Full model	0.870±0.118	0.623±0.060
+Immune	– community loss	0.878±0.145	0.379±0.091
+Immune	– nassoc	0.852±0.121	0.653±0.056
+Immune	– usage loss	0.859±0.138	0.647±0.048
+Immune	Stop-grad off	0.869±0.117	0.606±0.093
+The two cases you raised.
+
+Stop-gradient on modularity (0.615→0.555). It holds: the drop occurs in 9 of 9 Pancreas batches, p=0.0039. The overlapping deviations come from batch difficulty, identical in both runs. The effect is specific to Pancreas, where reconstruction has most to conflict over, and we scope the claim there.
+nassoc. Its effect is consistent on rare-cell homogeneity, in the same direction on all three datasets: 0.63→0.51 (7/8 batches), 0.56→0.48 (11/15), 0.90→0.76 (5/5) — so we anchor the component there, as a direction. On purity (0.972→0.962) you are right that the claim does not hold: purity cannot be paired, its ± being per metacell and two runs producing different metacells.
+Seeds. Agreed, a separate axis; seed repeats will be in the camera-ready.
+
+2. Harmony at both dimensionalities
+
+At Harmony's own package default of 20 PCs, scProto leads on both metric families on Pancreas — community structure and rare cells. At the 50 PCs you named, on all three datasets, the modularity separation is significant and the rare-cell metrics come out level. harmonypy performs no PCA and has no native dimensionality — its entry point is HarmonyMatrix(npcs=20), while 50 comes from Scanpy's and Seurat's defaults — so we report both, with scProto trained at each matching latent dimension.
+
+20 PCs, Pancreas:
+
+Method	Modularity	Rare F1	Rare precision	CT purity
+scProto	0.615±0.070	0.65±0.18	0.76±0.14	0.976±0.060
+SEACells (Harmony)	0.500±0.035	0.54±0.21	0.57±0.18	0.965±0.086
+Leiden (Harmony)	0.384±0.093	0.48±0.23	0.51±0.23	0.958±0.094
+scProto wins 6 of 8 batches on rare F1 against each Harmony arm, with coverage 0.76±0.23 against 0.69±0.22 and homogeneity 0.59±0.17 against 0.56±0.15.
+
+50 PCs, all three datasets — modularity per batch, paired one-sided Wilcoxon:
+
+Dataset	scProto (d=50)	SEACells (Harmony)	Leiden (Harmony)
+Pancreas	0.611±0.082	0.432±0.038, 9/9, p=0.012	0.502±0.130, 9/9, p=0.012
+Lung	0.654±0.027	0.470±0.046, 16/16, p<0.001	0.570±0.070, 15/16, p<0.001
+Immune	0.631±0.054	0.322±0.102, 5/5	0.461±0.094, 5/5
+scProto keeps the higher rare-cell precision here (0.75±0.15 against 0.60±0.16 on Pancreas) and significantly higher per-metacell purity on Lung and Immune (p<0.001), with rare-cell F1 level throughout: 0.60±0.18 against 0.66±0.13 (Pancreas), 0.58±0.23 against 0.64±0.17 (Lung), 0.91±0.02 against 0.89±0.03 (Immune).
+
+On Pancreas, scProto's modularity is unchanged by its own latent size (0.601/0.615/0.611) while Harmony's falls as its dimension grows (0.567→0.500→0.432). Harmony's rare-cell gains with dimension are on recall (0.35±0.14 → 0.62±0.20 → 0.76±0.10 on Pancreas), which is what its correction targets: correcting per soft cluster under an objective rewarding batch-mixed clusters groups a rare state across batches directly, and more dimensions let it do that without disturbing cell types.
+
+Official Review of Submission15985 by Reviewer e9Ho
+Official Reviewby Reviewer e9Ho23 Jun 2026, 05:53 (modified: 04 Aug 2026, 17:00)Program Chairs, Senior Area Chairs, Area Chairs, Reviewers Submitted, Authors, Reviewer e9HoRevisions
+Summary:
+scProto learns cross-batch prototypes (metacells) with an adapted batch-conditioned cVAE (scPoli): a community-preserving objective that matches pairwise prototype-assignment similarity (
+) to an input cell-cell affinity graph (transcriptomic or spatial), a reconstruction objective, and several other regularization terms. On three scIB integration datasets and one NSCLC spatial dataset it reports competitive modularity, high batch entropy, leading rare-cell homogeneity, and a favorable niche-purity vs cell-type-purity trade-off. The method is lightweight (under an hour per dataset) and the hyperparameters are documented.
+
+Contribution Type: General: Most submissions will fall into this type.
+Strengths And Weaknesses:
+The problem is real and the formulation is reasonable, but the core claim is never tested. The community-structure win is confounded by the baseline clusterer and by scoring on the model's own training objective, the standard integration metrics are missing, and the spatial claim is built on a single dataset.
+
+Strengths
+
+Sensible, swappable formulation. Matching prototype (metacell) assignments to an affinity graph that accepts either transcriptomic or spatial input is a reasonable and flexible design (l.114-119, l.142-152).
+Reproducible configuration. Appendix D/E document the hyperparameters (l.424-484), so the missing ablations are not a compute problem.
+Weaknesses
+
+No ablation, so the core claim is untested (vital). No experiment removes any introduced loss terms, sweeps 
+, or toggles the encoder stop-gradient (§4, App A-G), so the thesis that the affinity-community objective drives the gains is never separated from the scPoli backbone.
+K-means handicaps the baselines. Embedding baselines are clustered with plain K-means (l.213-215) while scProto uses graph-aware assignment and is scored on modularity, so the community-structure win is confounded with the clusterer, not the embedding (Leiden/Louvain is the field default).
+No standard scIB metrics on scIB data. The datasets come from scIB [28] (App A l.383-384), but none of its metrics (ARI/NMI/ASW/kBET/iLISI) appear (l.220-223), and the headline metric, modularity, is also the training loss and early-stop criterion (App D l.434-436), so the comparison is neither independent nor fair.
+The headline metric is under-specified. Modularity lacks a formula, resolution, or null model (App F l.486-488), so the numbers are neither reproducible nor comparable across the different-sized batches Table 1 averages.
+The cross-batch mechanism is inconsistent. The text credits cross-batch alignment to reconstruction (l.150-152), but the stop-gradient leaves the encoder no reconstruction gradient (l.156-157), so the alignment actually comes from the inherited Stage-1 cVAE.
+Abstract claims exceed the tables. Purity trails SEACells on Immune (0.87 vs 0.88) and Lung (0.86 vs 0.90), coverage trails on Lung (0.72 vs 0.74), and the "modularity across all three datasets" claim (l.229) fails on Pancreas (0.61 vs 0.67) (l.13-14, Tables 1-2).
+Thin significance and baselines. Tables 1-2 report no significance test (only the spatial Fig.3 does), and some "wins" overlap in std (e.g. Immune 0.62±0.08 vs 0.55±0.04). Only SEACells and MetaQ are true metacell baselines; SuperCell [11], Metacell-2 [4], and scVI [15] are not run.
+The spatial claim rests on one dataset. The spatial results come from a single subsampled NSCLC slide (App A l.385-386), which cannot show robustness to tissue or platform. Either narrow the claim or add a second benchmark dataset.
+Quality: 3: good
+Clarity: 3: good
+Significance: 2: not good
+Originality: 2: not good
+Questions:
+Leave-one-term-out ablation. Remove each loss term, toggle the stop-gradient, and sweep 
+ on one dataset, with the backbone fixed.
+What drives cross-batch alignment? l.152 credits reconstruction, but the stop-gradient leaves the encoder no reconstruction gradient (l.156-157).
+Report the standard scIB metrics. Will you add standard metrics like ARI, NMI, ASW, kBET, iLISI, and graph-connectivity on the datasets?
+Make the modularity comparison fair. Select on a held-out criterion and cluster the baselines with Leiden/Louvain, then report modularity on the held-out data.
+Baselines, prior art, scope. Will you add more baselines like scVI [15] / SuperCell [11], state the delta over [26], narrow the spatial claim, and soften the abstract to match the tables?
+Limitations:
+The two stated limitations (K set in advance; affinity-graph quality, l.283-285) are genuine but narrow, and omit the gaps that bear on the conclusions: no ablation, no standard integration metrics, no significance tests on Tables 1-2, the single spatial dataset, and every metric where scProto trails.
+
+Confidence: 4: You are confident in your assessment, but not absolutely certain. It is unlikely, but not impossible, that you did not understand some parts of the submission or that you are unfamiliar with some pieces of related work.
+Ethical Concerns: NO or VERY MINOR ethics concerns only
+Paper Formatting Concerns:
+N/A
+
+Code Of Conduct Acknowledgement: Yes
+Responsible Reviewing Acknowledgement: Yes
+Rebuttal by Authors
+Rebuttalby Authors (Fatemeh S. Hashemi-Golpayegani, Alessandro Palma, Mohammad Lotfollahi, Fabian J Theis, +5 more)28 Jul 2026, 15:27 (modified: 28 Jul 2026, 17:02)Program Chairs, Senior Area Chairs, Area Chairs, Reviewers Submitted, AuthorsRevisions
+Rebuttal:
+We thank the reviewer for an unusually thorough, evidence-based review. Full tables for the two-step Stage-1-embedding baseline, held-out-edge modularity, and leave-one-term-out ablation are in our response to Reviewer F5RB (§1–§3); we reference those numbers here and focus below on what's specific to this review.
+
+1. No ablation, so the core claim is untested (Weakness 1; Question 1)
+Full 7-arm leave-one-term-out ablation (every loss term, stop-gradient, waypoint init, temperature calibration) is in our response to Reviewer F5RB, §3. The two arms that most directly test this weakness: removing 
+ collapses modularity (0.61→0.45, largest drop of any arm, though not all the way to the scPoli-cVAE+K-means backbone's own 0.23); removing the stop-gradient (letting reconstruction reach the encoder) drops modularity and homogeneity (0.61→0.56; 0.63→0.51). Read with §2 below: the gains aren't simply inherited from the scPoli backbone.
+
+2. K-means handicaps the baselines (Weakness 2)
+scProto is not only a clustering step — Stage 2's affinity loss keeps updating the encoder, reshaping the latent geometry itself rather than partitioning a fixed embedding. Batch-correction-only training (reconstruction + KL) is dominated by common states, so a rare state can get absorbed into a denser neighbor; any affinity graph built on that embedding is already corrupted, and no downstream clusterer can recover a separation the embedding no longer contains.
+
+We tested this directly (F5RB §1): SEACells and Leiden applied to scProto's own frozen Stage-1 embedding, not K-means. scProto leads both F1 (macro) and rare-cell homogeneity on all three datasets — not a clusterer artifact, since Leiden is exactly the graph-aware alternative requested and still doesn't close the gap.
+
+3. No standard scIB metrics on scIB data (Weakness 3)
+We did not originally include the standard scIB battery because we don't think it measures what scProto is designed for. It evaluates general-purpose batch-integration embeddings — is the corrected space well-mixed, does clustering it agree with cell-type labels — while scProto pools already-corrected cells into groups that preserve fine-grained cell states, not just coarse annotated types, a different target these benchmarks don't test. This metric family can be actively misleading here: scProto uses 220–300 prototypes, deliberately finer than annotated cell type (9–17 here); KMeans-based NMI/ARI forces 
+=#cell-types, so a method with no fine substructure to lose can score higher than one whose finer, deliberately-preserved structure gets merged by a coarse re-clustering — rewarding exactly the collapse scProto is built to avoid. NMI/ARI are also cell-mass weighted, so a method can score well by handling only common types while failing rare states entirely. Most directly, Wang, Leskovec & Regev [1] show a model trained to directly fit cell-type labels tops all 12 standard scIB metrics while measurably distorting biological structure — a high score on this battery does not certify a good embedding, since it largely rewards agreement with the same coarse label used to define "conservation." Their proposed remedy, scGraph [1], checks local neighborhood structure instead; we already apply it to scProto's decoded prototypes in the ablation (F5RB §3) and will extend it to baselines as a follow-up.
+
+The evidence we rely on for scProto's actual claim is Table 2's rare-cell coverage/homogeneity and the frozen-embedding comparison in §2, where scProto beats SEACells and Leiden on the identical Stage-1 embedding on all three datasets.
+
+On modularity doubling as training loss and early-stopping criterion: addressed in §4 with a held-out-edge protocol.
+
+4. The headline metric is under-specified (Weakness 4; Question 4)
+Formula. Standard weighted Newman modularity,
+ 
+ 
+ 
+computed on the continuous RBF-kernel affinity weights (no thresholding), with the standard configuration-model null and a fixed resolution 
+ (not swept). We will add this to Appendix F.
+
+Circularity. We address this with a held-out-edge protocol (F5RB §2): 20% of each dataset's affinity-graph edges masked before training, scProto and SEACells fit on the identical masked 80%, modularity scored only on the hidden 20%. scProto's modularity on unseen edges stays close to its headline number and ahead of every baseline, including Leiden — not an artifact of scoring against its own training objective.
+
+Batch-size comparability. We report modularity per batch, not pooled, so structure preservation is visible batch-by-batch rather than dominated by the largest batch. Every method is scored against identical per-batch subgraphs, so batch-size variation is a shared covariate affecting every row equally. All claims are within-dataset, cross-method comparisons, never magnitude comparisons across datasets — we will state this explicitly.
+
+5. The cross-batch mechanism is inconsistent (Weakness 5; Question 2)
+The stop-gradient is deliberate, not an oversight — it stops reconstruction's dense-favoring bias from fighting the affinity/community objective over the shared encoder in Stage 2. Our ablation (§1) shows why it matters: removing it drops modularity and homogeneity (0.61→0.56; 0.63→0.51), purity flat.
+
+We agree l.150–152 currently credits reconstruction with alignment, which the stop-gradient contradicts. We will correct this for camera-ready: alignment is inherited from Stage 1; Stage 2 preserves and pools community structure over that already-aligned space, not re-aligning it.
+
+6. Abstract claims exceed the tables (Weakness 6)
+Agreed the wording at l.229 overclaims; we will fix it for camera-ready. The trade-off the reviewer's numbers surface is in fact the result we want to make, stated precisely instead of oversold.
+
+Against every method that actually mixes batches (scPoli-cVAE, UMAP, MetaQ), scProto's modularity is highest on all three datasets (Pancreas 0.61 vs 0.23/0.26/0.41; Immune 0.62 vs 0.26/0.26/0.28; Lung 0.67 vs 0.32/0.32/0.42). Against SEACells, which matches or beats scProto's modularity on Pancreas/Lung, the reason is visible in the same table: SEACells' batch entropy is 0.16–0.41 throughout — barely mixing at all — while scProto reaches 0.94–1.39. High community structure and real mixing are not usually compatible; scProto is the only method here that gets both. Rare-cell homogeneity drops the trade-off entirely: best on all three datasets with no exceptions (Pancreas 0.54, Immune 0.86, Lung 0.60).
+
+Where scProto trails, it trails methods that don't pay the mixing cost: Lung purity (0.86) ties the other real mixers (scPoli-cVAE, UMAP: 0.86); SEACells (0.90) and MetaQ (0.91) both mix far less (batch entropy 0.41, 0.53 vs 1.39). Immune's purity gap to SEACells is 1pp (0.87 vs 0.88) against a ~6x mixing difference. Pancreas purity is in fact scProto's best of all five methods (0.98). Coverage follows the same pattern: best/tied-best on Pancreas/Immune, second on Lung (0.72 vs 0.74), within one std of the top score. We will revise the abstract and l.229 to state this as a trade-off (modularity/purity vs. mixing) rather than an unqualified win, and state the Lung/Immune purity and Lung coverage gaps explicitly.
+
+7. Thin significance and baselines (Weakness 7)
+On the Immune modularity comparison (0.62±0.08 for scProto vs. 0.55±0.04 for SEACells): the paper's claim isn't that scProto's modularity strictly exceeds SEACells', but that it's comparable while substantially outperforming on batch mixing — the modularity numbers are the "matches" half of that joint claim, not the evidence for an advantage. Batch entropy on the same dataset is 0.94±0.51 vs 0.16±0.24 — non-overlapping even accounting for spread. We will state this framing explicitly.
+
+We agree every Tables 1–2 comparison would be stronger with a significance test, not only the ones large enough to flag by eye. We are adding paired tests across batches/metacells for both tables, using the same Mann-Whitney approach as Fig. 3, and will report results as a follow-up during the discussion period.
+
+On baseline completeness: Tables 1–2 include SEACells and MetaQ as true metacell baselines, with scPoli (cVAE)/UMAP as batch-correction-only controls. SuperCell, Metacell-2, and scVI are discussed in Related Work as conceptually limited, but each has a close empirical analog already in our tables: SuperCell/Metacell-2 are restricted to within-batch aggregation — the same limitation SEACells already shows (batch entropy 0.16–0.41, barely mixing); scVI optimizes reconstruction without affinity guidance — the same property scPoli (cVAE) already isolates. We can run all three directly during the discussion period if needed.
+
+8. The spatial claim rests on one dataset (Weakness 8; Question 5)
+We will try to add a second spatial benchmark during the discussion period. If we cannot complete it in time, we will narrow the spatial claim (§6 above) to reflect evidence from a single NSCLC slide, deferring additional tissues/platforms to future work.
+
+Ref
+[1] Wang, H., Leskovec, J., & Regev, A. "Limitations of cell embedding metrics assessed using drifting islands." Nature Biotechnology 44 (2026): 574–577.
+
+Official Comment by Reviewer e9Ho
+Official Commentby Reviewer e9Ho30 Jul 2026, 03:19Program Chairs, Senior Area Chairs, Area Chairs, Reviewers Submitted, Authors
+Comment:
+Thank you, this is a thorough response and I appreciate the care behind it.
+
+The ablation, the comparison against Leiden and SEACells on the frozen Stage-1 embedding, the held-out-edge protocol, and the full specification of the modularity metric all address concerns I raised, and the two corrections to the text are the ones I asked for.
+
+What remains is largely a question of coverage. The ablation is on one dataset, the significance tests for the headline tables have not yet been posted, several baselines are still unrun, and the spatial result rests on a single slide. On the standard integration metrics I take your point about NMI and ARI; measures such as kBET or iLISI would sidestep that objection while still giving a common point of comparison.
+
+My overall assessment is unchanged at this stage.
+
+ Replying to Official Comment by Reviewer e9Ho
+Response to Reviewer e9Ho's follow-up: full-coverage ablation, significance tests, and expanded baselines
+Official Commentby Authors (Fatemeh S. Hashemi-Golpayegani, Alessandro Palma, Mohammad Lotfollahi, Fabian J Theis, +5 more)31 Jul 2026, 19:19Program Chairs, Senior Area Chairs, Area Chairs, Reviewers Submitted, Authors
+Comment:
+We thank the reviewer for the follow-up and for confirming our first response resolved the concerns it addressed. Below we extend each remaining point from one dataset/example to full coverage, and add kBET/iLISI as requested.
+
+1. Ablation now covers all three datasets
+
+The same ablation (previously Pancreas-only) now runs on Lung and Immune too; full numbers in our reply to Reviewer nG29. On all three datasets: removing the community loss is the largest modularity drop of any arm (Pancreas 0.615→0.449, Lung 0.655→0.483, Immune 0.623→0.379); removing nassoc or the usage loss both drop rare-cell homogeneity (nassoc: Pancreas 0.63→0.51, Immune 0.90→0.76; usage: Pancreas 0.63→0.40). Removing reconstruction leaves modularity flat on all three (stop-gradient blocks it from the encoder) but still drops rare-cell homogeneity (Immune 0.90→0.87). The stop-gradient's own modularity effect and waypoint-vs-k-means-init are Pancreas-specific, flat on Lung/Immune — Pancreas's 9 sequencing chemistries give reconstruction a non-biological axis to conflict over that the others don't.
+
+2. Significance tests for Tables 1-2
+
+Paired one-sided Wilcoxon (modularity, rare F1/homogeneity), Bonferroni-corrected per dataset. The cited example, Immune modularity (scProto 0.62±0.08 vs. SEACells (PCA) 0.55±0.04): p_adj=0.25, ns.
+
+Dataset	Metric	scProto	vs. SEACells (PCA)
+Pancreas	Modularity	0.621	0.658, ns
+Pancreas	Rare F1	0.438	0.373, ns
+Pancreas	Rare Homog.	0.522	0.369, p=.035*
+Lung	Modularity	0.669	0.671, ns
+Lung	Rare F1	0.611	0.498, p<.05*
+Lung	Rare Homog.	0.586	0.495, p<.05*
+Immune	Modularity	0.620	0.569, ns
+Immune	Rare F1/Homog.	0.897/0.856	ns
+Modularity ties SEACells (PCA) on all three — the trade-off already central to the abstract — while scProto significantly wins rare-cell recovery on Lung, numerically ahead elsewhere: SEACells builds metacells within a single batch, so a rare state without enough cells in any one batch gets absorbed into a denser neighbor; scProto's batch correction pools that state's cells across batches instead. Against the batch-correction-only baselines (Parametric UMAP, MetaQ, scVI, Harmony), scProto's modularity wins are significant across the board on Lung, and on Pancreas against Parametric UMAP/MetaQ specifically.
+
+Purity (near-ceiling: 0.98/0.86/0.87): significantly ahead of most baselines on Lung/Immune, leads SEACells (Harmony) on Pancreas (p=0.0003***), ties the rest there; trails SEACells/MetaQ on Lung/Immune — same mixing trade-off. Immune's small size (5 batches) keeps most individual comparisons at ns after Bonferroni correction.
+
+3. Baselines
+
+scVI, dimension- and loss-matched (n_latent=8, Gaussian likelihood), SEACells/Leiden on top:
+
+Dataset	Metric	scProto	SEACells (scVI)	Leiden (scVI)	SuperCell	Metacell-2†
+Pancreas	F1	0.54±.21	0.18±.31, p=.039*	0.14±.30, p=.020*	0.07±.11, p=.012*	0.20±.26
+Pancreas	Homog.	0.56±.16	0.19±.30, p=.039*	0.21±.28, p=.039*	0.14±.06, p=.012*	0.20±.23
+Lung	F1	0.60±.18	0.35±.20, p<.001***	0.34±.16, p<.001***	0.47±.16, p=.045*	0.64±.16
+Lung	Homog.	0.58±.22	0.39±.20, p<.001***	0.38±.20, p<.001***	0.45±.16, p=.032*	0.56±.20
+Immune	F1/Homog.	0.85±.14/0.83±.10	ns	ns	0.88±.05/0.84±.04, ns	0.52±.24/0.44±.28
+† Metacell-2's K (own outlier policy) is too far from scProto's for significance testing; shown for reference.
+
+SEACells (PCA) — the paper's own baseline — follows the same direction (significant on Lung, ns on Pancreas F1, mixed on Immune; full numbers in §2). Dimension-matched Harmony and ComBat show the identical pattern (nG29 reply, §3–§4) — scVI, Harmony, and ComBat all lose the rare-cell test at matched dimension. SuperCell matches that on Pancreas/Lung (significant); Immune is a tie, ns. Metacell-2 (K mismatch, footnote) trails scProto on 5/6 cells, ahead only on Lung F1. Second spatial dataset in progress; otherwise we'll narrow the claim to the single NSCLC slide.
+
+4. kBET / iLISI
+
+Standard scib-metrics Benchmarker on scProto's own latent embedding, vs. uncorrected PCA and the scPoli Stage-1 embedding scProto is initialized from, all three datasets. iLISI: 0.000–0.002 (PCA), 0.088–0.174 (scPoli), 0.046–0.109 (scProto). KBET: 0.160–0.217 (PCA), 0.233–0.318 (scPoli), 0.229–0.286 (scProto). scProto is above uncorrected PCA on both metrics everywhere — Stage 2 doesn't undo Stage 1's alignment. Against scPoli's own embedding, scProto is close on KBET (largest gap 0.03, on Lung; ahead on Pancreas) and behind on iLISI — consistent with the modularity/purity-vs-mixing trade-off already central to this response.
+
+ Replying to Response to Reviewer e9Ho's follow-up: full-coverage ablation, significance tests, and expanded baselines
+Official Comment by Reviewer e9Ho
+Official Commentby Reviewer e9Ho04 Aug 2026, 12:13Program Chairs, Senior Area Chairs, Area Chairs, Reviewers Submitted, Authors
+Comment:
+Thank you for the additional results. The ablation and loss-weight sweep across all three datasets, the significance tests, the wider baselines, the node-level holdout, and the kBET and iLISI numbers all answer concerns I raised, and I appreciate that the null and unfavourable results were reported as plainly as the rest.
+
+What remains is largely what those tests show. Modularity against SEACells is not significant on any of the three datasets, so the community-structure result reads as a tie rather than a win; the matched-dimension question Reviewer nG29 raises is still open; and the spatial claim rests on one slide. My overall assessment is unchanged, but the response has made the paper's actual claims considerably clearer (score adjusted accordingly).
+
+Official Comment by Authors
+Official Commentby Authors (Fatemeh S. Hashemi-Golpayegani, Alessandro Palma, Mohammad Lotfollahi, Fabian J Theis, +5 more)04 Aug 2026, 15:27 (modified: 04 Aug 2026, 15:40)Program Chairs, Senior Area Chairs, Area Chairs, Reviewers Submitted, AuthorsRevisions
+Comment:
+We thank the reviewer for the close reading throughout. One update first: the second spatial benchmark is complete, on a different tissue and platform, and Fig. 3 reproduces on it (§3).
+
+1. Modularity against SEACells
+
+The tie is with the one baseline that removes no batch effect at all, and that trade-off is the paper's claim, not a win it failed to get. SEACells builds metacells within a single batch, on the same PCA affinity structure the metric is computed on, and is never asked to place cells from different batches together: its batch entropy is 0.16–0.41 against scProto's 0.94–1.39. scProto reaches the same community structure while mixing batches three to six times more, and against every method that does mix batches its modularity is significantly higher — across the board on Lung, against Parametric UMAP and MetaQ on Pancreas, and against Harmony at its own 50 PCs (9 of 9 batches, p=0.012). On the full graph the two are level, and the paper will not claim otherwise.
+
+The tie is also specific to scoring both methods on the graph they were fitted to. On structure neither was fitted to, scProto leads in all three settings we tested:
+
+Held-out edges. 20% masked before training, scProto and SEACells fit on the identical visible 80%, scored only on the hidden 20%: 0.59/0.66/0.62 against 0.47/0.52/0.39.
+Held-out nodes. 20% of cells excluded entirely from graph construction and training, then scored through a frozen encoder: 0.599/0.655/0.620, against 0.31–0.50 for Leiden on the scPoli-Stage-1 and scVI latents. SEACells cannot enter this test: its archetypal fit is defined only over the cells present when it is built.
+A graph scProto never trains on. On the second spatial dataset (§3), scored on the adaptive-RBF-on-PCA graph the transcriptomic baseline is itself fitted to, scProto reaches 0.510 against 0.363 and 0.103.
+2. Matched dimension
+
+Every comparison in Tables 1–2 and all significance testing is already dimension-matched, so we also ran the baselines at their own settings; full tables in our reply to Reviewer nG29. The community-structure separation does not move with dimension. At Harmony's package default of 20 PCs scProto leads on Pancreas on every metric (modularity 0.615±0.070 vs 0.500±0.035, rare F1 0.65±0.18 vs 0.54±0.21). At 50 PCs, with scProto also trained at d=50: 0.611 vs 0.432 on Pancreas (9/9, p=0.012), 0.654 vs 0.470 on Lung (16/16, p<0.001), 0.631 vs 0.322 on Immune (5/5), with significantly higher per-metacell purity on Lung and Immune (p<0.001). With scVI at its own defaults (ZINB, n_latent=10) as the backbone: 0.603±0.088 vs 0.296±0.078 and 0.379±0.122. The baselines' rare-cell metrics improve at native settings and come out level there, which follows from what Harmony optimizes — its per-soft-cluster objective targets cross-batch grouping directly.
+
+3. Spatial: a second tissue and a second platform
+
+The claim no longer rests on one slide. The second benchmark is a colorectal-cancer Xenium cohort — different tissue and platform from the NSCLC CosMx slide. Three whole sections from three patients are kept intact rather than subsampled: 50,130 cells, 13 cell types, 5 niches. Niche labels are the source study's own NicheCompass annotations, used only for evaluation; no niche label enters training, and the graph is adaptive-RBF on BANKSY embeddings (λ=0.8, BANKSY's recommended value). All methods run at the same number of metacells. Computed exactly as Fig. 3 (per-metacell majority labels, unweighted, one-sided Mann-Whitney U vs scProto):
+
+niche purity	cell-type purity
+scProto	0.915	0.781
+SEACells (transcriptomic)	0.885	0.788
+SEACells (spatial affinity)	0.930	0.604
+The trade-off holds in the same direction as on NSCLC: scProto is above the transcriptomics-only baseline on niche purity while matching it on cell-type purity (0.781 vs 0.788), and 0.18 above the spatial-affinity baseline on cell-type purity, which again reaches niche purity by giving up cell-type identity.
+
+The per-cell-type tests carry this rather than the averages. scProto's niche purity is significantly higher than SEACells (transcriptomic) on 6 of the 9 cell types testable for all three — cancer cells, endothelium, macrophages, neutrophils, smooth muscle, T cells — and its cell-type purity is significantly higher than SEACells (spatial affinity) on 7 of 9. Both halves hold simultaneously and significantly on five of these. The §1 modularity figures are this dataset's per-section means (0.441±0.074, 0.352±0.010, 0.084±0.030), reported descriptively — three sections is too few for the paired test used elsewhere.
+
+We will state the spatial claim at that level — niche-correlated structure captured while cell-type identity is preserved, on two tissues and two platforms — and keep the per-pair recovery result at pair level.

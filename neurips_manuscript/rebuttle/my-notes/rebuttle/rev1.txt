@@ -1,0 +1,49 @@
+# In particular, the cross-batch alignment seems to come mainly from the Stage 1 scPoli-style pretraining. In Stage 2, the reconstruction loss stops the gradient through the prototype assignment, so it does not directly update the encoder through this path. 
+# This makes the method look more like affinity-guided prototype refinement on a pretrained batch-corrected latent space, rather than a fully joint model for reconstruction, batch alignment, and community preservation.
+# The training design does not fully support the mechanism claimed in the paper. The manuscript suggests that reconstruction helps cross-batch alignment during prototype learning. However, the reconstruction loss stops the gradient through the assignment s_{ik}. Therefore, this loss does not update the encoder through the prototype assignment in Stage 2. The encoder is mainly shaped by the affinity/community objective after pretraining. The cross-batch correction seems to be largely inherited from the Stage 1 scPoli-style model. This point should be stated more clearly.
+# The most important baseline is missing. A natural comparison would be: first apply a batch-correction method, such as scPoli, scVI, Harmony, or BBKNN, and then run an existing graph-based metacell method such as SEACells on the corrected latent space. The current “scPoli + K-means” baseline is weaker. K-means is not designed to preserve graph communities. Without a corrected-latent-space plus graph-metacell baseline, it is hard to know whether scProto improves over a simple combination of existing tools.
+
+
+yes correct and the text can be modifies - hence this is intentialnal desing choice explain
+batch corrcetin stage 1 - stage 2 uses that but also for communities so both works togetehr
+althog l rec not change neocder to avoid fighting loss - other do change encoder - and 2 stage baslines support this
+mention that for fair comparison - batch efect removal stage shoud keep sam ethen apply clusyerign [leiden /archetypal] vs scprot stage2 otherwise the difrenc emay be becsaue of stage 1 bach correction
+so for now we only report scpoli + other lcustering vs scproto so we show thhat scproto is not sluetring on latent - it it changes learnet latent space
+
+
+
+
+
+# The evaluation also needs stronger controls. Modularity is closely related to the training affinity graph.
+# The modularity result is not fully independent from the training objective. The community loss directly encourages prototype assignment similarity to match the input affinity graph. Later, modularity is computed using the per-batch affinity subgraph. Modularity is also used for early stopping. Because of this, high modularity is partly expected. It is still a useful diagnostic, but it is not strong enough as independent evidence of biological metacell quality.
+
+generliaztion thing - the heldout mpdualit experiments 
+
+
+# The spatial claim is stronger than the current evidence. The paper says that scProto captures niche-correlated transcriptional programs. The presented results mainly show niche purity and cell-type purity. This is useful, but it does not yet prove discovery of transcriptional programs. Also, the niche labels are defined from local cell-type composition, and the spatial affinity graph is built from neighborhood-averaged PCA features. Therefore, the evaluation is not fully independent from the training signal.
+yes can be done - we will try to run and send result in discussion
+
+
+# The ablation study does not isolate the main components well enough. The method contains several important parts, including the community loss, reconstruction loss, normalized association regularization, usage loss, temperature calibration, and waypoint initialization. These components are not separately tested in a complete way. As a result, it is unclear which component is responsible for the main improvement.
+
+ablation
+
+
+to do
+why batch correct + cluster has this much variance? f1 / rare homogeneity - maybe we shoudl report modularity / maybe heldout? - this result with this much variance is weak
+for ablation - run on other datasets as well
+then check significance of results - do this for batch correct then cluster thing as well
+scvi + clustering / scproto
+BBKNN / harmoney + clustering
+
+discovery of spatial transcriptianl programs
+
+
+my ordered list:
+run ablation on other datasets
+do scvi + scprotp / leiden / archetypal 
+then decide what metric is valid for evalauting remove batch effect then cluster [modularity on heldout? rare metrics? why this much variance]
+do clear significant test on you results - if anything was not signifucnt [speacily rare metrics you have for remove batch then cluster metrics] realize why - maybe wrong metric to catch
+check harmoney the cluster - check chosen metric and analyse the results
+do bknn then cluster
+try to design experiemnt for sptaial trasncriptinal program discovery

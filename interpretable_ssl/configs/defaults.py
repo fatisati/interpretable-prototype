@@ -190,6 +190,7 @@ def get_defaults():
         'lambda_r1r2': 0.0,
         'r1r2_log': 0,               # 0 = linear max, 1 = log(max) (penalizes dead protos more aggressively)
         'lambda_proto_attract': 0.0,  # dead-proto attraction to poorly-represented cells
+        'lambda_proto_anchor': 0.0,   # soft MSE pull: prototype (still a free, gradient-trained param) toward soft_assign-column-normalized combination of this batch's cell embeddings — latent-space analogue of SEACells' B matrix, computed fresh per minibatch. Ignored if proto_decoupled=True (mutually exclusive — that already controls position via EMA). See files/proto_anchoring_vs_proto_usage.md (option A).
         'two_sided': 0,
         # Edge-centric UMAP parameters
         'umap_min_dist': 0.5,      # UMAP min_dist (scanpy default=0.5, umap default=0.1)
@@ -213,11 +214,14 @@ def get_defaults():
         'nassoc_agg': 'mean',            # how to aggregate per-batch M matrices: 'mean' (avg loss) or 'max' (element-wise max of M, then loss) or 'pbch' (loss per batch then avg; no cross-batch constraint, use mse diagonal)
         'nassoc_diag_loss': 'mse',       # diagonal loss form: 'mse' = (diag-1)^2, 'nll' = -log(avg_diag), 'nll2' = -log(avg_b[1-(d_b-1)^2]) rewards multi-batch moderate usage
         'nassoc_diag': True,             # whether to include diagonal (purity) term; set False to keep only off-diagonal (redundancy) term
+        'nassoc_diag_norm': 'volume',    # [D1] DIAGONAL denominator. 'volume' = edges_inside/volume (current: a containment measure -- volume is additive under merging, so merging two protos always raises it and hierarchical splits are penalized). 'pair' = edges_inside/possible_pairs, i.e. the induced-subgraph edge density = mean pairwise affinity between members; possible_pairs is superadditive so merging LOWERS it, which is what lets the loss rank a split above a merge. Off-diagonal keeps volume normalization either way. See files/notes/nassoc_redesign.md
+        'nassoc_gamma': 0.0,             # [D2] resolution parameter, used only by nassoc_diag_loss='hinge'/'cpm'. The density a prototype must reach to be "worth existing"; equivalently the price of a missing link relative to a present one (CPM, Traag et al. 2011). Higher = tighter/smaller prototypes. Its absolute scale depends on the affinity scale and minibatch sampling rate, so sweep it and read off the resulting mean metacell size rather than picking a value a priori.
         # --- Cell-cell similarity reconstruction (resolution pressure nassoc can't provide) ---
         'lambda_sim_recon': 0.0,         # off by default; decodes prototypes -> per-cell similarity target, reconstructed within each minibatch (S and prototypes both get gradient)
         'sim_recon_hidden_dim': 256,     # hidden width of the similarity decoder trunk
         'sim_recon_target': 'full',      # 'full': reconstruct each cell's actual aff_raw row (most literal match to SEACells); 'diffusion': regress to a precomputed per-cell diffusion-map coordinate instead (cheaper, compare both)
         'sim_recon_n_eigs': 10,          # diffusion-map dimensionality when sim_recon_target='diffusion'; unused for 'full'
+        'sim_recon_diffusion_t': 0.0,    # 'diffusion' only: eigenvector weighting eigenvalue**t before the batch-size rescale. 0 (default) = unweighted, every eigen-direction equal — protects fine/local (rare sub-community) resolution. 0.5 makes the per-cell MSE mathematically equivalent (Eckart-Young) to MSE on a rank-n_eigs reconstruction of the affinity matrix itself — i.e. the closest 'diffusion' gets to behaving like sim_recon_target='full' (or SEACells' own RSS), at the cost of the same fine/rare-pattern sensitivity 0.0 protects. A real dial, not a bug fix — see files/sim_recon_global_vs_local_compaction.md.
         'sim_recon_neg_sample': 0,       # 'full' only: if >0, decode/reconstruct against each row's true-neighbor columns plus a random sample of this many zero columns (fresh sample each step) instead of every column in the batch — same loss, cheaper per step. 0 = original behavior (all columns)
         # --- Decoupled prototype learning (prevents proto collapse) ---
         'proto_decoupled': False,        # True: protos updated via online GMM EM; detached from all losses

@@ -5,10 +5,16 @@ import numpy as np, scipy.sparse as sp
 from sklearn.neighbors import NearestNeighbors
 
 
-def _knn_sym_sigma(ad, build_on, k, graph_construction='union'):
+def _knn_sym_sigma(ad, build_on, k, graph_construction='union', bandwidth_mode='median'):
     """Shared core: kNN → binarize → sigma → symmetrize. Returns (sym, sigma, n).
 
-    sigma_i = distance to the (k//2)-th nearest neighbour (adaptive bandwidth).
+    bandwidth_mode='median' (default): sigma_i = distance to the (k//2)-th nearest
+        neighbour — the convention used everywhere else in this file.
+    bandwidth_mode='max_gap': sigma_i = distance just before the largest
+        consecutive gap in cell i's own sorted kNN distances — an elbow-style,
+        per-cell-adaptive choice instead of always using the same fixed
+        percentile position, which may or may not land on a real boundary
+        between "true local neighbors" and "everything else".
     sym is the symmetrized binary adjacency matrix.
     """
     sc.pp.neighbors(ad, use_rep=build_on, n_neighbors=k, knn=True)
@@ -19,17 +25,31 @@ def _knn_sym_sigma(ad, build_on, k, graph_construction='union'):
     knn_bin.data[:] = 1.0
     knn_bin.setdiag(1)
 
-    asc_idx = max(k // 2 - 1, 0)
-    row_counts = np.diff(knn_dist.indptr)
-    if (row_counts == k).all():
-        sigma = np.partition(knn_dist.data.reshape(n, k), asc_idx, axis=1)[:, asc_idx]
-    else:
+    if bandwidth_mode == 'median':
+        asc_idx = max(k // 2 - 1, 0)
+        row_counts = np.diff(knn_dist.indptr)
+        if (row_counts == k).all():
+            sigma = np.partition(knn_dist.data.reshape(n, k), asc_idx, axis=1)[:, asc_idx]
+        else:
+            sigma = np.empty(n)
+            for i in range(n):
+                s, e = knn_dist.indptr[i], knn_dist.indptr[i + 1]
+                d = knn_dist.data[s:e]
+                idx = min(asc_idx, max(len(d) - 1, 0))
+                sigma[i] = np.partition(d, idx)[idx] if len(d) else 1e-8
+    elif bandwidth_mode == 'max_gap':
+        # Delegates to _bandwidth_from_neighbor_dists (defined later in this module,
+        # resolved at call time -- fine for two top-level functions in the same file)
+        # rather than a second, separately-maintained copy of the same Kneedle-style
+        # logic, which is what caused this to still have the raw-largest-gap bug
+        # after it was fixed in the other copy.
         sigma = np.empty(n)
         for i in range(n):
             s, e = knn_dist.indptr[i], knn_dist.indptr[i + 1]
-            d = knn_dist.data[s:e]
-            idx = min(asc_idx, max(len(d) - 1, 0))
-            sigma[i] = np.partition(d, idx)[idx] if len(d) else 1e-8
+            d = np.sort(knn_dist.data[s:e])
+            sigma[i] = _bandwidth_from_neighbor_dists(d, 'max_gap') if len(d) else 1e-8
+    else:
+        raise ValueError(f"unknown bandwidth_mode: {bandwidth_mode!r} (expected 'median' or 'max_gap')")
     sigma = np.maximum(sigma, 1e-8)
 
     if graph_construction == 'union':
@@ -103,7 +123,7 @@ def _topk_per_row(M_csr, k):
     return M.tocsr()
 
 
-def rbf_product(ad, build_on_list, k=50, per_space_sigma=False):
+def rbf_product(ad, build_on_list, k=50, per_space_sigma=False, bandwidth_mode="median"):
     """Product of N adaptive RBF kernels on the union of their kNN graphs.
 
     Edges: union of all per-space kNN graphs.
@@ -122,6 +142,11 @@ def rbf_product(ad, build_on_list, k=50, per_space_sigma=False):
         build_on_list:    list of obsm keys, one per space (e.g. ['X_pca', 'X_covet'])
         per_space_sigma:  if True, use per-space sigma (from own kNN) instead of
                           recomputing sigma from the union graph
+        bandwidth_mode:   'median' (default, same convention _sigma_from_graph also
+                          uses) or 'max_gap' (elbow-style: sigma at each row's
+                          largest consecutive distance gap). Only affects the
+                          per_space_sigma=True path — _sigma_from_graph (used when
+                          per_space_sigma=False) is unchanged and still median-only.
     """
     import time
     t0 = t_step = time.time()
@@ -132,7 +157,7 @@ def rbf_product(ad, build_on_list, k=50, per_space_sigma=False):
         return f"{elapsed:.1f}s"
 
     spaces = list(build_on_list)
-    print(f"[rbf_product] n={ad.n_obs}  k={k}  spaces={spaces}")
+    print(f"[rbf_product] n={ad.n_obs}  k={k}  spaces={spaces}  bandwidth_mode={bandwidth_mode!r}")
 
     # Step 1: kNN sym per space (also keep sigma if per_space_sigma=True)
     syms = []
@@ -140,7 +165,7 @@ def rbf_product(ad, build_on_list, k=50, per_space_sigma=False):
     n = None
     for i, key in enumerate(spaces):
         print(f"[rbf_product] step 1.{i+1}: kNN → sym  {key}  (sc.pp.neighbors) ...")
-        sym, sigma, n = _knn_sym_sigma(ad, key, k)
+        sym, sigma, n = _knn_sym_sigma(ad, key, k, bandwidth_mode=bandwidth_mode)
         syms.append(sym)
         sigmas.append(sigma)
         print(f"[rbf_product] step 1.{i+1} done ({_t()})  nnz={sym.nnz}  nnz/row={sym.nnz/n:.1f}")
@@ -256,7 +281,9 @@ def build_sg_aff(pca_aff, spatial, cutoff=0.05):
 
 
 def spatial_context_aff(ad, pca_aff, beta=0.5):
-    import SEACells
+    import SEACells.build_graph  # bare `import SEACells` doesn't reliably expose the
+    # build_graph submodule as an attribute -- see the 'ctx' branch of generate_affinity
+    # for the full explanation. Same fix, applied here too.
     from sklearn.preprocessing import normalize
 
     sp_model = SEACells.build_graph.SEACellGraph(ad, "spatial", verbose=True)
@@ -362,7 +389,9 @@ def generate_affinity(ad, k, bk, affinity_type="inverse_dist", graph_mode=None,
         return inv_dist
 
     elif affinity_type == 'arbf_val':
-        import SEACells
+        import SEACells.build_graph  # bare `import SEACells` doesn't reliably expose the
+        # build_graph submodule as an attribute -- see the 'ctx' branch below for the
+        # full explanation. Same fix, applied here too.
         print("arbf_val: recalculating PCA (n_comps=50) then SEACells rbf ...")
         sc.tl.pca(ad, n_comps=50)
         kernel_model = SEACells.build_graph.SEACellGraph(ad, "X_pca", verbose=True)
@@ -388,6 +417,129 @@ def generate_affinity(ad, k, bk, affinity_type="inverse_dist", graph_mode=None,
                                      obsm_key='X_banksy_orig')
         return rbf_optimized(ad, build_on='X_banksy_orig', k=k, graph_construction='union')
 
+    elif affinity_type == 'bk32':
+        # Exact original pybanksy package (own expression + neighbor-mean expression
+        # + AGF, z-scored per block, lambda-weighted, concatenated, THEN PCA'd down
+        # to n_components -- the real published pipeline, not our own PCA-concat
+        # approximation), with num_neighbours=32 (not the hardcoded 15 'banksy_orig'
+        # uses) to match the median-32 niche-density target _ensure_X_ctx already
+        # calibrates ctx/ctxm/ctxg/ctxb to, and lambda=0.5 (balance spatial context
+        # vs. cell identity, chosen over the paper's cell-typing default of 0.2
+        # since niche recovery sits between "cell typing" and "domain segmentation").
+        # Then ordinary arbf (adaptive-bandwidth RBF, union symmetrization) on the
+        # resulting 50-dim embedding. Deliberately not 'banksy_orig0.5' -- anything
+        # starting with 'banksy' truncates to 'bank' under model_name.py's [:4]
+        # rule, colliding with the existing plain 'banksy0.5' runs already on disk.
+        print(f"bk32: pybanksy (exact package), lambda=0.5, num_neighbours=32, "
+              f"n_components=50, then arbf (k={k}) on top")
+        if 'X_bk32' in ad.obsm:
+            print(f"[bk32] using cached X_bk32 embedding already in adata.obsm "
+                  f"(shape={ad.obsm['X_bk32'].shape}) -- NOT recomputing. This must have "
+                  f"been precomputed on the FULL tissue before any cell-type filtering "
+                  f"(spatial_subsets.build_celltype_subset_with_context's banksy_configs) "
+                  f"for spatial context to be correct on a filtered subset.")
+        else:
+            print(f"[bk32] WARNING: X_bk32 not in adata.obsm -- computing it fresh HERE, "
+                  f"on the {ad.n_obs} cells currently in `ad`. If `ad` is already filtered "
+                  f"to one cell type, the neighbour-mean term will only see same-type "
+                  f"neighbours, not the true mixed-cell-type spatial context -- precompute "
+                  f"X_bk32 on the full tissue first if that's not what you want.")
+            compute_banksy_embedding(ad, lambda_param=0.5, num_neighbours=32,
+                                     n_components=50, obsm_key='X_bk32')
+        return rbf_optimized(ad, build_on='X_bk32', k=k, graph_construction='union')
+
+    elif affinity_type == 'bk08':
+        # Same pybanksy embedding as 'bk32', but lambda=0.8 -- the paper's own
+        # domain-segmentation default (vs. 0.5 for 'bk32', vs. 0.2 for cell
+        # typing) -- and the kernel is built with the REAL SEACells package's own
+        # SEACellGraph.rbf() (SEACells/build_graph.py), not this file's
+        # rbf_optimized reimplementation, so results are directly comparable to
+        # the actual package's own graph construction, not just our own version.
+        print(f"bk08: pybanksy (exact package), lambda=0.8, num_neighbours=32, "
+              f"n_components=50, then REAL SEACells build_graph.rbf (k={k}) on top")
+        if 'X_bk08' in ad.obsm:
+            print(f"[bk08] using cached X_bk08 embedding already in adata.obsm "
+                  f"(shape={ad.obsm['X_bk08'].shape}) -- NOT recomputing. This must have "
+                  f"been precomputed on the FULL tissue before any cell-type filtering "
+                  f"(spatial_subsets.build_celltype_subset_with_context's banksy_configs) "
+                  f"for spatial context to be correct on a filtered subset.")
+        else:
+            print(f"[bk08] WARNING: X_bk08 not in adata.obsm -- computing it fresh HERE, "
+                  f"on the {ad.n_obs} cells currently in `ad`. If `ad` is already filtered "
+                  f"to one cell type, the neighbour-mean term will only see same-type "
+                  f"neighbours, not the true mixed-cell-type spatial context -- precompute "
+                  f"X_bk08 on the full tissue first if that's not what you want.")
+            compute_banksy_embedding(ad, lambda_param=0.8, num_neighbours=32,
+                                     n_components=50, obsm_key='X_bk08')
+        from SEACells.build_graph import SEACellGraph
+        sg = SEACellGraph(ad, build_on='X_bk08', verbose=True)
+        return sg.rbf(k=k, graph_construction='union')
+
+    elif affinity_type == 'bkmg':
+        # Same pybanksy embedding as 'bk08' (lambda=0.8, reuses X_bk08 if already
+        # built), same max_gap (Kneedle) bandwidth 'ctxg' uses -- via the SAME
+        # function ctxg calls, pca_weight_on_existing_topology, not a separate
+        # reimplementation. Topology is a plain kNN graph on X_bk08 (median-mode
+        # _knn_sym_sigma, but only its binary `sym` is kept -- the sigma from
+        # that call is discarded); max_gap bandwidth is then computed on X_bk08
+        # distances restricted to THAT fixed topology, exactly like ctxg computes
+        # its max_gap bandwidth on X_pca restricted to the ctx-kernel's topology.
+        # Earlier version computed both the kNN topology AND the max_gap sigma
+        # directly from X_bk08 in one pass (_knn_sym_sigma(bandwidth_mode='max_gap')
+        # + _rbf_on_graph) -- on BANKSY's heavily neighbor-smoothed lambda=0.8
+        # embedding, local kNN distances are so compressed that Kneedle kept
+        # snapping to a near-zero-distance early knee, underflowing the RBF
+        # weight on almost every edge and leaving a near-singleton graph
+        # (58313/58423 Leiden "communities"). Deriving the bandwidth over a
+        # topology fixed independently of that same knee-detection step is what
+        # keeps ctxg stable, so bkmg now does the same.
+        print(f"bkmg: pybanksy (exact package), lambda=0.8, num_neighbours=32, "
+              f"n_components=50, then max_gap bandwidth (ctxg's pca_weight_on_existing_topology) "
+              f"on a fixed kNN topology (k={k})")
+        if 'X_bk08' not in ad.obsm:
+            compute_banksy_embedding(ad, lambda_param=0.8, num_neighbours=32,
+                                     n_components=50, obsm_key='X_bk08')
+        sym, _, _ = _knn_sym_sigma(ad, 'X_bk08', k, graph_construction='union',
+                                    bandwidth_mode='median')
+        return pca_weight_on_existing_topology(sym, ad.obsm['X_bk08'], bandwidth_mode='max_gap')
+
+    elif affinity_type == 'ctxb':
+        # BANKSY-style feature concatenation, but built entirely from OUR OWN
+        # X_pca/X_ctx (calibrated radius, median-32 target) instead of the pybanksy
+        # package -- no reason to give up that calibration for pybanksy's own
+        # default spatial-kNN neighbourhood definition (k=15) when all that
+        # actually matters is the *structure*: concatenate, variance-balance, run
+        # one kernel. Same weighting formula the existing banksy/banksy_radius
+        # branches already use (own-expression coefficient sqrt(1-lam**2), context
+        # coefficient lam, lam = sqrt(alpha*V_pca / ((1-alpha)*V_ctx + alpha*V_pca))
+        # -- letting Lambda := lam**2, this solves exactly Lambda = alpha*V_pca /
+        # ((1-alpha)*V_ctx + alpha*V_pca), i.e. sqrt(1-Lambda)/sqrt(Lambda) in
+        # BANKSY's own published notation, just solved directly for the coefficient
+        # instead of for the paper's lambda first -- same formula), but with
+        # alpha=0.5 (equal variance contribution from both blocks) instead of the
+        # paper's hand-picked 0.2 -- a data-driven, symmetric default rather than a
+        # borrowed hyperparameter.
+        #
+        # No second PCA after concatenating: arbf's kernel is Euclidean-distance
+        # kNN, which is rotation-invariant, so a non-dimensionality-reducing PCA on
+        # the 100-dim concatenated space would change nothing about neighbor
+        # structure, and dropping dimensions only risks losing real signal for no
+        # computational need (100 dims is trivial for kNN). Concatenate, then arbf,
+        # directly.
+        _ensure_X_ctx(ad)
+        X_pca = ad.obsm['X_pca']
+        X_ctx = ad.obsm['X_ctx']
+        alpha = 0.5
+        V_pca = X_pca.var(axis=0).sum()
+        V_ctx = X_ctx.var(axis=0).sum()
+        lam = np.sqrt(alpha * V_pca / ((1 - alpha) * V_ctx + alpha * V_pca))
+        print(f"[ctxb] alpha={alpha:.2f}  V_pca={V_pca:.3f}  V_ctx={V_ctx:.3f}  lambda={lam**2:.3f}  "
+              f"(coefficients: pca={np.sqrt(1 - lam**2):.3f}, ctx={lam:.3f})")
+        ad.obsm['X_ctxb'] = np.concatenate(
+            [np.sqrt(1 - lam**2) * X_pca, lam * X_ctx], axis=1
+        )
+        return rbf_optimized(ad, build_on='X_ctxb', k=k, graph_construction='union')
+
     elif affinity_type in [
         "arbf",
         "coaff",
@@ -398,7 +550,12 @@ def generate_affinity(ad, k, bk, affinity_type="inverse_dist", graph_mode=None,
         "sarbf",
         "scoaff",
     ]:
-        import SEACells
+        import SEACells.build_graph  # bare `import SEACells` doesn't reliably expose the
+        # build_graph submodule as an attribute -- see the 'ctx' branch below for the
+        # full explanation. Same fix, applied here too (this is the branch that hit it
+        # first, on a freshly-registered dataset whose affinity had never been built
+        # before -- every prior 'arbf' run had a cached .pkl and never actually called
+        # generate_affinity fresh).
 
         print("calculating seacell affinity")
         kernel_model = SEACells.build_graph.SEACellGraph(ad, "X_pca", verbose=True)
@@ -447,14 +604,103 @@ def generate_affinity(ad, k, bk, affinity_type="inverse_dist", graph_mode=None,
 
     elif affinity_type == "ctx":
         print('using new aff')
-        import SEACells
-        if 'X_ctx' not in ad.obsm:
-            sc.tl.pca(ad)
-            ad.obsm["X_ctx"] = build_context(ad, 7.5)
-        else:
-            print('using existing X_ctx in adata')
-        kernel_model = SEACells.build_graph.SEACellGraph(ad, "X_ctx", verbose=True)
-        return kernel_model.rbf(k, graph_construction="union")
+        import time
+        import SEACells.build_graph  # bare `import SEACells` doesn't reliably expose the
+        # build_graph submodule as an attribute -- depends on SEACells' own __init__.py,
+        # which apparently changed (unpinned `pip install git+...`) or was affected by
+        # --no-deps. Scoped to just this branch; not touching the other 4 occurrences of
+        # the same bare-import pattern elsewhere in this file for now.
+        _ensure_X_ctx(ad)
+        M = _get_or_build_ctx_kernel(ad, k)
+
+        # Diagnostic: for each cell, the edge-weighted fraction of its neighbours that
+        # share its cell type / niche label -- then summary stats of that fraction across
+        # cells. Direct visibility into what the graph is actually connecting, rather than
+        # inferring it after training from purity metrics. Skips gracefully if these obs
+        # columns aren't present (this branch is spatial-specific but not guaranteed to
+        # always run on NSCLC-labelled data). Shared helper (see weighted_same_label_frac /
+        # log_weighted_same_label_fracs above) so ctx_pca_median/ctx_pca_maxgap below reuse
+        # the exact same diagnostic instead of a re-derived copy.
+        log_weighted_same_label_fracs(M, ad, "ctx affinity")
+
+        return M
+
+    elif affinity_type in ("ctxm", "ctxg"):
+        # Same X_ctx-based topology as the "ctx" branch above (SEACells-style
+        # radius-averaged PCA, radius calibrated by _ensure_X_ctx), but the edge
+        # weight is the product of the X_ctx-arbf kernel AND a second, PCA-based
+        # arbf kernel computed on the SAME edges -- "PCA distance calculated on top
+        # of the kNN graph built on spatial", via pca_weight_on_existing_topology,
+        # NOT rbf_product's separate-PCA-kNN-then-union approach (a different graph
+        # from the one actually being tested here; reverted after building it once).
+        # Since PCA distance is large between different cell types (identity
+        # dominates PCA variance) and small within one type, this softly suppresses
+        # cross-cell-type edges without ever touching a cell-type label -- purely a
+        # function of expression similarity.
+        #
+        # Names are deliberately exactly 4 characters, not "ctx_pca_median" /
+        # "ctx_pca_maxgap": model_name.py's generate_model_name() truncates every
+        # string-valued param (including affinity_type) to [:4] for the run
+        # directory name, so anything longer than 4 chars sharing a 4-char prefix
+        # would collide and silently overwrite the other run's checkpoint dir.
+        #   'ctxm' — median bandwidth (same convention as everywhere else in this
+        #            file: distance to the k//2-th nearest neighbor).
+        #   'ctxg' — max_gap bandwidth (Kneedle-style knee detection -- see
+        #            _bandwidth_from_neighbor_dists).
+        _ensure_X_ctx(ad)
+        s_ctx = _get_or_build_ctx_kernel(ad, k)
+
+        bandwidth_mode = "median" if affinity_type == "ctxm" else "max_gap"
+        print(f"[{affinity_type}] pca_weight_on_existing_topology(bandwidth_mode={bandwidth_mode!r}) "
+              f"on the same {s_ctx.nnz} edges ...")
+        s_pca = pca_weight_on_existing_topology(s_ctx, ad.obsm["X_pca"], bandwidth_mode)
+
+        M = s_ctx.multiply(s_pca).tocsr()
+        print(f"[{affinity_type}] ctx-only nnz={s_ctx.nnz}  mean_weight={s_ctx.data.mean():.4f}  "
+              f"-> combined nnz={M.nnz}  mean_weight={M.data.mean() if M.nnz else float('nan'):.4f}")
+
+        log_weighted_same_label_fracs(M, ad, affinity_type)
+        return M
+
+    elif affinity_type in ("ctmr", "ctgr"):
+        # Same construction as ctxm/ctxg, then RECALIBRATED via a second adaptive-
+        # bandwidth pass (_recalibrate_combined_kernel) instead of ctxm/ctxg's raw
+        # Hadamard product. Motivation: ctxm/ctxg's mean edge weight measured ~2-2.6x
+        # lower than arbf's, which matters because scproto's epsilon calibration
+        # (calibrate_epsilon) binary-searches epsilon so the latent soft-assignment
+        # similarity on positive edges matches this graph's own mean edge weight
+        # (aff_raw, NOT row-normalized) -- a much lower target forces a much softer
+        # (larger) epsilon than arbf gets, plausibly over-smoothing the 800-way
+        # softmax into the few-giant-prototypes collapse we measured.
+        #
+        # A single global rescale-to-match-ctx's-mean was tried first and rejected:
+        # it patches the mean but not the shape (per-row degree, variance, tails), and
+        # isn't how the rest of this file calibrates kernels. _recalibrate_combined_
+        # kernel instead re-derives a proper per-row adaptive bandwidth from the
+        # PRODUCT's own combined distance (see its docstring for the full derivation)
+        # -- the identical recipe 'arbf' itself uses, just applied to the joint
+        # ctx+PCA distance instead of PCA distance alone. Only aff_raw's mean (and
+        # therefore the epsilon calibration target) changes -- normalize_aff() row-
+        # normalizes self.aff regardless of absolute input scale, so the *relative*
+        # same-type-vs-cross-type suppression pattern is unaffected.
+        #   'ctmr' -- median bandwidth (matches ctxm), recalibrated.
+        #   'ctgr' -- max_gap bandwidth (matches ctxg), recalibrated.
+        _ensure_X_ctx(ad)
+        s_ctx = _get_or_build_ctx_kernel(ad, k)
+
+        bandwidth_mode = "median" if affinity_type == "ctmr" else "max_gap"
+        print(f"[{affinity_type}] pca_weight_on_existing_topology(bandwidth_mode={bandwidth_mode!r}) "
+              f"on the same {s_ctx.nnz} edges ...")
+        s_pca = pca_weight_on_existing_topology(s_ctx, ad.obsm["X_pca"], bandwidth_mode)
+
+        M_raw = s_ctx.multiply(s_pca).tocsr()
+        M = _recalibrate_combined_kernel(M_raw, bandwidth_mode)
+        print(f"[{affinity_type}] ctx-only mean_weight={s_ctx.data.mean():.4f}  "
+              f"raw product mean_weight={M_raw.data.mean() if M_raw.nnz else float('nan'):.4f}  "
+              f"-> recalibrated mean_weight={M.data.mean() if M.nnz else float('nan'):.4f}")
+
+        log_weighted_same_label_fracs(M, ad, affinity_type)
+        return M
 
     elif affinity_type == "cpca":
         X_ctx = spatial_context_pca(ad, k)
@@ -710,6 +956,419 @@ def build_context(ad, radius):
     ctx = np.stack([Xpca[idx].mean(0) if len(idx) else Xpca[i] for i, idx in enumerate(neigh)])
     return ctx
 
+
+def _bandwidth_from_neighbor_dists(d_sorted, mode):
+    """Per-row bandwidth from one row's own sorted (ascending) neighbor distances.
+
+    mode='median': distance at the SEACells convention position (len//2 - 1) --
+        same rule build_seacell_kernel/_knn_sym_sigma already use.
+    mode='max_gap': Kneedle-style knee detection (Satopaa, Lehman, Xu, Raglin &
+        Kohler, "Finding a 'Kneedle' in a Haystack: Detecting Knee Points in System
+        Behavior", ICDCSW 2011) -- NOT the raw largest consecutive gap. Sorted kNN
+        distances typically look like a hockey stick: flat/slow for the first many
+        (genuinely close) neighbors, then an accelerating rise once you run out of
+        close neighbors and start reaching into the background -- i.e. a convex
+        increasing curve, sitting below the chord connecting its first and last
+        points. Kneedle's knee is the point of maximum distance BELOW that chord
+        (after min-max normalizing both axes to [0,1], the scale factor between
+        indices and distances no longer matters).
+        This is what actually fixes the near-duplicate-neighbor bug, not just an
+        ad hoc workaround for it: a jump right at the very start of the sorted list
+        sits close to the chord's own starting point almost by construction (small
+        x, small normalized y), so it contributes only a small deviation regardless
+        of how large that jump is in raw distance terms -- unlike a raw-gap search,
+        which picks exactly that spurious early jump. Confirmed empirically: the
+        earlier raw-largest-gap version produced sigma hitting the 1e-8 floor for a
+        large fraction of cells on a real run, collapsing the RBF kernel and
+        cascading into rows with zero surviving edges after top-k pruning downstream.
+    """
+    m = len(d_sorted)
+    if mode == 'median':
+        idx = max(m // 2 - 1, 0)
+        return max(d_sorted[idx], 1e-8)
+    elif mode == 'max_gap':
+        if m < 3:
+            return max(d_sorted[-1], 1e-8)
+        x_norm = np.arange(m, dtype=np.float64) / (m - 1)
+        y_range = d_sorted[-1] - d_sorted[0]
+        y_norm = (d_sorted - d_sorted[0]) / y_range if y_range > 0 else np.zeros(m)
+        # Convex increasing curve -> knee = max distance BELOW the y=x chord.
+        idx = int(np.argmax(x_norm - y_norm))
+        return max(d_sorted[idx], 1e-8)
+    else:
+        raise ValueError(f"unknown bandwidth mode: {mode!r} (expected 'median' or 'max_gap')")
+
+
+def pca_weight_on_existing_topology(s_aff, X_pca, bandwidth_mode='median'):
+    """Given an already-built sparse affinity matrix (the X_ctx-based spatial kernel),
+    compute a second, PCA-based RBF weight for the SAME edges -- same topology,
+    different weight, so the two can be multiplied elementwise later.
+
+    PCA distances (and the bandwidth derived from them) are computed strictly over
+    each cell's REAL spatial-context neighbors -- i.e. "PCA distance calculated on
+    top of the kNN graph built on spatial" -- not a separately-built PCA kNN search
+    unioned in afterward (which is what rbf_product does, and is a different graph
+    from what's being tested here).
+
+    Returns a sparse matrix with the identical nonzero pattern as s_aff.
+    """
+    coo = s_aff.tocoo()
+    n = s_aff.shape[0]
+
+    row_to_cols = {}
+    for r, c in zip(coo.row, coo.col):
+        row_to_cols.setdefault(r, []).append(c)
+
+    sigma = np.full(n, np.nan)
+    for r, cols in row_to_cols.items():
+        cols = np.asarray(cols)
+        d = np.linalg.norm(X_pca[r] - X_pca[cols], axis=1)
+        sigma[r] = _bandwidth_from_neighbor_dists(np.sort(d), bandwidth_mode)
+
+    pca_data = np.empty_like(coo.data, dtype=np.float64)
+    for i, (r, c) in enumerate(zip(coo.row, coo.col)):
+        d = np.linalg.norm(X_pca[r] - X_pca[c])
+        sig_c = sigma[c] if not np.isnan(sigma[c]) else sigma[r]
+        sigma_prod = max(sigma[r] * sig_c, 1e-8)
+        pca_data[i] = np.exp(-(d ** 2) / sigma_prod)
+
+    return sp.csr_matrix((pca_data, (coo.row, coo.col)), shape=s_aff.shape)
+
+
+def _recalibrate_combined_kernel(M, bandwidth_mode='median'):
+    """Re-derive a properly-scaled adaptive-bandwidth kernel from a product of two
+    RBF kernels sharing the same edge set (e.g. s_ctx.multiply(s_pca)).
+
+    Why this is needed: for two Gaussian/RBF kernels sharing edges, weight_ij =
+    exp(-d_ij^2 / bandwidth_ij), so log(w1_ij) + log(w2_ij) = -(d1_ij^2/b1_ij +
+    d2_ij^2/b2_ij) -- multiplying the WEIGHTS is mathematically equivalent to
+    summing the two kernels' own normalized squared distances into one combined
+    distance D_ij = sqrt(-2*log(w1_ij * w2_ij)). That combined distance is exactly
+    the right thing to build a joint kernel from -- but the raw product leaves its
+    overall bandwidth implicitly fixed at 1, never recalibrated to D's own scale.
+    Since D sums two independently-normalized ("each individually order-1")
+    quantities, its typical size is roughly double either factor's own typical
+    normalized distance -- exactly why the raw product's weights come out
+    systematically smaller than either input kernel (measured ~2-2.6x lower mean
+    edge weight than arbf on this dataset).
+
+    Fix: treat D_ij as a plain distance and re-run the SAME adaptive per-row
+    bandwidth selection this file uses everywhere else (_bandwidth_from_neighbor_
+    dists -- median or max_gap), then re-exponentiate: exp(-D_ij^2 / (2*Sigma_i^2)).
+    Mechanically identical to how 'arbf' itself derives weights from PCA distance --
+    just applied to the joint ctx+PCA distance instead of PCA distance alone, so the
+    result's marginal statistics (mean weight, effective degree) should resemble
+    arbf's own by construction, rather than an arbitrarily rescaled product.
+
+    Preserves M's exact sparsity pattern; only the weights change.
+    """
+    M = M.tocsr()
+    coo = M.tocoo()
+
+    # D_ij = sqrt(-2*log(w_ij)); clip below to avoid log(0) for numerically-zero
+    # survivors (weights can't exceed 1 after multiplying two <=1 kernels).
+    w = np.clip(coo.data, 1e-12, 1.0)
+    d = np.sqrt(-2.0 * np.log(w))
+
+    row_to_idx = {}
+    for i, r in enumerate(coo.row):
+        row_to_idx.setdefault(r, []).append(i)
+
+    sigma = np.full(M.shape[0], np.nan)
+    for r, idx in row_to_idx.items():
+        sigma[r] = _bandwidth_from_neighbor_dists(np.sort(d[idx]), bandwidth_mode)
+
+    new_data = np.empty_like(d)
+    for i, r in enumerate(coo.row):
+        new_data[i] = np.exp(-(d[i] ** 2) / (2 * sigma[r] ** 2))
+
+    return sp.csr_matrix((new_data, (coo.row, coo.col)), shape=M.shape)
+
+
+def _get_or_build_ctx_kernel(ad, k):
+    """Build (or reuse) the SEACells adaptive-RBF kernel on X_ctx -- the shared base
+    step for 'ctx', 'ctxm', and 'ctxg', which otherwise each independently rebuild
+    this identical ~4-5 minute computation (kNN -> RBF -> LIL -> CSR) even though it
+    depends only on X_ctx and k, not on which of the three is asking for it, or on
+    whatever PCA correction gets multiplied on top afterward.
+
+    Stored in ad.obsp['ctx_kernel'], which persists to disk via write_h5ad the same
+    way ad.obsm['X_ctx'] already does (see _ensure_X_ctx) -- so once any ONE of
+    ctx/ctxm/ctxg has built it and the caller saves the adata back to disk, every
+    later call (including run_mc_task reloading a fresh copy of the file internally
+    for each separate scProto training run) reuses it instead of rebuilding.
+    """
+    if 'ctx_kernel' in ad.obsp:
+        print("[ctx kernel] using existing ad.obsp['ctx_kernel'] (not recomputed)")
+        return ad.obsp['ctx_kernel']
+
+    import time
+    import SEACells.build_graph
+    t0 = time.time()
+    print(f"[ctx kernel] building SEACellGraph + rbf kernel on X_ctx (n={ad.n_obs}, k={k}) ...")
+    kernel_model = SEACells.build_graph.SEACellGraph(ad, "X_ctx", verbose=True)
+    s_ctx = kernel_model.rbf(k, graph_construction="union")
+    print(f"[ctx kernel] done ({time.time()-t0:.1f}s)  nnz={s_ctx.nnz}")
+    ad.obsp['ctx_kernel'] = s_ctx
+    return s_ctx
+
+
+def _ensure_X_ctx(ad, target_median_neighbours=None):
+    """Ensure ad.obsm['X_ctx'] exists, computing it via a radius CALIBRATED to a target
+    median neighbour count (default 32, Pentimalli et al.'s own reported 2D median --
+    see datasets/spatial_subsets.py) rather than a hand-picked fixed radius. Shared by
+    the 'ctx', 'ctxm', and 'ctxg' branches below so this logic lives in exactly one
+    place, not duplicated with its own hardcoded radius per branch (which is what 'ctx'
+    and 'ctxm'/'ctxg' each did independently before this helper existed).
+
+    Reuses whatever's already in ad.obsm['X_ctx'] as-is and never recomputes -- e.g. if
+    it was pre-baked into the .h5ad on disk (as done for fibnsc.h5ad via
+    build_celltype_subset_with_context, and however a caller chooses to do the same for
+    any other dataset to avoid recomputing this across multiple training runs that each
+    reload the file fresh).
+    """
+    if 'X_ctx' in ad.obsm:
+        print('[X_ctx] using existing X_ctx already in adata (not recomputed)')
+        return ad.obsm['X_ctx']
+
+    import time
+    from interpretable_ssl.datasets.spatial_subsets import (
+        calibrate_radius_for_target_median_neighbours, DEFAULT_TARGET_MEDIAN_NEIGHBOURS,
+    )
+    if 'X_pca' not in ad.obsm:
+        sc.tl.pca(ad)
+    target = target_median_neighbours or DEFAULT_TARGET_MEDIAN_NEIGHBOURS
+    radius = calibrate_radius_for_target_median_neighbours(ad, target=target)
+    t0 = time.time()
+    ad.obsm['X_ctx'] = build_context(ad, radius)
+    print(f"[X_ctx] build_context(radius={radius:.4f}) done ({time.time()-t0:.1f}s)")
+    return ad.obsm['X_ctx']
+
+
+def weighted_same_label_frac(Mcsr, labels):
+    """For each cell, the edge-weighted fraction of its neighbours sharing its
+    label. Shared by the 'ctx' branch's own diagnostic print and the new
+    ctx_pca_* branches below — pulled out to module level so both can call it
+    instead of duplicating it. Returns NaN for isolated cells (row_sum == 0).
+    """
+    labels = np.asarray(labels)
+    row_sums = np.asarray(Mcsr.sum(axis=1)).ravel()
+    Mcoo = Mcsr.tocoo()
+    match = (labels[Mcoo.row] == labels[Mcoo.col]).astype(np.float64)
+    weighted = np.zeros(Mcsr.shape[0])
+    np.add.at(weighted, Mcoo.row, Mcoo.data * match)
+    with np.errstate(invalid='ignore', divide='ignore'):
+        frac = weighted / row_sums
+    return frac
+
+
+def log_weighted_same_label_fracs(M, ad, name, label_specs=(("cell-type", "celltypes"), ("niche", "niches_2D"))):
+    """Print weighted same-label neighbour fraction for each (label_name, obs_key)
+    pair that exists in ad.obs — same print format the 'ctx' branch already uses,
+    now reusable so ctx_pca_median/ctx_pca_maxgap (and anything else) can log the
+    same diagnostic without re-deriving it.
+    """
+    Mcsr = M.tocsr()
+    for label_name, obs_key in label_specs:
+        if obs_key not in ad.obs.columns:
+            continue
+        frac = weighted_same_label_frac(Mcsr, ad.obs[obs_key].to_numpy())
+        print(f"[{name}] weighted same-{label_name} neighbour fraction "
+              f"(obs['{obs_key}']): mean={np.nanmean(frac):.3f}  "
+              f"median={np.nanmedian(frac):.3f}  std={np.nanstd(frac):.3f}  "
+              f"n_isolated={int(np.isnan(frac).sum())}")
+
+
+def graph_collapse_diagnostics(M, name="graph", leiden_resolution=1.0, top_n_communities=5,
+                                num_prototypes=None):
+    """Predicts, from an affinity graph alone -- no scProto training needed -- whether
+    training on it is likely to collapse most cells onto very few prototypes (the
+    observed failure mode: one metacell absorbing 2702/15309 cells while 93% of
+    prototypes get under 10 cells).
+
+    Three independent checks:
+
+    1. Effective degree (effk) vs. raw degree, per cell. effk_i = 1/sum_j(p_ij^2),
+       p_ij = row-normalized weight -- already the exact concept this codebase uses
+       elsewhere for temperature calibration (appendix/training.tex: "the target
+       K_eff is derived from the median effective number of neighbours in the
+       affinity graph"). effk close to raw degree means most of a cell's neighbours
+       contribute roughly equally to its weight budget -- no real local structure to
+       separate on (flat, like a plain X_ctx-topology graph). effk much smaller than
+       raw degree means a few neighbours dominate -- real local contrast (sharp, like
+       arbf-on-PCA).
+
+    2. Degree SPREAD (std/min/max, not just mean/median): a graph where most cells
+       sit around the same degree but a subset are far denser is exactly the
+       "few-huge-many-tiny" shape -- the mean/median alone can look fine while the
+       spread already gives it away. Same underlying stats `affinity_report()`
+       (trainers/scproto.py, printed as `aff_stats` at the start of every real
+       training run) already reports for whatever graph a run actually trains on --
+       reproduced here so a candidate graph can be checked before committing to a
+       training run at all.
+
+    3. Leiden community sizes on the RAW graph, before any neural training. This is
+       the more direct test: run a cheap, purely graph-theoretic clustering and check
+       whether one community already swallows a large fraction of cells. Since
+       scProto's own community-preserving loss (the UMAP loss on graph edges, and
+       nassoc when lambda_nassoc>0) pulls toward the same kind of structure this
+       graph already encodes, a graph that Leiden-collapses on its own is a strong
+       predictor that training will too -- lets you compare candidate graphs (e.g.
+       'ctxg' vs. a new design) BEFORE spending time on a full run.
+
+    Also checks the simple rule: if cells are on average connected to effk_mean
+    "effective" neighbours, a community-preserving loss will tend to pull each of
+    those neighbourhoods toward one shared prototype, so the number of prototypes
+    that actually end up used should be roughly n_cells / effk_mean. If
+    num_prototypes (K) is passed and is far above that predicted count, K itself is
+    oversized relative to what this graph's own connectivity can differentiate --
+    excess prototypes have nothing to grab onto and end up near-empty, which is
+    exactly the observed "many tiny metacells" half of the failure mode (independent
+    of the "few huge" half, which the effk/degree-flatness and Leiden checks above
+    speak to).
+
+    Args:
+        M:                 sparse affinity matrix (n_cells x n_cells).
+        name:              label for the printed output.
+        leiden_resolution: passed to leidenalg's RBConfigurationVertexPartition.
+        top_n_communities: how many of the largest communities to print sizes for.
+        num_prototypes:    if given, compares against the effk-predicted metacell
+                            count (n_cells / effk_mean) and raw-degree-predicted
+                            count (n_cells / degree_mean).
+
+    Returns:
+        dict with 'degree' and 'effk' (per-cell arrays); also 'leiden_sizes' and
+        'leiden_top1_frac' if leidenalg/python-igraph are installed.
+    """
+    Mcsr = M.tocsr()
+    row_sums = np.asarray(Mcsr.sum(axis=1)).ravel()
+    degree = np.asarray((Mcsr > 0).sum(axis=1)).ravel()
+
+    Mcoo = Mcsr.tocoo()
+    with np.errstate(invalid='ignore', divide='ignore'):
+        p = Mcoo.data / row_sums[Mcoo.row]
+    effk_denom = np.zeros(Mcsr.shape[0])
+    np.add.at(effk_denom, Mcoo.row, np.nan_to_num(p) ** 2)
+    effk = 1.0 / np.clip(effk_denom, 1e-12, None)
+
+    ratio = effk / np.clip(degree, 1, None)
+    print(f"[{name}] n={Mcsr.shape[0]}  nnz={Mcsr.nnz}")
+    print(f"[{name}] raw degree:  median={np.median(degree):.1f}  mean={degree.mean():.1f}  "
+          f"std={degree.std():.1f}  min={degree.min()}  max={degree.max()}")
+    print(f"[{name}] effk:        median={np.median(effk):.1f}  mean={effk.mean():.1f}  "
+          f"std={effk.std():.1f}  min={effk.min():.1f}  max={effk.max():.1f}")
+    print(f"[{name}] effk/degree ratio (median): {np.median(ratio):.3f}  "
+          f"(near 1.0 = flat/no local structure to separate on, near 0 = sharp/discriminative)")
+
+    n_cells = Mcsr.shape[0]
+    pred_k_effk = n_cells / max(effk.mean(), 1e-8)
+    pred_k_degree = n_cells / max(degree.mean(), 1e-8)
+    print(f"[{name}] predicted usable prototype count: n/effk_mean={pred_k_effk:.0f}  "
+          f"n/degree_mean={pred_k_degree:.0f}"
+          + (f"  vs. requested K={num_prototypes}" if num_prototypes else ""))
+    if num_prototypes and num_prototypes > 2 * pred_k_effk:
+        print(f"[{name}] WARNING: requested K={num_prototypes} is more than 2x the "
+              f"effk-predicted usable count ({pred_k_effk:.0f}) -- most of the excess "
+              f"prototypes have no distinguishable neighbourhood to grab onto and will "
+              f"end up near-empty, regardless of what happens with the few dense ones.")
+
+    result = {
+        'degree': degree, 'effk': effk,
+        'pred_k_effk': pred_k_effk, 'pred_k_degree': pred_k_degree,
+    }
+
+    try:
+        import igraph as ig
+        import leidenalg
+        g = ig.Graph(n=Mcsr.shape[0], edges=list(zip(Mcoo.row.tolist(), Mcoo.col.tolist())),
+                     directed=False)
+        g.es['weight'] = Mcoo.data.tolist()
+        g.simplify(combine_edges='sum')
+        partition = leidenalg.find_partition(
+            g, leidenalg.RBConfigurationVertexPartition,
+            weights='weight', resolution_parameter=leiden_resolution, seed=0,
+        )
+        sizes = sorted(partition.sizes(), reverse=True)
+        top = sizes[:top_n_communities]
+        frac_top1 = top[0] / Mcsr.shape[0]
+        print(f"[{name}] Leiden (resolution={leiden_resolution}): {len(sizes)} communities, "
+              f"largest {top_n_communities}: {top}  top-1 fraction of all cells: {frac_top1:.1%}")
+        if frac_top1 > 0.3:
+            print(f"[{name}] WARNING: {frac_top1:.1%} of cells fall into a single Leiden "
+                  f"community on the raw graph, before any training -- strong predictor of "
+                  f"prototype collapse (same failure mode as the observed 2702-cell metacell).")
+        result['leiden_sizes'] = sizes
+        result['leiden_top1_frac'] = frac_top1
+    except ImportError:
+        print(f"[{name}] leidenalg/python-igraph not installed -- skipping the community-size "
+              f"check (pip install python-igraph leidenalg to enable it). The effk numbers "
+              f"above still stand on their own.")
+
+    return result
+
+
+def leiden_resolution_sweep(M, resolutions=(0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 5.0),
+                             name="graph", min_community_size=5):
+    """Sweep Leiden resolution on a raw affinity graph and report how many communities
+    each resolution finds -- lets you pick a prototype count (num_prototypes) directly
+    from the graph's own natural structure, instead of committing to a fixed convention
+    (K ~= N/75) that may be far more than the graph can actually differentiate. No
+    training needed -- purely graph-theoretic, same Leiden call graph_collapse_diagnostics
+    already makes at a single fixed resolution, just swept over many resolutions instead.
+
+    Use alongside the true niche count (e.g. `adata.obs[NICHE_KEY].nunique()`) as a
+    sanity reference point -- not a target to hit directly (a resolution producing
+    exactly as many communities as true niches would badly under-resolve real
+    within-niche heterogeneity useful for pseudobulk DGE), but a floor: a resolution
+    giving noticeably FEWER communities than true niches means the graph itself can't
+    even separate the niches you're trying to recover, regardless of what scProto/
+    SEACells do downstream.
+
+    Args:
+        M:                  sparse affinity matrix.
+        resolutions:        resolution values to try.
+        name:               label for printed output.
+        min_community_size: communities smaller than this are counted separately (a
+                             resolution producing lots of these is likely
+                             over-splitting into noise, not real structure).
+
+    Returns:
+        list of dicts, one per resolution: resolution, n_communities, median_size,
+        frac_below_min_size, top1_frac.
+    """
+    import igraph as ig
+    import leidenalg
+
+    Mcsr = M.tocsr()
+    Mcoo = Mcsr.tocoo()
+    g = ig.Graph(n=Mcsr.shape[0], edges=list(zip(Mcoo.row.tolist(), Mcoo.col.tolist())),
+                 directed=False)
+    g.es['weight'] = Mcoo.data.tolist()
+    g.simplify(combine_edges='sum')
+
+    results = []
+    print(f"[{name}] Leiden resolution sweep (n={Mcsr.shape[0]} cells):")
+    header = f"{'resolution':>10}  {'n_comm':>7}  {'median_size':>12}  " \
+             f"{'frac<'+str(min_community_size):>8}  {'top1_frac':>9}"
+    print(header)
+    for res in resolutions:
+        partition = leidenalg.find_partition(
+            g, leidenalg.RBConfigurationVertexPartition,
+            weights='weight', resolution_parameter=res, seed=0,
+        )
+        sizes = np.array(sorted(partition.sizes(), reverse=True))
+        n_comm = len(sizes)
+        median_size = float(np.median(sizes))
+        frac_small = float((sizes < min_community_size).mean())
+        top1_frac = float(sizes[0] / Mcsr.shape[0])
+        print(f"{res:>10}  {n_comm:>7}  {median_size:>12.1f}  {frac_small:>8.1%}  {top1_frac:>9.1%}")
+        results.append({
+            'resolution': res, 'n_communities': n_comm, 'median_size': median_size,
+            'frac_below_min_size': frac_small, 'top1_frac': top1_frac,
+        })
+    return results
+
+
 def faiss_knn(b_adata, k):
     import faiss
 
@@ -721,7 +1380,10 @@ def faiss_knn(b_adata, k):
 
 
 def diffusion_knn(batch_adata, k, n_proto):
-    import SEACells
+    import SEACells.core  # explicit submodule import for consistency with the
+    # build_graph fix elsewhere in this file -- bare `import SEACells` has not been
+    # observed to drop `.core` (unlike `.build_graph`), but there's no reason to rely
+    # on that continuing to hold across SEACells versions.
 
     model = SEACells.core.SEACells(
         batch_adata,
@@ -1167,6 +1829,31 @@ def save_affinity(aff, ds_name, n_cells, affinity_type,
         pickle.dump(aff, f)
     print(f"Saved: {fpath}")
     return fpath
+
+
+def load_or_build_affinity(ad, ds_name, affinity_type, k=50, bk=None,
+                            n_components=50, k_neighbors=50, graph_dir='./graphs', **kwargs):
+    """save_affinity's filename convention, but as a cache check first: if a matching
+    .pkl already exists (e.g. one a training run already produced via the
+    adata_augmenter subprocess pipeline, which uses this exact same naming scheme —
+    see adata_augmenter.py:set_graph_name), load it instead of recomputing generate_affinity
+    from scratch. Same idea as train_seacell(mode='eval')/_resolve_run_dir's idempotency
+    elsewhere in this codebase -- avoid paying for expensive graph construction twice.
+    """
+    import os
+    import pickle
+    fname = f"affinity_{ds_name}{ad.n_obs}_ncomp{n_components}_kneighbors{k_neighbors}_{affinity_type}.pkl"
+    fpath = os.path.join(graph_dir, fname)
+    if os.path.exists(fpath):
+        print(f"[load_or_build_affinity] found cached graph at {fpath} -- loading (not recomputing)")
+        with open(fpath, 'rb') as f:
+            return pickle.load(f)
+    print(f"[load_or_build_affinity] no cached graph at {fpath} -- building fresh "
+          f"(affinity_type={affinity_type}, k={k})")
+    aff = generate_affinity(ad, k, bk, affinity_type=affinity_type, **kwargs)
+    save_affinity(aff, ds_name, ad.n_obs, affinity_type,
+                  n_components=n_components, k_neighbors=k_neighbors, graph_dir=graph_dir)
+    return aff
 
 
 def diagnose_embedding(ad, rep_key='X_covet', niche_col='niches_3D', k=50, sample_n=2000):

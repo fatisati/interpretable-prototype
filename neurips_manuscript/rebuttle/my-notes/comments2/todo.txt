@@ -1,0 +1,340 @@
+what else remaining?
+
+
+discovery of niche related programs
+try on more spatial datasets
+better heldout modulairyt test 
+
+spatial niche program discovery
+
+what we knwo [bio fact try to verify by litriture]
+sometimes spatial context effet the cell state - and change the transctiptinal program
+they may be some subttle changes in some genes - where pca or vae base methods - or even seacell on pca cannot distiguish
+but I assume they shoudl be within cell type [s specific spatial context effect shoud be same wihin a cell type 
+- at least we know within a cell type we shoudl expect same effect - across cell types maybe same maybe no]
+so we can say finding spatial related sub states within each cell type - and show some specific gene programs where scproto can find and others not - and prefrebly they shoud be validated in litriture
+
+so how we shoud design experiment
+
+what we have now: we train scproto with arbf on spatial context affinity
+this would tell the model capture some info from the gene exressions to preserev spatial context simialrities
+first stage pretrain: cells of same cell type get close to each other
+second stage: it tries to change the latent so preserev spatial context simialriti - so 2 cell with simialr spatial context shoudl be close
+
+best case: for each cell - the affinity connecet cells within each ceel type and defien simialrity based on spatial context simialrity
+becasue if it do it across cell types - maybe a spatial context has diffreent transcripnal effect on cells of 2 type
+but we can wish that the affinity graph preserev this - can be also tested that how well spatial context simialrty preserev cells of same type
+we can also modiify the graph i guess - as this is not the main claim of the paper
+
+maybe a graph where connect cells of same type based on spatial context simialrity would be nice - and cells across cell types based on pca simiarites maybe
+I dont know - I would prefer nit to use celltype labels
+good and bad possible cases if we only use spatial context affinity:
+
+1. if each cell is connected to enough cells from its own cell type - then if any niche related program exist i think scproto would recover it
+2. if too much cross cell type high affinity edge exist - then the encoder will try to find simialr program among these cell types - however we dont know if this program same across cell types?
+also even if same - it depends how these 2 cell type are close transcriptnaly - becasue even simialr program between them - it may be hard for pretrained encoder to find anything if fisrt step set them aside
+
+so first i need to know what litriture says - niche programs are ct dependatn? specialy maybe considering the dataset i woud like to test [primarily on nscl - then the breast we discussed]
+---
+
+
+but we would prefer to show some signal without changin too much - so maybe focus on what we already have may be good enough
+now what our current result show: it seems scproto capable if recovering some niches inside some cell types so maybe we can also show it is capbale of recovering ct-niche [spatial transcrinal programs]
+so how shoudl we test? what experiment
+
+if we look at scproto as some sort of clustering method 
+maybe we can do this: 
+label each metacell majority voting - then for each ct-niche we can do diffrential gene expression analysis and check whether we see any specific pattern in cells assigned to each niche vs other cells of same ct?
+but then what would be the baseline? 
+we can do dge on single cell by looking at niche label - we can do same by looking at metacell niche label - but then what should we expect to see?
+
+i am confused - how would a spatial transcriptional gene expression disoceyr should look like in this case?
+
+ok so now we know that niche transcripnal effect is cell type specific - so the only remaining possible good case is that we can wish in our spatial context affinity graph most cells are within cell type
+
+or more accuratly has anough from each cell type ot recove rthe pattern - becasue the results we already shown on result 3 are really showing some improvement in improving niche purity - meaning we are grouping cells of same niche and same ct
+
+but lets solve things one by one - imagine we solved this ct affinity probelm [for example we can train only for 1 cell type maybe]
+then what? how shoudl we evaluate - considering our method - the metacell thing - how can we show finding spatial transcripnal program and how shoud we validate it
+
+i think one good option can be reading metacell papers - i included in the other paper folder - along with maybe some papers related to sptial transctional program discovery - and check what experiemnt they fo 
+i thin metacell method can show us how do people use the metacell method to do dge maybe -or simialr
+
+
+---
+what we can show
+
+we can label each cell by its metacell ct and niche
+then do dge on each niche vs rest in each ct [but for all cells so no probelm with sample size for sig tests]
+
+
+do learnet metacell recover same program as sc? and supercell has a metrics so no probelm with sig test - we can use same approach
+so would be like this 
+
+we get gt dge genes using single cell - for each ct we do dge on each niche - and we would know how genes diffrentialy exppressed in each niche of a ct
+then we would do same on metacell - but here we cant do significant test - but we can get logfc [follow the way other metacell did it]
+and then we can check which method matches the sc better
+some problems: we did simialr and evaluated rbo / kendel - and the values too low - maybe shoud not check on full 900 genes - althogh for rbo this maybe should not be important - 
+and i think we did dge on metacells - sig test and i think this was a wrong one maybe - i dont knwo we shoud apply rbo kende and the othe mteric we had on what numbers - logfc? sig test? or what?
+
+
+so what we agree:
+gt: dge for each niche within each ct
+label metacell majority voting
+
+for metacells? still not sure: i am cofused we evaluate metacell genes? or sc genes of each group? like we get each ceel mc labela dn do dge?
+what did other metacell methods did?
+
+full graph fine? or filter only within ct edges? or only train on one ct?
+
+---
+
+gt: clear
+label metacells: majority voting or score base voting?
+for metacell de: wilcoxon or logfc? we do have very few metacell for soe niches within some ct - how lit handle this: so i think we get logfc yes? and for this even 1 mc for a group can work?
+we have lognorm values for our metacell geneexpresion - what shoudl we do - what is the lib size thing mentioed? do we need to solve this? how?: i think this isnt an issue
+now what metric to measure? corr of logfc? supercell metric between what [sig value of sc with what from ms]? what do lit do?
+
+---
+for each metacell - each niche within each ct - we woudl do logfc and wilocoxn 
+then we compare sc lofc on the sig genes vs mc logfc - what metaq did
+also from wiloxcn get supercell metrics
+report all - then eval
+
+--
+now we shoudl decide one thing - does it make sense to eval on current spatial context graph thing - do we have results at all?
+
+
+so now we have a clear plan
+
+but the thing
+----
+
+so now we get both metrics [from super cell and metaQ - each usefull for one aspect of model]
+we train on fibroblast only - so we the cross cell type edges dont cuased problem any more
+
+to solve issue more genralized
+build knn on pca so each cell only connected to cells of its own cell type with high probablity - calc distance and then arbf on spatial context vector 
+challeng: we dont know if cells from same spatial context of my type are nesserly in top k of pca or not - 
+we can try to solve by increasing k but this also can cause problem in rare ct 
+
+what we really want: define simialrity based on spatial context simialrity within each ct - is this what we really want? 
+lets go 1 step back
+we want to capture cell states
+we know that sometimes spatial context can effect cell state
+but i think that may not be all - 2 cells of same type - in same spatial context - is it possible to have diffreent gene expression program? i dont think so - i mean at least not very plausbale case
+i mean i want to check removing abrf simialrity on pca - within a cell type and replacing by spatial context simialrity can give us some harm or prabably not?
+
+i am thinking of this: we can build arbf on pca - then leiden to cluster - then for each cluster we would calc arbf on x spatial context - do youthink this woud give good result - 
+it somhow would be unsupervised version within cell types simialrity shouwl be based on spatial context
+
+and how do leiden know how many cluters? can it find it automaticlay?
+
+
+i think for spatial aff - here is the problem
+what is advanatge of scproto on spatial aff - what i claimed: the fact that is gets gene exressoin and does not only consider affinity
+if we make aff within ct - we cannot work on that anymore
+but we also know pure spatial aff can be missleading for scproto too - and giving it wrong signals
+so what can be advanatge of scproto if the aff is as we said
+do we have any option that we can design aff and experiment so that scproto capablity where it capture info from gene expression can be highlited? in spatial setting?
+now in the paper we claimed on balance between spatial and ct purity
+but the probelm is that the aff we are feeding is too dense and it cause collapse - can we do any minor change so things get better
+if we want to go in this direction - we shoudl not correct the aff complitly - so seacell still mixes cell types - but we should somehow solve the problem scproto face
+and shoudl be in a way we can also show improvement within cell type spayial niche program recovery vs archtypal over same aff [i guess - unless i want to show something easier where can be original seacell [on pca]]
+
+we can have 2 other options too - but i feel need more change so i prefer somhow solve option 1
+
+seacell archtypal / leiden just look at aff - for the niches where there is no effect in they assign their own seprate cluster - but i think the dge cannot show anything
+in scproto they get mixed with others - because there is no signal in gene expression to see it - but how can we show improvement in sptial transcripnal recovery usig the method we have in plan1?
+is it being show considering those expeirmtn at all?
+
+last option - try on a dataset with batch effect
+and again batch effetc removal and metacell leanring togetehr advanatge of scproto give it somethign where others cant
+and show improvement in spatial transcripnal program recvery - where again hard as multi batch de is chalnegeing for itself - and we knwo scproto advanatge is by aliging across atches for rare types
+but proving that would be super hard - maybe just showing some imprvemnt in effect size or somthing - i dont know
+
+
+on changes on the graph we already have so it would work better for scproto - still seacell and leiden fall behind
+
+it shoudl be more sparse for sure - now everyone connected to each other - cause this one proto get all thing 
+also i think we shoud somhow lower the cross batch edge weights - this i think help scproto - but less help seacell and leiden - as they care about graph too much
+so maybe we generate smae graph and aff - but we can also calc arbf on pca of same knn graph [build on spatail context vector] - then multiply to that
+doing this cross cell type edges get lower wieght - so we are making the graph more sparse - also still have the bias - but loweing the noise for scproto - what do you think?
+
+---
+
+so what we can test - we build spatial context graph and aff
+but its too dense - with too many cross ct edges
+so we have 2 new line now
+for both we calc pca distances on same spatial context knn graph
+1. we calc max gap on pca - and use as bandwidth for pca 
+2. we use same median as bandwidth
+
+we calc arbf on pca [based on the bandwidth defined] and multiply to spatial aff
+so now cross cell type edges shoud get lower weight - now the graph should be more sparse - we need to log some metric before pca multiplicaiton and after
+and also cross type nise reduce
+
+train scproto on both graphs 
+also leiden / acrhtypal of seacell
+get metrics as plan 1 states
+compare 
+
+---
+why scProto's hard prototype assignment is collapsing onto a handful of hub prototypes instead: so maybe soft labeling solve the probelm anc hange things
+
+affinty graph casue few huge - many tiny cells 
+if a cell is assigned to a mc - becase of nassoc all connected cells to it shuodl come to it 
+also commuity loss push this too
+so why we see this behavier? isnt it some aspect of the aff graph? or somhow related to epsilon tuning?
+
+
+what we know now:
+metrics are bad now - the wierd pattern we see now: few huge metacells - many very small ones - this cannot give us good dge results
+how to solve:
+I rememebr we had similar challnege before - and i was abale to somehow solve it
+
+1. smaller epsilon - how do we calibrate epsilon now
+2. better affinity - i dont knwo exactlt what but i know some aspects of input affinity graph effect this very much
+maybe when avg degree of nodes inside the graph is high - also i think that shoudl be related to number of metacells
+but i dont know exctaky how to reasoning
+what i know: arbf on pca does not have this problem 
+but spatial graphs all have this probelm - we shoudl be realize exactly why
+
+somehting i can think of
+we can calc degree of each node - then check mean median std min max - for both arbf and all spatial graphs
+a simple rule came to my mind - if in avg each node is connected to k nodes - then metacell size shoudl be in avg k 
+so if we have n samples - number of metacells hsoudl be about n / k - we can check this rule on the graphs and see if this matches in arbf and how it look like in the spatial graphs
+
+also to make affinity better lets again think what bilogy says:
+we know pca arbf is doing very nice - but we think spatial context also metter on top - somtimes variance in spatial context is more important than variance in pca
+but i think only if the spatial context variance is really high - unless pca is more informative
+
+also small noise and bias from spatial is somthign we want
+and we want the spatial aff not cause collapse the way tha current spatial aff do and and do not collapse cover rae typres simialr to way tha arbf on pca do
+
+and maybe if we correct the range of edges would be fine?
+we need frst to realize if this is graph thing
+then realize what aspect of graph as a metric
+the realize why we have proble in spatial context graphs
+then decide a solution and check
+
+---
+new finding: arbf(ctx) * arbf(pca) -> the range is lower - the avg simialrity of 2 cell os lower than arbf(pca) -> cause increase in epsilon -> maybe the reason for collapse we see now
+
+what should we do? we need to solve this range problem
+we can do arbf on top of cell cell simialrity again - range now shoud be simiar to before
+we can also do arbf(join pca and ctx - maybe with 2 bandwidth?) - arbf(pca dist / pca bandwidth * ctx dist/median dist) is this helpfull?
+
+
+why in fib arbf on ctx also had collapse problem?
+
+---
+so now i think we shoud build banksy embdding maybe use their exact code - arbf on top - and run the model 
+both scproto and seacell archetypal - make sure for both methods - save soft assigment metrics too not jsut hard ones 
+report results for dge
+then also label metacells based on soft score voting - then report dge metrics
+---
+
+so now we decided to go with banksy - its an standrad published paper - and we can apply arbf on top
+I feel shoudl work - and it should solve the problems we had before
+
+design choices:
+1. banksy package vs our own pca version: i would go with banksy
+2. use lambda 0.5 i guess - for balance effect of spatial and ct for our case i guess
+3. then apply pca?
+4. then arbf on top
+now we have affinity - 
+
+
+---
+it seems the blocker now is the collapse
+either caused by hard scoring: this is easy to check - calc soft scoring based metrics - how?
+for each cell try to load / geenrate soft assigment scores to each cell
+for each cell label based on weighted majority voting - each cell vote counted by its oft score - not all cell has same vote
+and then calc dge metrics
+make sure to report some metric show wieghted score based ms sizes too - so we know if soft score do we have collapse too or not
+
+or by the loss / aff related things
+then again we shoudl realize why - maybe by reporting some metrics
+what we had in my mind: 
+we do waypoint init - so at first each proto is initiated at some place where shoudl be close to final postion of a distinct cell state
+then that becasue of community and nassoc loss - shoudl pull other cells connected to it in the aff [can we check this with some metric?]
+so we expect that at the end each proto capture a dense community whihc represent a cell state - where in our case would be a group of cells with same ct / niche label
+maybe its number of proto probelm - i remember in my prev expreice when we had less number of proto it ws better
+how can we realize number of proto somehow from aff?
+also i need some logs during training so i can realize what is happening
+and we discussed that maybe chnging some lambda also helps - the usage - nassoc lambda terms maybe
+
+also i was thinking maybe i shoudl switch to lambda 0.8 for banksy - the one that in their paper mentioned for spatial discovery 
+
+so first i need to realize in soft way do we still have collapse
+if so what is the reason? and can we solve it by either:
+change number of proto and infer it from the graph for better matching
+or by tuning loss terms?
+
+
+so now what - we run ema - get gene expression results - along with metacell sizes - also per ct-niche detail
+also train nk [new ema mode] the comparison results
+both on 15 epoch
+
+we thank the reviwer for their cuntructive feedback on
+dont say one item - say what was it- use the reviwer own wording even say easy to follow and undetand - summerize version just they dont need to recheck what they said
+then say what was our experiemnt clearly compact 
+say reason of what we did breif very breif
+dont say not possible on seacell twice
+say it as our model advanatge not seacell limitation - this test was only applicable on vae methods ...
+say detail on table below 
+overaly use connetcig sentces for smoother flow - all breif
+do not say redudnat things - but text shoudl be easy to udentad and make every undetading super easy for the reviwer
+overly this patern is nice one:
+what we did - why - how - and what was the conclusion - all brefi and compact 
+no long boring sneteces = but connecting snetces for smoother flo are nice
+
+
+
+the way our loss work:
+
+usage: all proto shudl have at least 1 assigend cell
+nassoc diag: once a cell is assigend to a proto - its connected cells should com there
+commuinty loss: also say siialr thing - force per pos edges
+
+so i think loking at the model soft view - we shoud not have collapse 
+
+
+
+what i want to show:
+
+when we have bk08 aff graph - cells with simialr spatial ct are connected \
+when we use this as scproto aff - it tries to correct the pretrain embedding spcae
+where unitl now mostly cells of same ct close to each other
+but does not nescrly consider subttle yet important spatial programs
+
+what scprot does: give it some signal and says cells of same type niche shoud be asisgned to sma proto
+so it change the latent and prototype to encode this
+
+then by decoding proto and plan1 analysis
+we woud like to show they are some niche-ct pairs - where scproto can recover well known genes
+matching what already in sc
+while seacell on pca cant - becasue it doenst have any spatial info
+also seacell on same abk08 aff also cant becase it does not have access to trasncripnal info and would get 
+spatial noise in the graph as soemhting and wont corrcet it
+i mean in bk08 some edges are ct and shoud not effect - but archtypal ont know it and do not encode this
+
+so do you think considerign all limittions scproto now have - we can find such few cases? i feel i may see somthign in results
+and what is the corrcet way of searching for it?
+maybe you can check the nscl paper other lit too
+
+
+so i think what we have now
+we did dge - we used metaq and supercell apraoch - we did on niche ct pairs
+also mention for aff graph instead mean ctx we used lit validated appraoch banksy arbf on top
+we see scproto overlay better brign numbers - then lit validated genes where support the story
+
+
+we did tested spatial niche recovery [use rev wording]
+we evaluated [say what we evaluedt]
+we find scproto can find sparial niche programs where others cant 
+we checkd again litruret founded genes and explain the mechanism
+but i dont know ovrlay what numebr i shoud report - i htink if i mention metaq mthod i shoud report pereasn and kedel 
+but what perason and kendeu is good for us? showing scproto advanatge?
+i would like to be honets - but my goal is to show hwta is good about scproto not its limitation

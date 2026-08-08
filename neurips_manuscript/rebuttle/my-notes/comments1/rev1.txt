@@ -1,0 +1,10 @@
+ablation
+scvi / bknn
+held out edge from non same graph - experiment design
+spatial claim
+
+
+
+scVI/Harmony/BBKNN comparisons remain incomplete: include this
+held-out edges from the same graph are not fully independent: will try to desing expeirmtn more indepent. trt to send reuslt
+also still wolring on spatial

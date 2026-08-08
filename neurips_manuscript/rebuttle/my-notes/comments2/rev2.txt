@@ -1,0 +1,8 @@
+
+Harmony is conventionally used at ~50 PCs, so restricting it to 8 handicaps the comparison in the authors' favour;:
+we did this for fairness of comparios - 
+
+
+
+to do:
+and the stop-gradient on modularity (.615±.08 .> .555±.07). Reporting variance over seeds and for all datasets would make these results clearer.

@@ -1,0 +1,17 @@
+notes
+
+ablation
+signifcnat test for headline table
+more baselines [maybe also supercell and metacell]
+spatial results on more slides / datatsets
+measures such as kBET or iLISI would sidestep that objection while still giving a common point of comparison
+---
+draft 
+
+start with thank [use bets parctice how people start their answer]
+here i have the baltion results - [bring from rev2 md file] - add some explantion to answer rev3 concern - say we can see pattern across 3 dataset for the metrics realy there
+[check headline sigfnicance results md file and answer this concern]
+[include scvi and hamrney baslines here - for hamrney use rev2 md file - for scvi chekc experment reuslts - say we will send metacell2 and supercell too]
+[still working on spatial trying to send it [dont waste char say super breif]]
+[kBET or iLISI : ongoing run]
+

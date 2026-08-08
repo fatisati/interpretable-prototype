@@ -1,0 +1,11 @@
+- generic [active] [ref=e1]:
+  - link "Google" [ref=e2] [cursor=pointer]:
+    - /url: //www.google.com/
+  - paragraph [ref=e4]:
+    - text: "404."
+    - insertion [ref=e5]: That’s an error.
+  - paragraph [ref=e6]:
+    - text: The requested URL
+    - code [ref=e7]: /
+    - text: was not found on this server.
+    - insertion [ref=e8]: That’s all we know.

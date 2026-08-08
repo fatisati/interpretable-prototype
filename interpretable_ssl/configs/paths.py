@@ -38,8 +38,14 @@ def get_code_dir():
     return CODE_DIR
 
 
-def get_seacell_model_dir(ds_id, build_kernel_on="X_pca"):
+def get_seacell_model_dir(ds_id, build_kernel_on="X_pca", num_prototypes=None):
+    """num_prototypes=None (default) reproduces the exact pre-existing path for every
+    caller that doesn't pass it -- only appends a '_K{n}' suffix when a caller
+    explicitly asks for a specific-K run to get its own directory, so different
+    NUM_PROTOTYPES values never collide/overwrite each other's SEACells runs."""
     dir_name = "seacell" if build_kernel_on == "X_pca" else f"seacell_{build_kernel_on}"
+    if num_prototypes is not None:
+        dir_name += f"_K{num_prototypes}"
     return os.path.join(MODEL_DIR, ds_id, dir_name)
 
 

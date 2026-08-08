@@ -103,3 +103,15 @@ print(res)
 - `coverage` — fraction of cell types represented
 - `dge_rbo_avg`, `dge_kendall_avg`, `dge_jaccard_avg` — differential gene expression ranking agreement
 - `scgraph_corr_avg` — correlation between metacell and single-cell graphs
+
+## Design notes / ongoing investigations
+
+Deeper write-ups of specific design decisions and open questions (not
+derivable from reading the code alone) live in `files/`:
+
+- [`files/sim_recon_investigation_index.md`](files/sim_recon_investigation_index.md) —
+  entry point for the `lambda_sim_recon` investigation: what it is, the
+  collapse bugs found and fixed, `full` vs `diffusion` targets, the
+  diffusion-map eigenvalue-decay measurement, and why compaction is done
+  per-cell rather than via a shared global basis. Links out to the other
+  `files/sim_recon_*.md` docs and the notebooks each one is backed by.

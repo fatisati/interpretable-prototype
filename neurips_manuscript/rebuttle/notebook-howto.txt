@@ -1,0 +1,8 @@
+setup simialr to what we already have in notebook folders - almost all of them are simialr
+for pip install also same as what we have in current notebook
+
+eveything shoud be if exist load thencontnieu mode - to be optmized when colab disconnecetd
+another rule: set epochs minimal - becasue we really dont have time and we need to be really fast - i think pretrain epochs 50 would be fine - scproto fintune maybe 20 fine
+also report result for 1 dtaset first for eval - then go for others  - so if we ran out of time we say we have results for this 
+also make sure rpeort all std for metrics too
+save eveything where can be usefull and takes time to computet - so if notebook get disconcetd in the middle we dont loose them - do not save reddna non nesacry huge files 

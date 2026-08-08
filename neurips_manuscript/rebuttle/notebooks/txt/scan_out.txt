@@ -1,0 +1,90 @@
+=== cell 0 (markdown) ===
+SRC: # Rebuttal experiment: batch-correction + graph-metacell baselines (SEACells / Leiden)
+
+**Purpose.** Reviewer F5RB (Q1): *"Please compare scProto with stronger two-step baselines, such as scPoli latent + SEACells, scVI
+latent + SEACells, Harmony latent + SEACells, and BBKNN graph + SEACells."* e9Ho:
+OUT: 
+
+=== cell 14 (code) ===
+SRC: def leiden_resolution_search(adjacency, target_k, seed=42, start_res=1.0, max_res=512.0):
+    """Get EXACTLY target_k Leiden clusters via over-segment + greedy modularity-gain
+    merge-down. Leiden has no native "give me K clusters" parameter -- resolution is
+    an indirect knob, and plain bisecti
+OUT: 
+
+=== cell 25 (code) ===
+SRC: pancreas_results = run_all_baselines_for_dataset('pancreas')
+OUT: dataset is None, loading pancreas
+loading pancreas data
+✅ Already subsetted to HVGs (4000 genes).
+stage1_latent_extract_ds-panc_NP220_aff-arbf_cvae_e50_v31
+Embedding dictionary:
+ 	Num conditions: [9]
+ 	Embedding dim: [10]
+Encoder Architecture:
+	Input Layer in, out and cond: 4000 64 10
+	Mean/Var Layer in/out: 64 8
+Decoder Architecture:
+	First Layer in, out and cond:  8 64 10
+	Output Layer in/out:  64 4000 
+
+📊 Affinity: wdeg[min/mean/max]=5.446/23.916/92.201, effk_med=62.4, mutual=100.00%
+adam
+Loaded pretrain checkpoint from /content/drive/MyDrive/models/pancreas/pretrain/pretrain_ds-pancreas_cvae_e50/pretrain_checkpoint.pth
+  pretrain_params: {'dataset_id': 'pancreas', 'cvae_epochs': 50, 'batch_size': 1024, 'latent_dims': 8, 'l2norm': 1, 'model_type': 'gm', 'beta': 0.3, 'condition_key': 'tech'}
+  0%|          | 0/16 [00:00<?, ?it/s][pancreas] Stage-1 latent: 16382 cells x 8 dims
+
+=== [pancreas] batch-correction method: stage1z ===
+Computing kNN graph using scanpy NN ...
+Computing radius for adaptive bandwidth kernel...
+  0%|          | 0/16382 [00:00<?, ?it/s]Making graph symmetric...
+Parameter graph_construction = union being used to build KNN graph...
+Computing RBF kernel...
+  0%|          | 0/16382 [00:00<?, ?it/s]Building similarity LIL matrix...
+  0%|          | 0/16382 [00:00<?, ?it/s]Constructing CSR matrix...
+[waypoint init] N=16382  k=220  n_eigs=10  nnz=1113772  nnz/row=68.0
+[waypoint init] computing diffusion map ...
+[waypoint init] diffusion map done — 10 eigenvect
+
+=== cell 27 (code) ===
+SRC: lung_results = run_all_baselines_for_dataset('lung')
+OUT: dataset is None, loading lung
+loading lung data
+✅ Already subsetted to HVGs (4000 genes).
+stage1_latent_extract_ds-lung_aff-arbf_cvae_e50_v31
+Embedding dictionary:
+ 	Num conditions: [16]
+ 	Embedding dim: [10]
+Encoder Architecture:
+	Input Layer in, out and cond: 4000 64 10
+	Mean/Var Layer in/out: 64 8
+Decoder Architecture:
+	First Layer in, out and cond:  8 64 10
+	Output Layer in/out:  64 4000 
+
+📊 Affinity: wdeg[min/mean/max]=5.255/24.467/119.300, effk_med=63.8, mutual=100.00%
+adam
+Loaded pretrain checkpoint from /content/drive/MyDrive/models/lung/pretrain/pretrain_ds-lung_cvae_e50/pretrain_checkpoint.pth
+  pretrain_params: {'dataset_id': 'lung', 'cvae_epochs': 50, 'batch_size': 1024, 'latent_dims': 8, 'l2norm': 1, 'model_type': 'gm', 'beta': 0.3, 'condition_key': 'batch'}
+  0%|          | 0/32 [00:00<?, ?it/s][lung] Stage-1 latent: 32472 cells x 8 dims
+
+=== [lung] batch-correction method: stage1z ===
+Computing kNN graph using scanpy NN ...
+Computing radius for adaptive bandwidth kernel...
+  0%|          | 0/32472 [00:00<?, ?it/s]Making graph symmetric...
+Parameter graph_construction = union being used to build KNN graph...
+Computing RBF kernel...
+  0%|          | 0/32472 [00:00<?, ?it/s]Building similarity LIL matrix...
+  0%|          | 0/32472 [00:00<?, ?it/s]Constructing CSR matrix...
+[waypoint init] N=32472  k=300  n_eigs=10  nnz=2271796  nnz/row=70.0
+[waypoint init] computing diffusion map ...
+[waypoint init] diffusion map done — 10 eigenvectors
+waypoint MaxMin: 100%|█████
+
+=== cell 31 (code) ===
+SRC: dataset_display_names = {'pancreas': 'Pancreas', 'lung': 'Lung', 'pbmc-immune': 'Immune'}
+
+# --- Table 1 (community structure / batch integration): modularity, batch entropy, purity ---
+# Same convention as generate_tables.ipynb: load_task1_multi -> clean_run_names -> show_table.
+df_task1 = load_tas
+OUT: 

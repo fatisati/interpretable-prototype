@@ -1,0 +1,888 @@
+- generic [active] [ref=f1e1]:
+  - region "workspace.google.com uses cookies from Google to deliver and enhance the quality of its services and to analyze traffic." [ref=f1e2]:
+    - paragraph [ref=f1e3]:
+      - text: workspace.google.com uses cookies from Google to deliver and enhance the quality of its services and to analyze traffic.
+      - link "Learn more about how Google uses cookies. Opens in a new tab." [ref=f1e4] [cursor=pointer]:
+        - /url: https://policies.google.com/technologies/cookies?hl=en
+        - text: Learn more
+    - button "OK, got it" [ref=f1e5] [cursor=pointer]
+  - generic [ref=f1e6]:
+    - generic:
+      - generic: expand_more expand_more expand_more expand_more expand_more expand_more expand_more expand_more expand_more expand_more expand_more expand_more
+      - banner [ref=f1e7]:
+        - generic [ref=f1e8]:
+          - text: expand_more expand_more expand_more expand_more expand_more expand_more expand_more expand_more expand_more expand_more expand_more expand_more
+          - link "Open the Google Workspace page" [ref=f1e10] [cursor=pointer]:
+            - /url: /
+          - generic [ref=f1e19]:
+            - generic [ref=f1e20]:
+              - button "Open search" [ref=f1e21] [cursor=pointer]
+              - generic:
+                - generic:
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic:
+                          - search:
+                            - generic:
+                              - generic:
+                                - combobox "Search"
+                                - generic:
+                                  - generic: Search
+                                  - generic: resources
+                              - button "Close search"
+                          - listbox "Popular suggestions":
+                            - generic: Popular
+                          - status
+            - link "Try Google Drive for work" [ref=f1e27] [cursor=pointer]:
+              - /url: https://workspace.google.com/products/drive/for-work/?from=gafb-drive-def-en
+              - generic [ref=f1e28]: Try Drive for work
+            - link "Sign in to Google Drive" [ref=f1e30] [cursor=pointer]:
+              - /url: https://drive.google.com/drive/?dmr=1&ec=wgc-drive-[module]-goto
+              - generic [ref=f1e31]: Sign in
+        - generic [ref=f1e33]:
+          - group [ref=f1e34]:
+            - generic "Solutions" [ref=f1e35] [cursor=pointer]
+          - group [ref=f1e36]:
+            - generic "Products" [ref=f1e37] [cursor=pointer]
+          - group [ref=f1e38]:
+            - generic "Industries" [ref=f1e39] [cursor=pointer]
+          - link "Open the AI page" [ref=f1e41] [cursor=pointer]:
+            - /url: /solutions/ai/
+            - text: AI
+          - link "Open the Pricing page" [ref=f1e43] [cursor=pointer]:
+            - /url: https://workspace.google.com/pricing?source=gafb-drive-globalnav-en&hl=en&ga_region=amer&ga_country=us&ga_lang=en
+            - text: Pricing
+          - group [ref=f1e44]:
+            - generic "Resources" [ref=f1e45] [cursor=pointer]
+    - main [ref=f1e46]:
+      - generic [ref=f1e53]:
+        - generic [ref=f1e54]:
+          - generic [ref=f1e55]:
+            - img "Google Drive product logo" [ref=f1e57]
+            - heading "Store and share files online" [level=1] [ref=f1e59]
+            - generic [ref=f1e60]:
+              - paragraph [ref=f1e61]: AI-powered, secure cloud storage for seamless file sharing and enhanced collaboration.
+              - generic [ref=f1e62]:
+                - link "Sign in to Google Drive" [ref=f1e64] [cursor=pointer]:
+                  - /url: https://drive.google.com/drive/?dmr=1&ec=wgc-drive-[module]-goto
+                  - generic [ref=f1e65]: Sign in
+                - link "Try Google Drive for work" [ref=f1e67] [cursor=pointer]:
+                  - /url: https://workspace.google.com/products/drive/for-work/?from=gafb-drive-def-en
+                  - generic [ref=f1e68]: Try Drive for work
+          - img "Sharing project files in Google Drive and exploring more file actions with Gemini" [ref=f1e71]
+        - link "Navigate to the Gemini in Drive section" [ref=f1e73] [cursor=pointer]:
+          - /url: "#gemini-in-drive"
+          - generic [ref=f1e74]: Explore features
+      - list [ref=f1e83]:
+        - listitem [ref=f1e84]:
+          - option "Navigate to the Gemini in Drive section of the page" [selected] [ref=f1e85] [cursor=pointer]:
+            - generic [ref=f1e86]: Gemini in Drive
+        - listitem [ref=f1e87]:
+          - option "Navigate to the Store section of the page" [ref=f1e88] [cursor=pointer]:
+            - generic [ref=f1e89]: Store
+        - listitem [ref=f1e90]:
+          - option "Navigate to the Manage section of the page" [ref=f1e91] [cursor=pointer]:
+            - generic [ref=f1e92]: Manage
+        - listitem [ref=f1e93]:
+          - option "Navigate to the Collaborate section of the page" [ref=f1e94] [cursor=pointer]:
+            - generic [ref=f1e95]: Collaborate
+        - listitem [ref=f1e96]:
+          - option "Navigate to the Security section of the page" [ref=f1e97] [cursor=pointer]:
+            - generic [ref=f1e98]: Security
+        - listitem [ref=f1e99]:
+          - option "Navigate to the Download section of the page" [ref=f1e100] [cursor=pointer]:
+            - generic [ref=f1e101]: Download
+        - listitem [ref=f1e102]:
+          - option "Jump to the customers section of the page" [ref=f1e103] [cursor=pointer]:
+            - generic [ref=f1e104]: Customers
+        - listitem [ref=f1e105]:
+          - option "Navigate to the FAQs section of the page" [ref=f1e106] [cursor=pointer]:
+            - generic [ref=f1e107]: FAQs
+      - generic [ref=f1e112]:
+        - generic [ref=f1e114]:
+          - heading "Say goodbye to file silos and content chaos" [level=2] [ref=f1e116]
+          - generic [ref=f1e117]:
+            - paragraph [ref=f1e118]: Move your data and store all of your files in one place with Google Drive. AI-powered storage in the cloud helps teams collaborate in real-time, making it faster to find files and insights, backed by Google’s industry-leading data security for added protection.
+            - 'link "Learn more (Start a trial): Migrate to Google Drive" [ref=f1e120] [cursor=pointer]':
+              - /url: "/solutions/migration/drive-migration/ "
+              - text: Learn more
+        - img "A user starts typing a file name into the Google Drive search tool, and a list of potential matches appears." [ref=f1e123]
+      - generic [ref=f1e128]:
+        - generic [ref=f1e131] [cursor=pointer]:
+          - generic:
+            - generic:
+              - generic:
+                - img "YouTube video poster"
+          - button "Play video" [ref=f1e132]
+        - generic [ref=f1e136]:
+          - heading "Turn files into knowledge with Gemini in Google Drive" [level=2] [ref=f1e138]
+          - paragraph [ref=f1e140]: AI Overviews in Drive delivers instant, cited answers so you can stop digging and start finding. Ask Gemini in Drive provides grounded, detailed responses based on your content across Drive, Gmail, Calendar, and Chat—all within your control via customizable, shareable Drive projects.
+      - generic [ref=f1e146]:
+        - heading "Cloud storage made easy" [level=2] [ref=f1e147]
+        - paragraph [ref=f1e148]: Simple and scalable cloud storage for people and teams of all sizes. Upload, open, share and edit files from any device.
+      - generic [ref=f1e154]:
+        - generic [ref=f1e157]:
+          - group [ref=f1e159]:
+            - heading "Storage that grows with you" [level=3] [ref=f1e162] [cursor=pointer]
+            - paragraph [ref=f1e167]: Scale your storage effortlessly from 15GB to 5TB per user, plus the ability to request additional storage. Storage costs vary.
+          - group [ref=f1e169]:
+            - heading "Gmail attachments straight to Drive" [level=3] [ref=f1e172] [cursor=pointer]
+          - group [ref=f1e174]:
+            - heading "Scan documents with Drive" [level=3] [ref=f1e177] [cursor=pointer]
+        - generic [ref=f1e180]:
+          - generic:
+            - img "Indicating 30 gigabytes of storage used in Google Workspace"
+      - generic [ref=f1e186]:
+        - heading "Work smarter, save time" [level=2] [ref=f1e187]
+        - paragraph [ref=f1e188]: One place to manage, access, edit, and organize your files effortlessly for a streamlined workflow.
+      - generic [ref=f1e194]:
+        - generic [ref=f1e197]:
+          - generic:
+            - img "A logo cloud of popular Google Workspace products"
+        - generic [ref=f1e200]:
+          - group [ref=f1e202]:
+            - heading "Your files, all in one place" [level=3] [ref=f1e205] [cursor=pointer]
+            - paragraph [ref=f1e210]:
+              - text: Edit and organize
+              - link "Open the Google Docs page" [ref=f1e212] [cursor=pointer]:
+                - /url: https://workspace.google.com/products/docs/?from=gafb-drive-def-en
+                - text: Google Docs
+              - text: ","
+              - link "Open the Sheets page" [ref=f1e214] [cursor=pointer]:
+                - /url: https://workspace.google.com/products/sheets/?from=gafb-drive-def-en
+                - text: Sheets
+              - text: ","
+              - link "Open the Slides page" [ref=f1e216] [cursor=pointer]:
+                - /url: https://workspace.google.com/products/slides/?from=gafb-drive-def-en
+                - text: Slides
+              - text: ", Microsoft Office files, and PDFs in real-time. Plus, access over 100 other file types!"
+          - group [ref=f1e218]:
+            - heading "Annotate PDFs" [level=3] [ref=f1e221] [cursor=pointer]
+          - group [ref=f1e223]:
+            - heading "AI-powered search" [level=3] [ref=f1e226] [cursor=pointer]
+          - group [ref=f1e228]:
+            - heading "Activity view" [level=3] [ref=f1e231] [cursor=pointer]
+      - generic [ref=f1e237]:
+        - heading "Streamlined content collaboration and workflows" [level=2] [ref=f1e238]
+        - paragraph [ref=f1e239]: Unleash your team's full potential with seamless collaboration and effortless teamwork.
+      - generic [ref=f1e245]:
+        - generic [ref=f1e248]:
+          - group [ref=f1e250]:
+            - heading "Manage access" [level=3] [ref=f1e253] [cursor=pointer]
+            - paragraph [ref=f1e258]:
+              - text: Easily
+              - link "Open the share files page" [ref=f1e260] [cursor=pointer]:
+                - /url: https://workspace.google.com/resources/file-sharing/
+                - text: share files
+              - text: with customizable permissions (edit, comment, view). Control access further by preventing unwanted actions and setting expiration dates.
+          - group [ref=f1e262]:
+            - heading "Empower team collaboration with shared drives" [level=3] [ref=f1e265] [cursor=pointer]
+          - group [ref=f1e267]:
+            - heading "Electronic signatures" [level=3] [ref=f1e270] [cursor=pointer]
+          - group [ref=f1e272]:
+            - heading "3rd party integrations" [level=3] [ref=f1e275] [cursor=pointer]
+        - generic [ref=f1e278]:
+          - generic:
+            - img "Sharing a file from Drive and changing access to editor with an expiration date"
+      - generic [ref=f1e284]:
+        - heading "Secure cloud storage you can count on" [level=2] [ref=f1e285]
+        - paragraph [ref=f1e286]: Keep your data in trusted, compliant, and reliable cloud infrastructure that seamlessly integrates with your Workspace apps.
+      - generic [ref=f1e290]:
+        - generic [ref=f1e291]:
+          - generic [ref=f1e292]:
+            - img "A file saved on Google Drive" [ref=f1e294]
+            - generic [ref=f1e295]:
+              - heading "Cloud-native, enterprise-ready" [level=3] [ref=f1e297]
+              - paragraph [ref=f1e299]:
+                - text: A cloud infrastructure that is always up-to-date, helps reduce
+                - link "Open the security risks page" [ref=f1e301] [cursor=pointer]:
+                  - /url: https://workspace.google.com/security/threat-prevention/
+                  - text: security risks
+                - text: ", and meet"
+                - link "Open the compliance requirements page" [ref=f1e303] [cursor=pointer]:
+                  - /url: https://workspace.google.com/security/digital-sovereignty/
+                  - text: compliance requirements
+                - text: .
+          - generic [ref=f1e304]:
+            - img "Adding additional encryption to a file in Drive" [ref=f1e306]
+            - generic [ref=f1e307]:
+              - complementary [ref=f1e310]:
+                - 'button "Open Tooltip: This feature is available on some Google Workspace Business and Enterprise plans." [ref=f1e311]':
+                  - generic: Premium feature
+              - heading "Zero trust controls" [level=3] [ref=f1e318]
+              - paragraph [ref=f1e320]:
+                - strong [ref=f1e321]
+                - text: Robust security capabilities including
+                - link "Open the ransomware detection page" [ref=f1e323] [cursor=pointer]:
+                  - /url: https://workspace.google.com/blog/product-announcements/ai-ransomware-detection-in-google-drive
+                  - text: ransomware detection
+                - text: ","
+                - link "Open the client-side encryption page in a new tab" [ref=f1e325] [cursor=pointer]:
+                  - /url: https://support.google.com/a/answer/10741897?hl=en
+                  - text: client-side encryption
+                - text: ", and"
+                - link "Open the Vault page" [ref=f1e327] [cursor=pointer]:
+                  - /url: https://workspace.google.com/products/vault/?from=gafb-drive-def-en
+                  - text: Vault
+                - text: to safeguard sensitive data.
+          - generic [ref=f1e328]:
+            - img "Tagging an internal file as confidential in Drive" [ref=f1e330]
+            - generic [ref=f1e331]:
+              - complementary [ref=f1e334]:
+                - 'button "Open Tooltip: This feature is available on some Google Workspace Business and Enterprise plans." [ref=f1e335]':
+                  - generic: Premium feature
+              - heading "AI-powered security" [level=3] [ref=f1e342]
+              - paragraph [ref=f1e344]:
+                - link "Open the AI classification page in a new tab" [ref=f1e346] [cursor=pointer]:
+                  - /url: https://support.google.com/a/answer/12676216?hl=en
+                  - text: AI classification
+                - text: intelligently labels sensitive content, automatically identifying and protecting it with
+                - link "Open the data loss prevention (DLP) policies page in a new tab" [ref=f1e348] [cursor=pointer]:
+                  - /url: https://support.google.com/a/topic/7556687?hl=en&ref_topic=7558840&sjid=6320533305057951267-NC
+                  - text: data loss prevention (DLP) policies
+                - text: .
+        - text: arrow_forward arrow_forward
+      - generic [ref=f1e353]:
+        - generic [ref=f1e355]:
+          - heading "Sync your desktop with Drive" [level=2] [ref=f1e357]
+          - generic [ref=f1e358]:
+            - paragraph [ref=f1e359]: Get the most out of Drive right from your computer. Automatically keep all your Drive files up to date and protected. Available for Windows and macOS.
+            - link "Open the Download Drive for desktop page" [ref=f1e361] [cursor=pointer]:
+              - /url: https://dl.google.com/drive-file-stream/GoogleDriveSetup.exe
+              - generic [ref=f1e362]: Download Drive for desktop
+        - img "Drive for desktop syncing files to the cloud" [ref=f1e365]
+      - generic [ref=f1e371]:
+        - heading "Block ransomware proliferation with Drive for desktop" [level=2] [ref=f1e372]
+        - paragraph [ref=f1e373]: With AI-powered virus detection seamlessly integrated into Drive for desktop, customers have real-time ransomware detection, instant file recovery, and enhanced data security. Protect your business from costly downtime and data loss.
+      - generic [ref=f1e380] [cursor=pointer]:
+        - generic:
+          - generic:
+            - generic:
+              - img "This video shows Google Drive for desktop detecting a ransomware attack, stopping file uploads to the cloud, and allowing a user to easily restore multiple files."
+        - button "Drive for desktop syncing files to the cloud with ransomeware detection" [ref=f1e381]
+      - generic [ref=f1e391]:
+        - heading "Experience Drive on your mobile devices" [level=2] [ref=f1e392]
+        - generic [ref=f1e393]:
+          - link "Download the Drive app for iOS" [ref=f1e395] [cursor=pointer]:
+            - /url: https://apps.apple.com/app/google-drive/id507874739
+          - link "Download the Drive app for Android" [ref=f1e407] [cursor=pointer]:
+            - /url: https://play.google.com/store/apps/details?id=com.google.android.apps.docs
+      - generic [ref=f1e425]:
+        - heading "Learn why organizations use Drive" [level=2] [ref=f1e432]
+        - generic [ref=f1e438]:
+          - generic [ref=f1e439]:
+            - generic:
+              - generic [ref=f1e443]:
+                - generic:
+                  - generic:
+                    - generic:
+                      - img "Blue Ox Films logo"
+                - figure [ref=f1e445]:
+                  - blockquote [ref=f1e446]:
+                    - paragraph [ref=f1e447]: “We’ve automated our kick-off process. When we have a new project come in, within two minutes, we have all of the relevant templates duplicated in a Google Drive folder.”
+                  - generic [ref=f1e448]:
+                    - strong [ref=f1e449]: Taylor Kavanaugh
+                    - text: ", Co-founder and Executive Producer, Blue Ox Films"
+                  - link "Learn more about the Blue Ox Films customer story" [ref=f1e451] [cursor=pointer]:
+                    - /url: "https://workspace.google.com/customers/blueoxfilms/ "
+                    - generic [ref=f1e452]: Learn more
+              - generic [ref=f1e456]:
+                - generic:
+                  - generic:
+                    - generic:
+                      - img "Roche logo"
+                - figure [ref=f1e458]:
+                  - blockquote [ref=f1e459]:
+                    - paragraph [ref=f1e460]: “We have 100,000 users and billions of files in Google Drive. We couldn’t handle the labeling process at scale without AI classification. It provides value immediately, from the moment you turn it on.”
+                  - generic [ref=f1e461]:
+                    - strong [ref=f1e462]: Tim Ehrhart
+                    - text: ", CISO, Roche"
+                  - link "Learn more about the Roche customer story" [ref=f1e464] [cursor=pointer]:
+                    - /url: https://workspace.google.com/blog/customer-stories/roche-protects-files-ai-classification-google-drive
+                    - generic [ref=f1e465]: Learn more
+              - generic [ref=f1e469]:
+                - generic:
+                  - generic:
+                    - generic:
+                      - img "MM Pakistan logo"
+                - figure [ref=f1e471]:
+                  - blockquote [ref=f1e472]:
+                    - paragraph [ref=f1e473]: “Drive serves as a reference point for solutions from all our past projects so that our teams won’t feel like they need to reinvent the wheel when they start a new project.”
+                  - generic [ref=f1e474]:
+                    - strong [ref=f1e475]: Kamran Rafique
+                    - text: ", Technical Account Leader, MMP Pakistan"
+                  - link "Learn more about the MM Pakistan customer story" [ref=f1e477] [cursor=pointer]:
+                    - /url: "https://workspace.google.com/customers/mmp/ "
+                    - generic [ref=f1e478]: Learn more
+          - generic:
+            - generic:
+              - button "Previous slide" [disabled]: arrow_forward
+              - button "Next slide" [ref=f1e479] [cursor=pointer]: arrow_forward
+          - tablist [ref=f1e480]:
+            - tab "Navigate to slide 1" [selected] [ref=f1e481]
+            - tab "Navigate to slide 2" [ref=f1e482]
+            - tab "Navigate to slide 3" [ref=f1e483]
+      - generic [ref=f1e491]:
+        - heading "Curious about Google Drive?" [level=2] [ref=f1e492]
+        - paragraph [ref=f1e493]: Take a look at our FAQs to learn more.
+      - generic [ref=f1e502]:
+        - button "Expand all" [ref=f1e507] [cursor=pointer]:
+          - generic [ref=f1e508]: Expand all unfold_more
+        - list [ref=f1e509]:
+          - generic:
+            - listitem [ref=f1e510]:
+              - group [ref=f1e512]
+            - listitem [ref=f1e517]:
+              - group [ref=f1e519]
+            - listitem [ref=f1e524]:
+              - group [ref=f1e526]
+      - generic [ref=f1e539]:
+        - img "Drive icon" [ref=f1e542]
+        - generic [ref=f1e544]:
+          - heading "Store, manage and collaborate with Google Drive" [level=2] [ref=f1e545]
+          - generic [ref=f1e546]:
+            - link "Sign in to Google Drive" [ref=f1e548] [cursor=pointer]:
+              - /url: https://drive.google.com/drive/?dmr=1&ec=wgc-drive-[module]-goto
+              - generic [ref=f1e549]: Sign in
+            - link "Try Google Drive for work" [ref=f1e551] [cursor=pointer]:
+              - /url: https://workspace.google.com/products/drive/for-work/?from=gafb-drive-def-en
+              - generic [ref=f1e552]: Try Drive for work
+    - generic [ref=f1e555]:
+      - generic:
+        - generic [ref=f1e558]:
+          - generic [ref=f1e559]:
+            - heading "Sign up for productivity, collaboration, and AI updates" [level=2] [ref=f1e561]
+            - generic [ref=f1e563]:
+              - button "1"
+              - button "2"
+          - generic [ref=f1e567]:
+            - generic [ref=f1e568]:
+              - generic [ref=f1e573]:
+                - generic: First name*
+                - generic [ref=f1e575]:
+                  - generic: First name*
+                  - textbox "First name" [ref=f1e578]
+              - generic [ref=f1e583]:
+                - generic: Last name*
+                - generic [ref=f1e585]:
+                  - generic: Last name*
+                  - textbox "Last name" [ref=f1e588]
+              - generic [ref=f1e593]:
+                - generic: Business email*
+                - generic [ref=f1e595]:
+                  - generic: Business email*
+                  - textbox "Business email" [ref=f1e598]
+              - generic [ref=f1e601]:
+                - combobox "Selected country" [ref=f1e603]:
+                  - generic [ref=f1e604]: United States +1
+                - textbox "201-555-0123" [ref=f1e608]
+            - button "Open the Continue page" [ref=f1e611] [cursor=pointer]:
+              - generic [ref=f1e612]: Continue
+        - contentinfo [ref=f1e614]:
+          - generic [ref=f1e615]:
+            - generic [ref=f1e616]:
+              - generic [ref=f1e617]:
+                - generic [ref=f1e618]:
+                  - paragraph [ref=f1e620]:
+                    - text: Follow our
+                    - link "Open the Blog page" [ref=f1e622] [cursor=pointer]:
+                      - /url: https://workspace.google.com/blog/
+                      - text: Blog
+                  - list [ref=f1e623]:
+                    - listitem [ref=f1e624]:
+                      - link "Open the footer social links X page in a new tab" [ref=f1e625] [cursor=pointer]:
+                        - /url: https://x.com/googleworkspace
+                        - img "Follow us on X" [ref=f1e627]
+                    - listitem [ref=f1e628]:
+                      - link "Open the footer social links YouTube page in a new tab" [ref=f1e629] [cursor=pointer]:
+                        - /url: https://www.youtube.com/channel/UCBmwzQnSoj9b6HzNmFrg_yw/
+                        - img "YouTube" [ref=f1e631]
+                    - listitem [ref=f1e632]:
+                      - link "Open the footer social links LinkedIn page in a new tab" [ref=f1e633] [cursor=pointer]:
+                        - /url: https://www.linkedin.com/showcase/googleworkspace/
+                        - img "LinkedIn" [ref=f1e635]
+                    - listitem [ref=f1e636]:
+                      - link "Open the footer social links Instagram page in a new tab" [ref=f1e637] [cursor=pointer]:
+                        - /url: https://www.instagram.com/googleworkspace/
+                        - img "Instagram" [ref=f1e639]
+                    - listitem [ref=f1e640]:
+                      - link "Open the footer social links Facebook page in a new tab" [ref=f1e641] [cursor=pointer]:
+                        - /url: https://www.facebook.com/googleworkspace/
+                        - img "Facebook" [ref=f1e643]
+                    - listitem [ref=f1e644]:
+                      - link "Open the footer social links TikTok page in a new tab" [ref=f1e645] [cursor=pointer]:
+                        - /url: https://goo.gle/3xj0b2F
+                        - img "TikTok" [ref=f1e647]
+                - textbox "Search this site" [ref=f1e649]
+              - generic [ref=f1e650]:
+                - list [ref=f1e651]:
+                  - list [ref=f1e652]:
+                    - listitem [ref=f1e653]:
+                      - link "Open the Included applications page" [ref=f1e654] [cursor=pointer]:
+                        - /url: /features/
+                        - text: Included applications
+                    - list [ref=f1e655]:
+                      - listitem [ref=f1e656]:
+                        - link "Open the Gmail page" [ref=f1e658] [cursor=pointer]:
+                          - /url: https://workspace.google.com/products/gmail/?from=gafb-drive-def-en
+                          - text: Gmail
+                      - listitem [ref=f1e659]:
+                        - link "Open the Meet page" [ref=f1e661] [cursor=pointer]:
+                          - /url: https://workspace.google.com/products/meet/?from=gafb-drive-def-en
+                          - text: Meet
+                      - listitem [ref=f1e662]:
+                        - link "Open the Chat page" [ref=f1e664] [cursor=pointer]:
+                          - /url: https://workspace.google.com/products/chat/?from=gafb-drive-def-en
+                          - text: Chat
+                      - listitem [ref=f1e665]:
+                        - link "Open the Calendar page" [ref=f1e667] [cursor=pointer]:
+                          - /url: https://workspace.google.com/products/calendar/?from=gafb-drive-def-en
+                          - text: Calendar
+                      - listitem [ref=f1e668]:
+                        - link "Open the Drive page" [ref=f1e670] [cursor=pointer]:
+                          - /url: https://workspace.google.com/products/drive/?from=gafb-drive-def-en
+                          - text: Drive
+                      - listitem [ref=f1e671]:
+                        - link "Open the Docs page" [ref=f1e673] [cursor=pointer]:
+                          - /url: https://workspace.google.com/products/docs/?from=gafb-drive-def-en
+                          - text: Docs
+                      - listitem [ref=f1e674]:
+                        - link "Open the Sheets page" [ref=f1e676] [cursor=pointer]:
+                          - /url: https://workspace.google.com/products/sheets/?from=gafb-drive-def-en
+                          - text: Sheets
+                      - listitem [ref=f1e677]:
+                        - link "Open the Slides page" [ref=f1e679] [cursor=pointer]:
+                          - /url: https://workspace.google.com/products/slides/?from=gafb-drive-def-en
+                          - text: Slides
+                      - listitem [ref=f1e680]:
+                        - link "Open the Vids page" [ref=f1e682] [cursor=pointer]:
+                          - /url: https://workspace.google.com/products/vids?from=gafb-drive-def-en
+                          - text: Vids
+                      - listitem [ref=f1e683]:
+                        - link "Open the Pics page" [ref=f1e685] [cursor=pointer]:
+                          - /url: https://workspace.google.com/products/pics/?from=gafb-drive-def-en
+                          - text: Pics
+                      - listitem [ref=f1e686]:
+                        - link "Open the Forms page" [ref=f1e688] [cursor=pointer]:
+                          - /url: https://workspace.google.com/products/forms/?from=gafb-drive-def-en
+                          - text: Forms
+                      - listitem [ref=f1e689]:
+                        - link "Open the Sites page" [ref=f1e691] [cursor=pointer]:
+                          - /url: https://workspace.google.com/products/sites/?from=gafb-drive-def-en
+                          - text: Sites
+                      - listitem [ref=f1e692]:
+                        - link "Open the Keep page" [ref=f1e694] [cursor=pointer]:
+                          - /url: https://workspace.google.com/products/keep/?from=gafb-drive-def-en
+                          - text: Keep
+                      - listitem [ref=f1e695]:
+                        - link "Open the Tasks page" [ref=f1e697] [cursor=pointer]:
+                          - /url: https://workspace.google.com/products/tasks/?from=gafb-drive-def-en
+                          - text: Tasks
+                      - listitem [ref=f1e698]:
+                        - link "Open the Studio page" [ref=f1e700] [cursor=pointer]:
+                          - /url: /studio/
+                          - text: Studio
+                      - listitem [ref=f1e701]:
+                        - link "Open the Gemini app page" [ref=f1e703] [cursor=pointer]:
+                          - /url: /solutions/ai/
+                          - text: Gemini app
+                      - listitem [ref=f1e704]:
+                        - link "Open the Gemini Notebook page" [ref=f1e706] [cursor=pointer]:
+                          - /url: https://workspace.google.com/products/gemini-notebook/?from=gafb-drive-def-en
+                          - text: Gemini Notebook
+                      - listitem [ref=f1e707]:
+                        - link "Open the Apps Script page" [ref=f1e709] [cursor=pointer]:
+                          - /url: https://workspace.google.com/products/apps-script/?from=gafb-drive-def-en
+                          - text: Apps Script
+                - list [ref=f1e710]:
+                  - list [ref=f1e711]:
+                    - listitem [ref=f1e712]:
+                      - link "Open the Security and management page" [ref=f1e713] [cursor=pointer]:
+                        - /url: /security/
+                        - text: Security and management
+                    - list [ref=f1e714]:
+                      - listitem [ref=f1e715]:
+                        - link "Open the Admin page" [ref=f1e717] [cursor=pointer]:
+                          - /url: https://workspace.google.com/products/admin/?from=gafb-drive-def-en
+                          - text: Admin
+                      - listitem [ref=f1e718]:
+                        - link "Open the Endpoint page" [ref=f1e720] [cursor=pointer]:
+                          - /url: https://workspace.google.com/products/admin/endpoint/?from=gafb-drive-def-en
+                          - text: Endpoint
+                      - listitem [ref=f1e721]:
+                        - link "Open the Vault page" [ref=f1e723] [cursor=pointer]:
+                          - /url: https://workspace.google.com/products/vault/?from=gafb-drive-def-en
+                          - text: Vault
+                      - listitem [ref=f1e724]:
+                        - link "Open the Work Insights page" [ref=f1e726] [cursor=pointer]:
+                          - /url: https://workspace.google.com/products/workinsights/?from=gafb-drive-def-en
+                          - text: Work Insights
+                  - list [ref=f1e727]:
+                    - listitem [ref=f1e728]:
+                      - generic [ref=f1e729]: Solutions
+                    - list [ref=f1e730]:
+                      - listitem [ref=f1e731]:
+                        - link "Open the New Business page" [ref=f1e733] [cursor=pointer]:
+                          - /url: /business/new-business/
+                          - text: New Business
+                      - listitem [ref=f1e734]:
+                        - link "Open the Small Business page" [ref=f1e736] [cursor=pointer]:
+                          - /url: /business/small-business/
+                          - text: Small Business
+                      - listitem [ref=f1e737]:
+                        - link "Open the Enterprise page" [ref=f1e739] [cursor=pointer]:
+                          - /url: /enterprise/
+                          - text: Enterprise
+                      - listitem [ref=f1e740]:
+                        - link "Open the Retail page" [ref=f1e742] [cursor=pointer]:
+                          - /url: /industries/retail/
+                          - text: Retail
+                      - listitem [ref=f1e743]:
+                        - link "Open the Manufacturing page" [ref=f1e745] [cursor=pointer]:
+                          - /url: /industries/manufacturing/
+                          - text: Manufacturing
+                      - listitem [ref=f1e746]:
+                        - link "Open the Professional Services page" [ref=f1e748] [cursor=pointer]:
+                          - /url: /industries/professional-services/
+                          - text: Professional Services
+                      - listitem [ref=f1e749]:
+                        - link "Open the Technology page" [ref=f1e751] [cursor=pointer]:
+                          - /url: /industries/technology/
+                          - text: Technology
+                      - listitem [ref=f1e752]:
+                        - link "Open the Healthcare page" [ref=f1e754] [cursor=pointer]:
+                          - /url: /industries/healthcare/
+                          - text: Healthcare
+                      - listitem [ref=f1e755]:
+                        - link "Open the Financial Services page" [ref=f1e757] [cursor=pointer]:
+                          - /url: /industries/finance/
+                          - text: Financial Services
+                      - listitem [ref=f1e758]:
+                        - link "Open the Government page" [ref=f1e760] [cursor=pointer]:
+                          - /url: /industries/government/
+                          - text: Government
+                      - listitem [ref=f1e761]:
+                        - link "Open the Education page in a new tab" [ref=f1e763] [cursor=pointer]:
+                          - /url: https://edu.google.com/workspace-for-education/editions/education-fundamentals/?hl=[lang]
+                          - text: Education
+                      - listitem [ref=f1e764]:
+                        - link "Open the Nonprofits page in a new tab" [ref=f1e766] [cursor=pointer]:
+                          - /url: https://www.google.com/intl/en/nonprofits
+                          - text: Nonprofits
+                      - listitem [ref=f1e767]:
+                        - link "Open the Artificial Intelligence page" [ref=f1e769] [cursor=pointer]:
+                          - /url: /solutions/ai/
+                          - text: Artificial Intelligence
+                - list [ref=f1e770]:
+                  - list [ref=f1e771]:
+                    - listitem [ref=f1e772]:
+                      - link "Open the Pricing page" [ref=f1e773] [cursor=pointer]:
+                        - /url: https://workspace.google.com/pricing/?hl=en&source=gafb-drive-footer-en&ga_region=amer&ga_country=us&ga_lang=en
+                        - text: Pricing
+                    - list [ref=f1e774]:
+                      - listitem [ref=f1e775]:
+                        - link "Open the Compare pricing plans page" [ref=f1e777] [cursor=pointer]:
+                          - /url: https://workspace.google.com/pricing?source=gafb-drive-footer-en&hl=en&ga_region=amer&ga_country=us&ga_lang=en
+                          - text: Compare pricing plans
+                  - list [ref=f1e778]:
+                    - listitem [ref=f1e779]:
+                      - generic [ref=f1e780]: Add-ons
+                    - list [ref=f1e781]:
+                      - listitem [ref=f1e782]:
+                        - link "Open the Meet hardware page" [ref=f1e784] [cursor=pointer]:
+                          - /url: https://workspace.google.com/products/meet-hardware/?from=gafb-drive-def-en
+                          - text: Meet hardware
+                      - listitem [ref=f1e785]:
+                        - link "Open the Google Voice page" [ref=f1e787] [cursor=pointer]:
+                          - /url: https://workspace.google.com/products/voice/?from=gafb-drive-def-en
+                          - text: Google Voice
+                      - listitem [ref=f1e788]:
+                        - link "Open the AppSheet page in a new tab" [ref=f1e790] [cursor=pointer]:
+                          - /url: https://about.appsheet.com/home/
+                          - text: AppSheet
+                - list [ref=f1e791]:
+                  - list [ref=f1e792]:
+                    - listitem [ref=f1e793]:
+                      - generic [ref=f1e794]: Resources
+                    - list [ref=f1e795]:
+                      - listitem [ref=f1e796]:
+                        - link "Open the AI learnings for work page" [ref=f1e798] [cursor=pointer]:
+                          - /url: /learning/
+                          - text: AI learnings for work
+                      - listitem [ref=f1e799]:
+                        - link "Open the Security page" [ref=f1e801] [cursor=pointer]:
+                          - /url: /security/
+                          - text: Security
+                      - listitem [ref=f1e802]:
+                        - link "Open the Customer Stories page" [ref=f1e804] [cursor=pointer]:
+                          - /url: /customers/
+                          - text: Customer Stories
+                      - listitem [ref=f1e805]:
+                        - link "Open the FAQs page" [ref=f1e807] [cursor=pointer]:
+                          - /url: /faq/
+                          - text: FAQs
+                      - listitem [ref=f1e808]:
+                        - link "Open the Partners page in a new tab" [ref=f1e810] [cursor=pointer]:
+                          - /url: https://cloud.withgoogle.com/partners/?products=GOOGLE_WORKSPACE_PRODUCT
+                          - text: Partners
+                      - listitem [ref=f1e811]:
+                        - link "Open the Marketplace page" [ref=f1e813] [cursor=pointer]:
+                          - /url: https://workspace.google.com/marketplace/
+                          - text: Marketplace
+                      - listitem [ref=f1e814]:
+                        - link "Open the Integrations page" [ref=f1e816] [cursor=pointer]:
+                          - /url: https://workspace.google.com/integrations/
+                          - text: Integrations
+                      - listitem [ref=f1e817]:
+                        - link "Open the Training & Certification page" [ref=f1e819] [cursor=pointer]:
+                          - /url: /training/
+                          - text: Training & Certification
+                      - listitem [ref=f1e820]:
+                        - link "Open the Refer Google Workspace page" [ref=f1e822] [cursor=pointer]:
+                          - /url: https://workspace.google.com/referral-program/
+                          - text: Refer Google Workspace
+                - list [ref=f1e823]:
+                  - list [ref=f1e824]:
+                    - listitem [ref=f1e825]:
+                      - link "Open the Learning and support page" [ref=f1e826] [cursor=pointer]:
+                        - /url: /support/
+                        - text: Learning and support
+                    - list [ref=f1e827]:
+                      - listitem [ref=f1e828]:
+                        - link "Open the Admin Help page in a new tab" [ref=f1e830] [cursor=pointer]:
+                          - /url: https://support.google.com/a/#topic=29157
+                          - text: Admin Help
+                      - listitem [ref=f1e831]:
+                        - link "Open the Setup and Deployment Center page in a new tab" [ref=f1e833] [cursor=pointer]:
+                          - /url: https://support.google.com/a/answer/6365252
+                          - text: Setup and Deployment Center
+                      - listitem [ref=f1e834]:
+                        - link "Open the Learning Center for Users page in a new tab" [ref=f1e836] [cursor=pointer]:
+                          - /url: https://support.google.com/a/users?hl=en_us&#topic=11499463
+                          - text: Learning Center for Users
+                      - listitem [ref=f1e837]:
+                        - link "Open the Forums for Admins page in a new tab" [ref=f1e839] [cursor=pointer]:
+                          - /url: https://productforums.google.com/forum/#!forum/apps
+                          - text: Forums for Admins
+                      - listitem [ref=f1e840]:
+                        - link "Open the Google Workspace Dashboard page in a new tab" [ref=f1e842] [cursor=pointer]:
+                          - /url: https://www.google.com/appsstatus?hl=en_us
+                          - text: Google Workspace Dashboard
+                      - listitem [ref=f1e843]:
+                        - link "Open the What's New in Google Workspace page" [ref=f1e845] [cursor=pointer]:
+                          - /url: https://workspace.google.com/whatsnew/
+                          - text: What's New in Google Workspace
+                      - listitem [ref=f1e846]:
+                        - link "Open the Find a Google Workspace Partner page in a new tab" [ref=f1e848] [cursor=pointer]:
+                          - /url: https://www.google.com/a/partnersearch/?hl=en_us
+                          - text: Find a Google Workspace Partner
+                      - listitem [ref=f1e849]:
+                        - link "Open the Join the community of IT Admins page in a new tab" [ref=f1e851] [cursor=pointer]:
+                          - /url: https://www.googlecloudcommunity.com/gc/Google-Workspace/ct-p/google-workspace
+                          - text: Join the community of IT Admins
+                      - listitem [ref=f1e852]:
+                        - link "Open the Press page in a new tab" [ref=f1e854] [cursor=pointer]:
+                          - /url: https://cloud.google.com/press/
+                          - text: Press
+                  - list [ref=f1e855]:
+                    - listitem [ref=f1e856]:
+                      - generic [ref=f1e857]: More from Google
+                    - list [ref=f1e858]:
+                      - listitem [ref=f1e859]:
+                        - link "Open the Google Cloud page in a new tab" [ref=f1e861] [cursor=pointer]:
+                          - /url: https://cloud.google.com/?hl=en
+                          - text: Google Cloud
+                      - listitem [ref=f1e862]:
+                        - link "Open the Google Domains page in a new tab" [ref=f1e864] [cursor=pointer]:
+                          - /url: https://domains.google.com/about/
+                          - text: Google Domains
+                      - listitem [ref=f1e865]:
+                        - link "Open the Chrome Enterprise page in a new tab" [ref=f1e867] [cursor=pointer]:
+                          - /url: https://chromeenterprise.google/
+                          - text: Chrome Enterprise
+                      - listitem [ref=f1e868]:
+                        - link "Open the Google Business Solutions page in a new tab" [ref=f1e870] [cursor=pointer]:
+                          - /url: https://www.google.com/intl/en_us/services
+                          - text: Google Business Solutions
+                      - listitem [ref=f1e871]:
+                        - link "Open the Google Ads page in a new tab" [ref=f1e873] [cursor=pointer]:
+                          - /url: https://ads.google.com/home/?subid=[subid]
+                          - text: Google Ads
+                      - listitem [ref=f1e874]:
+                        - link "Open the Business Messages page in a new tab" [ref=f1e876] [cursor=pointer]:
+                          - /url: https://businessmessages.google/
+                          - text: Business Messages
+            - generic [ref=f1e877]:
+              - generic [ref=f1e878]:
+                - img "Google" [ref=f1e881]
+                - list [ref=f1e882]:
+                  - listitem [ref=f1e883]:
+                    - link "Open the Privacy page in a new tab" [ref=f1e884] [cursor=pointer]:
+                      - /url: https://policies.google.com/privacy?hl=en_us
+                      - text: Privacy
+                  - listitem [ref=f1e885]:
+                    - link "Open the Terms page in a new tab" [ref=f1e886] [cursor=pointer]:
+                      - /url: https://policies.google.com/terms?hl=en_us
+                      - text: Terms
+                  - listitem [ref=f1e887]:
+                    - link "Open the About Google page in a new tab" [ref=f1e888] [cursor=pointer]:
+                      - /url: https://about.google/?hl=en_us
+                      - text: About Google
+                  - listitem [ref=f1e889]:
+                    - link "Open the Google Products page in a new tab" [ref=f1e890] [cursor=pointer]:
+                      - /url: https://www.google.com/intl/en_us/about/products/?from=gafb-drive-def-en
+                      - text: Google Products
+                  - listitem [ref=f1e891]:
+                    - link "Open the Help page in a new tab" [ref=f1e892] [cursor=pointer]:
+                      - /url: https://support.google.com/workspace/?hl=en_us
+                      - text: Help
+                - generic [ref=f1e893]:
+                  - link "Open the Help page in a new tab" [ref=f1e895] [cursor=pointer]:
+                    - /url: https://support.google.com/a
+                    - generic [ref=f1e899]: Help
+                  - button "Change Language" [ref=f1e902] [cursor=pointer]:
+                    - generic [ref=f1e906]:
+                      - generic [ref=f1e907]: English
+                      - generic [ref=f1e909]: Change Language
+              - region "Language List":
+                - generic [ref=f1e910]:
+                  - link "Open the Bahasa Indonesia locale page" [ref=f1e911] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/id/products/drive/?from=gafb-drive-def-en
+                    - text: Bahasa Indonesia
+                  - link "Open the Čeština locale page" [ref=f1e912] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/cs/products/drive/?from=gafb-drive-def-en
+                    - text: Čeština
+                  - link "Open the Dansk locale page" [ref=f1e913] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/da/products/drive/?from=gafb-drive-def-en
+                    - text: Dansk
+                  - link "Open the Deutsch locale page" [ref=f1e914] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/de/products/drive/?from=gafb-drive-def-en
+                    - text: Deutsch
+                  - link "Open the Deutsch – Schweiz locale page" [ref=f1e915] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/de_ch/products/drive/?from=gafb-drive-def-en
+                    - text: Deutsch – Schweiz
+                  - generic [ref=f1e916]: English
+                  - link "Open the English – Australia locale page" [ref=f1e917] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/en_au/products/drive/?from=gafb-drive-def-en
+                    - text: English – Australia
+                  - link "Open the English – Canada locale page" [ref=f1e918] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/en_ca/products/drive/?from=gafb-drive-def-en
+                    - text: English – Canada
+                  - link "Open the English – India locale page" [ref=f1e919] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/en_in/products/drive/?from=gafb-drive-def-en
+                    - text: English – India
+                  - link "Open the English – Indonesia locale page" [ref=f1e920] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/en_id/products/drive/?from=gafb-drive-def-en
+                    - text: English – Indonesia
+                  - link "Open the English – Ireland locale page" [ref=f1e921] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/en_ie/products/drive/?from=gafb-drive-def-en
+                    - text: English – Ireland
+                  - link "Open the English – Malaysia locale page" [ref=f1e922] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/en_my/products/drive/?from=gafb-drive-def-en
+                    - text: English – Malaysia
+                  - link "Open the English – New Zealand locale page" [ref=f1e923] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/en_nz/products/drive/?from=gafb-drive-def-en
+                    - text: English – New Zealand
+                  - link "Open the English – Philippines locale page" [ref=f1e924] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/en_ph/products/drive/?from=gafb-drive-def-en
+                    - text: English – Philippines
+                  - link "Open the English – Singapore locale page" [ref=f1e925] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/en_sg/products/drive/?from=gafb-drive-def-en
+                    - text: English – Singapore
+                  - link "Open the English – South Africa locale page" [ref=f1e926] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/en_za/products/drive/?from=gafb-drive-def-en
+                    - text: English – South Africa
+                  - link "Open the English – United Kingdom locale page" [ref=f1e927] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/en_uk/products/drive/?from=gafb-drive-def-en
+                    - text: English – United Kingdom
+                  - link "Open the Español locale page" [ref=f1e928] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/es/products/drive/?from=gafb-drive-def-en
+                    - text: Español
+                  - link "Open the Español (Latinoamérica) locale page" [ref=f1e929] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/es-419/products/drive/?from=gafb-drive-def-en
+                    - text: Español (Latinoamérica)
+                  - link "Open the Español (Latinoamérica) – Argentina locale page" [ref=f1e930] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/es-419_ar/products/drive/?from=gafb-drive-def-en
+                    - text: Español (Latinoamérica) – Argentina
+                  - link "Open the Español (Latinoamérica) – Estados Unidos locale page" [ref=f1e931] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/es-419_us/products/drive/?from=gafb-drive-def-en
+                    - text: Español (Latinoamérica) – Estados Unidos
+                  - link "Open the Español (Latinoamérica) – México locale page" [ref=f1e932] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/es-419_mx/products/drive/?from=gafb-drive-def-en
+                    - text: Español (Latinoamérica) – México
+                  - link "Open the Français locale page" [ref=f1e933] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/fr/products/drive/?from=gafb-drive-def-en
+                    - text: Français
+                  - link "Open the Français – Canada locale page" [ref=f1e934] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/fr_ca/products/drive/?from=gafb-drive-def-en
+                    - text: Français – Canada
+                  - link "Open the Français – Suisse locale page" [ref=f1e935] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/fr_ch/products/drive/?from=gafb-drive-def-en
+                    - text: Français – Suisse
+                  - link "Open the Italiano locale page" [ref=f1e936] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/it/products/drive/?from=gafb-drive-def-en
+                    - text: Italiano
+                  - link "Open the Magyar locale page" [ref=f1e937] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/hu/products/drive/?from=gafb-drive-def-en
+                    - text: Magyar
+                  - link "Open the Nederlands locale page" [ref=f1e938] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/nl/products/drive/?from=gafb-drive-def-en
+                    - text: Nederlands
+                  - link "Open the Norsk locale page" [ref=f1e939] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/no/products/drive/?from=gafb-drive-def-en
+                    - text: Norsk
+                  - link "Open the Polski locale page" [ref=f1e940] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/pl/products/drive/?from=gafb-drive-def-en
+                    - text: Polski
+                  - link "Open the Português (Brasil) locale page" [ref=f1e941] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/pt-BR/products/drive/?from=gafb-drive-def-en
+                    - text: Português (Brasil)
+                  - link "Open the Português (Portugal) locale page" [ref=f1e942] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/pt-PT/products/drive/?from=gafb-drive-def-en
+                    - text: Português (Portugal)
+                  - link "Open the Suomi locale page" [ref=f1e943] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/fi/products/drive/?from=gafb-drive-def-en
+                    - text: Suomi
+                  - link "Open the Svenska locale page" [ref=f1e944] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/sv/products/drive/?from=gafb-drive-def-en
+                    - text: Svenska
+                  - link "Open the Tiếng Việt locale page" [ref=f1e945] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/vi/products/drive/?from=gafb-drive-def-en
+                    - text: Tiếng Việt
+                  - link "Open the Türkçe locale page" [ref=f1e946] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/tr/products/drive/?from=gafb-drive-def-en
+                    - text: Türkçe
+                  - link "Open the Русский locale page" [ref=f1e947] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/ru/products/drive/?from=gafb-drive-def-en
+                    - text: Русский
+                  - link "Open the Українська locale page" [ref=f1e948] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/uk/products/drive/?from=gafb-drive-def-en
+                    - text: Українська
+                  - link "Open the עברית locale page" [ref=f1e949] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/iw/products/drive/?from=gafb-drive-def-en
+                    - text: עברית
+                  - link "Open the العربية locale page" [ref=f1e950] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/ar/products/drive/?from=gafb-drive-def-en
+                    - text: العربية
+                  - link "Open the العربية – مصر locale page" [ref=f1e951] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/ar_eg/products/drive/?from=gafb-drive-def-en
+                    - text: العربية – مصر
+                  - link "Open the ไทย locale page" [ref=f1e952] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/th/products/drive/?from=gafb-drive-def-en
+                    - text: ไทย
+                  - link "Open the 한국어 locale page" [ref=f1e953] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/ko/products/drive/?from=gafb-drive-def-en
+                    - text: 한국어
+                  - link "Open the 中文 (香港) locale page" [ref=f1e954] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/zh-HK/products/drive/?from=gafb-drive-def-en
+                    - text: 中文 (香港)
+                  - link "Open the 中文（简体中文） locale page" [ref=f1e955] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/zh-CN/products/drive/?from=gafb-drive-def-en
+                    - text: 中文（简体中文）
+                  - link "Open the 中文（繁體中文） locale page" [ref=f1e956] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/zh-TW/products/drive/?from=gafb-drive-def-en
+                    - text: 中文（繁體中文）
+                  - link "Open the 日本語 locale page" [ref=f1e957] [cursor=pointer]:
+                    - /url: https://workspace.google.com/intl/ja/products/drive/?from=gafb-drive-def-en
+                    - text: 日本語

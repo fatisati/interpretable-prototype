@@ -1,9 +1,10 @@
 from scib_metrics.benchmark import Benchmarker
 import os
+import numpy as np
 import pandas as pd
 import sys
 
-from interpretable_ssl.configs.paths import MODEL_DIR, get_seacell_model_dir
+from interpretable_ssl.configs.paths import MODEL_DIR, get_seacell_model_dir, get_dataset_model_dir
 from interpretable_ssl.scGraph import *
 import scanpy as sc
 import scvi
@@ -35,14 +36,33 @@ def save_append(df, save_dir, name, append=True, name_postfix=None):
     return df
 
 
-def get_scib(adata, obsm_keys, bk, lk):
+def get_scib(adata, obsm_keys, bk, lk, bio_conservation_metrics=None, batch_correction_metrics=None):
+    """bio_conservation_metrics / batch_correction_metrics: pass
+    scib_metrics.benchmark.BioConservation / BatchCorrection instances to
+    restrict which metrics Benchmarker computes (default None = its own full
+    battery). Useful for e.g. kBET/iLISI-only requests -- NMI/ARI's Leiden/KMeans
+    clustering search is the slow part of benchmark(), and skipping it when only
+    kBET/iLISI are wanted saves most of the runtime.
+    """
     if adata.obs[bk].nunique() == 1:
         return None
+    # Benchmarker's own constructor defaults these to real BioConservation()/
+    # BatchCorrection() instances only when the kwarg is left UNSET -- passing
+    # None explicitly bypasses that and trips its "either batch or bio metrics
+    # must be defined" guard when both are None. Only forward non-None values
+    # so the no-args call site keeps getting Benchmarker's real full-battery
+    # defaults, unchanged from before this function took these two params.
+    extra_kwargs = {}
+    if bio_conservation_metrics is not None:
+        extra_kwargs['bio_conservation_metrics'] = bio_conservation_metrics
+    if batch_correction_metrics is not None:
+        extra_kwargs['batch_correction_metrics'] = batch_correction_metrics
     bm = Benchmarker(
         adata=adata,
         batch_key=bk,
         label_key=lk,
         embedding_obsm_keys=obsm_keys,  # evaluate the PCA space
+        **extra_kwargs,
     )
     bm.benchmark()  # runs neighbors, clustering, and metrics
     results = bm.get_results(min_max_scale=False)  # returns a tidy DataFrame
@@ -50,6 +70,127 @@ def get_scib(adata, obsm_keys, bk, lk):
     return results
     # save_path = f"{res_dir}/{ds}/"
     # return save_append(results, save_path, "scib", name_postfix=name_postfix)
+
+
+def get_stage1_latent(ds_id, cvae_epochs=50, batch_size=1024):
+    """Load the existing Stage-1 (scPoli pretrain) checkpoint for ds_id and encode
+    every cell with it -- no Stage-2 (prototype/community) training happens here.
+
+    Returns:
+        t:  the SCProtoTrainer, with t.model holding ONLY Stage-1 weights and
+            t.train_ds.adata the preprocessed AnnData used for pretraining.
+        ad: t.train_ds.adata (kept as a separate name for clarity below).
+        z1: (N, d) numpy array -- the Stage-1-only latent for every cell in ad,
+            in the same row order as ad.
+    """
+    from interpretable_ssl.experiments.tasks import get_trainer
+
+    t = get_trainer(
+        experiment_name='stage1_latent_extract',
+        cvae_epochs=cvae_epochs,
+        dataset_id=ds_id,
+        l2norm=1,
+        assignment_metric='dotp',
+        batch_size=batch_size,
+        affinity_type='arbf',
+    )
+    t.load_pretrain_checkpoint()  # raises FileNotFoundError if not pretrained yet
+
+    ad = t.train_ds.adata
+    with torch.no_grad():
+        z1 = t.encode_adata(ad, t.model, z_idx=1).cpu().numpy()
+
+    print(f"[{ds_id}] Stage-1 latent: {z1.shape[0]} cells x {z1.shape[1]} dims")
+    return t, ad, z1
+
+
+def get_all_embeddings_for_scib(ds_id, cvae_epochs=50, batch_size=1024):
+    """Assemble one AnnData with every corrected embedding as an obsm key, for a
+    direct scIB-metrics comparison -- rebuttal response to Reviewer e9Ho's Q3:
+    "Will you add standard metrics like ARI, NMI, ASW, kBET, iLISI...?"
+
+    Reuses on-disk caches wherever possible: scVI comes from the per-dataset
+    '_cache_X_scvi_emb.npy' cache written by
+    notebooks/batch_correct_then_cluster_baselines.ipynb's
+    run_all_baselines_for_dataset() -- run that at least once first so the cache
+    exists; otherwise that embedding is skipped here with a warning rather than
+    silently retraining scVI (slow, and this function's job is metric computation,
+    not model fitting). scProto's own Stage-2 latent is reloaded from its existing
+    trained checkpoint via run_mc_task(..., load_umap=True) -- also not retrained
+    here. Harmony is loaded AFTER scProto (see below) at scProto's own latent
+    dimension, via get_harmony_embedding_matched_dim -- matching what "the Harmony
+    baseline" means everywhere else in this project now (run_correction_method's
+    harmony_n_comps). It is NOT read from the old, un-dimensioned
+    '_cache_X_harmony_emb.npy' -- that file (if it still exists on disk from before
+    this fix) is a stale d=50 embedding and would silently be the wrong comparison
+    here if used.
+
+    Returns:
+        AnnData with obsm keys among {'X_pca', 'X_stage1z', 'X_harmony', 'X_scvi',
+        'X_scproto'} -- whichever are available -- ready to pass to get_scib().
+    """
+    from interpretable_ssl.experiments.tasks import run_mc_task, LAMBDA_PROTO_UMAP_PRECON
+    from interpretable_ssl.datasets.dataset_configs import DATASETS
+
+    t1, ad, z1 = get_stage1_latent(ds_id, cvae_epochs=cvae_epochs, batch_size=batch_size)
+    ad.obsm['X_stage1z'] = z1
+    if 'X_pca' not in ad.obsm:
+        sc.pp.pca(ad, n_comps=50)
+
+    emb_path = os.path.join(get_dataset_model_dir(ds_id), '_cache_X_scvi_emb.npy')
+    if os.path.exists(emb_path):
+        ad.obsm['X_scvi'] = np.load(emb_path)
+    else:
+        print(f"[{ds_id}] no cached embedding at {emb_path} -- run "
+              f"batch_correct_then_cluster_baselines.ipynb's "
+              f"run_all_baselines_for_dataset('{ds_id}') first to populate it. "
+              f"Skipping 'scvi' in the scIB comparison for now.")
+
+    t2, _, _ = run_mc_task(
+        ds_id,
+        cvae_epochs=cvae_epochs,
+        train_epochs=50,
+        eval_freq=3,
+        patience=6,
+        batch_size=batch_size,
+        umap_steps_per_epoch=500,
+        lambda_config=LAMBDA_PROTO_UMAP_PRECON | {'nassoc_agg': 'max'},
+        affinity_type='arbf',
+        load_umap=True,
+        skip_eval=True,  # only need the loaded model to encode -- load_umap=True alone
+                         # still runs the full eval+save pipeline unconditionally
+                         # (that's what load_umap actually skips is training, not
+                         # eval/save), which would otherwise re-run eval_metacell_quality/
+                         # eval_task2/3 and overwrite clusters.npz/metacells.h5ad in this
+                         # run's own directory -- including the canonical scProto run
+                         # directories -- every time this function is called.
+    )
+    with torch.no_grad():
+        z_scproto = t2.encode_adata(t2.train_ds.adata, t2.model, z_idx=1).cpu().numpy()
+    scproto_obs_names = t2.train_ds.adata.obs_names
+
+    missing = set(ad.obs_names) - set(scproto_obs_names)
+    if missing:
+        print(f"[{ds_id}] WARNING: {len(missing)} cells in the Stage-1 adata are not "
+              f"present in scProto's own adata -- obs_names don't fully align between "
+              f"the two loading paths. Skipping 'X_scproto' in the scIB comparison for "
+              f"this dataset rather than risk silently misaligned rows.")
+    else:
+        z_scproto_df = pd.DataFrame(z_scproto, index=scproto_obs_names)
+        ad.obsm['X_scproto'] = z_scproto_df.reindex(ad.obs_names).values
+
+        # Harmony at scProto's own latent dimension -- see docstring. Needs
+        # ad.obsm['X_scproto'] (just set above) to know that dimension, and needs
+        # batch_key to run the correction at all.
+        bk = DATASETS.get(ds_id, {}).get('batch_key')
+        if bk is not None:
+            from interpretable_ssl.evaluation.batch_correct_baselines import (
+                get_harmony_embedding_matched_dim,
+            )
+            n_comps = ad.obsm['X_scproto'].shape[1]
+            ad.obsm['X_harmony'] = get_harmony_embedding_matched_dim(ad, bk, n_comps, ds_id=ds_id)
+
+    return ad
 
 
 # thres_batch=100, thres_celltype=10
@@ -83,19 +224,28 @@ def get_mc_scg(ad, mc_adata, bk, lk, _obsm_list):
     scg.process_batches()
     scg.calculate_consensus()
     scg.adata = mc_adata
-    res_df = pd.DataFrame(columns=["Rank-PCA", "Corr-PCA", "Corr-Weighted"])
+    res_df = pd.DataFrame(columns=[
+        "Rank-PCA", "Corr-PCA", "Corr-Weighted",
+        "Rank-PCA-std", "Corr-PCA-std", "Corr-Weighted-std",
+    ])
 
     # self.concensus_df_pca.to_csv("concensus_df_pca_%s.csv"%self.trim_rate)
     # exit()
     for _obsm in _obsm_list:
         adata_df = scg.adata_concensus(_obsm)
+        rank_per_gene = scg.rank_diff(adata_df, scg.concensus_df_pca)
+        corr_per_gene = scg.corr_diff(adata_df, scg.concensus_df_pca)
+        corrw_per_gene = scg.corrw_diff(adata_df, scg.concensus_df_pca)
         _row_df = pd.DataFrame(
             {
-                "Rank-PCA": scg.rank_diff(adata_df, scg.concensus_df_pca).mean().values,
-                "Corr-PCA": scg.corr_diff(adata_df, scg.concensus_df_pca).mean().values,
-                "Corr-Weighted": scg.corrw_diff(adata_df, scg.concensus_df_pca)
-                .mean()
-                .values,
+                # per-gene correlation/rank agreement, averaged: mean is the existing
+                # headline number, std is the spread across genes (previously discarded)
+                "Rank-PCA": rank_per_gene.mean().values,
+                "Corr-PCA": corr_per_gene.mean().values,
+                "Corr-Weighted": corrw_per_gene.mean().values,
+                "Rank-PCA-std": rank_per_gene.std().values,
+                "Corr-PCA-std": corr_per_gene.std().values,
+                "Corr-Weighted-std": corrw_per_gene.std().values,
             },
             index=[_obsm],
         )
@@ -149,7 +299,25 @@ def save_trainer_metrics(t, dataset, append=True):
     return save_metrics(adata, [t.get_model_name()], dataset, bk, lk, append)
 
 
-def add_scvi_emb(adata, query_stu, bk, pt_epochs=None, ft_epochs=None):
+def add_scvi_emb(adata, query_stu, bk, pt_epochs=None, ft_epochs=None, gene_likelihood="zinb"):
+    """Trains scVI (reference-then-query-finetune, matching this codebase's own
+    Stage-1 pretrain-then-finetune split) and returns its latent representation.
+
+    gene_likelihood: passed straight through to scvi.model.SCVI. Default 'zinb'
+    (scvi-tools' own default) is what every existing caller of this function still
+    gets -- unchanged behavior. Pass 'normal' for a Gaussian reconstruction
+    likelihood (Normal NLL with learned per-gene variance) instead of the
+    ZINB/NB/Poisson count-likelihood family -- still scVI's real architecture
+    (same encoder, same library-size-scaled decoder mean, same batch conditioning),
+    just a different, also-scvi-tools-native noise model on the SAME raw-count
+    target (adata.layers['counts'], set below regardless of gene_likelihood --
+    scVI's decoder always reconstructs against raw counts, scaled internally by
+    library size; there is no way to point stock scVI at log-normalized data
+    without also bypassing its library-size machinery, see batch_correct_baselines
+    module docstring / rebuttal notebook comments for the full reasoning on why
+    this is a meaningfully closer, but not perfect, match to an MSE-on-lognorm
+    objective compared to the ZINB default).
+    """
     adata.X = adata.layers.get("counts", adata.X)
     print(f"adata.X max: {adata.X.max()}")
     d = get_defaults()
@@ -161,19 +329,20 @@ def add_scvi_emb(adata, query_stu, bk, pt_epochs=None, ft_epochs=None):
     )
     train_ad = ref[train_ind].copy()
 
-    print(f"training scvi with ds size: {len(train_ad)} and {pt_epochs}, {ft_epochs}")
+    print(f"training scvi (gene_likelihood={gene_likelihood}) with ds size: "
+          f"{len(train_ad)} and {pt_epochs}, {ft_epochs}")
     # 1) Setup AnnData for scVI
     #    No need for common genes step since ref_adata comes from adata
     scvi.model.SCVI.setup_anndata(train_ad, batch_key=bk)
 
     # 2) Train model on reference
-    model = scvi.model.SCVI(train_ad, n_latent=8)
+    model = scvi.model.SCVI(train_ad, n_latent=8, gene_likelihood=gene_likelihood)
     model.train(max_epochs=pt_epochs)
 
     # Adapt model to whole adata
     query_model = scvi.model.SCVI.load_query_data(adata, model)
     query_model.train(ft_epochs)
-    key = "X_scvi"
+    key = "X_scvi_gauss" if gene_likelihood == "normal" else "X_scvi"
     key += (
         f"_pt{pt_epochs}"
         if pt_epochs != (d["pretraining_epochs"] + d["cvae_epochs"])
@@ -352,9 +521,15 @@ def get_scproto_metacell_metrics(
     )
 
 
-def load_seacell(ds_id, normalize=True, build_kernel_on="X_pca"):
-    seacell_dir = get_seacell_model_dir(ds_id, build_kernel_on)
+def load_seacell(ds_id, normalize=True, build_kernel_on="X_pca", num_prototypes=None):
+    from interpretable_ssl.evaluation.metric_helpers.metacell_metrics import _reconstruct_from_delta
+
+    seacell_dir = get_seacell_model_dir(ds_id, build_kernel_on, num_prototypes=num_prototypes)
     ad = sc.read_h5ad(os.path.join(seacell_dir, "seacell_sc.h5ad"))
+    if ad.uns.get("_seacell_delta"):
+        # this tag's file is a delta -- merge it onto the dataset's shared
+        # base to reconstruct the full per-cell ad (see save_seacell)
+        ad = _reconstruct_from_delta(ad, seacell_dir)
     mc_ad = sc.read_h5ad(os.path.join(seacell_dir, "seacell_agg.h5ad"))
     if normalize and mc_ad.X.max() > 20:
         sc.pp.normalize_total(mc_ad, target_sum=1e4)

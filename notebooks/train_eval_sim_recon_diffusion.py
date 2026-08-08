@@ -113,6 +113,10 @@ LOAD_BASELINE = True
 # produce — False trains it; flip to True on a re-run to just reload.
 LOAD_SIMRECON = False
 
+# sqrt(eigenvalue)-weighted variant (sim_recon_diffusion_t=0.5) — see the
+# markdown at that training cell below for what this tests.
+LOAD_SIMRECON_WEIGHTED = False
+
 trainers = {}
 results = {}
 mc_adatas = {}
@@ -156,6 +160,82 @@ train_or_load('arbf+diffusion', AFFINITY, load=LOAD_SIMRECON,
                               'sim_recon_n_eigs': SIM_RECON_N_EIGS})
 
 # %% [markdown]
+# ### +sim-recon (`diffusion` target, sqrt(eigenvalue)-weighted: `sim_recon_diffusion_t=0.5`)
+#
+# Same target dimensionality as the run above, but each eigenvector is
+# scaled by `eigenvalue**0.5` before the batch-size rescale
+# (`_compute_sim_recon_diffusion_targets`, `trainers/scproto.py`). By the
+# Eckart-Young theorem this makes per-cell MSE on the weighted coordinates
+# mathematically equivalent (up to the rank-`n_eigs` truncation) to MSE on a
+# reconstructed similarity matrix — as close as `diffusion` mode can get to
+# behaving like `sim_recon_target='full'` (or SEACells' own RSS), at the
+# cost of the same fine/rare-pattern sensitivity the unweighted (`t=0`) run
+# above protects. See `files/sim_recon_global_vs_local_compaction.md` for
+# the full reasoning — this cell is the empirical test of that dial, not a
+# claim that it's strictly better.
+#
+# Compare this run's purity/niche-purity against `arbf+diffusion` (`t=0`)
+# and SEACells below: closer to SEACells here, at whatever cost shows up in
+# the per-cell-type purity table for rare types, is exactly the trade-off
+# predicted.
+
+# %%
+train_or_load('arbf+diffusion_t0.5', AFFINITY, load=LOAD_SIMRECON_WEIGHTED,
+               extra_lambda={'lambda_sim_recon': LAMBDA_SIM_RECON, 'sim_recon_target': 'diffusion',
+                              'sim_recon_n_eigs': SIM_RECON_N_EIGS, 'sim_recon_diffusion_t': 0.5})
+
+# %% [markdown]
+# ### Diagnostic — how much of the diffusion target is prototype-explainable?
+#
+# The sim_recon decoder can only ever emit a per-prototype-constant profile
+# (`soft_assign @ decoded`, rank <= NP prototypes) — its ceiling on any given
+# eigen-index is however much of that dimension's variance sits *between*
+# prototypes rather than within one. Eigen-index runs coarse -> fine; this
+# checks where that between-prototype fraction decays into noise, which is
+# the actual number of dimensions worth asking the decoder to reconstruct
+# (vs. dimensions where "predict ~0" is already the MSE-optimal answer and
+# just dilutes the aggregate pred_std/target_std readout).
+#
+# Cheap: one argmax pass over the already-trained model + a single
+# vectorized scatter-add over (N, n_eigs) — a few seconds, not a retrain.
+
+# %%
+import numpy as np
+import matplotlib.pyplot as plt
+
+t_diff = trainers['arbf+diffusion']
+target = t_diff._sim_recon_diffusion_target.numpy()  # (N, n_eigs)
+assignments, _ = t_diff._get_assignments()            # (N,) hard prototype id per cell
+
+K = int(assignments.max()) + 1
+n_eigs = target.shape[1]
+
+group_sum = np.zeros((K, n_eigs), dtype=np.float64)
+np.add.at(group_sum, assignments, target)
+group_counts = np.bincount(assignments, minlength=K).astype(np.float64)
+group_means = group_sum / np.clip(group_counts[:, None], 1, None)
+
+overall_mean = target.mean(axis=0)
+between_var = np.average((group_means - overall_mean) ** 2, axis=0, weights=group_counts)
+total_var = target.var(axis=0)
+between_frac = between_var / (total_var + 1e-8)
+
+plt.figure(figsize=(8, 4))
+plt.plot(between_frac)
+plt.xlabel('eigen-index (coarse -> fine)')
+plt.ylabel('between-prototype variance fraction')
+plt.title(f'Prototype-explainable fraction per diffusion dim (NP={K}, n_eigs={n_eigs})')
+plt.axhline(0.05, color='gray', linestyle='--', linewidth=1, label='5% floor')
+plt.legend()
+plt.show()
+
+print('between_frac[:20]     =', np.round(between_frac[:20], 3))
+print('between_frac[100:120] =', np.round(between_frac[100:120], 3))
+print('between_frac[500:520] =', np.round(between_frac[500:520], 3))
+# Read the cutoff off the curve above (where it drops under ~5-10% and stays
+# there) rather than guessing a round number for sim_recon_n_eigs.
+
+# %% [markdown]
 # ## SEACells (PCA) baseline
 #
 # `train_seacell` skips training and returns immediately if a saved run is
@@ -195,9 +275,10 @@ os.makedirs(GRAPH_DIR, exist_ok=True)
 # exact match (not keyword substring) because 'arbf' is a literal substring
 # of 'arbf+diffusion''s saved name too.
 MODEL_KEYWORDS = {
-    model_names['arbf']:           'scProto (arbf)',
-    model_names['arbf+diffusion']: 'scProto + sim-recon/diffusion (arbf)',
-    'seacell':                     'SEACells (PCA)',
+    model_names['arbf']:                'scProto (arbf)',
+    model_names['arbf+diffusion']:      'scProto + sim-recon/diffusion (arbf)',
+    model_names['arbf+diffusion_t0.5']: 'scProto + sim-recon/diffusion, t=0.5 (arbf)',
+    'seacell':                          'SEACells (PCA)',
 }
 MODEL_KEYWORDS
 

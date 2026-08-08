@@ -46,6 +46,7 @@ MEAN_STD_PAIRS = {
     'batch_rare_repr_macro_mean':    'batch_rare_repr_macro_std',
     'batch_rare_repr_micro_mean':    'batch_rare_repr_micro_std',
     'batch_rare_homogeneity_mean':   'batch_rare_homogeneity_std',
+    'batch_rare_cross_batch_homog_mean': 'batch_rare_cross_batch_homog_std',
     'batch_rare_purity_mean':        'batch_rare_purity_std',
     'batch_rare_f1_macro_mean':      'batch_rare_f1_macro_std',
 }
@@ -87,6 +88,8 @@ METRIC_DISPLAY_NAMES = {
     'batch_rare_repr_micro_std':      'Batch-Rare Repr (micro) Std',
     'batch_rare_homogeneity_mean':    'Batch-Rare Homogeneity',
     'batch_rare_homogeneity_std':     'Batch-Rare Homogeneity Std',
+    'batch_rare_cross_batch_homog_mean': 'Cross-Batch Rare Homogeneity',
+    'batch_rare_cross_batch_homog_std':  'Cross-Batch Rare Homogeneity Std',
     'batch_rare_purity_mean':         'Batch-Rare Purity',
     'batch_rare_purity_std':          'Batch-Rare Purity Std',
     'batch_rare_f1_macro_mean':       'Batch-Rare F1 (macro)',
@@ -115,6 +118,7 @@ METRIC_DIRECTION = {
     'batch_rare_repr_macro_mean':            'up',
     'batch_rare_repr_micro_mean':            'up',
     'batch_rare_homogeneity_mean':           'up',
+    'batch_rare_cross_batch_homog_mean':     'up',
     'batch_rare_purity_mean':                'up',
     'batch_rare_f1_macro_mean':              'up',
     'n_unused_protos':                       'down',
@@ -171,44 +175,36 @@ def load_run_metrics(ds_id):
         else:
             continue
 
-        # Augment with std from per-mc CSVs if available
-        purity_csv = os.path.join(run_dir, 'purity_per_mc.csv')
-        if os.path.exists(purity_csv):
-            s = pd.read_csv(purity_csv, index_col=0).squeeze()
-            m['std_cell_type_purity'] = float(s.std())
-
-        entropy_csv = os.path.join(run_dir, 'batch_entropy_per_mc.csv')
-        if os.path.exists(entropy_csv):
-            s = pd.read_csv(entropy_csv, index_col=0).squeeze()
-            m['std_batch_entropy'] = float(s.std())
-
-        niche_purity_csv = os.path.join(run_dir, 'niche_purity_per_mc.csv')
-        if os.path.exists(niche_purity_csv):
-            s = pd.read_csv(niche_purity_csv, index_col=0).squeeze()
-            m['mean_niche_purity'] = float(s.mean())
-            m['std_niche_purity'] = float(s.std())
-
-        ct_niche_rbo_csv = os.path.join(run_dir, 'ct_niche_rbo.csv')
-        if os.path.exists(ct_niche_rbo_csv):
-            row = pd.read_csv(ct_niche_rbo_csv, index_col=0).squeeze()
-            m['ct_niche_rbo_avg'] = float(row.mean())
-            m['std_ct_niche_rbo'] = float(row.std())
-
-        mod_batch_csv = os.path.join(run_dir, 'modularity_per_batch.csv')
-        if os.path.exists(mod_batch_csv):
-            s = pd.read_csv(mod_batch_csv, index_col=0).squeeze()
-            m['mean_modularity_batch'] = float(s.mean())
-            m['std_modularity_batch'] = float(s.std())
-
-        soft_purity_csv = os.path.join(run_dir, 'soft_purity_per_mc.csv')
-        if os.path.exists(soft_purity_csv):
-            s = pd.read_csv(soft_purity_csv, index_col=0).squeeze()
-            m['soft_std_cell_type_purity'] = float(s.std())
-
-        soft_entropy_csv = os.path.join(run_dir, 'soft_batch_entropy_per_mc.csv')
-        if os.path.exists(soft_entropy_csv):
-            s = pd.read_csv(soft_entropy_csv, index_col=0).squeeze()
-            m['soft_std_batch_entropy'] = float(s.std())
+        # --- Backfill stds from the per-mc CSVs ---
+        # metrics.json is the source of truth: eval now writes every std scalar
+        # directly (see mc_metric_utils.save_metacell_metrics). These CSV reads only
+        # fill keys metrics.json doesn't already have, so runs saved before that
+        # change still show their "± std" columns, and a run whose CSVs are missing
+        # no longer silently loses the std column. Note the two directions differ:
+        # a key already present in metrics.json is never overwritten from a CSV.
+        _csv_backfill = [
+            # (csv filename, {metric key: 'mean'|'std'})
+            ('purity_per_mc.csv',             {'std_cell_type_purity': 'std'}),
+            ('batch_entropy_per_mc.csv',      {'std_batch_entropy': 'std'}),
+            ('niche_purity_per_mc.csv',       {'mean_niche_purity': 'mean',
+                                               'std_niche_purity': 'std'}),
+            ('ct_niche_rbo.csv',              {'ct_niche_rbo_avg': 'mean',
+                                               'std_ct_niche_rbo': 'std'}),
+            ('modularity_per_batch.csv',      {'mean_modularity_batch': 'mean',
+                                               'std_modularity_batch': 'std'}),
+            ('soft_purity_per_mc.csv',        {'soft_std_cell_type_purity': 'std'}),
+            ('soft_batch_entropy_per_mc.csv', {'soft_std_batch_entropy': 'std'}),
+        ]
+        for fname, key_ops in _csv_backfill:
+            missing = {k: op for k, op in key_ops.items() if m.get(k) is None}
+            if not missing:
+                continue  # metrics.json already has these — don't re-read the CSV
+            csv_path = os.path.join(run_dir, fname)
+            if not os.path.exists(csv_path):
+                continue
+            s = pd.read_csv(csv_path, index_col=0).squeeze()
+            for k, op in missing.items():
+                m[k] = float(s.mean() if op == 'mean' else s.std())
 
         results[entry] = m
 
@@ -523,18 +519,31 @@ def show_table(df, metrics=None, dataset_display_names=None, exclude_keywords=No
                     auto_pairs[key] = candidate_std
 
     # Merge mean ± std pairs into single string columns
+    missing_std = []  # (dataset, metric) pairs shown as a bare mean, no std available
     for mean_col, std_col in auto_pairs.items():
         mean_label = METRIC_DISPLAY_NAMES.get(mean_col, mean_col)
         std_label  = METRIC_DISPLAY_NAMES.get(std_col, std_col)
         for ds in pivoted.columns.get_level_values('Dataset').unique():
-            if (ds, mean_label) in pivoted.columns and (ds, std_label) in pivoted.columns:
-                pivoted[(ds, mean_label)] = pivoted.apply(
-                    lambda r, d=ds, ml=mean_label, sl=std_label:
-                        f"{r[(d, ml)]:.3f} ± {r[(d, sl)]:.3f}"
-                        if pd.notna(r[(d, ml)]) and pd.notna(r[(d, sl)]) else '-',
-                    axis=1
-                )
-                pivoted = pivoted.drop(columns=[(ds, std_label)])
+            if (ds, mean_label) not in pivoted.columns:
+                continue
+            if (ds, std_label) not in pivoted.columns:
+                # Mean is present but its std isn't. Previously this branch did
+                # nothing, so the column rendered as a bare mean and the missing
+                # "± std" was indistinguishable from a metric that never had one.
+                missing_std.append(f"{ds}/{mean_label}")
+                continue
+            pivoted[(ds, mean_label)] = pivoted.apply(
+                lambda r, d=ds, ml=mean_label, sl=std_label:
+                    f"{r[(d, ml)]:.3f} ± {r[(d, sl)]:.3f}"
+                    if pd.notna(r[(d, ml)]) and pd.notna(r[(d, sl)]) else '-',
+                axis=1
+            )
+            pivoted = pivoted.drop(columns=[(ds, std_label)])
+
+    if missing_std:
+        print(f"WARNING: no std found for {len(missing_std)} column(s), shown as bare "
+              f"means: {', '.join(sorted(missing_std))}\n"
+              f"         Re-run eval for those runs to write the std into metrics.json.")
 
     # Rows where every cell is NaN have no metrics — exclude them.
     all_nan_mask = pivoted.isna().all(axis=1)

@@ -1,0 +1,55 @@
+notes:
+
+1. ablation on lung and PBMC
+
+2. harmoney + cluster
+
+on harmoney then cluster:
+
+what is our claim: scproto get batch removed space - and correct its over correction by modifying latent space - for exmaple 2 rare cells may get absorbed to dense states - scproto correct this
+so now encoder know if a specific pattern of a rare state happeneded where it shoudl put the cell in the latent space
+how we show this? we used rare cells in each batch as a way to show this
+
+we used f1 as a measure how well we are classifying rare cells - also homogeienity as contues measure of checking how well rare cells are beign grouped together
+
+for harmoney: how does it work?
+it does kmeans on pca - rare cell types within one batch even may not be assigned to same cluster - i am not sure but i feel this ma cuase probelm - i can say that in harmoney - cells of same state are assumed to have same batch effect vector am i correct?
+then it assign each cell to some cluster but in a ways so that maximize batch mixing for each cluster - this may not be true - if a cell state not exist in a batch be problematic
+then it move cell embeddings so that batch effect removes 
+
+i think if we do harmoney using same k as number of proto - and do batch correct - one good thing is that as its linear - i think arbf on and then leiden for exmaple
+cells of same batch are really good - becasue its like we do leiden on pca 
+but there is a chance of mixing worng cells across batches - specialy for rare cell types - i dont know if it can match corret rare cell types across batches or not? why yes and why not?
+
+i think the worst things would happened if a state not exist in one batch - in that case we think scproto shoud do better - lets check this
+
+what we have - scproto is mostly same with harmonet if we do leiden or seacell [better in some cases] [maybe we can work on this and say thats the case where we think scproto has advnatge]
+hen also report modulairyt and mention we considered as gt [maybe report some test set would be better - say becaseu ct labels may come from harmoeny itself - so if we consider the gt are on affinity we compare modualirty instead of ct labels]
+we can also bring 2 other metrics showing scproto is better than harmoney - 1: eval on arbf on latent - no clustering 2: the metric where eval how well we are matching rare ct across batches
+
+
+
+
+3. On this matter, hyperparameter sweeps or details on hyperparameter tuning (which were also mentioned as part of this concern) are still missing.
+lambda [comm - nssoc - usage - proto recon]
+epsilon [if tuned per dataset maybe e can ignore and do nt sweep]? alpha?
+what else? what is their value mentioedn in the paper? what range for each make sesne?
+k [done]
+what else?
+
+4. what is combat - mention it
+--
+
+my answer draft
+
+say thanks [use whatever usualy peoople start with in comment]
+include result on lung and pbmc 
+include results on sweep
+
+include harmeny results - along with signifcance results [use best rpactcie how people usualy report this]
+but the rebuttal cites "mixed results, ahead of scProto on some datasets, behind in others": say in our prevous loss we mistakenely applied harmey in pca with numebr of dim 50 - however scprot latent spca dim was 8
+for more fair comparison we did harmneiy on same 8 dim and now scproto is better
+we think scproto works better than hamrney becasue [mention facts in harmoeny notes]
+
+[include combat results]
+

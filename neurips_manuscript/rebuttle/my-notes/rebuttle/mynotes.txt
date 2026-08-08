@@ -1,0 +1,48 @@
+# can scproto generliza for heldout edges? or just memorize
+
+I think scproto can learn to put cells on correct place from gene expression - this is what i expetc scproto loss give it
+
+to validate this
+we would mask some edges [but also i think we scan start by random - but also it may be important what edges shoud be masked - becase i think some rare cell type edges may be the case where scpoli may not work]
+then train scproto - then evalaute modualirty on those edges - then compare against scpoli
+we can do same for seacell - and show that how seacell trained on held out edges preserve masked edge modualiryt - but this maynot be good basline becasue seacell does not remove batch effect
+
+and any other baseline we need? maybe scvi can also be a good one - where we check how it preserve test modualirty and compare against seacell
+both scpoli stage 1 and scvi - they dotn train on any affinty - they are just normal vae - by this exp we want to show that if we train by affinity - this can be generalize on non seen affinityes too
+
+
+
+
+
+# for the ablation
+i need to make sure we are able to reproduce the paper results first - useing correct config - also changes in code does not has real effect
+then think what is the role of each component, and what metrics we need to show that each compontnet is doig its job
+
+community loss: move samples and prototypes to match the input affinity - this is main driver - i think modularity and rare homogenity are the one mainly effected by this - maybe also purity 
+nassoc loss: this one force non redundant protos - also compactness of protos - i think purity and rare homogeneity - maybe also rare coverage
+usage: force the model use all protos - i think rare coverage - rare homogeneity - maybe purity
+proto recon: force proto recon - preserve proto in the latent space - i think this maybe the one not let batch effect form again - isnt it? - the protos cannot be batch spedici? what makes this? maybe batch entropy then - i dont know exactly
+waypoint init: very important i think for oduairty - maybe rare covarge and homogeneity
+
+
+
+
+# for the does remove batch effect then cluster do same:
+we showed not - we said batch effect may corrupt the geomatry of space and lsuetring on cirrupted space is proematic specaly for rare states
+we show homogenity and f1 as roof - on scpoli baselines
+
+but other batch effect corrcetion mehtods can be also tested
+i feel easiet one is scvi - but shoudl be compared to scproto on scvi: how importnt this do you think? do you think we need this or redunant?
+bknn + cluster - i am not sure how this one was working
+harmoney + cluster -> we baisclay did this and it was working nice - with better metrics - but we need to check why - i dont rememebr how was harmoney working
+
+
+
+
+
+# ablation on number of prototypes
+this one also imporant one
+
+we think number of prototypes could effect results
+modulairty - ct purity - rare ct metrics - maybe even batch entropy - what other metrics do we need? 
+baselines: i think leiden on scpoli [stage 1], also seacell with same number of k 

@@ -1,0 +1,9 @@
+The held-out-edge protocol removes direct use of the evaluated edges during: bring from md file - we have drafted this
+ since restricting all methods to (d=8) : we need this for fairness - unless comapsriosn effect might be for dim
+ replacing scVI’s standard count likelihood with a Gaussian likelihood may disadvantage methods under nonstandard settings: also same for fairness - we can also set scproto los son nb - we just did this for fir comapsiro to match our prev trains
+ Finally, the spatial results still support preservation of predefined niche composition rather than discovery of niche-correlated transcriptional programs: answwer this based on our md file
+
+check rev*.txt to see full discsison - the write answer in new md file
+ check the example try to learn from it on how we shoud answwer
+ check howto - try to follwo the notes
+

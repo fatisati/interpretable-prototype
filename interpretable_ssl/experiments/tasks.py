@@ -5,6 +5,7 @@ Usage in any notebook:
     from interpretable_ssl.experiments.tasks import get_trainer, run_mc_task
 """
 
+import glob
 import os
 import json
 
@@ -99,15 +100,13 @@ def get_trainer(**kwargs):
 
     from interpretable_ssl.trainers.scproto import SCProtoTrainer
 
-    t = SCProtoTrainer(
-        debug=1,
-        workers=0,
-        umap_min_dist=0.5,
-        umap_spread=1.0,
-        umap_neg_rate=5,
-        pretraining_epochs=0,
-        **kwargs
-    )
+    kwargs.setdefault('debug', 1)
+    kwargs.setdefault('workers', 0)
+    kwargs.setdefault('umap_min_dist', 0.5)
+    kwargs.setdefault('umap_spread', 1.0)
+    kwargs.setdefault('umap_neg_rate', 5)
+    kwargs.setdefault('pretraining_epochs', 0)
+    t = SCProtoTrainer(**kwargs)
     print(t.get_model_name())
     t.setup()
     return t
@@ -135,6 +134,7 @@ def find_metacells(
     umap_steps_per_epoch=1000,
     load_pretrain=True,
     load_umap=False,
+    skip_eval=False,
     freeze_batch_embedding=False,
     freeze_decoder=False,
     soft_metrics=False,
@@ -172,6 +172,14 @@ def find_metacells(
         umap_steps_per_epoch:   Gradient steps per epoch (caps dataset size).
         load_pretrain:          If True, reuse existing pretrain checkpoint if found.
         load_umap:              If True, skip training and load the UMAP checkpoint.
+        skip_eval:              If True (requires load_umap=True), return right after
+                                loading the checkpoint -- skips eval_metacell_quality/
+                                eval_task2/3, aff_dc_compactness, and save_metacells/
+                                save_umap_data entirely. load_umap alone only skips
+                                training; eval+save still run unconditionally without
+                                this. Use when you only need the loaded trainer/model
+                                (e.g. to encode cells) and don't want to re-run
+                                evaluation or touch this run's saved output files.
         freeze_batch_embedding: If True, freeze batch embedding before UMAP training.
         freeze_decoder:         If True, freeze decoder before UMAP training.
         trainer_kwargs:         Extra kwargs forwarded to get_trainer.
@@ -269,13 +277,29 @@ def find_metacells(
         )
 
     # --- Eval ---
-    skip = set(skip_metrics or [])
     t.load_umap_checkpoint()
+    if skip_eval:
+        # Caller only wants the loaded, trained model (e.g. to encode cells into its
+        # latent) -- not a re-evaluation. Without this, load_umap=True still runs the
+        # full eval+save pipeline below unconditionally on every call (that's what
+        # load_umap actually skips is training, NOT eval/save), which is wasted
+        # compute AND overwrites clusters.npz/metacells.h5ad in this run's own
+        # directory via t.save_metacells()/t.save_umap_data() every time -- including
+        # the canonical run directories whose numbers have been verified against the
+        # published paper. Only valid alongside load_umap=True; there's no checkpoint
+        # to skip evaluating yet on a fresh training run.
+        if not load_umap:
+            raise ValueError("skip_eval=True requires load_umap=True -- nothing has "
+                              "been trained yet to skip evaluating.")
+        return t, {}, None
+
+    skip = set(skip_metrics or [])
     res1 = t.eval_metacell_quality(soft_metrics=soft_metrics) if 'task1' not in skip else {}
     res2 = t.eval_task2_metrics(soft_metrics=soft_metrics)    if 'task2' not in skip else {}
     res3 = t.eval_task3_metrics()                             if 'task3' not in skip else {}
 
     metrics = {
+        'seed': getattr(t, 'seed', None),
         # Task 1
         'purity':           float(res1['purity'].mean())        if res1.get('purity') is not None else None,
         'niche_purity':     float(res1['niche_purity'].mean())  if res1.get('niche_purity') is not None else None,
@@ -287,6 +311,7 @@ def find_metacells(
         'dge_kendall_avg':  res2.get('dge_kendall_avg'),
         'dge_jaccard_avg':  res2.get('dge_jaccard_avg'),
         'scgraph_corr_avg': res2.get('scgraph_corr_avg'),
+        'scgraph_corr_std': res2.get('scgraph_corr_std'),
         # Task 3 (spatial only)
         'ct_niche_rbo_avg': res3.get('ct_niche_rbo_avg'),
     }
@@ -375,6 +400,87 @@ def find_metacells(
 # ---------------------------------------------------------------------------
 
 run_mc_task = find_metacells  # backward-compatible alias
+
+
+# ---------------------------------------------------------------------------
+# Ablation-variant runner
+#
+# Shared by the component-ablation rebuttal notebooks: trains/reloads one
+# variant of a lambda-config sweep through run_mc_task and (optionally)
+# attaches prototype-level diagnostics on top of the usual metrics dict.
+# ---------------------------------------------------------------------------
+
+def _checkpoint_exists(ds_id, experiment_name):
+    """Cheap existence check via directory-name prefix match -- experiment_name
+    is always a literal prefix of the saved model dir name (model_name.py),
+    so this avoids replicating the full abbreviation-based name-generation
+    logic just to check whether a checkpoint is already on disk.
+    """
+    pattern = os.path.join(os.environ['MODEL_DIR'], ds_id, f'{experiment_name}_*', 'umap_checkpoint.pth')
+    return len(glob.glob(pattern)) > 0
+
+
+def run_ablation_variant(ds_id, tag, overrides, base_lambda_config, common_kwargs,
+                          variant_display_names=None, load_umap=None,
+                          experiment_prefix='ablation', extra_diagnostics=True):
+    """One (dataset, variant) run: base_lambda_config with exactly one key
+    overridden, trained/evaluated via the same run_mc_task pipeline the
+    paper's own numbers come from. experiment_name='{experiment_prefix}_{tag}'
+    keeps each variant's dump folder distinct and keyword-matchable in a
+    results section.
+
+    load_umap=None (default): auto-detect -- reload the existing checkpoint if
+    one is already saved for this (ds_id, tag), else train fresh. Pass True/False
+    explicitly to force one behavior regardless of what's on disk.
+
+    extra_diagnostics=True: also attach prototype_redundancy /
+    active_prototype_count (nassoc/usage-loss diagnostics) to the result dict.
+    Set False for arms where these aren't meaningful (e.g. spatial ablations).
+    """
+    lambda_config = dict(base_lambda_config)
+    lambda_config.update(overrides)
+    experiment_name = f'{experiment_prefix}_{tag}'
+    if load_umap is None:
+        load_umap = _checkpoint_exists(ds_id, experiment_name)
+    display = variant_display_names[tag] if variant_display_names else tag
+    print(f"\n=== [{ds_id}] ablation variant: {tag} ({display}) ==="
+          f"  [{'reloading existing checkpoint' if load_umap else 'training fresh'}]")
+
+    t, res, mc_ad = run_mc_task(
+        ds_id,
+        lambda_config=lambda_config,
+        trainer_kwargs={'experiment_name': experiment_name},
+        load_umap=load_umap,
+        **common_kwargs,
+    )
+    res = dict(res)
+    if extra_diagnostics:
+        from interpretable_ssl.evaluation.trainer_diagnostics import (
+            prototype_redundancy, active_prototype_count,
+        )
+        res.update(prototype_redundancy(t))
+        res.update(active_prototype_count(t))
+    return t, res, mc_ad
+
+
+def run_all_variants_for_dataset(ds_id, ablations, base_lambda_config, common_kwargs,
+                                  variant_display_names=None, load_umap=None,
+                                  experiment_prefix='ablation', extra_diagnostics=True):
+    """Runs every entry of `ablations` for one dataset. Each variant is
+    independent -- safe to re-run just one by calling run_ablation_variant
+    directly if a single arm needs to change. load_umap=None (default):
+    auto-detect per arm (see run_ablation_variant) -- pass True/False to force
+    one behavior for every arm regardless of what's on disk.
+    """
+    trainers, results, mc_adatas = {}, {}, {}
+    for tag, overrides in ablations.items():
+        t, res, mc_ad = run_ablation_variant(
+            ds_id, tag, overrides, base_lambda_config, common_kwargs,
+            variant_display_names=variant_display_names, load_umap=load_umap,
+            experiment_prefix=experiment_prefix, extra_diagnostics=extra_diagnostics,
+        )
+        trainers[tag], results[tag], mc_adatas[tag] = t, res, mc_ad
+    return trainers, results, mc_adatas
 
 
 def _resolve_ds_id(ds_id, batch_key, label_key, niche_key, num_prototypes):

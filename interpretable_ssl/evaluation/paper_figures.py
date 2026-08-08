@@ -77,9 +77,17 @@ def _resolve_run_dir(ds_id, keyword, prefer_csv='purity_per_mc.csv'):
     if not os.path.isdir(base_dir):
         return None
 
+    # Sibling experiments (e.g. k_sensitivity_sweep.ipynb's 'ksweepE8'-tagged folders)
+    # save run dirs into the same dataset model dir with names that substring-match a
+    # plain keyword like 'seacell_X_stage1z' (e.g. 'seacell_X_stage1z_ksweepE8_K880').
+    # Silently picking one of those via matched[-1] breaks the "same K for every
+    # method" comparison this table exists to make (see canonical_scproto_run.md) --
+    # exclude sweep-tagged folders from a generic substring match unless the caller's
+    # own keyword explicitly asks for that sweep tag.
     matched = [
         e for e in _list_subdirs(base_dir)
         if (e == keyword or keyword in extract_model_key(e, ds_id=ds_id))
+        and ('ksweep' not in e or 'ksweep' in keyword)
     ]
     if not matched:
         return None
@@ -2526,8 +2534,22 @@ def _rare_table_one(did, keyword, display_name, rare_quantile, verbose, quiet=Fa
     bl_homogeneity_per_batch = []
     bl_purity_per_batch      = []
     bl_f1_per_batch          = []
+    bl_recall_per_batch      = []
+    bl_precision_per_batch   = []
+    # cross-batch grouping: of a rare cell's same-label metacell-mates, what fraction
+    # are from a DIFFERENT batch than the cell itself? Neither coverage, homogeneity,
+    # nor F1 can tell "grouped with true cross-batch counterparts" apart from "grouped
+    # only with same-batch cells of the same type" -- a method can score well on all
+    # three by giving each batch's rare cells their own small same-batch-only cluster,
+    # exactly the "no co-clustering" failure mode (see harmony_notes.md). This metric
+    # is blind to that loophole: same-batch same-label mates never count toward it.
+    bl_cross_batch_homog_per_batch = []
     if batch_key is not None and batch_key in cells_df.columns:
-        for _, batch_df in cells_df.groupby(batch_key):
+        # (metacell, label, batch) triple counts -- needed to subtract each rare
+        # cell's OWN batch's contribution from its metacell's total same-label count,
+        # leaving just the cross-batch same-label count.
+        mc_label_batch_counts = cells_df.groupby(['metacell_id', label_key, batch_key]).size()
+        for batch_val, batch_df in cells_df.groupby(batch_key):
             ct_freq = batch_df[label_key].value_counts(normalize=True)
             bl_thresh = float(ct_freq.mean() - ct_freq.std())
             bl_rare   = set(ct_freq[ct_freq < bl_thresh].index)
@@ -2558,6 +2580,24 @@ def _rare_table_one(did, keyword, display_name, rare_quantile, verbose, quiet=Fa
             bl_micro_per_batch.append(per_cell_score)
             bl_homogeneity_per_batch.append(per_cell_score)
 
+            # cross-batch homogeneity: same formula/denominator as homogeneity above
+            # (fraction of the metacell that shares this cell's label), but the
+            # numerator only counts same-label mates from a DIFFERENT batch. total
+            # same-label count in the metacell (any batch) minus this cell's own
+            # batch's same-label count in that metacell = cross-batch same-label
+            # count; divide by metacell size for the same per-cell scale as `scores`.
+            same_batch_lookup = pd.MultiIndex.from_arrays(
+                [bl_cells['metacell_id'], bl_cells[label_key],
+                 pd.Index([batch_val] * len(bl_cells))]
+            )
+            same_batch_same_label = mc_label_batch_counts.reindex(same_batch_lookup).fillna(0.0).values
+            total_same_label = mc_label_counts.reindex(
+                pd.MultiIndex.from_arrays([bl_cells['metacell_id'], bl_cells[label_key]])
+            ).fillna(0.0).values
+            cross_batch_same_label = total_same_label - same_batch_same_label
+            cross_batch_scores = cross_batch_same_label / mc_sizes.reindex(bl_cells['metacell_id']).values
+            bl_cross_batch_homog_per_batch.append(float(cross_batch_scores.mean()))
+
             # purity: size-weighted purity of metacells whose majority is a locally-rare CT
             bl_rare_mc_mask  = mc_majority.isin(bl_rare)
             bl_rare_mc_pur   = mc_purity_series[bl_rare_mc_mask].values
@@ -2569,6 +2609,8 @@ def _rare_table_one(did, keyword, display_name, rare_quantile, verbose, quiet=Fa
             # F1: precision = global avg purity of ct's dedicated metacells
             #     recall    = fraction of ct-cells in THIS batch in a dedicated metacell
             f1_vals = []
+            recall_vals = []
+            precision_vals = []
             for ct in bl_rare:
                 ct_cells_b = batch_df[batch_df[label_key] == ct]
                 if ct_cells_b.empty:
@@ -2577,8 +2619,14 @@ def _rare_table_one(did, keyword, display_name, rare_quantile, verbose, quiet=Fa
                 precision_c = mc_purity_by_ct.get(ct, 0.0)
                 denom = precision_c + recall_c
                 f1_vals.append(2 * precision_c * recall_c / denom if denom > 0 else 0.0)
+                recall_vals.append(recall_c)
+                precision_vals.append(precision_c)
             if f1_vals:
                 bl_f1_per_batch.append(float(np.mean(f1_vals)))
+            if recall_vals:
+                bl_recall_per_batch.append(float(np.mean(recall_vals)))
+            if precision_vals:
+                bl_precision_per_batch.append(float(np.mean(precision_vals)))
 
     def _mean_std(vals):
         if not vals:
@@ -2590,7 +2638,10 @@ def _rare_table_one(did, keyword, display_name, rare_quantile, verbose, quiet=Fa
     bl_macro_mean,        bl_macro_std        = _mean_std(bl_macro_per_batch)
     bl_micro_mean,        bl_micro_std        = _mean_std(bl_micro_per_batch)
     bl_homogeneity_mean,  bl_homogeneity_std  = _mean_std(bl_homogeneity_per_batch)
+    bl_cross_batch_homog_mean, bl_cross_batch_homog_std = _mean_std(bl_cross_batch_homog_per_batch)
     bl_purity_mean,       bl_purity_std       = _mean_std(bl_purity_per_batch)
+    bl_recall_mean,       bl_recall_std       = _mean_std(bl_recall_per_batch)
+    bl_precision_mean,    bl_precision_std    = _mean_std(bl_precision_per_batch)
     bl_f1_mean,           bl_f1_std           = _mean_std(bl_f1_per_batch)
 
     if verbose:
@@ -2600,7 +2651,10 @@ def _rare_table_one(did, keyword, display_name, rare_quantile, verbose, quiet=Fa
             f"repr macro={bl_macro_mean:.2f}±{bl_macro_std:.2f}  "
             f"micro={bl_micro_mean:.2f}±{bl_micro_std:.2f}  "
             f"homogeneity={bl_homogeneity_mean:.2f}±{bl_homogeneity_std:.2f}  "
+            f"cross_batch_homog={bl_cross_batch_homog_mean:.2f}±{bl_cross_batch_homog_std:.2f}  "
             f"purity={bl_purity_mean:.2f}±{bl_purity_std:.2f}  "
+            f"recall={bl_recall_mean:.2f}±{bl_recall_std:.2f}  "
+            f"precision={bl_precision_mean:.2f}±{bl_precision_std:.2f}  "
             f"F1={bl_f1_mean:.2f}±{bl_f1_std:.2f}"
         )
 
@@ -2614,10 +2668,32 @@ def _rare_table_one(did, keyword, display_name, rare_quantile, verbose, quiet=Fa
         batch_rare_repr_micro_std=bl_micro_std,
         batch_rare_homogeneity_mean=bl_homogeneity_mean,
         batch_rare_homogeneity_std=bl_homogeneity_std,
+        # cross-batch grouping: see the comment above bl_cross_batch_homog_per_batch's
+        # definition -- same formula as homogeneity, restricted to same-label
+        # metacell-mates from a DIFFERENT batch. This is the metric that can't be
+        # satisfied by same-batch-only clustering, unlike coverage/homogeneity/F1.
+        batch_rare_cross_batch_homog_mean=bl_cross_batch_homog_mean,
+        batch_rare_cross_batch_homog_std=bl_cross_batch_homog_std,
         batch_rare_purity_mean=bl_purity_mean,
         batch_rare_purity_std=bl_purity_std,
+        batch_rare_recall_macro_mean=bl_recall_mean,
+        batch_rare_recall_macro_std=bl_recall_std,
+        batch_rare_precision_macro_mean=bl_precision_mean,
+        batch_rare_precision_macro_std=bl_precision_std,
         batch_rare_f1_macro_mean=bl_f1_mean,
         batch_rare_f1_macro_std=bl_f1_std,
+        # raw per-batch arrays (not scalars) -- ignored by show_table's explicit
+        # metrics= allowlist, consumed by rare_metric_significance_paired() for
+        # paired Wilcoxon tests against a reference method.
+        _batch_rare_f1_macro_per_batch=list(bl_f1_per_batch),
+        _batch_rare_homogeneity_per_batch=list(bl_homogeneity_per_batch),
+        _batch_rare_cross_batch_homog_per_batch=list(bl_cross_batch_homog_per_batch),
+        # total metacell count K for this (dataset, run) -- the paper's protocol
+        # requires every baseline to be configured to the same K as scProto
+        # ("All baselines are configured to produce the same number of metacells
+        # K as scProto"); rare_metric_significance() checks this before treating
+        # a comparison as fair.
+        _n_metacells=int(len(mc_sizes)),
     ), vlines
 
 
@@ -2691,15 +2767,662 @@ def rare_celltype_purity_table(
     if not results:
         return pd.DataFrame()
 
-    # restore insertion order: ds_ids × model_keywords
+    # restore insertion order: ds_ids × model_keywords. dict.fromkeys(...) dedupes
+    # model_keywords.values() while preserving order -- several keys may legitimately
+    # map to the same display name (e.g. one exact-match key per dataset), which would
+    # otherwise produce duplicate (did, name) tuples and duplicate rows below.
     ordered_keys = [
         (did, name)
         for did in ds_ids
-        for name in model_keywords.values()
+        for name in dict.fromkeys(model_keywords.values())
         if (did, name) in results
     ]
     idx = pd.MultiIndex.from_tuples(ordered_keys, names=['dataset', 'run'])
     return pd.DataFrame([results[k] for k in ordered_keys], index=idx)
+
+
+def rare_metric_significance(
+    df_rare,
+    ref_name,
+    metrics=('_batch_rare_f1_macro_per_batch', '_batch_rare_homogeneity_per_batch'),
+    dataset_display_names=None,
+    k_tolerance=0.05,
+):
+    """Paired one-sided Mann-Whitney U (ref > other) on the per-batch rare-cell
+    arrays underlying Table 2, Bonferroni-corrected across the non-ref methods
+    compared within each (dataset, metric) group.
+
+    Same statistical convention already used for the spatial Fig. 3 significance
+    test elsewhere in this module (one-sided, ref-as-alternative='greater',
+    Bonferroni across comparisons within each group).
+
+    Args:
+        df_rare: DataFrame from rare_celltype_purity_table(...) -- must retain
+                 the raw '_batch_rare_*_per_batch' list columns (present by
+                 default; not dropped unless explicitly filtered out first).
+        ref_name: display name of the reference method (e.g. 'scProto').
+        metrics:  which raw per-batch columns to test. Default: F1 and
+                  homogeneity, the two rare-cell metrics in Table 2.
+        dataset_display_names: dict mapping ds_id -> display name for the
+                  'dataset' column in the returned table.
+        k_tolerance: relative tolerance on realized metacell count K (default
+                  5%). Methods are *configured* to the same nominal K, but the
+                  realized count almost never matches exactly -- a handful of
+                  prototypes/archetypes end up empty and get dropped, so e.g.
+                  scProto landing on 219 vs. a configured-K=220 baseline's 220
+                  is expected noise, not a real mismatch. Only a K difference
+                  larger than this tolerance (e.g. a stray K=88 leftover run
+                  vs. a K=294 canonical one) is treated as a genuine mismatch.
+
+    Enforces the paper's own baseline protocol ("All baselines are configured
+    to produce the same number of metacells K as scProto") before testing: for
+    each dataset, a baseline whose total metacell count (df_rare's
+    '_n_metacells' column -- required) differs from ref_name's by more than
+    k_tolerance (relative) is dropped from that comparison entirely rather
+    than tested -- a real K mismatch inflates or deflates
+    coverage/homogeneity/F1 independent of method quality, so it isn't a fair
+    pair. Dropped (dataset, metric, method) combinations are listed via a
+    printed note; the Bonferroni correction only counts the comparisons
+    actually kept.
+
+    Returns:
+        Long-form DataFrame with columns:
+        dataset, metric, method, k, n, median, mean, std,
+        p_vs_ref, p_adj, sig (last three only for method != ref_name).
+    """
+    from scipy.stats import mannwhitneyu
+
+    def _stars(p):
+        if p < 0.001: return '***'
+        if p < 0.01:  return '**'
+        if p < 0.05:  return '*'
+        return 'ns'
+
+    missing = [m for m in metrics if m not in df_rare.columns]
+    if missing:
+        raise ValueError(
+            f"rare_metric_significance: {missing} not in df_rare.columns -- "
+            f"re-run rare_celltype_purity_table() (raw per-batch columns are "
+            f"included by default) without filtering them out first."
+        )
+
+    has_k = '_n_metacells' in df_rare.columns
+    if not has_k:
+        raise ValueError(
+            "rare_metric_significance: df_rare has no '_n_metacells' column -- "
+            "re-run rare_celltype_purity_table() with the updated _rare_table_one "
+            "(adds K per run) so K-matching can be enforced before any comparison."
+        )
+
+    skipped = []
+
+    datasets = df_rare.index.get_level_values('dataset').unique()
+    rows = []
+    for did in datasets:
+        ds_label = (dataset_display_names or {}).get(did, did)
+        if (did, ref_name) not in df_rare.index:
+            continue
+        k_ref = df_rare.loc[(did, ref_name), '_n_metacells']
+
+        for metric in metrics:
+            names_here = [
+                name for name in df_rare.loc[did].index
+                if isinstance(df_rare.loc[(did, name), metric], list)
+                and len(df_rare.loc[(did, name), metric]) > 0
+            ]
+            if ref_name not in names_here:
+                continue
+
+            # Keep only the reference plus baselines whose total metacell count K
+            # matches it (within k_tolerance) for this dataset -- a baseline run
+            # with a genuinely different K is not a fair comparison
+            # (coverage/homogeneity/F1 scale with K) and is dropped here rather
+            # than tested, per the paper's own protocol ("All baselines are
+            # configured to produce the same number of metacells K as
+            # scProto"). Exact equality is NOT required: realized K almost
+            # never matches the configured K exactly (a few prototypes/
+            # archetypes end up empty and get dropped), so small differences
+            # from that are expected noise, not a mismatch.
+            matched = []
+            for name in names_here:
+                if name == ref_name:
+                    matched.append(name)
+                    continue
+                k_method = df_rare.loc[(did, name), '_n_metacells']
+                if (
+                    pd.notna(k_ref) and pd.notna(k_method)
+                    and abs(int(k_ref) - int(k_method)) <= k_tolerance * int(k_ref)
+                ):
+                    matched.append(name)
+                else:
+                    skipped.append(
+                        f"{ds_label}/{metric.lstrip('_').replace('_per_batch', '')}: "
+                        f"{name} skipped (K={k_method} vs {ref_name}'s K={k_ref}, "
+                        f"outside {k_tolerance:.0%} tolerance)"
+                    )
+
+            ref_vals = np.array(df_rare.loc[(did, ref_name), metric])
+            others = [n for n in matched if n != ref_name]
+            n_comparisons = max(len(others), 1)  # Bonferroni denominator per group
+
+            for name in matched:
+                vals = np.array(df_rare.loc[(did, name), metric])
+                row = {
+                    'dataset': ds_label,
+                    'metric':  metric.lstrip('_').replace('_per_batch', ''),
+                    'method':  name,
+                    'k':       int(df_rare.loc[(did, name), '_n_metacells']),
+                    'n':       len(vals),
+                    'median':  float(np.median(vals)),
+                    'mean':    float(vals.mean()),
+                    'std':     float(vals.std()),
+                }
+                if name != ref_name and len(ref_vals) > 0:
+                    try:
+                        _, p_raw = mannwhitneyu(ref_vals, vals, alternative='greater')
+                        p_adj = min(p_raw * n_comparisons, 1.0)
+                        row['p_vs_ref'] = p_raw
+                        row['p_adj']    = p_adj
+                        row['sig']      = _stars(p_adj)
+                    except Exception:
+                        pass
+                rows.append(row)
+
+    if skipped:
+        print(
+            "Skipped (K mismatch vs reference -- not a same-K comparison, "
+            "per the paper's baseline protocol):"
+        )
+        for m in skipped:
+            print(f"  - {m}")
+
+    return pd.DataFrame(rows)
+
+
+def rare_metric_significance_paired(
+    df_rare,
+    ref_name,
+    metrics=('_batch_rare_f1_macro_per_batch', '_batch_rare_homogeneity_per_batch'),
+    dataset_display_names=None,
+    k_tolerance=0.05,
+):
+    """Paired one-sided Wilcoxon signed-rank test (ref > other), Bonferroni-corrected --
+    the paired counterpart to rare_metric_significance(), which (despite what its own
+    comment claims -- 'paired ... tests') actually runs an UNPAIRED Mann-Whitney U on
+    these same arrays. That leaves real power on the table here: ref_vals[i] and
+    vals[i] are the SAME physical batch for every method (both built by
+    rare_celltype_purity_table() via cells_df.groupby(batch_key), which sorts
+    deterministically; 'locally rare' is defined from ground-truth cell-type frequency
+    within a batch -- a property of the batch itself, not of which clustering method
+    produced the metacells -- so every method's array covers the identical set of
+    batches in the identical order). An unpaired test discards that correspondence and
+    lets batch-to-batch heterogeneity that affects every method similarly (e.g. 'batch
+    3 is just noisier for everyone') swamp the actual scProto-vs-baseline difference.
+    Pairing removes that shared variance, isolating only the within-batch difference --
+    on the exact same data, no new runs needed.
+
+    Adds an 'n_wins' column: how many of the n batches scProto's per-batch value
+    strictly exceeds the baseline's -- a distribution-free, easy-to-read sanity check
+    that stays informative even when the formal p-value doesn't reach significance
+    (which is common here given how few batches these datasets have).
+
+    Same K-tolerance filtering / Bonferroni correction / docstring caveats as
+    rare_metric_significance() -- see that function for the full explanation of the
+    K-matching protocol. A (dataset, metric, method) triple is skipped from the test
+    (kept in the output with p_vs_ref/p_adj/sig left unset) if ref_vals and vals don't
+    have the same length -- this should not happen given the shared-batch-ordering
+    guarantee above, but is guarded against rather than assumed.
+
+    Returns:
+        Long-form DataFrame with columns:
+        dataset, metric, method, k, n, median, mean, std, n_wins,
+        p_vs_ref, p_adj, sig (last three only for method != ref_name).
+    """
+    from scipy.stats import wilcoxon
+
+    def _stars(p):
+        if p < 0.001: return '***'
+        if p < 0.01:  return '**'
+        if p < 0.05:  return '*'
+        return 'ns'
+
+    missing = [m for m in metrics if m not in df_rare.columns]
+    if missing:
+        raise ValueError(
+            f"rare_metric_significance_paired: {missing} not in df_rare.columns -- "
+            f"re-run rare_celltype_purity_table() (raw per-batch columns are "
+            f"included by default) without filtering them out first."
+        )
+
+    has_k = '_n_metacells' in df_rare.columns
+    if not has_k:
+        raise ValueError(
+            "rare_metric_significance_paired: df_rare has no '_n_metacells' column -- "
+            "re-run rare_celltype_purity_table() with the updated _rare_table_one "
+            "(adds K per run) so K-matching can be enforced before any comparison."
+        )
+
+    skipped = []
+    length_mismatch = []
+
+    datasets = df_rare.index.get_level_values('dataset').unique()
+    rows = []
+    for did in datasets:
+        ds_label = (dataset_display_names or {}).get(did, did)
+        if (did, ref_name) not in df_rare.index:
+            continue
+        k_ref = df_rare.loc[(did, ref_name), '_n_metacells']
+
+        for metric in metrics:
+            names_here = [
+                name for name in df_rare.loc[did].index
+                if isinstance(df_rare.loc[(did, name), metric], list)
+                and len(df_rare.loc[(did, name), metric]) > 0
+            ]
+            if ref_name not in names_here:
+                continue
+
+            matched = []
+            for name in names_here:
+                if name == ref_name:
+                    matched.append(name)
+                    continue
+                k_method = df_rare.loc[(did, name), '_n_metacells']
+                if (
+                    pd.notna(k_ref) and pd.notna(k_method)
+                    and abs(int(k_ref) - int(k_method)) <= k_tolerance * int(k_ref)
+                ):
+                    matched.append(name)
+                else:
+                    skipped.append(
+                        f"{ds_label}/{metric.lstrip('_').replace('_per_batch', '')}: "
+                        f"{name} skipped (K={k_method} vs {ref_name}'s K={k_ref}, "
+                        f"outside {k_tolerance:.0%} tolerance)"
+                    )
+
+            ref_vals = np.array(df_rare.loc[(did, ref_name), metric])
+            others = [n for n in matched if n != ref_name]
+            n_comparisons = max(len(others), 1)  # Bonferroni denominator per group
+
+            for name in matched:
+                vals = np.array(df_rare.loc[(did, name), metric])
+                row = {
+                    'dataset': ds_label,
+                    'metric':  metric.lstrip('_').replace('_per_batch', ''),
+                    'method':  name,
+                    'k':       int(df_rare.loc[(did, name), '_n_metacells']),
+                    'n':       len(vals),
+                    'median':  float(np.median(vals)),
+                    'mean':    float(vals.mean()),
+                    'std':     float(vals.std()),
+                }
+                if name != ref_name and len(ref_vals) > 0:
+                    if len(ref_vals) != len(vals):
+                        length_mismatch.append(
+                            f"{ds_label}/{row['metric']}: {name} skipped (n={len(vals)} "
+                            f"vs {ref_name}'s n={len(ref_vals)} -- can't pair arrays of "
+                            f"different length)"
+                        )
+                    else:
+                        row['n_wins'] = int((ref_vals > vals).sum())
+                        try:
+                            _, p_raw = wilcoxon(ref_vals, vals, alternative='greater')
+                            p_adj = min(p_raw * n_comparisons, 1.0)
+                            row['p_vs_ref'] = p_raw
+                            row['p_adj']    = p_adj
+                            row['sig']      = _stars(p_adj)
+                        except ValueError:
+                            # all paired differences are zero -- wilcoxon can't run;
+                            # n_wins (0) already tells the whole story for this row.
+                            pass
+                rows.append(row)
+
+    if skipped:
+        print(
+            "Skipped (K mismatch vs reference -- not a same-K comparison, "
+            "per the paper's baseline protocol):"
+        )
+        for m in skipped:
+            print(f"  - {m}")
+    if length_mismatch:
+        print("Skipped (unequal-length arrays -- can't pair):")
+        for m in length_mismatch:
+            print(f"  - {m}")
+
+    return pd.DataFrame(rows)
+
+
+_GRAPH_BATCH_METRIC_FILES = {
+    'modularity_per_batch': 'modularity_per_batch.csv',
+    'purity_per_mc':        'purity_per_mc.csv',
+    'batch_entropy_per_mc': 'batch_entropy_per_mc.csv',
+}
+
+
+def graph_batch_significance(
+    ds_ids,
+    model_keywords,
+    ref_name,
+    metrics=('modularity_per_batch', 'purity_per_mc', 'batch_entropy_per_mc'),
+    dataset_display_names=None,
+    k_tolerance=0.05,
+):
+    """Paired one-sided Mann-Whitney U (ref > other) on Table 1's raw arrays
+    (per-batch modularity, per-metacell purity, per-metacell batch entropy),
+    Bonferroni-corrected across the non-ref methods compared within each
+    (dataset, metric) group -- the Table 1 counterpart to
+    rare_metric_significance() (which covers Table 2's homogeneity/F1).
+
+    Reads 'modularity_per_batch.csv' / 'purity_per_mc.csv' /
+    'batch_entropy_per_mc.csv' directly from each run's saved directory (the
+    same files load_run_metrics() already reduces to the mean/std shown in
+    Table 1) -- no retraining needed, no need to widen model_keywords beyond
+    whatever runs are already resolvable there.
+
+    Same K-matching convention as rare_metric_significance(): K is the
+    realized metacell count for a run (= len(purity_per_mc.csv), since that
+    file has one row per metacell); a baseline whose K differs from
+    ref_name's by more than k_tolerance (relative) is dropped from that
+    comparison rather than tested, for the same reason -- exact equality
+    isn't the right bar (a few empty prototypes/archetypes are normal at
+    identical configured K), but a real mismatch (different configured K)
+    is not a fair pair.
+
+    Args:
+        ds_ids:        dataset id or list of dataset ids.
+        model_keywords: dict {run-folder keyword: display name} -- reuse the
+                  same dict already built for rare_celltype_purity_table()
+                  (e.g. the one defined in this notebook's rare-cell-table
+                  cell), so method names/canonical runs stay consistent
+                  across Table 1 and Table 2 significance tests.
+        ref_name:      display name of the reference method (e.g. 'scProto').
+        metrics:       which of the three raw arrays to test.
+        dataset_display_names: dict mapping ds_id -> display name.
+        k_tolerance:   relative tolerance on realized K (default 5%).
+
+    Returns:
+        Long-form DataFrame: dataset, metric, method, k, n, median, mean, std,
+        p_vs_ref, p_adj, sig (last three only for method != ref_name).
+    """
+    from scipy.stats import mannwhitneyu
+
+    def _stars(p):
+        if p < 0.001: return '***'
+        if p < 0.01:  return '**'
+        if p < 0.05:  return '*'
+        return 'ns'
+
+    unknown = [m for m in metrics if m not in _GRAPH_BATCH_METRIC_FILES]
+    if unknown:
+        raise ValueError(
+            f"graph_batch_significance: unknown metrics {unknown} -- choose "
+            f"from {list(_GRAPH_BATCH_METRIC_FILES)}"
+        )
+
+    ds_ids = [ds_ids] if isinstance(ds_ids, str) else list(ds_ids)
+
+    # --- load raw arrays + K for every (dataset, method) pair, once ---
+    data = {}  # (did, name) -> {'_k': int, metric: np.array, ...}
+    for did in ds_ids:
+        for keyword, name in model_keywords.items():
+            run_dir = _resolve_run_dir(did, keyword, prefer_csv='purity_per_mc.csv')
+            if run_dir is None:
+                continue
+            purity_s = _read_series(os.path.join(run_dir, 'purity_per_mc.csv'))
+            if purity_s is None:
+                continue
+            entry = {'_k': len(purity_s), 'purity_per_mc': purity_s.values.astype(float)}
+            entropy_s = _read_series(os.path.join(run_dir, 'batch_entropy_per_mc.csv'))
+            entry['batch_entropy_per_mc'] = (
+                entropy_s.values.astype(float) if entropy_s is not None else None
+            )
+            mod_s = _read_series(os.path.join(run_dir, 'modularity_per_batch.csv'))
+            entry['modularity_per_batch'] = (
+                mod_s.values.astype(float) if mod_s is not None else None
+            )
+            data[(did, name)] = entry
+
+    skipped = []
+    rows = []
+    for did in ds_ids:
+        ds_label = (dataset_display_names or {}).get(did, did)
+        if (did, ref_name) not in data:
+            continue
+        k_ref = data[(did, ref_name)]['_k']
+
+        for metric in metrics:
+            # dict.fromkeys(...) dedupes while preserving order -- model_keywords may
+            # legitimately map several exact-match keys to the same display name (e.g.
+            # one per dataset for a run whose folder name isn't uniform across
+            # datasets), which would otherwise make that name appear multiple times
+            # here and produce duplicate rows downstream.
+            names_here = [
+                name for name in dict.fromkeys(model_keywords.values())
+                if (did, name) in data
+                and data[(did, name)].get(metric) is not None
+                and len(data[(did, name)][metric]) > 0
+            ]
+            if ref_name not in names_here:
+                continue
+
+            # Same-K filter (see docstring) -- drop rather than test a
+            # baseline whose realized metacell count genuinely differs.
+            matched = []
+            for name in names_here:
+                if name == ref_name:
+                    matched.append(name)
+                    continue
+                k_method = data[(did, name)]['_k']
+                if abs(k_ref - k_method) <= k_tolerance * k_ref:
+                    matched.append(name)
+                else:
+                    skipped.append(
+                        f"{ds_label}/{metric}: {name} skipped (K={k_method} vs "
+                        f"{ref_name}'s K={k_ref}, outside {k_tolerance:.0%} tolerance)"
+                    )
+
+            ref_vals = np.array(data[(did, ref_name)][metric])
+            others = [n for n in matched if n != ref_name]
+            n_comparisons = max(len(others), 1)  # Bonferroni denominator per group
+
+            for name in matched:
+                vals = np.array(data[(did, name)][metric])
+                row = {
+                    'dataset': ds_label,
+                    'metric':  metric,
+                    'method':  name,
+                    'k':       data[(did, name)]['_k'],
+                    'n':       len(vals),
+                    'median':  float(np.median(vals)),
+                    'mean':    float(vals.mean()),
+                    'std':     float(vals.std()),
+                }
+                if name != ref_name and len(ref_vals) > 0:
+                    try:
+                        _, p_raw = mannwhitneyu(ref_vals, vals, alternative='greater')
+                        p_adj = min(p_raw * n_comparisons, 1.0)
+                        row['p_vs_ref'] = p_raw
+                        row['p_adj']    = p_adj
+                        row['sig']      = _stars(p_adj)
+                    except Exception:
+                        pass
+                rows.append(row)
+
+    if skipped:
+        print(
+            "Skipped (K mismatch vs reference -- not a same-K comparison, "
+            "per the paper's baseline protocol):"
+        )
+        for m in skipped:
+            print(f"  - {m}")
+
+    return pd.DataFrame(rows)
+
+
+_GRAPH_BATCH_PAIRABLE_METRICS = ('modularity_per_batch',)
+
+
+def graph_batch_significance_paired(
+    ds_ids,
+    model_keywords,
+    ref_name,
+    metrics=_GRAPH_BATCH_PAIRABLE_METRICS,
+    dataset_display_names=None,
+    k_tolerance=0.05,
+):
+    """Paired one-sided Wilcoxon signed-rank test (ref > other) -- the paired
+    counterpart to graph_batch_significance(), for 'modularity_per_batch' ONLY.
+
+    Only 'modularity_per_batch' is pairable: batch is a shared, method-independent
+    unit (the same physical batch exists for every method on a given dataset), so
+    ref_vals[i] and vals[i] refer to the same batch and can be validly paired --
+    exactly the same reasoning as rare_metric_significance_paired(). 'purity_per_mc'
+    and 'batch_entropy_per_mc' CANNOT be paired this way: a metacell is a
+    method-specific output (different clustering methods produce different numbers of
+    metacells with different cell compositions), so there is no natural
+    correspondence between "metacell i of scProto" and "metacell i of a baseline" --
+    forcing a pairing there would be statistically meaningless, not just weaker.
+    Requesting either of those raises ValueError; use graph_batch_significance()
+    (unpaired Mann-Whitney U) for those two metrics instead, which is the
+    statistically appropriate test for a method-specific, unpaired unit like a
+    metacell.
+
+    Adds an 'n_wins' column: how many of the n batches scProto's per-batch modularity
+    strictly exceeds the baseline's.
+
+    Same K-tolerance filtering / Bonferroni correction / args as
+    graph_batch_significance() -- see that function's docstring.
+
+    Returns:
+        Long-form DataFrame with columns:
+        dataset, metric, method, k, n, median, mean, std, n_wins,
+        p_vs_ref, p_adj, sig (last three only for method != ref_name).
+    """
+    from scipy.stats import wilcoxon
+
+    def _stars(p):
+        if p < 0.001: return '***'
+        if p < 0.01:  return '**'
+        if p < 0.05:  return '*'
+        return 'ns'
+
+    metrics = [metrics] if isinstance(metrics, str) else list(metrics)
+    not_pairable = [m for m in metrics if m not in _GRAPH_BATCH_PAIRABLE_METRICS]
+    if not_pairable:
+        raise ValueError(
+            f"graph_batch_significance_paired: {not_pairable} can't be paired "
+            f"(no cross-method metacell correspondence -- see docstring). Only "
+            f"{_GRAPH_BATCH_PAIRABLE_METRICS} are valid here; use "
+            f"graph_batch_significance() (unpaired) for the rest."
+        )
+    unknown = [m for m in metrics if m not in _GRAPH_BATCH_METRIC_FILES]
+    if unknown:
+        raise ValueError(
+            f"graph_batch_significance_paired: unknown metrics {unknown} -- choose "
+            f"from {list(_GRAPH_BATCH_METRIC_FILES)}"
+        )
+
+    ds_ids = [ds_ids] if isinstance(ds_ids, str) else list(ds_ids)
+
+    data = {}  # (did, name) -> {'_k': int, metric: np.array, ...}
+    for did in ds_ids:
+        for keyword, name in model_keywords.items():
+            run_dir = _resolve_run_dir(did, keyword, prefer_csv='purity_per_mc.csv')
+            if run_dir is None:
+                continue
+            purity_s = _read_series(os.path.join(run_dir, 'purity_per_mc.csv'))
+            if purity_s is None:
+                continue
+            entry = {'_k': len(purity_s)}
+            mod_s = _read_series(os.path.join(run_dir, 'modularity_per_batch.csv'))
+            entry['modularity_per_batch'] = (
+                mod_s.values.astype(float) if mod_s is not None else None
+            )
+            data[(did, name)] = entry
+
+    skipped = []
+    length_mismatch = []
+    rows = []
+    for did in ds_ids:
+        ds_label = (dataset_display_names or {}).get(did, did)
+        if (did, ref_name) not in data:
+            continue
+        k_ref = data[(did, ref_name)]['_k']
+
+        for metric in metrics:
+            # dict.fromkeys(...) dedupes while preserving order -- see the equivalent
+            # comment in graph_batch_significance() above for why this matters.
+            names_here = [
+                name for name in dict.fromkeys(model_keywords.values())
+                if (did, name) in data
+                and data[(did, name)].get(metric) is not None
+                and len(data[(did, name)][metric]) > 0
+            ]
+            if ref_name not in names_here:
+                continue
+
+            matched = []
+            for name in names_here:
+                if name == ref_name:
+                    matched.append(name)
+                    continue
+                k_method = data[(did, name)]['_k']
+                if abs(k_ref - k_method) <= k_tolerance * k_ref:
+                    matched.append(name)
+                else:
+                    skipped.append(
+                        f"{ds_label}/{metric}: {name} skipped (K={k_method} vs "
+                        f"{ref_name}'s K={k_ref}, outside {k_tolerance:.0%} tolerance)"
+                    )
+
+            ref_vals = np.array(data[(did, ref_name)][metric])
+            others = [n for n in matched if n != ref_name]
+            n_comparisons = max(len(others), 1)  # Bonferroni denominator per group
+
+            for name in matched:
+                vals = np.array(data[(did, name)][metric])
+                row = {
+                    'dataset': ds_label,
+                    'metric':  metric,
+                    'method':  name,
+                    'k':       data[(did, name)]['_k'],
+                    'n':       len(vals),
+                    'median':  float(np.median(vals)),
+                    'mean':    float(vals.mean()),
+                    'std':     float(vals.std()),
+                }
+                if name != ref_name and len(ref_vals) > 0:
+                    if len(ref_vals) != len(vals):
+                        length_mismatch.append(
+                            f"{ds_label}/{metric}: {name} skipped (n={len(vals)} vs "
+                            f"{ref_name}'s n={len(ref_vals)} -- can't pair arrays of "
+                            f"different length, e.g. different batch counts)"
+                        )
+                    else:
+                        row['n_wins'] = int((ref_vals > vals).sum())
+                        try:
+                            _, p_raw = wilcoxon(ref_vals, vals, alternative='greater')
+                            p_adj = min(p_raw * n_comparisons, 1.0)
+                            row['p_vs_ref'] = p_raw
+                            row['p_adj']    = p_adj
+                            row['sig']      = _stars(p_adj)
+                        except ValueError:
+                            pass
+                rows.append(row)
+
+    if skipped:
+        print(
+            "Skipped (K mismatch vs reference -- not a same-K comparison, "
+            "per the paper's baseline protocol):"
+        )
+        for m in skipped:
+            print(f"  - {m}")
+    if length_mismatch:
+        print("Skipped (unequal-length arrays -- can't pair):")
+        for m in length_mismatch:
+            print(f"  - {m}")
+
+    return pd.DataFrame(rows)
 
 
 # ---------------------------------------------------------------------------

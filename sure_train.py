@@ -89,8 +89,8 @@ def train_sure(ds_id, mode, n_epochs=None, batch_size=None):
             )
 
     SURE.save_model(model, os.path.join(save_path, 'sure_model.pth'))
-    ad.write(os.path.join(save_path, 'sure_sc.h5ad'))
-    mc_ad.write(os.path.join(save_path, 'sure_agg.h5ad'))
+    ad.write(os.path.join(save_path, 'sure_sc.h5ad'), compression="gzip")
+    mc_ad.write(os.path.join(save_path, 'sure_agg.h5ad'), compression="gzip")
     print(f"SURE saved to {save_path}")
 
 
@@ -178,12 +178,14 @@ def eval_sure_task3(ds_id):
 
     summary, _ = celltype_niche_dge(ad, mc_ad, lk, nk, 'sure', save_path)
     ct_niche_rbo_avg = float(summary.values.mean())
-    print(f"[sure task3] mean ct-niche RBO: {ct_niche_rbo_avg:.4f}")
+    std_ct_niche_rbo = float(summary.values.std(ddof=1)) if summary.values.size > 1 else 0.0
+    print(f"[sure task3] mean ct-niche RBO: {ct_niche_rbo_avg:.4f} ± {std_ct_niche_rbo:.4f}")
 
     metrics_path = os.path.join(save_path, 'metrics.json')
     metrics = json.load(open(metrics_path)) if os.path.exists(metrics_path) else {}
     metrics['ct_niche_rbo_avg'] = ct_niche_rbo_avg
+    metrics['std_ct_niche_rbo'] = std_ct_niche_rbo
     with open(metrics_path, 'w') as f:
         json.dump(metrics, f, indent=2)
 
-    return {'ct_niche_rbo_avg': ct_niche_rbo_avg}
+    return {'ct_niche_rbo_avg': ct_niche_rbo_avg, 'std_ct_niche_rbo': std_ct_niche_rbo}

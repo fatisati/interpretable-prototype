@@ -91,3 +91,14 @@ def fix_random_seeds(seed=31):
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
     np.random.seed(seed)
+    # RNG seeding alone doesn't make GPU training reproducible: cuDNN's default
+    # algorithm selection and atomic-add-based backward ops (heavily used by this
+    # model's scatter/graph-aggregation losses) can still vary run-to-run.
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    # cudnn.deterministic only covers conv/RNN kernels -- this model is MLP-based
+    # and leans on scatter_add/index_add for per-prototype/per-batch aggregation
+    # (community/nassoc/usage losses), which cudnn.deterministic does not touch.
+    # warn_only=True: fall back to non-deterministic (with a warning) for any op
+    # with no deterministic CUDA implementation, instead of hard-crashing training.
+    torch.use_deterministic_algorithms(True, warn_only=True)

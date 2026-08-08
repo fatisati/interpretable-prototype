@@ -1,0 +1,38 @@
+i am writing this for claude to use rules when i ask to write md fiels to reviwer reposne
+do not say wrong things - wrong reasoning
+write it in a way so i can copy pate and respsne - do not put stupid thigs in it - like you did it i will add - as it is converation with me
+do not highlight my weaknesses
+do not mention things that make reviwer notice somthign where rise him new question - use silent in this situation - only tell these things in chat with me and ask me how i want to solve it
+try to adres reviwer concersn with what w ehave
+all of our claims shoudl match each other - no incocnistetcy 
+try to understan main oints abput our model - and all eplxantion and reasoning and numbers shoudl suport that - if does not look like we shoud say why very breilfy
+always consider we are writing for reviwer - so dont bring non relavant thigns from our converation there - only tigns where matter to say and mention adn exampin to reviwer
+do not highlitgh weakness or numbers not good - do not put snetcen stress on them unless really want to ask me if you wnated to
+say positive things frst then breifly mention weak results
+try to use main metrics mentioned in the paper as base evidence - they are the one which  mainly claim what we wnat - we also added rare f1 too which is also support main things too
+now we are working to preparing comment1 - so check the full discussion and for each reviwer write in a way that solve the main issues had in mentioned
+make sure the snetce yu say is supportive with the numebrs you bring - if possible bring signifcnat test info for your claims
+do not incude unnesaacry detail where may rasie new questions from reviwers
+for any answer - check the whole things each reviwer had in mind - and try to adress general picture with any detail you mention wrt to what we really have 
+highlight good things we did and we have - try to show them we did much work
+do not think of char limit when adding new info - we will trim at the end so we have wholisitic view
+make sure do not refer to things wher not real or not there
+do not say again what reviwer said if not nesacry - we dont want to waste chars for nothing
+consider which char we say shoudl have somhting valuabl to us - 
+answer in a way so that we undetnd wht they said 
+do not consider to do thing for the char length
+why you keep using word fair? in the places where should not be - please dont - feel like claude signiture i dont like it
+the most imoptant clear answer to the reviwer - shoud be in  firsrt of section - sentence - they may be lazy not read unitl end
+try to be objective yet not messy - so write you rsnetces say conclusion then very brefi numbers then say more details
+answer their question very clealy easy to uderstnd - to the point
+
+try to say what they asked - not too many non nesacyryt things - for whatever you say check what if i dnt say it what would be the effect - and if removing had no effect dont say it
+for whatever you want t say - asner the question summerized veyr direct firts - then say detail
+put yourself on behalf of the reviwer [for each] and think what he / she is looking for - dont say unnesary things
+
+summary at first - een he was lazya and didnt read until end get the point
+he shoud know firts that we have undetatood what they asked and the direct answer shoud be seen very easily
+say sumamry of what happened then details based on pritoty order - direct answr
+
+positve tone super improtan
+valid is very important - dont say invalid thigseasy to udentand and clear

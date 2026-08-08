@@ -1,0 +1,42 @@
+=== cell 31 (code) ===
+SRC: dataset_display_names = {'pancreas': 'Pancreas', 'lung': 'Lung', 'pbmc-immune': 'Immune'}
+
+# --- Table 1 (community structure / batch integration): modularity, batch entropy, purity ---
+# Same convention as generate_tables.ipynb: load_task1_multi -> clean_run_names -> show_table.
+df_task1 = load_task1_multi(RNA_SEQ_DATASETS, metrics=TASK1_METRICS)
+df_task1 = clean_run_names(df_task1)
+show_table(df
+OUT: 
+
+=== cell 32 (code) ===
+SRC: # --- Table 2 (metacell representation quality): coverage, DGE consistency, scGraph ---
+df_task2 = load_task1_multi(RNA_SEQ_DATASETS, metrics=TASK2_METRICS)
+df_task2 = clean_run_names(df_task2)
+show_table(df_task2, metrics=TASK2_METRICS, dataset_display_names=dataset_display_names)
+OUT: 
+
+=== cell 33 (code) ===
+SRC: # --- Rare-cell-type table (the key hypothesis test): coverage + homogeneity, same
+# per-batch-rare-cell definition results.tex uses for Table 2 (tab:rare_cells) ---
+model_keywords = {'proto_umap': 'scProto', 'seacell': 'SEACells (PCA)'}
+for method in CORRECTION_METHODS:
+    disp = METHOD_DISPLAY_NAMES[method]
+    model_keywords[f'seacell_X_{method}'] = f'SEACells ({disp})'
+    model_keywords[f'le
+OUT: 
+
+=== cell 34 (code) ===
+SRC: # --- Embedding-level rare-cell kNN purity: was structure already lost before any
+# clustering ran? (../planning/rebuttal_plan.md hypothesis, step 1 -- no clustering involved here) ---
+rows = []
+for ds_id in RNA_SEQ_DATASETS:
+    path = os.path.join(get_dataset_model_dir(ds_id), f'rare_knn_purity_{ds_id}.json')
+    if not os.path.exists(path):
+        continue
+    d = json.load(open(path))
+    row
+OUT: 
+
+=== cell 35 (code) ===
+SRC: 
+OUT: 

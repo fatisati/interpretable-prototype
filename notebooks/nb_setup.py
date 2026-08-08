@@ -53,6 +53,7 @@ from interpretable_ssl.experiments.tasks import (
 
 from seacell_train import (
     train_seacell,
+    train_seacell_own_affinity,
     eval_seacell_task1,
     eval_seacell_task2,
     eval_seacell_task3,

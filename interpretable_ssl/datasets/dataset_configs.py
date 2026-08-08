@@ -228,6 +228,30 @@ DATASETS = {
         "ft_epochs": 0,
         "niche_key": 'niches_2D',  # TODO: set to niche annotation column name
     },
+    "fibnsc": {
+        # Fibroblasts-only subset of s28nsc (the full/un-subsampled section-28 dataset,
+        # not the ss28nsc subsample), spatial context (X_ctx) precomputed on the FULL
+        # tissue before cell-type filtering, via a radius-based average (build_context) --
+        # matching the NSCLC paper's own method and our appendix's app:spatial_affinity
+        # formula (a physical radius, not a fixed neighbour count). The radius is
+        # calibrated automatically each build to match the paper's own reported density
+        # (median 32 neighbours in their 2D 50um neighbourhood, nscl.pdf p.9) rather than
+        # assuming our coordinate units match their micrometers -- see
+        # interpretable_ssl/datasets/spatial_subsets.py:
+        # calibrate_radius_for_target_median_neighbours / build_celltype_subset_with_context.
+        # Single cell type by construction, so scProto's 'ctx' affinity graph built on top
+        # of this X_ctx is same-cell-type only automatically (no cross-cell-type edges to
+        # mask), while X_ctx itself still reflects each cell's true (mixed-cell-type)
+        # neighbourhood composition. num_prototypes = n_cells/75 (15309/75), matching this
+        # codebase's rough cells-per-prototype ratio on ss28nsc (28804/300 ~= 96).
+        "path": Path(DATA_DIR) / "spatial/fibnsc.h5ad",
+        "label_key": "celltypes",
+        "niche_key": "niches_2D",
+        "label_encoder_path": os.path.join(CODE_DIR, "data/NSCLC_3D_section_28.pkl"),
+        "num_prototypes": 204,
+        "batch_size": 512,
+        "ft_epochs": 0,
+    },
     "bms28nsc": { # but in reality, its 0.1 with some new probs
         "path": Path(DATA_DIR) / "spatial/bms28nsc_v1.h5ad",
         "batch_key": "section",
@@ -279,7 +303,28 @@ DATASETS = {
         "batch_size": 1024,
         "umap_checkpoint_freq": 10,
     },
-        
+    "crcx": {
+        # CRC Xenium (Marteau et al. 2026, Cancer Cell) -- second spatial dataset
+        # for the rebuttal, different tissue (colon vs. NSCLC lung) and platform
+        # (Xenium vs. CosMx). 3 whole tissue sections (g_core, l_normal, d_normal;
+        # patients g/l/d, tissue_regions core/normal) kept intact -- not a random
+        # per-cell subsample -- so spatial neighborhoods stay real for the affinity
+        # graph and for BANKSY. X is already log-normalized (source file's own
+        # log1p), layers['counts'] holds raw counts for the DGE ground-truth step.
+        # See neurips_manuscript/rebuttle/notebooks/crc_xenium_data_prep.ipynb.
+        "path": Path(DATA_DIR) / "spatial/crc_xenium/crc_xenium_prepped.h5ad",
+        "batch_key": "patient_id",
+        "label_key": "celltype",
+        "niche_key": "Niche",  # NicheCompass-derived (GNN), NOT composition-clustering
+                                 # like ours -- kept for reference/ground-truth DGE only.
+        "label_encoder_path": os.path.join(CODE_DIR, "data/crcx_label_encoder.pkl"),
+        "num_prototypes": 670,  # ~50,130 cells / 75, matching the SEACells-style
+                                  # K ~= N/75 convention (appendix training.tex).
+        "batch_size": 1024,
+        "ft_epochs": 0,
+        "normalized": True,  # X is already log-normalized -- skip Dataset's own
+                              # normalize_total/log1p on load.
+    },
 }
 
 def load_ds(ds_id):

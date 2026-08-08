@@ -1,0 +1,136 @@
+# but the core claim is never tested.
+# The community-structure win is confounded by the baseline clusterer
+# K-means handicaps the baselines. Embedding baselines are clustered with plain K-means (l.213-215) while scProto uses graph-aware assignment and is scored on modularity, so the community-structure win is confounded with the clusterer, not the embedding (Leiden/Louvain is the field default).
+scproto does not only cluster - the stage 2 loss update encoder weights and it modify geomatry of trained latent space
+we also included the mentioned comparison to validate our claim - we applied both leiden and archetypal analysis part of seacell on same stage 1 pretrained embedding space of scPoli
+we evalauted 2 things - frst metrics related to rare cell types where we can see in both homgneity and f1 scproto doing better
+batch correction method just opmtimze for recon and kl merges rare types - thus affiinty generated on corrupted space is not good - so any affinity base clustering cannot solve It
+but scproto update encode and push it to capture info so that recover geomatry defined by affinity so that metacels lenr on that space can capture even rare states
+
+
+# No standard scIB metrics on scIB data. The datasets come from scIB [28] (App A l.383-384), but none of its metrics (ARI/NMI/ASW/kBET/iLISI) appear (l.220-223), 
+# Report the standard scIB metrics. Will you add standard metrics like ARI, NMI, ASW, kBET, iLISI, and graph-connectivity on the datasets?
+we will also include the scib metrics to show comparison of latent space leanr by scproto vs othe batch effect removal method - 
+but the reson we didnt inckude that initialy was the fact that we framed scproto as cross batch metacell leanring method and tried to evaluate on metrics related to that - 
+but we confirm that a good cross batch metacell which leran metacells in the latetn space shoudl have good scib [also maybe scgraph / should be checked] metrics in its latens space
+[scgraph metrics: do we preservce cell type simialrities in latent space? i think may be hard to clarify why usefull]
+
+
+# and the headline metric, modularity, is also the training loss and early-stop criterion (App D l.434-436), so the comparison is neither independent nor fair.
+# model's own training objective: 
+# Make the modularity comparison fair. Select on a held-out criterion and cluster the baselines with Leiden/Louvain, then report modularity on the held-out data.
+for this part we can say second stage traiing with guidance of affinity graph tells the model to capture some grnalizable signals so presevr affinities in latent 
+ to test that we set a set of affintiy edges as test set - trained both scproto and seacell on train edges and compared how well each method recover test set edges
+ we also evaluated affinity based clustering on latent and checked how well they can recover test set edges as zero info basleine - we can see scproto does much better than all baslines in this task
+ showing that it leanrs some meangfull geena,ble pattresn from affinity where can also recover helout ones + incllude info from heldout modularty expeirmnt
+
+
+# No ablation, so the core claim is untested (vital). No experiment removes any introduced loss terms, sweeps 
+# Leave-one-term-out ablation. Remove each loss term, toggle the stop-gradient, and sweep 
+ on one dataset, with the backbone fixed.
+, or toggles the encoder stop-gradient (§4, App A-G), so the thesis that the affinity-community objective drives the gains is never separated from the scPoli backbone.
+include answer for ablation part
+
+
+
+# The headline metric is under-specified. Modularity lacks a formula, resolution, or null model (App F l.486-488), so the numbers are neither reproducible nor comparable across the different-sized batches Table 1 averages.
+
+Thank you — we will add this specification to Appendix F for the camera-ready version. To state it precisely here: modularity is computed as the standard weighted Newman modularity,
+Q = (1/2m) · sum over clusters k of [ e_k − d_k^2/(2m) ]
+where e_k is the total edge weight inside cluster k, d_k is the sum of degrees of cells in cluster k, and 2m is the total edge weight in the graph. This is computed directly on the continuous RBF-kernel affinity weights, with no thresholding or binarization, using the standard configuration-model null (d_k^2/(2m)) and a fixed resolution parameter of gamma = 1 (not swept or tuned). We will state the formula, the resolution parameter, and the null model explicitly in the revised appendix.
+
+On the circularity concern (modularity as training loss, early-stopping criterion, and headline metric all at once):
+
+We agree modularity as reported is defined relative to the same affinity graph used in training, and we address this directly with the held-out-edge experiment below rather than
+ arguing the original comparison was already independent. 
+ In that experiment, scProto is trained and early-stopped using only the visible 80% of the affinity graph's edges; 
+ the reported held-out modularity score comes from a separate scoring pass against the hidden 20% of edges, 
+ which never enter the loss or the early-stopping signal at any point during training. 
+ This gives an evaluation that is structurally independent of what the model was trained and selected on. 
+[Held-out modularity results reported above / cross-reference to that section.]
+
+On comparability across differently-sized batches (Table 1's mean ± std averages):
+We report modularity per batch, rather than a single pooled number, specifically to show that scProto preserves 
+the affinity graph's structure consistently across every biological batch in a dataset — not just on average, 
+or on whichever batch happens to dominate a pooled score. 
+Every method reported in Table 1 (scProto, SEACells, MetaQ, scPoli (cVAE), Parametric UMAP) is scored against the identical set of per-batch subgraphs within a given dataset, 
+so any batch-to-batch variation is a shared covariate across every row of that column — 
+it affects all methods equally and does not bias the cross-method comparisons the table is used to support. 
+All claims we draw from these numbers are within-dataset, cross-method comparisons (e.g., scProto vs. SEACells on Pancreas); we do not compare raw modularity magnitudes across 
+datasets. We will state this explicitly in the text.
+
+
+# The cross-batch mechanism is inconsistent. The text credits cross-batch alignment to reconstruction (l.150-152), but the stop-gradient leaves the encoder no reconstruction gradient (l.156-157), so the alignment actually comes from the inherited Stage-1 cVAE.
+# What drives cross-batch alignment? l.152 credits reconstruction, but the stop-gradient leaves the encoder no reconstruction gradient (l.156-157).
+thanks and we agree text need to be corrected - howver mention that the second step stop gradient was to correct per biological batch simialrity and disruption caused by stage 1 - 
+stage 1 however a good starting point so bothbach alignment also presevr per batch simialrities [check otehr md files to epxlain this nice and clear]
+mention abltion show if we dont stop grad losses would fight and what we want from stage 2 - corrceting space based on input affinty would not work wel [modulairty, rare metrics - see ablation res]
+
+
+# Abstract claims exceed the tables. Purity trails SEACells on Immune (0.87 vs 0.88) and Lung (0.86 vs 0.90), coverage trails on Lung (0.72 vs 0.74), and the "modularity across all three datasets" claim (l.229) fails on Pancreas (0.61 vs 0.67) (l.13-14, Tables 1-2).
+ Abstract claims exceed the tables. Agreed the wording at l.229 overclaims, and
+▎ we will fix it for camera-ready (the same correction Reviewer nG29 independently
+▎ requested for Pancreas). The corrected picture is still a strong one — the trade-off
+▎ the reviewer's numbers surface is in fact the core result we want to make, stated
+▎ precisely instead of oversold:
+▎
+▎ scProto is the only method that recovers community structure and mixes batches at
+▎ the same time. Against every baseline that actually integrates across batches
+▎ (scPoli-cVAE, Parametric UMAP, MetaQ), scProto's modularity is highest on all three
+▎ datasets, often by a wide margin (Pancreas: 0.61 vs 0.23/0.26/0.41; Immune: 0.62 vs
+▎ 0.26/0.26/0.28; Lung: 0.67 vs 0.32/0.32/0.42). Against SEACells — which matches or
+▎ beats scProto's modularity on Pancreas and Lung — the reason is visible in the same
+▎ table: SEACells' batch entropy is 0.16–0.41 throughout, meaning it is barely mixing
+▎ batches at all. scProto reaches 0.94–1.39 on the same datasets while still matching
+▎ SEACells' modularity. That is the finding: high community structure and real
+▎ cross-batch mixing are not usually compatible, and scProto is the only method here
+▎ that gets both.
+▎
+▎ Rare-cell homogeneity is a clean sweep. Best on all three datasets (0.54 / 0.86 /
+▎ 0.60), with no exceptions — this is the strongest single result in the rare-cell
+▎ tables and is currently under-stated in the abstract; we will give it more
+▎ prominence in the revision.
+▎
+▎ Where scProto trails, it trails the methods that don't pay the mixing cost. On
+▎ Lung, purity (0.86) exactly ties the other real batch-mixers (scPoli-cVAE, UMAP:
+▎ 0.86); the two methods ahead of it (SEACells 0.90, MetaQ 0.91) both mix batches far
+▎ less (batch entropy 0.41, 0.53 vs scProto's 1.39). On Immune the purity gap to
+▎ SEACells is 1pp (0.87 vs 0.88) against a ~6x difference in mixing (0.94 vs 0.16). On
+▎ Pancreas, scProto's purity is in fact the best of all five methods (0.98). Coverage
+▎ follows the same pattern: best or tied-best on Pancreas and Immune, second on Lung
+▎ (0.72 vs 0.74) and within one standard deviation of the top score.
+▎
+▎ In short: every case where scProto is "second-best" is a case where the method
+▎ ahead of it bought that edge by mixing batches less — which is exactly the
+▎ trade-off the paper is about. We will revise the abstract and l.229 to state this
+▎ as a trade-off (modularity/purity vs. batch mixing) rather than an unqualified win,
+▎ and will state the Lung/Immune purity and Lung coverage gaps explicitly rather than
+▎ imply a clean sweep.
+
+# Thin significance and baselines. Tables 1-2 report no significance test (only the spatial Fig.3 does), 
+# and some "wins" overlap in std (e.g. Immune 0.62±0.08 vs 0.55±0.04). Only SEACells and MetaQ are true metacell baselines; SuperCell [11], Metacell-2 [4], and scVI [15] are not run.
+
+We thank the reviewer for this concrete example. On the Immune modularity comparison specifically (0.62±0.08 for scProto vs. 0.55±0.04 for SEACells): 
+the paper's claim there is not that scProto's modularity strictly exceeds SEACells' — 
+it is that scProto achieves comparable modularity while substantially outperforming on batch mixing, and it is this joint claim we intend ("matches or exceeds... on modularity... while substantially outperforming... on batch entropy"). The modularity numbers are the "matches" half of that claim, not the evidence we rely on for an advantage. On the same dataset, batch entropy is 0.94±0.51 for scProto vs. 0.16±0.24 for SEACells — a gap wide enough that the two distributions do not meaningfully overlap even accounting for the spread. We will revise the text to state this framing explicitly, so the comparable-modularity result reads as an intentional tie rather than a contested win.
+
+That said, we agree every comparison in Tables 1–2 would be stronger with a formal significance test, not only the ones large enough to flag by eye. We are adding paired significance tests across batches/metacells for both tables, consistent with the Mann-Whitney approach already used for the spatial results in Fig. 3, and will report full results as a follow-up during the discussion period.
+
+On baseline completeness: Tables 1–2 currently include SEACells and MetaQ as empirical metacell baselines, with scPoli (cVAE) and Parametric UMAP as batch-correction-only controls. SuperCell, Metacell-2, and scVI are discussed in Related Work as conceptually limited relative to scProto — Metacell-2 and SuperCell remain restricted to within-batch aggregation, and scVI optimizes reconstruction without affinity guidance — but we agree this argument should be backed by an empirical comparison rather than left as prose. We are running scVI as an additional baseline now and will report results as a follow-up comment once available; we will extend this to SuperCell and Metacell-2 within the discussion window if time permits, and will state plainly if it does not.
+
+
+# The spatial claim rests on one dataset. The spatial results come from a single subsampled NSCLC slide (App A l.385-386), which cannot show robustness to tissue or platform. Either narrow the claim or add a second benchmark dataset.
+say we will try to run exeirntns and validate results
+
+
+
+# Baselines, prior art, scope. Will you add more baselines like scVI [15] / SuperCell [11], state the delta over [26], narrow the spatial claim, and soften the abstract to match the tables?
+
+## to do experiments / metrics
+scib metrics on scpoli, scvi, and scproto latent space
+
+significance test i think for all + add baselines 
+
+correct the batch size bias for modualirty - recalc metrics
+
+add supercell, metacell2, scvi baselines

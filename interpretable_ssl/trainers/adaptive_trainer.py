@@ -64,13 +64,33 @@ class AdoptiveTrainer(Trainer):
 
     PRETRAIN_PARAM_KEYS = [
         'dataset_id', 'cvae_epochs', 'batch_size',
-        'latent_dims', 'l2norm', 'model_type', 'beta',
+        'latent_dims', 'l2norm', 'model_type', 'beta', 'num_prototypes',
     ]
     PRETRAIN_ABBREVIATIONS = {
         'dataset_id': 'ds', 'cvae_epochs': 'cvae_e', 'batch_size': 'BS',
         'latent_dims': 'LD', 'l2norm': 'l2norm', 'model_type': 'model',
-        'beta': 'beta',
+        'beta': 'beta', 'num_prototypes': 'NP',
     }
+
+    def _get_pretrain_param_default(self, key, defaults):
+        """Default value to compare against when deciding whether `key` earns a token
+        in the pretrain checkpoint name. Plain `defaults.get(key)` (configs/defaults.py's
+        flat, dataset-agnostic fallback) is wrong for `num_prototypes` specifically --
+        it legitimately varies per dataset (see dataset_configs.py: pancreas=220,
+        lung=300, cd34=95, ...), so comparing against one flat number would tag every
+        dataset whose own default isn't that number, even when num_prototypes was never
+        actually overridden for it.
+        """
+        if key == 'num_prototypes':
+            from interpretable_ssl.datasets.dataset_configs import DATASETS
+            ds_conf = DATASETS.get(self.dataset_id)
+            if ds_conf and 'num_prototypes' in ds_conf:
+                return ds_conf['num_prototypes']
+            # Unregistered/custom dataset: no per-dataset default to compare against --
+            # fall back to "never tag this key" (self.params.get(key) == itself),
+            # matching the pre-existing behavior for such datasets exactly.
+            return self.params.get(key)
+        return defaults.get(key)
 
     def _get_pretrain_name(self):
         from interpretable_ssl.configs.defaults import get_defaults
@@ -78,7 +98,8 @@ class AdoptiveTrainer(Trainer):
         parts = ['pretrain']
         for key in self.PRETRAIN_PARAM_KEYS:
             val = self.params.get(key)
-            if val is not None and val != defaults.get(key):
+            default_val = self._get_pretrain_param_default(key, defaults)
+            if val is not None and val != default_val:
                 abbr = self.PRETRAIN_ABBREVIATIONS[key]
                 parts.append(f"{abbr}-{val}" if isinstance(val, str) else f"{abbr}{val}")
         return "_".join(parts)

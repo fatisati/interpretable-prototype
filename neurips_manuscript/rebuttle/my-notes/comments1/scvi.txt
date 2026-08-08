@@ -1,0 +1,4 @@
+so check the scvi with mse loss - if results good report it
+
+then check if nb vs mse make large diffrenece - we can also train scprot with same loss and add new comparison
+- Rare-cell-toward-dense bias being shared across MSE/NB/ZINB — I'd agree in spirit: none of the three have any term that protects rare subpopulations, so majority cell types dominate the loss regardless of noise family. I'd stop short of assuming it's identical in magnitude across the three (ZINB's zero-inflation term specifically targets dropout, which isn't quite the same axis as "rare cell type"), but as a first-order argument for "this isn't the thing MSE-vs-ZINB will fix," I think you're right.

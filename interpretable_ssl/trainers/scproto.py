@@ -384,6 +384,22 @@ class SCProtoTrainer(AdoptiveTrainer):
         centers = torch.nn.functional.normalize(embeddings.float(), dim=1)
         self.model.set_prototypes(centers)
 
+        # --- post-init usage check: how concentrated is the hard assignment
+        #     right after waypoint seeding, before any training/loss has run?
+        #     Tells apart "collapse starts at init" from "collapse develops
+        #     during training" -- no epsilon needed yet, pure argmax. ---
+        with torch.no_grad():
+            z_full = self.encode_adata(self.train_ds.adata, self.model, z_idx=1).to(self.device)
+            init_assign = self.model.prototypes(z_full).argmax(dim=1).cpu().numpy()
+        sizes_init = np.bincount(init_assign, minlength=K)
+        n_used_init = int((sizes_init > 0).sum())
+        p_init = sizes_init / max(sizes_init.sum(), 1)
+        eff_n_init = 1.0 / np.sum(p_init ** 2)
+        top5_share_init = np.sort(sizes_init)[::-1][:5].sum() / max(sizes_init.sum(), 1)
+        print(f"[waypoint init] post-init hard assignment (before any training): "
+              f"{n_used_init}/{K} prototypes used ({n_used_init / K:.1%})  "
+              f"effective_n={eff_n_init:.1f}  top5_share={top5_share_init:.1%}")
+
     @staticmethod
     def _proto_sim(s_i, s_j, metric='dotp'):
         """Pairwise proto similarity between softmax assignment vectors.
@@ -794,7 +810,7 @@ class SCProtoTrainer(AdoptiveTrainer):
 
     # -- UMAP edge training: setup / epoch / public API ------------------
 
-    def _compute_sim_recon_diffusion_targets(self, aff_csr, cell_ds, n_eigs):
+    def _compute_sim_recon_diffusion_targets(self, aff_csr, cell_ds, n_eigs, diffusion_t=0.0):
         """Per-biological-batch diffusion coordinates — a compact, precomputed
         (n_eigs-dim) summary of each cell's position in the affinity graph,
         used as the regression target when sim_recon_target='diffusion'.
@@ -810,15 +826,27 @@ class SCProtoTrainer(AdoptiveTrainer):
         picking init seeds, whereas a regression target needs every cell's
         coordinates to be meaningful.
 
-        Every eigenvector is kept at equal (unweighted) scale — no
-        eigenvalue^t diffusion-time weighting. This isn't a placeholder: the
-        point of sim_recon is catching a prototype that secretly glues
-        together two internally-cohesive but mutually disconnected
-        sub-communities, and that signal lives in the fine/local, small-
-        eigenvalue directions. Upweighting the coarse/global (large-
-        eigenvalue) directions instead would drown out exactly the thing
-        this loss needs to see, so equal weighting is the correct setting
-        for this use case, not a default waiting to be tuned.
+        `diffusion_t` controls eigenvalue^t weighting of each eigenvector
+        before the batch-size rescale below (default 0.0 = unweighted, every
+        eigen-direction equal). This used to be a removed, hardcoded-off
+        knob; it's back as a real, tunable dial rather than a bug fix — see
+        `files/sim_recon_global_vs_local_compaction.md` for the full
+        reasoning, summarized here:
+        - `t=0` (default): every eigen-direction weighted equally. Protects
+          resolution in the fine/local, small-eigenvalue directions, which is
+          where a prototype secretly gluing together two disconnected
+          sub-communities is most likely to show up — upweighting large-
+          eigenvalue directions instead would drown that signal out.
+        - `t=0.5`: weights each eigenvector by sqrt(eigenvalue). By the
+          Eckart-Young theorem, the Gram matrix of sqrt(eigenvalue)-weighted
+          top-k eigenvectors *is* the optimal rank-k reconstruction of the
+          affinity matrix itself — so per-cell MSE on `t=0.5` coordinates is
+          mathematically equivalent (up to the rank-n_eigs truncation) to
+          MSE on a reconstructed similarity matrix, i.e. as close as
+          `diffusion` mode can get to behaving like `sim_recon_target='full'`
+          (or SEACells' own RSS). Trades away the same fine/rare-pattern
+          sensitivity `t=0` protects — a real dial, not a strictly-better
+          setting.
 
         eigsh returns each eigenvector with Sum(v_i**2) == 1 (unit L2 norm)
         — that's an arbitrary solver convention, not a biological constraint:
@@ -832,7 +860,9 @@ class SCProtoTrainer(AdoptiveTrainer):
         larger batches. Multiplying by sqrt(N_b) (the batch's cell count)
         converts that to mean(v_i**2) == 1, i.e. an O(1) RMS entry
         regardless of batch size, so target scale reflects batch size
-        instead of an eigsh bookkeeping artifact.
+        instead of an eigsh bookkeeping artifact. This rescale is applied
+        after any eigenvalue^t weighting, and is unrelated to it — it's
+        fixing a batch-size artifact, not an importance weighting.
 
         We also drop the single leading eigenvector (eigenvalue ~1 for a
         connected graph, direction ~ sqrt(degree)). It's the trivial
@@ -862,8 +892,14 @@ class SCProtoTrainer(AdoptiveTrainer):
             k_request = min(n_eigs + 1, len(idx_b) - 2)
             vals, vecs = eigsh(L_sym, k=k_request, which='LM', tol=1e-2)
             order = np.argsort(-vals)  # descending: largest eigenvalue first
+            vals_sorted = vals[order][1:]  # drop the trivial leading eigenvalue (largest)
             vecs = vecs[:, order][:, 1:]  # drop the trivial leading eigenvector (largest eigenvalue)
             k = vecs.shape[1]
+            if diffusion_t:
+                # clip: L_sym can return tiny-negative eigenvalues at float
+                # precision near 0, which would NaN under a fractional power
+                weights = np.clip(vals_sorted, 0, None) ** diffusion_t
+                vecs = vecs * weights[np.newaxis, :]
             vecs = vecs * np.sqrt(len(idx_b))  # undo eigsh's unit-norm convention -> O(1) RMS entry, independent of batch size
             coords[idx_b, :k] = vecs
         return coords
@@ -947,10 +983,11 @@ class SCProtoTrainer(AdoptiveTrainer):
             sim_recon_target = getattr(self, 'sim_recon_target', 'full')
             if sim_recon_target == 'diffusion':
                 n_eigs = getattr(self, 'sim_recon_n_eigs', 10)
+                diffusion_t = getattr(self, 'sim_recon_diffusion_t', 0.0)
                 output_dim = n_eigs
-                coords = self._compute_sim_recon_diffusion_targets(_A, cell_ds, n_eigs)
+                coords = self._compute_sim_recon_diffusion_targets(_A, cell_ds, n_eigs, diffusion_t)
                 self._sim_recon_diffusion_target = torch.from_numpy(coords)  # (N, n_eigs), CPU
-                print(f"   sim_recon diffusion target: n_eigs={n_eigs}, "
+                print(f"   sim_recon diffusion target: n_eigs={n_eigs}, diffusion_t={diffusion_t}, "
                       f"RMS entry={coords.std():.4f} (should be O(1), not ~1/sqrt(N))")
             else:
                 output_dim = _A.shape[0]
@@ -988,11 +1025,20 @@ class SCProtoTrainer(AdoptiveTrainer):
             'epoch': 0,
             'cell_ds': torch.tensor(cell_ds, dtype=torch.long),
         }
-        self._c_k_ema = None  # reset EMA for proto_usage_mode='max'
+        self._c_k_ema = None  # reset EMA for proto_usage_mode='ema'
+        self._n_k_ema = None  # reset EMA for proto_usage_mode='nk'
         self._gmm_n_total_epochs = epochs
         if proto_decoupled:
             self._init_decoupled_proto_state()
             print(f"   proto_decoupled=True: prototypes updated via EMA of cluster means (excluded from optimizer)")
+        _lambda_proto_anchor = getattr(self, 'lambda_proto_anchor', 0.0)
+        if _lambda_proto_anchor > 0 and not proto_decoupled:
+            print(f"   proto_anchor: λ={_lambda_proto_anchor} (soft MSE pull toward column-normalized "
+                  f"soft_assign combination of this batch's cell embeddings — free gradient param, "
+                  f"see files/proto_anchoring_vs_proto_usage.md option A)")
+        elif _lambda_proto_anchor > 0 and proto_decoupled:
+            print(f"   proto_anchor: λ={_lambda_proto_anchor} set but IGNORED — proto_decoupled=True already "
+                  f"controls prototype position via EMA; the two are mutually exclusive")
 
         print(f"Starting edge-centric UMAP training (similarity={umap_similarity})")
         print(f"   min_dist={min_dist}, spread={spread}, neg_rate={neg_rate}")
@@ -1004,10 +1050,22 @@ class SCProtoTrainer(AdoptiveTrainer):
             _nassoc_diag_loss = getattr(self, 'nassoc_diag_loss', 'mse')
             _nassoc_agg = getattr(self, 'nassoc_agg', 'mean')
             _nassoc_diag = getattr(self, 'nassoc_diag', True)
+            _nassoc_diag_norm = getattr(self, 'nassoc_diag_norm', 'volume')
+            _nassoc_gamma = getattr(self, 'nassoc_gamma', 0.0)
             _offdiag_mode = f'-log(1-sqrt(m))' if _nassoc_diag_loss == 'nll' else 'm²'
-            _diag_mode = f'-log(m)' if _nassoc_diag_loss == 'nll' else '(m-1)²'
+            _diag_mode = {
+                'nll': '-log(m)',
+                'nll2': '-log(1-(m-1)²)',
+                'hinge': f'max(0,{_nassoc_gamma}-m)²',
+                'cpm': f'-(m-{_nassoc_gamma})·pairs',
+            }.get(_nassoc_diag_loss, '(m-1)²')
+            # [D1] which denominator the diagonal uses: containment vs density
+            _diag_den = ('edges_inside/possible_pairs [density]' if _nassoc_diag_norm == 'pair'
+                         else 'edges_inside/volume [containment]')
             print(f"   nassoc: λ={_lambda_nassoc}, agg={_nassoc_agg}, "
                   f"diag={'ON' if _nassoc_diag else 'OFF'} [{_diag_mode}], offdiag=[{_offdiag_mode}]")
+            print(f"           diag_norm={_nassoc_diag_norm} -> {_diag_den}"
+                  + (f", gamma={_nassoc_gamma}" if _nassoc_diag_loss in ('hinge', 'cpm') else ""))
         if lambda_sim_recon > 0:
             _sr_diag_note = "target diagonal=1 (self-similarity)" if sim_recon_target != 'diffusion' else "no self-loop (diffusion target)"
             print(f"   sim_recon: λ={lambda_sim_recon}, target={sim_recon_target}, {_sr_diag_note}")
@@ -1121,6 +1179,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         proto_recon_hard = getattr(self, 'proto_recon_hard', False)
         lambda_r1r2 = self.lambda_r1r2
         lambda_proto_attract = getattr(self, 'lambda_proto_attract', 0.0)
+        lambda_proto_anchor = getattr(self, 'lambda_proto_anchor', 0.0)
         lambda_proto_usage = getattr(self, 'lambda_proto_usage', 0.0)
         proto_usage_mode   = getattr(self, 'proto_usage_mode', 'nk')
         lambda_nassoc = getattr(self, 'lambda_nassoc', 0.0)
@@ -1128,6 +1187,8 @@ class SCProtoTrainer(AdoptiveTrainer):
         nassoc_agg = getattr(self, 'nassoc_agg', 'mean')
         nassoc_diag_loss = getattr(self, 'nassoc_diag_loss', 'mse')
         nassoc_diag = getattr(self, 'nassoc_diag', True)
+        nassoc_diag_norm = getattr(self, 'nassoc_diag_norm', 'volume')
+        nassoc_gamma = getattr(self, 'nassoc_gamma', 0.0)
         lambda_sim_recon = getattr(self, 'lambda_sim_recon', 0.0)
         sim_recon_target = getattr(self, 'sim_recon_target', 'full')
         use_proto_sim = getattr(self, 'umap_similarity', 'embedding') == 'proto'
@@ -1139,7 +1200,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         total_metrics = {
             'loss': 0, 'umap': 0, 'q_pos': 0, 'q_neg': 0, 'margin': 0,
             'loss_pos': 0, 'loss_neg': 0, 'recon': 0, 'kl': 0,
-            'proto_recon': 0, 'r1r2': 0, 'proto_attract': 0, 'nassoc': 0, 'proto_usage': 0, 'n_unused_protos': 0,
+            'proto_recon': 0, 'r1r2': 0, 'proto_attract': 0, 'proto_anchor': 0, 'nassoc': 0, 'proto_usage': 0, 'n_unused_protos': 0,
             'nassoc_diag_val': 0, 'nassoc_offdiag_val': 0, 'sim_recon': 0,
             'sim_recon_pred_std': 0, 'sim_recon_target_std': 0,
         }
@@ -1410,8 +1471,10 @@ class SCProtoTrainer(AdoptiveTrainer):
                             recon_x_agg[cmask] = scores[cmask] @ decoded_all[c]
                         elif proto_recon_hard:
                             recon_x_agg[cmask] = st_scores[cmask] @ decoded_all[c]
-                        else:
+                        elif getattr(self, 'proto_recon_stopgrad', True):
                             recon_x_agg[cmask] = scores[cmask].detach() @ decoded_all[c]
+                        else:
+                            recon_x_agg[cmask] = scores[cmask] @ decoded_all[c]
                 proto_recon_loss = F.mse_loss(recon_x_agg, X_batch, reduction="none").sum(dim=-1).mean()
 
             if lambda_r1r2 > 0:
@@ -1433,8 +1496,24 @@ class SCProtoTrainer(AdoptiveTrainer):
                         self._c_k_ema = c_k_ema.detach().cpu()
                     proto_usage_loss = -torch.log(c_k_ema.clamp(min=1e-8)).mean() / (1 - ema_alpha)
                 else:                                                      # 'nk' (default)
+                    # Same EMA-tracking machinery as 'ema' mode, applied to n_k
+                    # (sum -- aggregate mass) instead of c_k (max -- single
+                    # champion cell). Fixes 'ema''s blindness to total headcount
+                    # (a lone confident cell fully satisfies 'ema') while also
+                    # avoiding per-batch noise for rare populations (batch_size=
+                    # 1024 out of the full dataset means a genuinely rare, real
+                    # population can have few or zero cells in any single batch
+                    # by sampling luck -- the EMA carries signal across batches
+                    # instead of resetting every step).
                     n_k = soft_assign.sum(dim=0)                          # (K,)
-                    proto_usage_loss = torch.log(1.0 + 1.0 / n_k.clamp(min=1e-8)).mean()
+                    ema_alpha = getattr(self, 'usage_nk_alpha', 0.9)
+                    if self._n_k_ema is None:
+                        self._n_k_ema = n_k.detach().cpu()
+                        n_k_ema = n_k
+                    else:
+                        n_k_ema = ema_alpha * self._n_k_ema.to(self.device) + (1 - ema_alpha) * n_k
+                        self._n_k_ema = n_k_ema.detach().cpu()
+                    proto_usage_loss = torch.log(1.0 + 1.0 / n_k_ema.clamp(min=1e-8)).mean()
 
             loss = lambda_umap * umap_loss
             if lambda_recon > 0:
@@ -1469,6 +1548,7 @@ class SCProtoTrainer(AdoptiveTrainer):
                 unique_batches = cell_batch.unique()
 
                 M_list = []
+                pairs_list = []          # [D1/D2] per-batch possible_pairs, only filled for 'pair'
                 for b in unique_batches:
                     # include all edges whose head is from batch b (tail may be cross-batch)
                     b_head = cell_batch[head_local]
@@ -1491,7 +1571,32 @@ class SCProtoTrainer(AdoptiveTrainer):
                     vol = S.T @ d_na                                    # [K]
 
                     norm = torch.sqrt((vol[:, None] + eps_na) * (vol[None, :] + eps_na))
-                    M_list.append(A_na / norm)                          # [K, K]
+                    M_b = A_na / norm                                   # [K, K]
+
+                    if nassoc_diag_norm == 'pair':
+                        # [D1] Swap the DIAGONAL denominator only.
+                        #   volume[k]         = 2*edges_inside + edges_leaving   -> containment
+                        #                       ("what share of my members' degree stays home")
+                        #   possible_pairs[k] = size*(size-1)/2                  -> capacity, so
+                        #                       edges_inside/possible_pairs = induced-subgraph
+                        #                       edge density = mean pairwise affinity of members
+                        # volume is ADDITIVE under merging (vol[X u Y] = vol[X] + vol[Y]), so the
+                        # denominator never notices a merge while the numerator gains the
+                        # between-edges -> containment always rises -> hierarchical splits are
+                        # vetoed and no threshold can flip that. possible_pairs is SUPERADDITIVE
+                        # (it gains size[X]*size[Y] mostly-empty cross-pairs), so density falls
+                        # on a weak merge. That monotonicity flip is the whole point.
+                        # Off-diagonal deliberately keeps volume normalization: there it is
+                        # degree correction between clusters, which is the right thing.
+                        size_b = S[cell_batch == b].sum(0)                    # [K] soft cell count
+                        pairs_b = 0.5 * size_b * (size_b - 1.0).clamp(min=0.0)
+                        # A_na = A_part + A_part.T, so its diagonal double-counts every internal
+                        # edge -> divide by 2*pairs, not pairs.
+                        density_b = A_na.diagonal() / (2.0 * pairs_b + eps_na)
+                        M_b = M_b * off_mask.to(M_b.dtype) + torch.diag(density_b)
+                        pairs_list.append(pairs_b)
+
+                    M_list.append(M_b)                                  # [K, K]
 
                 if M_list:
                     if nassoc_agg == 'pbch':
@@ -1499,8 +1604,25 @@ class SCProtoTrainer(AdoptiveTrainer):
                         # nassoc is NOT responsible for cross-batch consistency (that's CVAE+UMAP's job)
                         # within each batch: push diagonal toward 1 (purity) and off-diagonal toward 0 (no redundancy)
                         # use mse for diagonal to avoid blowup when a proto is absent in some batches
-                        def _diag_loss(d):
-                            if nassoc_diag_loss == 'nll':
+                        def _diag_loss(d, pairs=None):
+                            if nassoc_diag_loss == 'hinge':
+                                # [D2] floor, not target: pay only BELOW gamma, no reward above.
+                                # Removes the veto on splits but does not create a preference
+                                # for them -- pair with nassoc_diag_norm='pair' for that.
+                                return (nassoc_gamma - d).clamp(min=0.0).pow(2).mean()
+                            elif nassoc_diag_loss == 'cpm':
+                                # [D2] Constant Potts Model as a reward:
+                                #   score[k] = edges_inside[k] - gamma*possible_pairs[k]
+                                #            = possible_pairs[k] * (density[k] - gamma)
+                                # normalized by total pairs so the loss scale is stable. The
+                                # pair weighting is what makes CPM actively PREFER a justified
+                                # split, unlike the hinge. Equivalently (Felipe et al. 2025):
+                                # reward each present link, charge gamma for each missing one.
+                                if pairs is None:
+                                    return (nassoc_gamma - d).clamp(min=0.0).pow(2).mean()
+                                return -(((d - nassoc_gamma) * pairs).sum()
+                                         / (pairs.sum() + eps_na))
+                            elif nassoc_diag_loss == 'nll':
                                 return -torch.log(d.clamp(min=1e-8)).mean()
                             elif nassoc_diag_loss == 'nll2':
                                 return -torch.log((1 - (d - 1) ** 2).clamp(min=1e-8)).mean()
@@ -1512,9 +1634,11 @@ class SCProtoTrainer(AdoptiveTrainer):
                             else:
                                 return (m ** 2).mean()
                         batch_losses = [
-                            ((_diag_loss(M_b.diag()) if nassoc_diag else 0.0)
+                            ((_diag_loss(M_b.diag(),
+                                         pairs_list[bi] if pairs_list else None)
+                              if nassoc_diag else 0.0)
                              + nassoc_alpha * _offdiag_loss(M_b[off_mask]))
-                            for M_b in M_list
+                            for bi, M_b in enumerate(M_list)
                         ]
                         nassoc_loss = torch.stack(batch_losses).mean()
                     else:
@@ -1525,7 +1649,15 @@ class SCProtoTrainer(AdoptiveTrainer):
                         else:
                             M_agg = torch.stack(M_list, dim=0).mean(dim=0)        # [K, K]
                         diag_M = torch.diag(M_agg)
-                        if nassoc_diag_loss == 'nll':
+                        if nassoc_diag_loss == 'hinge':
+                            # [D2] see _diag_loss above for the rationale
+                            diag_term = (nassoc_gamma - diag_M).clamp(min=0.0).pow(2).mean()
+                        elif nassoc_diag_loss == 'cpm':
+                            pairs_agg = (torch.stack(pairs_list, dim=0).mean(dim=0)
+                                         if pairs_list else torch.ones_like(diag_M))
+                            diag_term = -(((diag_M - nassoc_gamma) * pairs_agg).sum()
+                                          / (pairs_agg.sum() + eps_na))
+                        elif nassoc_diag_loss == 'nll':
                             diag_term = -torch.log(diag_M.clamp(min=1e-8)).mean()
                         elif nassoc_diag_loss == 'nll2':
                             # per-batch: f(d)=1-(d-1)^2 converts MSE-distance to similarity score in [0,1]
@@ -1543,6 +1675,19 @@ class SCProtoTrainer(AdoptiveTrainer):
                         nassoc_loss = (diag_term if nassoc_diag else 0.0) + offdiag_term
                         total_metrics['nassoc_diag_val'] += diag_M.mean().item()
                         total_metrics['nassoc_offdiag_val'] += M_agg[off_mask].mean().item()
+                        # --- cheap per-epoch collapse watch (mini-batch estimates) ---
+                        # Only the two numbers that catch collapse as it happens; the full
+                        # graph-based diagnostics (tightness_gap, dip test, size-vs-tightness)
+                        # are computed at eval time in evaluation/collapse_diagnostics.py.
+                        with torch.no_grad():
+                            _mass = S.sum(0)                                  # [K] soft sizes
+                            _tot = _mass.sum().clamp(min=eps_na)
+                            # fraction of the mini-batch held by the single biggest prototype
+                            total_metrics['proto_largest_share'] += (_mass.max() / _tot).item()
+                            # effective number of prototypes in use (perplexity), as a fraction of K
+                            _u = (_mass / _tot).clamp(min=1e-12)
+                            total_metrics['proto_eff_k_frac'] += (
+                                torch.exp(-(_u * _u.log()).sum()) / K_na).item()
                     loss = loss + lambda_nassoc * nassoc_loss
 
             sim_recon_loss = torch.tensor(0.0, device=self.device)
@@ -1558,7 +1703,8 @@ class SCProtoTrainer(AdoptiveTrainer):
                 # every one of its cells' individual neighbor rows, which a
                 # two-sub-community prototype structurally cannot satisfy at once.
                 # 'diffusion' mode (regress to precomputed per-cell diffusion-map
-                # coordinates) is unused for now — see notebook discussion.
+                # coordinates) — see train_eval_sim_recon_diffusion.ipynb for the
+                # dedicated experiment and n_eigs-selection discussion.
                 #
                 # S and the prototypes both keep their gradient here (unlike
                 # proto_recon_loss's gene-expression decoder, which detaches S):
@@ -1676,6 +1822,36 @@ class SCProtoTrainer(AdoptiveTrainer):
                 proto_attract_loss = -(dead_weight * attraction.max(dim=0).values).mean()
                 loss = loss + lambda_proto_attract * proto_attract_loss
 
+            proto_anchor_loss = torch.tensor(0.0, device=self.device)
+            if lambda_proto_anchor > 0 and use_proto_sim and not proto_decoupled:
+                # Soft, gradient-based alternative to proto_decoupled's hard EMA
+                # update: prototype stays a free, gradient-trained parameter, but
+                # gets an added pull toward being explainable as a combination of
+                # this minibatch's real cell embeddings — a latent-space analogue
+                # of SEACells' B matrix (archetype = convex combination of data),
+                # computed fresh each step instead of accumulated over time like
+                # the EMA. See files/proto_anchoring_vs_proto_usage.md (option A)
+                # for the full reasoning and how this compares to proto_decoupled.
+                #
+                # soft_assign is already row-stochastic (softmax over prototypes,
+                # per cell); dividing by its own column sums makes it
+                # column-stochastic-equivalent (each prototype's weights over
+                # this batch's cells sum to 1) without a second softmax — the
+                # same combination rule _update_protos_ema uses, just computed
+                # from one minibatch instead of a running accumulator.
+                #
+                # Entire target computed under no_grad: gradient must flow only
+                # into the live `protos` parameter on the loss's left side, not
+                # back through soft_assign/z_unique on the right side — anything
+                # else creates a moving-target feedback loop (the same reason
+                # proto_recon_loss detaches `scores` before decoding).
+                with torch.no_grad():
+                    col_sum = soft_assign.sum(dim=0, keepdim=True).clamp(min=1e-8)  # (1, K)
+                    W = soft_assign / col_sum                                        # (n_unique, K), column-stochastic
+                    recon_proto = W.T @ z_unique                                     # (K, D)
+                proto_anchor_loss = F.mse_loss(self.model.get_prototypes(), recon_proto)
+                loss = loss + lambda_proto_anchor * proto_anchor_loss
+
             loss.backward()
             optimizer.step()
 
@@ -1705,6 +1881,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             total_metrics['r1r2'] += r1r2_loss.item()
             total_metrics['proto_recon'] += proto_recon_loss.item()
             total_metrics['proto_attract'] += proto_attract_loss.item()
+            total_metrics['proto_anchor'] += proto_anchor_loss.item()
             total_metrics['nassoc'] += nassoc_loss.item()
             total_metrics['proto_usage'] += proto_usage_loss.item()
             total_metrics['sim_recon'] += sim_recon_loss.item()
@@ -1758,6 +1935,8 @@ class SCProtoTrainer(AdoptiveTrainer):
             extra += f" | r1r2={metrics['r1r2']:.4f}"
         if getattr(self, 'lambda_proto_attract', 0) > 0:
             extra += f" | proto_attract={metrics['proto_attract']:.4f}"
+        if getattr(self, 'lambda_proto_anchor', 0) > 0:
+            extra += f" | proto_anchor={metrics['proto_anchor']:.4f}"
         if getattr(self, 'lambda_nassoc', 0) > 0:
             extra += f" | nassoc={metrics['nassoc']:.4f} [diag={metrics['nassoc_diag_val']:.3f} offdiag={metrics['nassoc_offdiag_val']:.3f}]"
         if getattr(self, 'lambda_proto_usage', 0) > 0:
@@ -1854,6 +2033,12 @@ class SCProtoTrainer(AdoptiveTrainer):
                     self._init_proto_usage_nk_batch()
                 metrics = self._run_umap_epoch()
                 current_epoch = start + i + 1
+                # Keep the counter that save/load_umap_checkpoint persist in step with
+                # training. Without this it stays at its initial value, so every
+                # checkpoint records epoch 0 and a resumed run cannot tell how much of
+                # its budget was already spent. Display-only elsewhere -- training,
+                # results and file names are unaffected.
+                self._umap_state['epoch'] = current_epoch
                 if verbose:
                     self._print_umap_epoch(current_epoch, last_epoch, metrics)
                 if freq > 0 and (current_epoch % freq == 0 or current_epoch == last_epoch):
@@ -1886,6 +2071,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             metrics = self._run_umap_epoch()
             epoch_offset += 1
             current_epoch = start + epoch_offset
+            self._umap_state['epoch'] = current_epoch  # see note in fixed-epoch branch
 
             if verbose:
                 end_str = f"~{max_epochs}" if max_epochs else "?"
@@ -1915,6 +2101,36 @@ class SCProtoTrainer(AdoptiveTrainer):
                     proto_labels = self.label_prototypes(lk)['labels']
                     n_covered = proto_labels.nunique()
                     coverage_str = f", coverage={n_covered/n_total:.4f} ({n_covered}/{n_total})"
+                    missing_types = sorted(set(self.train_ds.adata.obs[lk].unique()) - set(proto_labels.unique()))
+
+                    # --- usage + graph-community-preservation, every eval (reuses
+                    #     modularity()'s own assignments + the training graph --
+                    #     no extra encoding): are prototypes collapsing, and is
+                    #     nassoc still honoring the graph while they do? ---
+                    import scipy.sparse as sp
+                    assign_arr = result['assignments']
+                    K = self.nmb_prototypes
+                    sizes = np.bincount(assign_arr, minlength=K)
+                    n_used = int((sizes > 0).sum())
+                    p_use = sizes / max(sizes.sum(), 1)
+                    eff_n = 1.0 / np.sum(p_use ** 2)
+                    top5_share = np.sort(sizes)[::-1][:5].sum() / max(sizes.sum(), 1)
+                    A_use = self.train_ds.aff_raw if hasattr(self.train_ds, 'aff_raw') else self.train_ds.aff
+                    A_use = sp.csr_matrix(A_use)
+                    A_use = (A_use + A_use.T) / 2
+                    A_use.setdiag(0)
+                    A_use.eliminate_zeros()
+                    onehot = np.eye(K, dtype=np.float32)[assign_arr]
+                    neighbor_mass = np.asarray(A_use @ onehot)
+                    total_mass = neighbor_mass.sum(axis=1)
+                    own_mass = neighbor_mass[np.arange(len(assign_arr)), assign_arr]
+                    agreement = np.divide(own_mass, total_mass, out=np.zeros_like(total_mass),
+                                           where=total_mass > 0).mean()
+                    print(f"  [proto usage] {n_used}/{K} used ({n_used / K:.1%})  "
+                          f"effective_n={eff_n:.1f}  top5_share={top5_share:.1%}  "
+                          f"community-preservation(mean neighbor agreement)={agreement:.3f}")
+                    if missing_types:
+                        print(f"  [coverage] missing (no prototype's majority label): {missing_types}")
                 else:
                     result = self.edge_homophily()
                     score = result['homophily']
@@ -1944,6 +2160,10 @@ class SCProtoTrainer(AdoptiveTrainer):
             'model_state_dict': self.model.state_dict(),
             'epoch': self._umap_state['epoch'] if hasattr(self, '_umap_state') else 0,
             'optimizer_state_dict': self._umap_state['optimizer'].state_dict() if hasattr(self, '_umap_state') else None,
+            # Lets load_umap_checkpoint restore the exact calibration instead of
+            # re-deriving it via a full waypoint-init + calibrate_epsilon pass.
+            'epsilon': float(self.epsilon),
+            'temperature': float(self.temperature),
         }
         torch.save(state, path)
         print(f"Saved UMAP checkpoint to {path} (epoch {state['epoch']})")
@@ -1963,8 +2183,6 @@ class SCProtoTrainer(AdoptiveTrainer):
             path = os.path.join(self.get_dump_path(), 'umap_checkpoint.pth')
         checkpoint = torch.load(path, map_location=self.device)
 
-        # Step 1: restore pretrain weights + init prototypes — matches the state at which
-        # epsilon was originally calibrated (before UMAP training began).
         # Drop any sim-decoder submodules first: they're built lazily by
         # _setup_umap_edges (step 2) and won't exist in a pretrain-only checkpoint,
         # so a strict load_state_dict would fail if self.model already carries them
@@ -1973,10 +2191,24 @@ class SCProtoTrainer(AdoptiveTrainer):
             if hasattr(self.model, attr):
                 delattr(self.model, attr)
         self.load_pretrain_checkpoint()
-        self.init_prototypes()
 
-        # Step 2: rebuild training objects and calibrate epsilon on pretrain+proto state.
-        self._setup_umap_edges(init_prototypes=False, skip_calibration=False)
+        # Step 1+2: rebuild training objects (edge dataset, loaders, etc.) needed
+        # for continue_train_umap_edges. If the checkpoint has saved calibration,
+        # restore epsilon/temperature directly instead of reproducing them via a
+        # full waypoint-init + calibrate_epsilon pass — that pass exists only to
+        # re-derive these two numbers, and its outputs are discarded anyway once
+        # model weights are overwritten in step 3. Prototype values themselves
+        # don't need to be initialized here for the same reason.
+        has_saved_calibration = checkpoint.get('epsilon') is not None
+        if has_saved_calibration:
+            self._setup_umap_edges(init_prototypes=False, skip_calibration=True)
+            self.epsilon = checkpoint['epsilon']
+            self.temperature = checkpoint['temperature']
+        else:
+            # Legacy checkpoint without saved calibration — fall back to
+            # reproducing training-time state via waypoint init + recalibration.
+            self.init_prototypes()
+            self._setup_umap_edges(init_prototypes=False, skip_calibration=False)
 
         # Step 3: overwrite model weights with the fully trained UMAP checkpoint.
         self.model.load_state_dict(checkpoint['model_state_dict'])
@@ -2327,11 +2559,13 @@ class SCProtoTrainer(AdoptiveTrainer):
 
         summary, _ = celltype_niche_dge(ad, mc_ad, lk, nk, name, dump)
         ct_niche_rbo_avg = float(summary.values.mean())
+        std_ct_niche_rbo = float(summary.values.std(ddof=1)) if summary.values.size > 1 else 0.0
 
         self._log_metric('ct_niche_rbo_avg', ct_niche_rbo_avg)
-        print(f"[task3] mean ct-niche RBO: {ct_niche_rbo_avg:.4f}")
+        self._log_metric('std_ct_niche_rbo', std_ct_niche_rbo)
+        print(f"[task3] mean ct-niche RBO: {ct_niche_rbo_avg:.4f} ± {std_ct_niche_rbo:.4f}")
 
-        return {'ct_niche_rbo_avg': ct_niche_rbo_avg}
+        return {'ct_niche_rbo_avg': ct_niche_rbo_avg, 'std_ct_niche_rbo': std_ct_niche_rbo}
 
     def _log_metric(self, name, value):
         """Store a scalar or dict metric value in the internal log and flush to disk."""

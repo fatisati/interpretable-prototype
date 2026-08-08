@@ -187,6 +187,109 @@ def calc_batch_entropy(df, batch_key, mc_key="SEACell", return_per_mc=False):
     return float(np.mean(ents))
 
 
+def calc_metacell_ilisi(df, batch_key, mc_key="SEACell", return_per_mc=False):
+    """Metacell-level analog of iLISI (inverse Simpson's diversity index of local
+    batch composition), using each method's own group assignment as the
+    neighborhood instead of a k-NN neighborhood in a shared embedding.
+
+    Same formula as iLISI (1 / sum(p_b^2), p_b = batch b's fraction within the
+    neighborhood), just evaluated on the metacell a cell was actually assigned to
+    rather than its k nearest neighbors. This sidesteps k-NN's neighborhood-size
+    hyperparameter (irrelevant here -- the neighborhood is exactly the metacell's
+    own realized size) and works for methods with no shared continuous embedding
+    to build a k-NN graph on (e.g. SEACells, which only outputs group assignment).
+
+    Range: 1.0 (metacell drawn from a single batch, worst) to n_batches
+    (perfectly uniform mixture, best) -- not normalized by n_batches, matching
+    iLISI's own convention.
+    """
+    if batch_key not in df.columns:
+        return None
+
+    groups = df.groupby(mc_key)
+    vals = []
+    for _, sub in groups:
+        p = sub[batch_key].value_counts(normalize=True).values
+        vals.append(float(1.0 / np.sum(p ** 2)))
+
+    if return_per_mc:
+        return pd.Series(vals, index=pd.Index(groups.groups.keys(), dtype=str), name="metacell_ilisi")
+    return float(np.mean(vals))
+
+
+def calc_metacell_kbet(df, batch_key, mc_key="SEACell", global_freq=None,
+                        alpha=0.05, min_size=5, return_per_mc=False):
+    """Metacell-level analog of kBET: chi-squared test of each metacell's batch
+    composition against the dataset's global batch proportions, using the
+    metacell itself as the neighborhood instead of a fixed-size k-NN
+    neighborhood. Same rationale as calc_metacell_ilisi -- see its docstring.
+
+    Args:
+        df:          DataFrame with one row per cell, columns [mc_key, batch_key].
+        global_freq: pd.Series of global batch proportions to test each metacell
+                     against. Pass the SAME series across every method being
+                     compared on a dataset (e.g. computed once from the full
+                     adata) so a difference in rejection rate reflects the
+                     method's mixing, not a different reference distribution.
+                     Defaults to `df[batch_key]`'s own proportions if omitted.
+        alpha:       significance threshold for "rejected" (default 0.05).
+        min_size:    metacells with fewer than this many cells are excluded --
+                     chi-squared is unreliable at very low expected counts.
+                     Excluded count is reported, not silently dropped.
+
+    Returns:
+        dict with 'rejection_rate_by_mc' (fraction of tested metacells with
+        p < alpha; unweighted, one vote per metacell), 'rejection_rate_by_cell'
+        (same, weighted by metacell size -- matches kBET's own per-cell
+        orientation), 'n_tested', 'n_excluded_small', and (if return_per_mc)
+        'per_mc', a DataFrame indexed by metacell with size/p_value/rejected.
+        Lower rejection rate = better batch mixing (same convention as kBET).
+        Returns None if batch_key is missing.
+    """
+    from scipy.stats import chisquare
+
+    if batch_key not in df.columns:
+        return None
+    if global_freq is None:
+        global_freq = df[batch_key].value_counts(normalize=True)
+    batch_labels = global_freq.index
+
+    rows = []
+    n_excluded = 0
+    for mc_id, sub in df.groupby(mc_key):
+        n = len(sub)
+        if n < min_size:
+            n_excluded += 1
+            continue
+        obs = sub[batch_key].value_counts().reindex(batch_labels, fill_value=0).values
+        exp = global_freq.reindex(batch_labels).values * n
+        keep = exp > 0
+        if keep.sum() < 2:
+            # fewer than 2 batches with nonzero expected count -- degenerate test
+            n_excluded += 1
+            continue
+        _, p = chisquare(obs[keep], exp[keep])
+        rows.append({'mc': mc_id, 'size': n, 'p_value': float(p), 'rejected': bool(p < alpha)})
+
+    if not rows:
+        return {'rejection_rate_by_mc': None, 'rejection_rate_by_cell': None,
+                'n_tested': 0, 'n_excluded_small': n_excluded}
+
+    res = pd.DataFrame(rows).set_index('mc')
+    rate_by_mc = float(res['rejected'].mean())
+    rate_by_cell = float((res['rejected'] * res['size']).sum() / res['size'].sum())
+
+    out = {
+        'rejection_rate_by_mc': rate_by_mc,
+        'rejection_rate_by_cell': rate_by_cell,
+        'n_tested': int(len(res)),
+        'n_excluded_small': int(n_excluded),
+    }
+    if return_per_mc:
+        out['per_mc'] = res
+    return out
+
+
 def calc_modularity_per_batch(A, assignments, batch_labels):
     """Compute modularity for each batch on an edge-filtered subgraph.
 
@@ -685,14 +788,23 @@ def compute_task1_metrics(
     # --- metrics.json (read-then-update to preserve task2 metrics) ---
     metrics_path = os.path.join(save_path, 'metrics.json')
     metrics = json.load(open(metrics_path)) if os.path.exists(metrics_path) else {}
+    # Unweighted stds are written here alongside their means. They used to be derived
+    # only in result_tables.py by re-reading *_per_mc.csv, which meant a run whose CSVs
+    # were missing (older run, interrupted save, results copied without them) silently
+    # lost its "± std" column with no error. They're scalars already in memory here --
+    # no extra compute, a few bytes on disk -- so metrics.json is now the source of
+    # truth and the CSVs are only a backfill for runs saved before this change.
     if purity_per_mc is not None:
         metrics['mean_cell_type_purity'] = float(purity_per_mc.mean())
+        metrics['std_cell_type_purity'] = float(purity_per_mc.std())
         metrics['weighted_mean_cell_type_purity'] = weighted_mean_purity
         metrics['weighted_std_cell_type_purity'] = weighted_std_purity
     if niche_purity_per_mc is not None:
         metrics['mean_niche_purity'] = float(niche_purity_per_mc.mean())
+        metrics['std_niche_purity'] = float(niche_purity_per_mc.std())
     if entropy_per_mc is not None:
         metrics['mean_batch_entropy'] = float(entropy_per_mc.mean())
+        metrics['std_batch_entropy'] = float(entropy_per_mc.std())
         metrics['weighted_mean_batch_entropy'] = weighted_mean_entropy
         metrics['weighted_std_batch_entropy'] = weighted_std_entropy
     if coverage is not None:
@@ -719,12 +831,16 @@ def compute_task1_metrics(
     }
 
 
-def calc_task2_metrics(ad, mc_ad, lk, bk, obsm_keys, name, save_path):
+def calc_task2_metrics(ad, mc_ad, lk, bk, obsm_keys, name, save_path, compute_dge=True):
     """
     Task 2: Metacell representation quality.
       - Coverage:        fraction of cell types in ad represented by at least one metacell
       - DGE consistency: agreement between metacell DE and per-batch single-cell DE
       - scGraph:         how well metacell embeddings recover single-cell consensus structure
+
+    compute_dge: set False to skip step 2 entirely (dge_*_avg all come back None) --
+    e.g. when the caller's `ad` isn't lognormalized and DGE would just raise, or when
+    DGE isn't needed and skipping it avoids both the crash and the wasted compute.
 
     Returns:
         dict with scalar summaries for logging:
@@ -739,15 +855,21 @@ def calc_task2_metrics(ad, mc_ad, lk, bk, obsm_keys, name, save_path):
     )
 
     # 2. DGE consistency (saves dge_consistency.csv)
-    df_rbo, df_kt, df_jac = compute_dge_consistency(mc_ad, ad, lk, bk, name=name, save_path=save_path)
-    dge_rbo_avg     = float(df_rbo["avg global"].iloc[0]) if df_rbo is not None else None
-    dge_kendall_avg = float(df_kt["avg global"].iloc[0])  if df_kt  is not None else None
-    dge_jaccard_avg = float(df_jac["avg global"].iloc[0]) if df_jac is not None else None
+    if compute_dge:
+        df_rbo, df_kt, df_jac = compute_dge_consistency(mc_ad, ad, lk, bk, name=name, save_path=save_path)
+        dge_rbo_avg     = float(df_rbo["avg global"].iloc[0]) if df_rbo is not None else None
+        dge_kendall_avg = float(df_kt["avg global"].iloc[0])  if df_kt  is not None else None
+        dge_jaccard_avg = float(df_jac["avg global"].iloc[0]) if df_jac is not None else None
+    else:
+        dge_rbo_avg = dge_kendall_avg = dge_jaccard_avg = None
 
     # 3. scGraph
     scg = get_mc_scg(ad, mc_ad, bk, lk, obsm_keys)
     scg.to_csv(f"{save_path}/scgraph.csv")
     scgraph_corr_avg = float(scg["Corr-PCA"].mean()) if scg is not None else None
+    # spread across genes of the per-gene Corr-PCA that scgraph_corr_avg averages --
+    # previously computed inside get_mc_scg and discarded before it reached this dict
+    scgraph_corr_std = float(scg["Corr-PCA-std"].mean()) if scg is not None else None
 
     return {
         "coverage":         coverage,
@@ -755,4 +877,5 @@ def calc_task2_metrics(ad, mc_ad, lk, bk, obsm_keys, name, save_path):
         "dge_kendall_avg":  dge_kendall_avg,
         "dge_jaccard_avg":  dge_jaccard_avg,
         "scgraph_corr_avg": scgraph_corr_avg,
+        "scgraph_corr_std": scgraph_corr_std,
     }
