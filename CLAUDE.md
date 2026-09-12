@@ -207,7 +207,25 @@ numeric option:  <abbrev><value>          # not truncated, safe
 - Never special-case the naming code to work around a bad name — rename the value.
 - Numeric options are safe on this point (no truncation).
 
-Then, for the option itself, all three must be present:
+**First decide: a new value for an existing key, or a brand-new key?** Check
+`configs/defaults.py` (`get_defaults()`) and `interpretable_ssl/constants.py`
+(`ABBREVIATIONS`) for the key *before* picking any names.
+
+- **New variant of an existing key** — the key already has a default and an
+  abbreviation (e.g. `nassoc_diag_norm` already exists; adding `'pair'` alongside its
+  `'volume'` default is a variant, not a new key). The abbreviation is already there —
+  **do not touch `constants.py`**. You only need to pick the new **value**'s name
+  (4-char-distinct from every other value already used for that key) and, only if the
+  key's own default is changing (usually it isn't), update `defaults.py`.
+- **Completely new key** — nothing in either file mentions it yet (e.g. introducing
+  `nassoc_offdiag_norm` where before there was no such option at all). This needs a
+  **feature name** (the abbreviation itself) *and* a **value**, and both files below
+  must be edited, in the same change — skipping either is how a new option silently
+  fails to reach the model name.
+
+Then, for the option itself, all three must be present (steps 1-2 apply in full only to
+a completely new key; a variant of an existing key only needs step 3, plus step 1 if the
+default is actually changing):
 
 1. **Default** in `configs/defaults.py` (`get_defaults()`), with an inline comment. Must
    be the behavior-preserving value (usually `0`/`False`/off) so existing folder names
@@ -227,10 +245,210 @@ Then, for the option itself, all three must be present:
    > `sim_recon_*`, `proto_usage_mode`, `covet_alpha`, ...). Adding an abbreviation
    > there looks correct and does nothing.
 3. Print `t.get_model_name()` once and confirm the option appears with a distinguishable
-   value.
+   value. This is the step that actually proves a saved run for this variant is
+   findable by name later — do it even for a variant-only change.
+
+## 9b. Every new loss term: check its SCALE and RANGE before trusting any result
+
+A new loss term is not "working" because the run finished and the number went down. Two
+real bugs shipped this way and both were invisible for weeks — the runs looked fine, the
+metrics were plausible, and the loss decreased monotonically the whole time.
+
+**Do these three checks the first time a new term runs, before reading any result:**
+
+1. **Print the term's own value and compare it against its theoretical range.** If a
+   quantity is a *density*, a *probability*, a *purity*, a *correlation* — it has a known
+   range. Print it and check.
+   > Real bug: the `nassoc` diagonal is an edge density, so it must lie in `[0, 1]`, and
+   > the loss `(density - 1)^2` drives it to 1. The logged value was **371–510**.
+   > `possible_pairs = size*(size-1)/2` clamps to exactly **0** for any prototype whose
+   > *soft minibatch* size is below 1, so `density = edges/1e-8` exploded. Under
+   > `(density-1)^2` an EMPTY prototype cost `1` while a merely SMALL one cost `~1e16` —
+   > the loss was paying the model to kill prototypes. That was the entire cause of the
+   > 15/200-survivor collapse, and fixing it moved DGE from 0.654 to 0.780.
+
+2. **Print every term of the total loss side by side and check the ratios.** One term at
+   1000x another is a bug until proven otherwise, no matter how sensible each looks alone.
+   > Real bug: `nassoc=2874` vs `umap=2.5` — the regularizer was 99.5% of the total loss.
+   > Cause: numerator computed at full-dataset scale (`nassoc_size_scale='full'`),
+   > denominator at minibatch scale (summed weight of the *sampled* edges only), so the
+   > term came out `n_edges_total/n_edges_batch` ~= 3900x too large.
+
+3. **Check every denominator for a term that can vanish, and every minibatch estimate for
+   a scale mismatch against its numerator.** Anything quadratic in a soft count
+   (`possible_pairs`) is biased differently under subsampling than anything linear
+   (`size`, `volume`), so a ratio of the two is NOT an unbiased estimate of the
+   full-graph ratio. Rescale both sides to the same scale, or don't compare them.
+
+Corollary for hyperparameters: a threshold parameter (`nassoc_gamma`) is only
+interpretable once the quantity it is compared against is on a known scale. Derive it
+from something real (`gamma = mean_weighted_degree * internal_fraction / (target_size -
+0.5)` — measure `mean_weighted_degree` from the affinity, don't guess) rather than
+sweeping blind, and re-derive it if the scaling of the underlying quantity changes.
+
+## 9c. scProto base config — always start from this
+
+The loss fixes in §9b are **not** the `defaults.py` defaults (defaults stay
+behavior-preserving so existing model-folder names don't change). Pass them explicitly.
+Validated on `s28nsc`/K=200: DGE `pearson_r` 0.654 -> 0.780, 0/200 dead prototypes, and it
+also rescued the affinities where the old loss collapsed to 15/200 (0.342 -> 0.760).
+
+```python
+lambda_config = dict(LAMBDA_PROTO_UMAP_PRECON) | {
+    'nassoc_diag_norm': 'pair',   # [D1] density, not containment: fixes the merge bias
+    'nassoc_diag_loss': 'cpm',    # [D2] CPM reward, not an unreachable target of 1
+    'nassoc_gamma':     0.15,     # derived from a 75-cell target, see §9b -- re-derive per graph
+    'nassoc_size_scale': 'full',  # [D5] THE important one: without it density explodes (§9b)
+    'nassoc_cpm_norm': 'gful',    # full-graph normalizer so gamma keeps a gradient AND the
+                                  # term stays on the same scale as the other losses
+}
+```
+
+`nassoc_cpm_norm='graf'` is the older minibatch-scaled normalizer, kept only so the runs
+that used it stay reproducible — prefer `'gful'` with `nassoc_size_scale='full'`.
 
 ## 10. Explanation style
 
 Define every term and metric inline. Formulas as **plain-text code blocks with readable
 variable names** — no LaTeX (read in a PowerShell terminal). Report what a result means,
 but don't decide the claim or interpretation — ask first; that's the user's call.
+
+## 11. Running on Modal — GPU/CPU cloud alternative to Colab
+
+Validated end-to-end (training + eval + SEACells + BANKSY) as of 2026-09. Use it when
+Colab's install is too slow or a quick isolated experiment doesn't need a notebook at
+all. Modal has its own local pip mirror (`pypi-mirror.modal.local`) — installs that crawl
+on Colab's real-internet pip take seconds here, so most of §1's Colab pip pain doesn't
+apply. Real money, real GPU-minutes: **check the actual cost/time before scaling up a
+sweep**, same caution as any paid cloud resource.
+
+**Windows shell gotcha, every single time.** The `modal` CLI's Rich-based progress output
+emits a unicode checkmark that crashes with `'charmap' codec can't encode character`
+under PowerShell/Git-Bash's default console codepage. Always prefix:
+```
+PYTHONIOENCODING=utf-8 PYTHONUTF8=1 modal run your_script.py
+```
+
+**Data path: a Modal Volume mirroring `MODEL_DIR`/`DATA_DIR`/`CODE_DIR`.** Create one
+volume (`modal volume create <name>`), lay it out exactly like the real dirs, then set
+env vars to match before importing anything:
+```
+/vol/data/spatial/<file>.h5ad          -> DATA_DIR
+/vol/code/interpretable_ssl/...        -> CODE_DIR  (upload the package dir directly;
+/vol/code/seacell_train.py                it's ~6MB, `modal volume put` handles dirs)
+/vol/code/graphs/<affinity>.pkl        -> CODE_DIR/graphs  (cache -- see below)
+/vol/code/data/<label_encoder>.pkl     -> CODE_DIR/data
+/vol/models/<ds_id>/pretrain/...       -> MODEL_DIR  (reuse the existing pretrain
+                                           checkpoint -- pretraining doesn't depend on
+                                           affinity, so one checkpoint covers every
+                                           affinity_type sweep at that K)
+```
+In the function: `os.environ['DATA_DIR']='/vol/data/'` etc., `sys.path.insert(0,
+'/vol/code')`, `os.chdir('/vol/code')` (needed because `get_affinity_path`'s
+`graph_dir='./graphs'` default is CWD-relative — same as `nb_setup.py`'s `chdir` on
+Colab). `volume.commit()` at the end of every function that writes, or the run vanishes
+when the container exits.
+
+**Where `DATA_DIR`/`MODEL_DIR` actually live locally, for uploading to the volume.** On
+Colab these point at the user's *personal* Google Drive, not this repo's own shared-drive
+checkout — a plain search of this checkout will not find raw dataset `.h5ad` files or
+model checkpoints. On a machine where the personal Drive is also synced, they show up as
+separate Drive-shortcut mount points from the shared project folder:
+```
+DATA_DIR  -> G:\.shortcut-targets-by-id\1AWk3HED5vjpJuz_mnw4pundDJHzdL99K\data
+MODEL_DIR -> G:\.shortcut-targets-by-id\1-0FnoSFlnEGxgKJQCAbspCuHc3osVs25\models
+```
+`modal volume put` can read directly from these paths once found.
+
+**The package list that actually imports cleanly** (found by hitting every
+`ModuleNotFoundError` once, not by guessing — reuse this instead of rediscovering it):
+```
+numpy scipy pandas anndata scanpy torch scarches wandb tqdm statsmodels diptest
+palantir faiss-cpu scikit-learn matplotlib scib-metrics ipython
+git+https://github.com/dpeerlab/SEACells.git   (separate .pip_install call, extra_options="--no-deps")
+pybanksy   (only if computing a BANKSY embedding fresh)
+```
+`scib-metrics` and `ipython` are easy to miss: nothing in this project's own code hints
+at needing them, but `interpretable_ssl.evaluation.metrics` hard-imports `scib_metrics`
+at module level, and the real `SEACells` package hard-imports `IPython.display` at
+*its* module level — both fire the moment you import almost anything from
+`interpretable_ssl.trainers.scproto` or `.evaluation.metric_helpers`, training or not.
+`modal.Image.pip_install("pkg", "--no-deps")` is invalid syntax — flags go in
+`extra_options=`, not the package list.
+
+**`Data_Handler.py` hard-crashes any import of the trainer chain outside Colab.** It
+hardcodes `HOME_DIR = '/content/drive/MyDrive/codes/'` (unrelated to
+`configs/paths.py`'s configurable one) and eagerly `open()`s
+`{HOME_DIR}/Islander/meta/<dataset>/{cell2cat,batch2cat}.json` for eleven unrelated
+datasets (`lung`, `lung_fetal_donor`, `lung_fetal_organoid`, `brain`, `breast`, `heart`,
+`eye`, `gut_fetal`, `skin`, `COVID`, `pancreas`) at module import time, regardless of
+which dataset you're actually using. Stub them in the image build (`{}` is enough,
+they're dead code for anything outside those eleven datasets):
+```
+mkdir -p /content/drive/MyDrive/codes/Islander/meta/<name> && \
+  echo '{}' > .../cell2cat.json && echo '{}' > .../batch2cat.json
+```
+for each of the eleven. One-time cost per image; don't try to fix the real bug (patching
+`Data_Handler.py` itself) mid-experiment.
+
+**The anndata-version gap.** Files written by an older anndata encode a Python `None`
+(e.g. `uns['log1p']['base']`, `uns['pca']['params']['mask_var']) as an HDF5 dataset with
+`encoding-type: null`, which current anndata (`0.11`-`0.12`+) has no reader registered
+for at all — `IORegistryError`, not a version-mismatch warning. Don't patch the file;
+register a reader once, before reading anything:
+```python
+from anndata._io.specs.registry import _REGISTRY, IOSpec
+import h5py
+@_REGISTRY.register_read(h5py.Dataset, IOSpec('null', '0.1.0'))
+def _read_null(elem, _reader):
+    return None
+```
+
+**`train_seacell` (and anything else built on `load_dataset`) re-reads the h5ad from
+disk internally — it never sees an obsm key you only added to your in-memory `AnnData`.**
+If you compute a new embedding (e.g. a BANKSY run at a lambda that isn't cached yet),
+`ad.write_h5ad(path)` to persist it back to the *same file on the volume* before calling
+`train_seacell`/`run_mc_task`, or it `KeyError`s looking for the obsm key on its own
+fresh copy. This is the same reason `bk08`'s branch in `graph_generator.py` checks
+`if 'X_bk08' in ad.obsm` against a file, not an object.
+
+**New `affinity_type` values for a lambda/parameter sweep don't need a code change.**
+`load_or_build_affinity` checks the cache (`get_affinity_path`) before ever calling
+`generate_affinity`. Precompute the embedding + kernel yourself (reuse
+`compute_banksy_embedding` + the real `SEACells.build_graph.SEACellGraph.rbf()` — the
+same recipe `bk08`'s branch uses, just with a different `lambda_param`), `save_affinity()`
+it under a new tag (`'bk02'`, `'bk04'`, ... — already 4-char-distinct from `bk08`/`bk32`/
+`bkmg`, see §9), and `run_mc_task(..., affinity_type='bk02')` finds it without touching
+`graph_generator.py` at all. Building the affinity is CPU-only and cheap; only training
+needs a GPU.
+
+**GPU choice: T4 is enough.** A full scProto run at this project's usual scale (K=200,
+~50-60k cells, `cvae_epochs=50` reusing an existing pretrain checkpoint, `train_epochs`
+up to 20) took ~12-13 minutes wall time on a T4, comfortably inside a few dollars even
+run several times. SEACells/BANKSY work needs no GPU at all — use a plain CPU function
+(`cpu=4, memory=16384` was enough for `s28nsc`-scale SEACells fits), it's both cheaper
+and skips needing a CUDA-enabled torch build for work that never touches the GPU.
+
+**Reading Modal-volume output back through a Google-Drive-mounted mirror is flaky on
+Windows — go through `modal volume get`/`ls` instead of the Drive-synced path when
+you need certainty.** Two independent failure modes hit the same symptom (file
+"missing" even though it's really there):
+- Large files read with `h5py`/`anndata` directly off a Drive-streamed path can fail
+  mid-read (`Invalid argument`, wrong byte offset) because Drive's virtual filesystem
+  doesn't handle h5py's non-sequential seeks well. Copy locally first, then read.
+- Auto-generated run-folder names (`proto_..._ds-<id>_NP<k>_..._v31`) plus a Drive
+  shortcut path can exceed Windows' 260-char `MAX_PATH`. `os.listdir` on the *parent*
+  still enumerates the file, but `open()`/`pandas.read_csv`/`shutil.copy`/PowerShell's
+  `Copy-Item` all fail on the literal path — and the standard `\\?\` long-path prefix
+  does **not** help on this Drive-mapped letter drive (tested, still fails). There is no
+  per-call fix; either enable Windows long-path support system-wide (don't do this
+  without asking — it's a machine-level registry change) or fetch the one file you need
+  via `modal volume get <vol> <long/path/on/volume> <short/local/path>`, which reads
+  Modal's storage directly and never touches the Drive-sync layer's path limit.
+
+
+bfore applying new changes - commit old things - and log what was it and why we changed - so the older runs reproducble and we have a log of what ahppened and why we added things
+
+when explain a formula - use understanble var names
+try to answer all of my questions undetandble - correct and comact - do not hallusincate - do not say many unrelated things many noisy things
+

@@ -1,0 +1,9 @@
+arm,description,pearson_r,pearson_r_std,tpr,n_pairs,median_mc_size
+SEACells_lam0.2,SEACells lambda0.2,0.8487,0.0832,0.9642,19,258.0
+E4_reinit,E1 + VQ-VAE reinit,0.8079,0.1954,0.9745,13,294.5
+E2_collapse,E1 + DMoN collapse reg (usage off),0.7972,0.1746,0.968,13,295.5
+E3_minoffdiag,E1 + min() off-diag,0.7944,0.1653,0.9851,11,298.0
+E1_cpmfix_bk08,"E1 cpm+graf+full, bk08",0.7801,0.168,0.9609,11,293.0
+E1_cpmfix_bk02,"E1 cpm+graf+full, bk02",0.76,0.197,0.9758,12,294.0
+SEACells_PCA_K200,SEACells PCA,0.7171,0.1684,0.9789,14,266.0
+SEACells_bk08,SEACells bk08,0.6648,0.1747,0.9681,16,208.0

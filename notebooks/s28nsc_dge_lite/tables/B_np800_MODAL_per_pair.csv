@@ -1,0 +1,2 @@
+cell_type,niche,n_genes,n_pos_mc,n_ctrl_mc,pearson_r,kendall_tau,tpr,median_pos_mc_size,min_pos_mc_size,mean_niche_purity
+Fibroblasts,Desmoplastic stroma,87,3,2,0.163689633883714,0.1681368618016573,0.9080459770114943,1473.0,59.0,0.3086885802484156

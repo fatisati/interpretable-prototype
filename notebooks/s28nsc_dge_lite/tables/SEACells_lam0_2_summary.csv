@@ -1,0 +1,2 @@
+,pearson_r,kendall_tau,pearson_r_std,kendall_tau_std,tpr,tpr_std,n_pairs,n_metacells,median_mc_size
+SEACells_lam0.2,0.848684261162953,0.5768699626996944,0.083225625714776,0.0841386484677536,0.9641822410627693,0.02675204219349619,19.0,200.0,258.0

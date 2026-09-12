@@ -1052,6 +1052,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             _nassoc_diag = getattr(self, 'nassoc_diag', True)
             _nassoc_diag_norm = getattr(self, 'nassoc_diag_norm', 'volume')
             _nassoc_gamma = getattr(self, 'nassoc_gamma', 0.0)
+            _nassoc_offdiag_norm = getattr(self, 'nassoc_offdiag_norm', 'sqrt')
             _offdiag_mode = f'-log(1-sqrt(m))' if _nassoc_diag_loss == 'nll' else 'm²'
             _diag_mode = {
                 'nll': '-log(m)',
@@ -1062,10 +1063,14 @@ class SCProtoTrainer(AdoptiveTrainer):
             # [D1] which denominator the diagonal uses: containment vs density
             _diag_den = ('edges_inside/possible_pairs [density]' if _nassoc_diag_norm == 'pair'
                          else 'edges_inside/volume [containment]')
+            # [D4] which denominator the off-diagonal uses: geometric mean vs smaller side
+            _offdiag_den = ('min(vol_p,vol_q) [smaller-side]' if _nassoc_offdiag_norm == 'min'
+                             else 'sqrt(vol_p*vol_q) [geometric mean]')
             print(f"   nassoc: λ={_lambda_nassoc}, agg={_nassoc_agg}, "
                   f"diag={'ON' if _nassoc_diag else 'OFF'} [{_diag_mode}], offdiag=[{_offdiag_mode}]")
             print(f"           diag_norm={_nassoc_diag_norm} -> {_diag_den}"
                   + (f", gamma={_nassoc_gamma}" if _nassoc_diag_loss in ('hinge', 'cpm') else ""))
+            print(f"           offdiag_norm={_nassoc_offdiag_norm} -> {_offdiag_den}")
         if lambda_sim_recon > 0:
             _sr_diag_note = "target diagonal=1 (self-similarity)" if sim_recon_target != 'diffusion' else "no self-loop (diffusion target)"
             print(f"   sim_recon: λ={lambda_sim_recon}, target={sim_recon_target}, {_sr_diag_note}")
@@ -1189,6 +1194,21 @@ class SCProtoTrainer(AdoptiveTrainer):
         nassoc_diag = getattr(self, 'nassoc_diag', True)
         nassoc_diag_norm = getattr(self, 'nassoc_diag_norm', 'volume')
         nassoc_gamma = getattr(self, 'nassoc_gamma', 0.0)
+        nassoc_offdiag_norm = getattr(self, 'nassoc_offdiag_norm', 'sqrt')
+        nassoc_size_scale = getattr(self, 'nassoc_size_scale', 'btch')
+        nassoc_cpm_norm = getattr(self, 'nassoc_cpm_norm', 'pair')
+        nassoc_cpm_free = int(getattr(self, 'nassoc_cpm_free', 0))
+        nassoc_exact = int(getattr(self, 'nassoc_exact', 0))
+        lambda_collapse = getattr(self, 'lambda_collapse', 0.0)
+        # full-dataset totals, used by nassoc_size_scale='full' to undo the minibatch
+        # sampling bias in size / possible_pairs (see defaults.py [D5])
+        n_total_cells = len(self._umap_state['cell_ds'])
+        n_total_edges = len(self._umap_state['edge_dataset'])
+        # full-graph summed edge weight, for nassoc_cpm_norm='gful' (DMoN's 2m)
+        if not hasattr(self, '_full_graph_weight'):
+            _w = self._umap_state['edge_dataset'].weights
+            self._full_graph_weight = torch.as_tensor(
+                float(_w.sum()), device=self.device).clamp(min=1e-8)
         lambda_sim_recon = getattr(self, 'lambda_sim_recon', 0.0)
         sim_recon_target = getattr(self, 'sim_recon_target', 'full')
         use_proto_sim = getattr(self, 'umap_similarity', 'embedding') == 'proto'
@@ -1203,6 +1223,9 @@ class SCProtoTrainer(AdoptiveTrainer):
             'proto_recon': 0, 'r1r2': 0, 'proto_attract': 0, 'proto_anchor': 0, 'nassoc': 0, 'proto_usage': 0, 'n_unused_protos': 0,
             'nassoc_diag_val': 0, 'nassoc_offdiag_val': 0, 'sim_recon': 0,
             'sim_recon_pred_std': 0, 'sim_recon_target_std': 0,
+            # collapse watch (see evaluation/collapse_diagnostics.py for the eval-time
+            # versions computed on the full graph)
+            'proto_largest_share': 0, 'tightness_gap': 0, 'size_tightness_corr': 0,
         }
         # snapshot proto positions at epoch start to measure movement
         if proto_decoupled:
@@ -1212,6 +1235,8 @@ class SCProtoTrainer(AdoptiveTrainer):
         n_batches = 0
         _batch_nk_accum = {}  # batch_id -> [K] cumulative soft assignment sum for batch entropy
         used_proto_ids = set()
+        _last_soft_assign = None   # last step's soft assignment, for proto_reinit_every
+        _last_z_unique = None      # last step's cell embeddings, for proto_reinit_every
 
         from tqdm import tqdm
         for batch in tqdm(loader, desc='edges'):
@@ -1306,6 +1331,9 @@ class SCProtoTrainer(AdoptiveTrainer):
                     sa_effk = (1.0 / (soft_assign * soft_assign).sum(dim=1))
                     total_metrics['effk'] = total_metrics.get('effk', 0) + sa_effk.median().item()
                     used_proto_ids.update(soft_assign.argmax(dim=1).unique().cpu().tolist())
+                    # keep the last step's assignments/embeddings for proto_reinit_every
+                    _last_soft_assign = soft_assign.detach()
+                    _last_z_unique = z_unique.detach()
                     # accumulate per-batch soft usage for batch entropy
                     _bids = self._umap_state['cell_ds'][unique_idx.cpu()]
                     for _b in _bids.unique():
@@ -1515,6 +1543,19 @@ class SCProtoTrainer(AdoptiveTrainer):
                         self._n_k_ema = n_k_ema.detach().cpu()
                     proto_usage_loss = torch.log(1.0 + 1.0 / n_k_ema.clamp(min=1e-8)).mean()
 
+            # DMoN collapse regularization (Tsitsulin et al., JMLR 2023, eq. 5):
+            #   (sqrt(K)/n_cells) * ||soft_sizes||_2 - 1
+            # soft_sizes always sums to n_cells, so under that fixed L1 budget the L2 norm is
+            # minimized by balanced sizes and maximized when one prototype takes everything.
+            # Identically equal to sqrt(K/effective_K)-1, i.e. a smooth function of how many
+            # prototypes are actually in use: 0 = balanced, sqrt(K)-1 = total collapse. Being a
+            # ratio it is scale-free, so unlike possible_pairs it carries no minibatch bias.
+            collapse_loss = torch.tensor(0.0, device=self.device)
+            if lambda_collapse > 0 and use_proto_sim:
+                _sizes = soft_assign.sum(dim=0)                            # (K,) soft counts
+                _n = soft_assign.shape[0]
+                collapse_loss = (math.sqrt(soft_assign.shape[1]) / _n) * _sizes.norm(p=2) - 1.0
+
             loss = lambda_umap * umap_loss
             if lambda_recon > 0:
                 loss = loss + lambda_recon * recon_loss
@@ -1526,6 +1567,9 @@ class SCProtoTrainer(AdoptiveTrainer):
                 loss = loss + lambda_r1r2 * r1r2_loss
             if lambda_proto_usage > 0:
                 loss = loss + lambda_proto_usage * proto_usage_loss
+            if lambda_collapse > 0:
+                loss = loss + lambda_collapse * collapse_loss
+                total_metrics['collapse'] = total_metrics.get('collapse', 0) + collapse_loss.item()
 
             nassoc_loss = torch.tensor(0.0, device=self.device)
             if lambda_nassoc > 0 and use_proto_sim:
@@ -1548,7 +1592,39 @@ class SCProtoTrainer(AdoptiveTrainer):
                 unique_batches = cell_batch.unique()
 
                 M_list = []
-                pairs_list = []          # [D1/D2] per-batch possible_pairs, only filled for 'pair'
+                pairs_list = []          # per-batch possible_pairs (used by 'cpm' + diagnostics)
+                size_list = []           # per-batch soft prototype sizes
+                density_list = []        # per-batch tightness = edges_inside / possible_pairs
+                edges_list = []          # per-batch edges_inside (division-free CPM)
+                # [D2] assignment-INDEPENDENT normalizer for the 'cpm' diagonal: the summed
+                # affinity weight of this step's sampled edges. Depends only on which edges
+                # were drawn, never on S, so gamma cannot cancel against it (unlike
+                # sum(possible_pairs), which is exactly what gamma multiplies).
+                if nassoc_cpm_norm == 'dpar':
+                    # DETACHED sum(possible_pairs) -- the normalizer implied by the objective's
+                    # own bounds rather than borrowed from DMoN. Since
+                    #     score[p] = edges_inside[p] - gamma*pairs[p]
+                    #     score[p] in [ -gamma*pairs[p], (1-gamma)*pairs[p] ]
+                    # dividing the SUM by sum(pairs) puts the whole term in
+                    # [-(1-gamma), +gamma] for any dataset or batch size -- a natural, bounded,
+                    # portable scale. Plain (non-detached) sum(pairs) is the original 'pair'
+                    # normalizer, in which gamma*sum(pairs)/sum(pairs) collapses to a constant
+                    # and gamma loses its gradient entirely. Detaching keeps the numerator's
+                    # pairs differentiable while freezing the denominator, so the scale is
+                    # natural AND gamma still steers training.
+                    cpm_norm_const = None      # filled in below, needs pairs_list
+                elif nassoc_cpm_norm == 'gful':
+                    # FULL-graph total edge weight -- this is DMoN's 1/(2m) exactly. Use this
+                    # whenever nassoc_size_scale='full', otherwise the numerator is at
+                    # full-dataset scale while the denominator is at minibatch scale and the
+                    # term comes out ~(n_edges_total/n_edges_batch)x too large: measured
+                    # nassoc=2874 vs umap=2.5, i.e. nassoc was 99.5% of the total loss.
+                    cpm_norm_const = self._full_graph_weight
+                else:
+                    # 'graf': summed weight of THIS step's sampled edges. Assignment-independent
+                    # (so gamma still gets a gradient) but minibatch-scaled -- mismatched against
+                    # a full-scale numerator. Kept so existing runs stay reproducible.
+                    cpm_norm_const = weights.sum().detach().clamp(min=eps_na)
                 for b in unique_batches:
                     # include all edges whose head is from batch b (tail may be cross-batch)
                     b_head = cell_batch[head_local]
@@ -1570,8 +1646,105 @@ class SCProtoTrainer(AdoptiveTrainer):
                     d_na.scatter_add_(0, t_b, w_b)
                     vol = S.T @ d_na                                    # [K]
 
-                    norm = torch.sqrt((vol[:, None] + eps_na) * (vol[None, :] + eps_na))
+                    if nassoc_offdiag_norm == 'min':
+                        # [D4] bill leakage against the SMALLER prototype's own budget
+                        # (conductance-of-the-smaller-side, Kannan/Vempala/Vetta 2004) --
+                        # sqrt(vol_p*vol_q) is dominated by the larger volume, so a rare
+                        # prototype bleeding into a common one registers as almost nothing.
+                        # min(v,v)=v=sqrt(v*v) for p==q, so this never touches the diagonal.
+                        norm = torch.minimum(vol[:, None], vol[None, :]) + eps_na
+                    else:
+                        norm = torch.sqrt((vol[:, None] + eps_na) * (vol[None, :] + eps_na))
                     M_b = A_na / norm                                   # [K, K]
+
+                    # size / pairs / density are computed ALWAYS, not only when the loss
+                    # uses them, so the tightness diagnostics are logged identically for
+                    # the 'volume' baseline and the 'pair' runs and stay comparable.
+                    size_b = S[cell_batch == b].sum(0)                    # [K] soft cell count
+                    if nassoc_exact:
+                        # [D6] Correct the two counting errors in edges_inside.
+                        # The affinity is symmetric AND stores self-loops, and EdgeDataset
+                        # lists every stored nonzero, so each undirected edge {i,j} appears
+                        # TWICE (as (i,j) and (j,i)) and each cell contributes one (i,i).
+                        # Verified on bk02: nnz=4,648,883 = 2*2,295,230 + 58,423.
+                        # Therefore
+                        #   A_part[p,p]     = 2*true_edges_inside + sum_i aff[i,i]*assign[i,p]^2
+                        #   A_na.diagonal() = 2*A_part[p,p] = 4*true + 2*self_term
+                        # so the existing 0.5* leaves edges_inside at 2*true + self_term.
+                        # Since score = edges_inside - gamma*pairs, inflating ONLY the first
+                        # term halves the effective gamma -- which is why gamma never behaved
+                        # like the density threshold it is defined to be.
+                        _self = (h_b == t_b)
+                        if _self.any():
+                            _self_term = (S[h_b[_self]] ** 2
+                                          * w_b[_self].unsqueeze(1)).sum(0)
+                        else:
+                            _self_term = torch.zeros_like(size_b)
+                        edges_in_b = 0.25 * (A_na.diagonal() - 2.0 * _self_term)
+                    else:
+                        edges_in_b = 0.5 * A_na.diagonal()   # A_na = A_part + A_part.T, so its
+                                                          # diagonal double-counts every
+                                                          # internal edge -> halve it once here.
+                    if nassoc_size_scale == 'full':
+                        # [D5] Rescale minibatch counts to FULL-DATASET scale before forming
+                        # density. Without this, possible_pairs (quadratic in size) collapses to
+                        # exactly 0 for any prototype with soft minibatch size < 1, so
+                        # density = edges/eps explodes (measured mean diag 371-510 vs a target
+                        # of 1) and (density-1)^2 makes an EMPTY prototype (cost 1) far cheaper
+                        # than a SMALL one (cost ~1e16) -- i.e. the loss pays to kill prototypes.
+                        # Rescaling keeps sizes >= 1 and puts density back in [0,1], which is
+                        # also what makes nassoc_gamma interpretable as a real density.
+                        _n_cells_b = (cell_batch == b).sum().clamp(min=1)
+                        _cell_scale = float(n_total_cells) / _n_cells_b.to(size_b.dtype)
+                        _edge_scale = float(n_total_edges) / w_b.numel() if w_b.numel() else 1.0
+                        size_eff = size_b * _cell_scale
+                        edges_eff = edges_in_b * _edge_scale
+                    else:
+                        size_eff = size_b
+                        edges_eff = edges_in_b
+                    if nassoc_exact:
+                        # [D6] EXACT soft pair count. possible_pairs is defined as
+                        #   sum over i<j of assign[i,p]*assign[j,p]
+                        # i.e. edges_inside with the affinity replaced by 1 ("capacity").
+                        # Its closed form is (size^2 - sum_i assign^2)/2 -- an identity, not an
+                        # approximation, obtained from (sum a)^2 = sum a^2 + 2*sum_{i<j} a_i a_j.
+                        # Reduces EXACTLY to n(n-1)/2 when assignments are hard (then
+                        # sum assign^2 == sum assign == n), and is always >= 0 because
+                        # (sum a)^2 >= sum a^2 for a >= 0. So it can never be clamped to zero
+                        # and the divide-by-zero that caused the prototype collapse cannot occur.
+                        # The old size*(size-1)/2 is the HARD formula used on soft counts: it
+                        # goes NEGATIVE whenever size < 1, gets clamped to 0, and then
+                        # edges/pairs explodes.
+                        _sumsq = (S[cell_batch == b] ** 2).sum(0)
+                        if nassoc_size_scale == 'full':
+                            _sumsq = _sumsq * (_cell_scale ** 2)
+                        pairs_b = 0.5 * (size_eff ** 2 - _sumsq).clamp(min=0.0)
+                    else:
+                        pairs_b = 0.5 * size_eff * (size_eff - 1.0).clamp(min=0.0)
+                    # A prototype with fewer than 2 effective members has NO pairs, so its
+                    # density is undefined -- dividing by eps yields ~1e8 and (density-1)^2
+                    # then dwarfs every real prototype, which is what made an empty prototype
+                    # cheaper than a small one (see defaults.py [D5]). Floor the denominator at
+                    # one pair and zero the numerator for those slots, so a degenerate
+                    # prototype contributes density 0 (a finite, ordinary "bad" value) instead
+                    # of +inf. Without this the loss is only stable while the nassoc term is
+                    # heavy enough to keep every prototype populated -- measured directly:
+                    # with the correctly-scaled 'gful' normalizer, nassoc fell to 1% of the
+                    # total loss, prototypes drained, and mean density blew up to 8e3-3e4.
+                    # LAPLACE PSEUDO-COUNT, not an eps. `+ 1` is a real prior ("assume one
+                    # possible pair exists"), so a degenerate prototype gets density
+                    # = edges/1 ~= 0 -- an ordinary bad value -- instead of edges/1e-8 ~= 1e8.
+                    # Preferred over a hard `size >= 2` mask because it is SMOOTH: no
+                    # threshold, no gradient discontinuity, and a genuinely rare-but-real
+                    # prototype is nudged rather than dropped. An eps of 1e-8 is not a prior
+                    # at all, it is crash avoidance that silently returns a huge number, and
+                    # under (density-1)^2 that huge number became 1e8 vs 1 for an empty
+                    # prototype -- i.e. the loss paid to kill prototypes (see defaults.py [D5]).
+                    density_b = edges_eff / (pairs_b + 1.0)
+                    pairs_list.append(pairs_b)
+                    size_list.append(size_b)
+                    density_list.append(density_b)
+                    edges_list.append(edges_eff)
 
                     if nassoc_diag_norm == 'pair':
                         # [D1] Swap the DIAGONAL denominator only.
@@ -1588,13 +1761,7 @@ class SCProtoTrainer(AdoptiveTrainer):
                         # on a weak merge. That monotonicity flip is the whole point.
                         # Off-diagonal deliberately keeps volume normalization: there it is
                         # degree correction between clusters, which is the right thing.
-                        size_b = S[cell_batch == b].sum(0)                    # [K] soft cell count
-                        pairs_b = 0.5 * size_b * (size_b - 1.0).clamp(min=0.0)
-                        # A_na = A_part + A_part.T, so its diagonal double-counts every internal
-                        # edge -> divide by 2*pairs, not pairs.
-                        density_b = A_na.diagonal() / (2.0 * pairs_b + eps_na)
                         M_b = M_b * off_mask.to(M_b.dtype) + torch.diag(density_b)
-                        pairs_list.append(pairs_b)
 
                     M_list.append(M_b)                                  # [K, K]
 
@@ -1620,8 +1787,9 @@ class SCProtoTrainer(AdoptiveTrainer):
                                 # reward each present link, charge gamma for each missing one.
                                 if pairs is None:
                                     return (nassoc_gamma - d).clamp(min=0.0).pow(2).mean()
-                                return -(((d - nassoc_gamma) * pairs).sum()
-                                         / (pairs.sum() + eps_na))
+                                _den = (cpm_norm_const if nassoc_cpm_norm == 'graf'
+                                        else pairs.sum() + eps_na)
+                                return -(((d - nassoc_gamma) * pairs).sum() / _den)
                             elif nassoc_diag_loss == 'nll':
                                 return -torch.log(d.clamp(min=1e-8)).mean()
                             elif nassoc_diag_loss == 'nll2':
@@ -1655,8 +1823,29 @@ class SCProtoTrainer(AdoptiveTrainer):
                         elif nassoc_diag_loss == 'cpm':
                             pairs_agg = (torch.stack(pairs_list, dim=0).mean(dim=0)
                                          if pairs_list else torch.ones_like(diag_M))
-                            diag_term = -(((diag_M - nassoc_gamma) * pairs_agg).sum()
-                                          / (pairs_agg.sum() + eps_na))
+                            # [D2] denominator: 'gful' = full-graph edge weight (DMoN's 1/(2m),
+                            # scale-matched to a full-scale numerator); 'graf' = this step's
+                            # sampled weight (assignment-independent but minibatch-scaled);
+                            # 'pair' = the legacy denominator in which gamma cancels entirely.
+                            if nassoc_cpm_norm == 'dpar':
+                                # detached: natural bounded scale, gamma keeps its gradient
+                                _den = pairs_agg.sum().detach().clamp(min=eps_na)
+                            elif nassoc_cpm_norm in ('graf', 'gful'):
+                                _den = cpm_norm_const
+                            else:
+                                _den = pairs_agg.sum() + eps_na   # legacy: gamma cancels
+                            if nassoc_cpm_free and edges_list:
+                                # DIVISION-FREE CPM -- the published form (Traag et al. 2011):
+                                #   score[p] = edges_inside[p] - gamma * possible_pairs[p]
+                                # Algebraically identical to (density-gamma)*pairs, but
+                                # numerically safe: at possible_pairs=0 this is edges-0=edges
+                                # (finite), whereas the ratio form is inf*0. This is exactly why
+                                # Leiden never hits the degenerate-cluster problem -- CPM as
+                                # published is a subtraction, never a ratio.
+                                edges_agg = torch.stack(edges_list, dim=0).mean(dim=0)
+                                diag_term = -((edges_agg - nassoc_gamma * pairs_agg).sum() / _den)
+                            else:
+                                diag_term = -(((diag_M - nassoc_gamma) * pairs_agg).sum() / _den)
                         elif nassoc_diag_loss == 'nll':
                             diag_term = -torch.log(diag_M.clamp(min=1e-8)).mean()
                         elif nassoc_diag_loss == 'nll2':
@@ -1675,19 +1864,47 @@ class SCProtoTrainer(AdoptiveTrainer):
                         nassoc_loss = (diag_term if nassoc_diag else 0.0) + offdiag_term
                         total_metrics['nassoc_diag_val'] += diag_M.mean().item()
                         total_metrics['nassoc_offdiag_val'] += M_agg[off_mask].mean().item()
-                        # --- cheap per-epoch collapse watch (mini-batch estimates) ---
-                        # Only the two numbers that catch collapse as it happens; the full
-                        # graph-based diagnostics (tightness_gap, dip test, size-vs-tightness)
-                        # are computed at eval time in evaluation/collapse_diagnostics.py.
+                        # --- per-epoch collapse watch (mini-batch estimates) ---
+                        # These are the chosen collapse metrics, logged every step. dip_p is
+                        # NOT here: it needs the full-dataset size distribution and is
+                        # meaningless on one mini-batch -- it is computed at eval time by
+                        # evaluation/collapse_diagnostics.py, together with gini/top5pct and
+                        # the label-based joint-purity macro/micro/gap.
                         with torch.no_grad():
                             _mass = S.sum(0)                                  # [K] soft sizes
                             _tot = _mass.sum().clamp(min=eps_na)
-                            # fraction of the mini-batch held by the single biggest prototype
+                            # largest_share: fraction of cells held by the biggest prototype.
+                            # No target size involved. Watch the trend: rising = collapsing.
                             total_metrics['proto_largest_share'] += (_mass.max() / _tot).item()
-                            # effective number of prototypes in use (perplexity), as a fraction of K
-                            _u = (_mass / _tot).clamp(min=1e-12)
-                            total_metrics['proto_eff_k_frac'] += (
-                                torch.exp(-(_u * _u.log()).sum()) / K_na).item()
+                            # accumulate soft mass over the whole epoch -> the full-dataset
+                            # size distribution, used for the dip test after the loop
+                            _prev = getattr(self, '_epoch_proto_mass', None)
+                            self._epoch_proto_mass = _mass if _prev is None else _prev + _mass
+
+                            if density_list:
+                                _dens = torch.stack(density_list, 0).mean(0)   # [K] tightness
+                                _sz = torch.stack(size_list, 0).mean(0)        # [K] sizes
+                                _ok = _sz > 1.0                                # need >=2 members
+                                if _ok.sum() > 2:
+                                    _d, _s = _dens[_ok], _sz[_ok]
+                                    # macro: each PROTOTYPE counts equally (inflated by
+                                    # fragmentation -- singletons are trivially tight)
+                                    _t_macro = _d.mean()
+                                    # micro: each CELL counts equally (inflated by collapse)
+                                    _t_micro = (_d * _s).sum() / _s.sum().clamp(min=eps_na)
+                                    # macro and micro are computed but not logged separately
+                                    # tightness_gap ~0 healthy; >>0 means the BIG prototypes
+                                    # are the loose ones = the collapse signature
+                                    total_metrics['tightness_gap'] += (_t_macro - _t_micro).item()
+                                    # Spearman(size, tightness): rank-correlate, then Pearson
+                                    # on the ranks. Expected ~-0.2 (on a kNN graph tightness
+                                    # falls as ~k/size); < -0.6 = the giants are pathological.
+                                    _rd = _d.argsort().argsort().float()
+                                    _rs = _s.argsort().argsort().float()
+                                    _rd = _rd - _rd.mean(); _rs = _rs - _rs.mean()
+                                    total_metrics['size_tightness_corr'] += (
+                                        (_rd * _rs).sum()
+                                        / (_rd.norm() * _rs.norm()).clamp(min=eps_na)).item()
                     loss = loss + lambda_nassoc * nassoc_loss
 
             sim_recon_loss = torch.tensor(0.0, device=self.device)
@@ -1892,6 +2109,60 @@ class SCProtoTrainer(AdoptiveTrainer):
 
         for k in total_metrics:
             total_metrics[k] /= max(n_batches, 1)
+
+        # --- dead-prototype restart (VQ-VAE codebook restarts, van den Oord et al. 2017;
+        # random-restart trick in Jukebox, Dhariwal et al. 2020) ---
+        # A prototype with zero assigned mass has no gradient path back, so no penalty term
+        # can revive it -- only a direct teleport can. Dead slots are moved onto the cells
+        # currently WORST served by the codebook (lowest max assignment probability = farthest
+        # from every existing prototype), which is the analogue of VQ-VAE's
+        # highest-reconstruction-error input.
+        _reinit_every = int(getattr(self, 'proto_reinit_every', 0) or 0)
+        if (_reinit_every > 0 and use_proto_sim
+                and (self._umap_state['epoch'] + 1) % _reinit_every == 0):
+            _thresh = float(getattr(self, 'proto_reinit_thresh', 0.01))
+            _usage = self._c_k_ema if self._c_k_ema is not None else self._n_k_ema
+            if _usage is not None and _last_soft_assign is not None:
+                _usage = _usage.to(self.device)
+                _dead = (_usage < _thresh).nonzero(as_tuple=True)[0]
+                if len(_dead) > 0:
+                    with torch.no_grad():
+                        # worst-served cells in the last minibatch: lowest max assignment
+                        _served = _last_soft_assign.max(dim=1).values
+                        _n_take = min(len(_dead), _served.numel())
+                        _worst = torch.argsort(_served)[:_n_take]
+                        _new = _last_z_unique[_worst]
+                        _new = F.normalize(_new, dim=1) if self.l2norm == 1 else _new
+                        self.model.prototypes.weight[_dead[:_n_take]] = _new
+                        # clear their usage EMA so they get a fair window before being
+                        # judged dead again
+                        if self._c_k_ema is not None:
+                            self._c_k_ema[_dead[:_n_take].cpu()] = 1.0
+                        if self._n_k_ema is not None:
+                            self._n_k_ema[_dead[:_n_take].cpu()] = 1.0
+                    total_metrics['n_reinit'] = float(_n_take)
+                    print(f"   [reinit] revived {_n_take} dead prototypes "
+                          f"(usage < {_thresh}) onto worst-served cells")
+
+        # Hartigan dip test on the FULL-dataset prototype size distribution.
+        # Summing the per-step soft masses over every mini-batch of the epoch gives the
+        # whole-dataset size vector for free -- no extra forward pass. It cannot be done
+        # per step: one mini-batch spread over K prototypes gives a handful of cells each,
+        # so the cliff-vs-plateau shape the test looks for does not exist at that scale.
+        # SMALL p = significantly not one hump = the collapse cliff (HEALTHY p > 0.05).
+        _mass_epoch = getattr(self, '_epoch_proto_mass', None)
+        if _mass_epoch is not None:
+            try:
+                import diptest as _dt
+                _s = _mass_epoch.detach().cpu().numpy()
+                _s = np.log10(_s[_s > 0])
+                if len(_s) >= 4:
+                    _dip, _dip_p = _dt.diptest(_s)
+                    total_metrics['size_dip_stat'] = float(_dip)
+                    total_metrics['size_dip_p'] = float(_dip_p)
+            except ImportError:
+                pass
+            self._epoch_proto_mass = None
 
         if use_proto_sim:
             total_metrics['n_unused_protos'] = self.nmb_prototypes - len(used_proto_ids)
