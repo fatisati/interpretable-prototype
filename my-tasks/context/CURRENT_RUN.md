@@ -6,7 +6,62 @@
 
 ---
 
-## IN FLIGHT — gful gamma sweep, usage loss OFF (started 2026-09-14)
+## PARTIAL RESULT — gful gamma sweep, usage loss OFF (2026-09-14)
+
+**STATUS: stopped after 2 of 4 gammas.** `g01` and `g024` completed and are committed to
+the volume; `g05` was ~40% through training when the process was killed (cause not
+established from the log — a Modal heartbeat `ConnectionError` appears shortly before,
+but the run continued past it, so that may be unrelated). `g05` and `g10` were never run.
+The per-gamma `volume.commit()` design worked: nothing completed was lost.
+
+```
+run                 alive    density   gamma   median   max    internal   pearson_r  n_pairs
+                                               size     size   fraction
+g01   (usage OFF)  200/200   0.0191    0.01     172    1,154    0.379      0.746      12
+g024  (usage OFF)  200/200   0.0245    0.024    268      656    0.300      0.821      13
+--- for reference ---
+d7fix (usage ON)   200/200   0.0238    0.15     294      360    0.266      0.758      14
+SEACells bk02        200     0.0295     --      258      925    0.447      0.849      19
+```
+
+### Four findings
+
+1. **Gamma does NOT control prototype count — a clean negative result.** With
+   `lambda_proto_usage=0`, all 200 prototypes stayed alive at BOTH gammas. Removing the
+   usage constraint did not let gamma prune anything, so scProto's gamma does not recover
+   its Leiden role just by turning usage off. The likely reason (not separately verified):
+   softmax forces every cell's memberships to sum to 1, so emptying a prototype pushes its
+   cells into others, inflating them and lowering THEIR density — the equilibrium keeps all
+   200 populated.
+
+2. **Density converged to ≈ gamma — the framework is validated.** At `gamma=0.024` the run
+   achieved density `0.0245` (0.4% off). CPM theory says the equilibrium sits where
+   `density = gamma`, and that is exactly what happened. This is the first direct
+   confirmation that gamma is now a real, reachable density target (contrast §6, where
+   gamma was uninterpretable, and §10's gamma=0.15 which was unreachable by construction).
+   At `gamma=0.01` density settled at `0.0191`, i.e. it could not be pushed that low.
+
+3. **The usage loss was HURTING edge containment.** `internal_fraction` rose from 0.266
+   (usage ON) to 0.300 / 0.379 (usage OFF) — materially closer to SEACells' 0.447. Sizes
+   also became uneven (max 1,154 / 656 vs a rigid 360 with usage ON), which is much more
+   SEACells-like (max 925). **The usage loss was forcing an artificial uniformity that the
+   data does not support**, and paying for it in edge containment.
+
+4. **`gamma=0.024` + usage OFF is the best gful arm measured so far: DGE 0.821**, up from
+   `d7fix`'s 0.758, with a TIGHTER std (0.133 vs 0.197), approaching SEACells' 0.849.
+
+**What did NOT improve: coverage.** `n_pairs` is 12-13, versus SEACells' 19 — unchanged
+from every other arm. Consistent with §9: coverage is a prototype-PLACEMENT problem, and
+neither gamma nor the usage loss addresses it.
+
+### Not yet run
+`gamma=0.05` and `gamma=0.10` from this sweep; and `gamma=0.046` (the SEACells-matched
+value). Given finding 2, gamma now behaves predictably enough that these should land close
+to `density ≈ gamma` with correspondingly smaller metacells.
+
+---
+
+## ORIGINAL PLAN (for reference) — gful gamma sweep, usage loss OFF
 
 **Script:** `modal_scripts/train_gful_nousage_gamma_sweep.py` (Modal, T4, 90-min timeout cap)
 **Budget:** ~$1. Commits after EVERY gamma, so a timeout loses at most the in-flight run.
