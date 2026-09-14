@@ -290,7 +290,7 @@ itself." It gives exactly `n(n-1)/2` when clustering is hard, and it can never b
 
 ---
 
-## 6. Sweeping gamma  (most recent)
+## 6. Sweeping gamma
 
 **What gamma is.** The price of a *missing* connection inside a metacell, measured in units
 of one *real* connection. High gamma = "I demand tightly connected metacells."
@@ -365,7 +365,8 @@ gives p >= 0.19.
 
 These two are probably the same underlying issue: **scProto is not resolving small states.**
 
-Remaining suspects, all **untested**:
+Remaining suspects — **section 9 has since settled these, read it instead**. Kept here
+as the record of what was believed before the separability experiment:
 - **K is a fixed input.** All 200 prototypes are kept alive, so mean size is pinned at 292
   by arithmetic. Rare states need small metacells. Note the size-equalizing pressure comes
   from CPM's `gamma * possible_pairs` (quadratic in size), **not** from the usage loss —
@@ -470,6 +471,19 @@ stand" (rare states are exactly where this bug bites hardest).
 spending Modal budget on it, per this project's cost-awareness rule (see CLAUDE.md
 section 11).
 
+**Does `nassoc_size_scale='btch'` + `nassoc_cpm_norm='dpar'` need this fix too? No --
+the rescale step never runs for it.** The bug lives entirely inside the
+`if nassoc_size_scale == 'full':` branch that multiplies `sumsq` by `_cell_scale` (or, in
+the bug, `_cell_scale**2`). Under `'btch'` that branch is skipped completely:
+`size_eff = size_b` (the batch's own raw count, no rescaling at all), and for
+`nassoc_exact`, `_sumsq` is used exactly as computed on the batch, no `_cell_scale`
+anywhere. So `possible_pairs[p] = (size_b^2 - sumsq_b)/2` runs directly on the batch's own
+numbers -- nothing to get wrong, and no rerun is needed for any run that used `'btch'`.
+`'btch'`+`'dpar'` trades this bug for a DIFFERENT, older problem instead: a rare
+prototype's raw BATCH size can itself land below 1 purely from having few members in one
+minibatch (not from any rescaling math), so `possible_pairs` can still be tiny/fragile
+there -- just for the reason section 5 originally described, not this one.
+
 ---
 
 ## 8. Correction to section 5(b): self-loops don't reach training, so they were never
@@ -532,6 +546,169 @@ across an epoch; it is not the c/c^2 bug. The c/c^2 gap itself (26k vs 33k, ~25%
 real but modest for a prototype that gets several members per batch -- it only becomes
 catastrophic (collapse to exactly 0, per section 7's donor-cell example) for prototypes
 so rare that a batch sees a small FRACTION of one member's soft weight, not whole members.
+
+---
+
+## 9. Where the niche signal actually dies  (newest)
+
+**What looked wrong.** After steps 1-6, DGE was tied with SEACells (0.839 vs 0.849,
+p >= 0.19) but two gaps refused to move no matter what we did to the loss:
+coverage 14 vs 19, joint purity 0.431 vs 0.504.
+
+### 9a. First: decompose the joint-purity gap
+
+Joint purity = for each metacell, the fraction of its cells sharing the most common
+`celltype|niche` label. Split into its two halves:
+
+```
+                  ct_purity   niche_purity   joint_purity
+SEACells bk0.2      0.823        0.591          0.504
+scProto  bk0.2      0.849        0.488          0.431
+                    +0.026       -0.103         -0.073
+                    WE WIN       WE LOSE
+```
+
+**The whole gap is niche purity.** Our metacells are CLEANER than SEACells' on cell
+type and MESSIER on spatial niche. Empirically `joint ~= 1.04 * ct * niche` for both
+methods (within 0.4%), so matching SEACells' niche purity while keeping our own
+cell-type purity would give `1.04 * 0.849 * 0.591 = 0.522 > 0.504` -- we would WIN.
+Target: niche purity 0.488 -> 0.571.
+
+### 9b. Hypothesis tested: is SEACells over-splitting on position?
+
+The idea: SEACells partitions a spatial embedding directly, so maybe it carves out
+"states" that are spatially distinct but have NO real gene-expression signal -- and
+its coverage and niche-purity advantages are partly fake.
+
+Test: for each state a method found, check whether its metacell DGE matches the real
+single-cell DGE. States found but not reproducible = spurious.
+
+```
+                                       mean pearson_r
+  14 states BOTH methods found             0.855
+   5 states ONLY SEACells found            0.850     difference -0.005
+```
+
+**REJECTED. SEACells' extra states are real.** Their tpr is 0.95-1.00 (the highest in
+the table) and each has 25-87 genes significantly DE in the REAL SINGLE CELLS
+(Vascular endothelium|Alveolar spaces 87, Macrophages|Airways 74, Cytotoxic T
+cells|Tumor surface 65, Fibroblasts|Alveolar spaces 39, Regulatory T cells|
+Desmoplastic stroma 25). scProto found ZERO states SEACells missed -- strict subset.
+
+Side observation from the same check: the coverage ceiling is far higher than either
+method reaches. Of 146 (cell type, niche) pairs in the ground truth, **64 have enough
+signal to be testable** (>=5 significantly DE genes; MIN_GENES=5 is the gate). SEACells
+resolves 19, scProto 14. And three of the STRONGEST states are missed by BOTH:
+Macrophages|Tumor core (229 DE genes), Tumor cells|Airways (226), Tumor cells|Vascular
+stroma (206). "Match SEACells at 19" is a much lower bar than the data supports.
+
+### 9c. The decisive experiment: where is the niche signal lost?
+
+Protocol: for each cell type separately, predict the NICHE label from a representation.
+Logistic regression, class_weight='balanced', 5-fold CV, balanced accuracy, 15 cell
+types with >=2 niches of >=30 cells. Run locally, CPU only, no training.
+Scripts: `notebooks/s28nsc_dge_lite/scripts/{niche_sep,get_z,sep2,sep3}.py`
+Tables:  `notebooks/s28nsc_dge_lite/tables/s28nsc_niche_sep_*.csv`
+
+`z` was recovered by rebuilding the encoder in plain torch from the checkpoint state
+dict (960 -> 31 -> ReLU -> 8, single condition so the cond term is a constant bias) and
+VALIDATED by reproducing the saved assignments: `adata.X` + ReLU scored 0.669 agreement
+versus 0.12-0.32 for every other input/activation combination. Not 1.0 because the saved
+labels come from the training-time balanced assignment, not a plain argmax over 200
+prototypes; logistic regression is invariant to invertible linear maps, so `z` is right.
+
+```
+representation            balanced acc   lift    % of expression signal retained
+  chance                      0.162      --
+  expression PCA50            0.316     +0.155        100%   (what is available)
+  scProto z (8-d latent)      0.303     +0.141         91%   <- ENCODER IS FINE
+  soft assignment (200-d)     0.246     +0.084         54%   <- 40% LOST HERE
+  hard metacell (one-hot)     0.249     +0.088         57%
+  expression PCA8 (control)   0.295     +0.134         86%
+  spatial xy coords           0.299     +0.138         89%
+```
+
+**THREE FINDINGS, and they settle the argument:**
+
+1. **The signal IS in gene expression, at the CELL level, not just as a group-mean
+   effect.** 0.316 vs 0.162 chance, about 2x. Expression is even slightly MORE
+   informative about niche than raw spatial coordinates (0.316 vs 0.299). So "the
+   information isn't there" is NOT available as an excuse for the loss.
+
+2. **The encoder is exonerated.** z retains 91% of the niche signal in 50 PCs, and
+   BEATS a dimension-matched PCA8 (106%). The 8-d bottleneck costs almost nothing.
+   => **Raising latent_dim 8 -> 16 could gain at most +0.014 lift (~9%).** Not the fix.
+   The earlier "capacity spent on cell type" hypothesis was WRONG.
+
+3. **The prototype assignment is where 40% of the niche signal dies** (91% -> 54%).
+   The 200 prototypes are placed such that dot-product assignment discards niche
+   information that z demonstrably carries. Hard vs soft makes no difference (0.246 vs
+   0.249) because at epsilon=0.060 the softmax is already essentially one-hot: mean
+   assignment entropy is 0.113 nats out of a possible 5.30.
+
+**VERDICT: the loss is at fault, and the fault is localized to prototype placement.**
+Not the encoder, not the latent dimension, not missing spatial input.
+
+Note this REVERSES an earlier claim in this file and retires the argument that spatial
+info must be fed to the encoder as an input. It also retires the evidence previously
+offered for it -- "niche purity does not respond to 4x more spatial weight in the graph
+(0.491 -> 0.496)" -- which was CIRCULAR: a loss that ignores niche would equally fail to
+respond to a better graph. That observation never discriminated between the two
+explanations.
+
+### 9d. What this points at next (untested)
+
+The off-diagonal term is the prime suspect for prototype placement: it averages over
+39,800 prototype pairs that are almost all zero, contributes ~0.005 to the total loss,
+and therefore exerts essentially no pressure to keep prototypes distinct. Candidate
+fixes: `max` or top-k instead of `mean` (so the term targets the actually-overlapping
+pairs), or the `min` normalizer that is already implemented but has never shown an
+effect because nothing else was in a state to reveal it.
+
+---
+
+## 10. [D7] fix rerun on GPU: confirms correctness, moves no metric (2026-09-14)
+
+**What we did.** Reran `H4_g015` (`nassoc_exact=1`, `nassoc_size_scale='full'`,
+`nassoc_cpm_norm='gful'`, `gamma=0.15`, `lambda_nassoc=1000`, everything else identical to
+"Best config to use") on Modal/T4, same config as the buggy baseline, but with the [D7]
+fix from section 7 in the code (verified synced and present before launching). New run
+saved as `lf_h4_g015_d7fix` so the buggy baseline stays on disk for comparison. cvae_e50,
+train_epochs=20/eval_freq=2/patience=4 (current CLAUDE.md standard -- the buggy run's
+folder name doesn't encode epoch count, so this is the best-available match, not a
+confirmed exact reproduction).
+
+```
+                         pearson_r  kendall_tau   tpr    n_pairs  median_mc_size  joint_purity
+H4_g015 (buggy, c^2)       0.800       0.542      0.975    15         297            -- (never computed, see section 5's GAP note)
+H4_g015_d7fix (fixed, c)   0.758       0.530      0.974    14         294            0.423
+```
+`joint_purity` for the fixed run: 0.423 (`purity_micro` in `collapse_row`) -- close to but
+slightly under the old NON-exact scProto-best figure quoted in section 9 (0.431), and well
+under SEACells (0.504). `n_pairs=14` matches that same old non-exact baseline exactly
+(section 9's "14 vs 19" coverage number), not the buggy exact run's 15.
+
+**Verdict: the fix is correct (section 7's derivation and real-data check both hold), but
+it does not move DGE, coverage, or joint purity.** If anything, on this single seed, DGE
+is very slightly lower with the fix (0.800 -> 0.758, well inside both runs' large stds
+[~0.13-0.20] -- not a significant regression, but definitely not an improvement either).
+
+**This is not a surprise in hindsight -- section 9 already explains why.** Section 9c
+localized the ENTIRE coverage/joint-purity gap to prototype PLACEMENT (dot-product
+assignment discards 40% of the niche signal the encoder demonstrably carries), not to
+the diagonal CPM counting math. [D7] only touches counting math. A fix to counting math
+was never going to move a problem section 9 already pinned on assignment/placement --
+this rerun is a confirming data point for section 9's conclusion, not a contradiction of
+it. Same pattern as section 6: gamma being uninterpretable was real and worth fixing, and
+fixing it "moved no metric" either, for the identical underlying reason.
+
+**Practical takeaway:** `nassoc_exact=1` should still be considered CORRECT and worth
+using for its own sake (the counting is now right, full stop), but it is not a candidate
+fix for the coverage/joint-purity gap. Section 9d's off-diagonal-term suspect remains the
+live lead.
+
+Artifacts: `notebooks/s28nsc_dge_lite/tables/H4_g015_d7fix_{summary,per_pair}.csv`,
+`models/s28nsc/lf_h4_g015_d7fix_.../metrics.json` (Modal volume).
 
 ---
 
