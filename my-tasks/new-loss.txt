@@ -365,3 +365,23 @@ fixed in scproto.py [D7] and defaults.py nassoc_exact comment. NOT yet rerun on 
 the nassoc_exact H1/H4 numbers (0.839->0.800) were measured WITH this bug present, so
 that comparison needs to be redone before trusting it. full writeup: decisions.md section 7.
 
+====
+good catch from user: if every cell has a self-loop with weight 1.0 (the max weight in
+the graph), doesn't the WeightedRandomSampler that drives training just always pick
+self-loops and never real edges, making the whole loss useless?
+
+checked it -- NO, this is not a problem. self.aff (the raw cached graph pkl) does have
+self-loops (weight=1.0, confirmed on real bk08 data), but MultiCropsDataset.__init__
+(adata_augmenter.py:124-127) builds a SEPARATE self.aff_raw right after loading it:
+  _raw = self.aff.tocsr(copy=True); _raw.setdiag(0); _raw.eliminate_zeros()
+and scproto.py uses self.train_ds.aff_raw (not .aff) for EdgeDataset/the sampler AND for
+nassoc everywhere. verified: self.aff nnz=4,058,285 (58,423 self-loops) -> self.aff_raw
+nnz=3,999,862 (0 self-loops). so the sampler never sees a self-loop at all.
+
+this DOES mean the earlier "edges_inside inflated by self-loop contamination" half of
+section 5(b) was tested against the wrong object (self.aff, not aff_raw) -- in real
+training self_term is always 0, so that specific narrative was wrong. the fix code
+itself is still correct though (it degrades exactly right when self_term=0), and the
+OTHER half of 5(b) -- each real edge counted twice, (i,j) and (j,i) -- is untouched by
+this and is still the real bug. corrected writeup: decisions.md section 8.
+

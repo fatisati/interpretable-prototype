@@ -472,6 +472,69 @@ section 11).
 
 ---
 
+## 8. Correction to section 5(b): self-loops don't reach training, so they were never
+   the mechanism -- but the fix is still correct (2026-09-14)
+
+**What looked wrong.** While confirming section 5 was safe (the user asked whether every
+cell being connected to itself with weight 1.0 -- the max possible weight -- means the
+WeightedRandomSampler that drives training (`scproto.py:947`, samples edges proportional
+to weight) would sample self-loops on almost every draw, wasting the training signal.
+
+**What we found.** The self-loop numbers in section 5(b) (`nnz=4,648,883 = 2*edges +
+58,423 self-loops`, diag=1.0) are real, but they describe `self.aff` -- the raw cached
+`graphs/*.pkl` file straight out of `generate_affinity()`. They do **not** describe what
+training actually uses. `MultiCropsDataset.__init__` (`adata_augmenter.py:124-127`)
+builds a SEPARATE copy immediately after loading:
+```
+_raw = self.aff.tocsr(copy=True)
+_raw.setdiag(0)
+_raw.eliminate_zeros()
+self.aff_raw = _raw
+```
+and `scproto.py` uses `self.train_ds.aff_raw` (not `.aff`) everywhere that matters --
+`_setup_umap_edges` (builds `EdgeDataset` + the `WeightedRandomSampler`, line 911) and
+every nassoc computation. Verified directly on the real `bk08` file:
+```
+self.aff       (raw cached pkl):  nnz=4,058,285   self-loops=58,423, weight=1.0 each
+self.aff_raw   (what training uses): nnz=3,999,862   self-loops=0
+```
+**So the sampler concern is a non-issue** -- self-loops are stripped before `EdgeDataset`
+is ever built, `WeightedRandomSampler` never sees them, and every training edge is a real
+cell-cell pair.
+
+**Consequence for section 5(b).** The "edges_inside inflated by self-loop contamination"
+half of that finding was measured against the wrong object -- in real training,
+`self_term` (the self-loop correction term in the `nassoc_exact` code) is always exactly
+0, because there ARE no self-loops in `aff_raw` to find. The **other** half of 5(b) (each
+real edge counted twice, once as `(i,j)` and once as `(j,i)`) is unaffected by this and
+is still the real, necessary correction -- verified algebraically: even with
+`self_term=0`, `edges_in_b = 0.25*(A_na.diagonal() - 2*self_term)` reduces to
+`0.25*(4*true_edges - 0) = true_edges`, exactly. **The `nassoc_exact` code fix needed no
+change** -- it was written to handle self-loops IF present and correctly degrades to "no
+self-loops" when they aren't, which is what real training actually hits. Only the
+*narrative* in section 5(b) (and the earlier explanation given to the user in this same
+conversation) overstated the self-loop's role; both are corrected here.
+
+**Real numbers, one deterministic minibatch (seed fixed, reproducible):** a real 292-cell
+neighborhood around cell 30000 (ground truth: 135 cells after de-duplication, true
+`edges_inside=760.6`, true `possible_pairs=9045`, true `density=0.084`), with exactly 5 of
+its real members forced into an otherwise-random 1024-cell batch at soft weight 0.9:
+```
+size_b (this batch)  = 4.50   sumsq_b = 4.05
+possible_pairs  BUGGY (c^2, section 7's bug) = 26,366   density=0.362
+possible_pairs  FIXED (c,   section 7's fix) = 32,843   density=0.291
+possible_pairs  GROUND TRUTH (full membership, no extrapolation) = 9,045   density=0.084
+```
+Both badly overshoot the true value here -- that overshoot is separate sampling noise
+(`edge_scale`, which rescales the few edges visible in one minibatch up to full-dataset
+scale, is itself noisy for a single draw) and would average out over many minibatches
+across an epoch; it is not the c/c^2 bug. The c/c^2 gap itself (26k vs 33k, ~25% here) is
+real but modest for a prototype that gets several members per batch -- it only becomes
+catastrophic (collapse to exactly 0, per section 7's donor-cell example) for prototypes
+so rare that a batch sees a small FRACTION of one member's soft weight, not whole members.
+
+---
+
 ## Untested ideas, parked
 
 - **VQ-VAE style restart of dead prototypes** (`proto_reinit_every`). Implemented. Showed
