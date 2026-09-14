@@ -1,0 +1,2 @@
+,pearson_r,kendall_tau,pearson_r_std,kendall_tau_std,tpr,tpr_std,n_pairs,n_metacells,median_mc_size
+lf_i_dpar_exact_g01,0.7820573691045428,0.5567256759808454,0.24183878379848942,0.19258157618264907,0.9714439005799194,0.014465830047550624,11.0,200.0,291.5

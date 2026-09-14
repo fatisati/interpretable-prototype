@@ -712,6 +712,56 @@ Artifacts: `notebooks/s28nsc_dge_lite/tables/H4_g015_d7fix_{summary,per_pair}.cs
 
 ---
 
+## 11. `btch`+`dpar` gamma sweep -- a real n_pairs gain, at a real purity cost (2026-09-14)
+
+**Why this ran.** Section 7 showed `[D7]` only affects `nassoc_size_scale='full'`; under
+`'btch'` (`dpar`'s partner normalizer, no full-dataset rescaling) there is nothing to fix,
+but `gamma=0.15` was calibrated for `'full'`-scale density and has no reason to be the
+right threshold for `'btch'`-scale (raw, unrescaled, noisier) density. Existing `dpar`
+runs already on the volume (`lf_g1_bn_g01/g03`, WITHOUT `nassoc_exact`) used gamma in
+0.01-0.03, a real prior. Swept `[0.01, 0.03, 0.05]` WITH `nassoc_exact=1`, everything else
+matching "Best config to use" except `nassoc_size_scale='btch'`, `nassoc_cpm_norm='dpar'`.
+
+```
+                              median_size  n_pairs  pearson_r  ct_purity  joint_purity  coverage  modularity
+gamma=0.01 (lf_i_dpar_g01)      291.5        11       0.782      0.850       0.432        0.944     0.279
+gamma=0.03 (lf_i_dpar_g03)      158.5        17       0.718      0.634       0.355        0.778     0.208
+gamma=0.05 (lf_i_dpar_g05)      197.5        14       0.715      0.658       0.359        0.778     0.204
+  for reference --
+H4_g015_d7fix (full+gful, 0.15) 294.0        14       0.758      0.827       0.423        0.944     0.261
+SEACells bk0.2 (section 9)       --          19        --         0.823      0.504         --        --
+```
+
+**Gamma clearly does something here** (unlike section 6's `full`+`gful` sweep, where
+gamma only moved size, never coverage): `0.01` barely splits anything (median size stays
+near the untouched ~292 average), `0.03` roughly halves it and finds MORE niche states
+than any other `nassoc_exact` run so far -- 17, the closest to SEACells' 19 of anything
+tested. **But it is a real tradeoff, not a free win**: cell-type purity crashes from
+~0.83-0.85 (every other healthy run) to 0.634, joint purity drops to 0.355 (below
+`H4_g015_d7fix`'s 0.423), and cell-TYPE coverage (fraction of the 18 cell types
+represented at all, not niche-state count) drops 0.944 -> 0.778 -- some cell types are
+losing representation even as niche granularity increases for the ones that remain.
+
+**Interpretation, tentative.** This is the first lever in this whole investigation that
+moves `n_pairs` at all (sections 6, 7, 10 all "moved no metric" on coverage) -- consistent
+with section 9's conclusion that the bottleneck is prototype placement, since `gamma`
+here is directly controlling how aggressively prototypes fragment, which IS a placement
+lever, unlike the diagonal counting fixes. Worth reading alongside section 9d's
+off-diagonal-term suspect: an off-diagonal term with real teeth might let gamma fragment
+prototypes for niche resolution WITHOUT paying the cell-type-purity cost seen here, since
+right now nothing is stopping a split from cutting across cell-type boundaries instead of
+along niche ones.
+
+**Not run yet, open questions:** a finer gamma grid between 0.01 and 0.03 (where the
+purity cliff happens), and whether pairing `nassoc_offdiag_norm='min'` (already
+implemented, per section 9d) with `dpar` gamma=0.03 recovers cell-type purity while
+keeping the n_pairs gain.
+
+Artifacts: `notebooks/s28nsc_dge_lite/tables/lf_i_dpar_exact_g{01,03,05}_{summary,per_pair}.csv`,
+`models/s28nsc/lf_i_dpar_exact_g{01,03,05}_.../metrics.json` (Modal volume).
+
+---
+
 ## Untested ideas, parked
 
 - **VQ-VAE style restart of dead prototypes** (`proto_reinit_every`). Implemented. Showed
