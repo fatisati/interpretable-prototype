@@ -92,30 +92,50 @@ been collapsing completely.
 Everything else — including the main UMAP community loss, at 2.5 — was invisible to the
 optimizer.
 
-**What we found.** Two different jobs had been tangled into one number:
+**What we found.** The diagonal CPM term, in full, always looks like this:
 
 ```
-normalizer      puts the term on a sensible SCALE.      There is a right answer.
-lambda_nassoc   says how much you CARE about the term.  This is the tuning dial.
+diag_term  =  - ( sum over every prototype p of  edges_inside[p] - gamma * possible_pairs[p] )  /  normalizer
+
+  edges_inside[p]     real weighted connections between two members of prototype p
+  possible_pairs[p]   ALL member-pairs of p, connected or not -- the "capacity"
+  gamma               price charged per possible pair that is NOT a real edge
+                       (equivalently: the density a prototype must clear to be "worth it")
+  normalizer          what the summed score gets divided by. pair / graf / gful / dpar
+                       differ ONLY in this.
 ```
 
-Step 2 had rescaled the *numerator* (edges, sizes) to full-dataset units but left the
-*denominator* at minibatch units — a ~3900x mismatch. That is not a tuning problem; no
-value of `lambda_nassoc` fixes a term whose scale drifts with batch size.
+**Why `normalizer` has to exist at all.** Sum `edges_inside[p] - gamma*possible_pairs[p]` over
+200 prototypes and the raw number's size depends on the dataset -- how many cells, how
+many edges, how big the minibatch is -- none of which has anything to do with how much
+you actually want this loss term to matter relative to the others. Two separate jobs had
+been tangled into that one raw number:
 
-### The four normalizers, in the order they were invented
+```
+normalizer      puts the term on a sensible, dataset-size-independent SCALE. This has a
+                right answer: whichever choice keeps the numerator and normalizer
+                measured at the SAME scale (batch vs full-dataset -- see section 7) and
+                keeps gamma's gradient alive (see `pair` below, where it doesn't). Not
+                something you tune by feel.
+lambda_nassoc   says how much you CARE about this term relative to every other loss
+                (UMAP, usage, ...). This IS a free tuning dial -- there is no "correct"
+                value, only what balances well against the other terms.
+```
 
-The CPM diagonal term is always
-```
-diag_term = - sum_over_prototypes( edges_inside[p] - gamma * possible_pairs[p] ) / DENOM
-```
-and the variants differ **only** in `DENOM`. Code: `scproto.py:1603-1627` and `1830-1836`.
+Step 2 (an earlier fix, below) had rescaled the *numerator* (edges, sizes) to
+full-dataset units but left `normalizer` at minibatch units -- a ~3900x mismatch. That is not
+a tuning problem; no value of `lambda_nassoc` fixes a term whose scale silently drifts
+with batch size underneath it.
+
+### The four choices for `normalizer`, in the order they were invented
+
+Code: `scproto.py:1603-1627` and `1830-1836`.
 
 ---
 
 **`pair` — the original. BROKEN. Never use.**
 ```
-DENOM = sum_over_prototypes( possible_pairs[p] )        <- attached to the graph
+normalizer = sum_over_prototypes( possible_pairs[p] )        <- attached to the graph
 ```
 *Why it seemed reasonable:* possible_pairs is what gamma is charged against, so dividing
 by its sum looked like the natural unit.
@@ -132,7 +152,7 @@ the three runs came out nearly identical because they *were* the same run.
 
 **`graf` — first working fix.**
 ```
-DENOM = summed affinity weight of THIS minibatch's sampled edges   (detached)
+normalizer = summed affinity weight of THIS minibatch's sampled edges   (detached)
 ```
 *Why:* it depends only on **which edges were drawn**, never on the assignments `S`, so
 gamma can no longer cancel against it. That restores gamma's gradient.
@@ -147,7 +167,7 @@ roughly `n_edges_total / n_edges_batch`, and it also **jitters with batch compos
 
 **`gful` — CHOSEN. This is the one in the best config.**
 ```
-DENOM = total affinity weight of the WHOLE graph   (constant, computed once)
+normalizer = total affinity weight of the WHOLE graph   (constant, computed once)
 ```
 *Why this one:*
 1. **Scale-matched.** Numerator is full-dataset, denominator is full-dataset. Nothing
@@ -164,7 +184,7 @@ Code: `self._full_graph_weight = edge_dataset.weights.sum()`, `scproto.py:1208-1
 
 **`dpar` — good alternative, kept as a live option.**
 ```
-DENOM = sum_over_prototypes( possible_pairs[p] )   but DETACHED (frozen, no gradient)
+normalizer = sum_over_prototypes( possible_pairs[p] )   but DETACHED (frozen, no gradient)
 ```
 *Why:* it is `pair` with the denominator's gradient cut. That single change kills the
 cancellation while keeping the objective's own natural bound:
