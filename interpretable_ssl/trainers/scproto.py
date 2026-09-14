@@ -1620,6 +1620,25 @@ class SCProtoTrainer(AdoptiveTrainer):
                     # term comes out ~(n_edges_total/n_edges_batch)x too large: measured
                     # nassoc=2874 vs umap=2.5, i.e. nassoc was 99.5% of the total loss.
                     cpm_norm_const = self._full_graph_weight
+                elif nassoc_cpm_norm == 'cpar':
+                    # [D8] CONSTANT-PAIRS: the EXPECTED sum(possible_pairs) for a balanced
+                    # hard partition, N*(N-K)/(2K), computed ONCE from N and K.
+                    # Combines dpar's correct scaling with gful's stability:
+                    #   - like dpar, it scales as possible_pairs does, so the term stays on the
+                    #     same interval when K or N changes -- lambda_nassoc stays portable.
+                    #   - unlike dpar, it is a FIXED CONSTANT: it never drifts as the assignment
+                    #     evolves during training, so nassoc's weight relative to the other loss
+                    #     terms is the same at step 1 and step 10000.
+                    # NOTE (measured, s28nsc/bk02/K=200): cpar=8,503,906 vs gful=2m=1,540,839,
+                    # a fixed 5.52x. At FIXED N and K the two are therefore equivalent up to a
+                    # rescaling of lambda_nassoc (cpar@lambda=5520 == gful@lambda=1000, exactly
+                    # -- same gradients). cpar only behaves DIFFERENTLY from gful once K or N
+                    # changes, which is the whole reason it exists: 2m is blind to K, this is not.
+                    _Ncp = float(n_total_cells)
+                    _Kcp = float(K_na)
+                    cpm_norm_const = torch.as_tensor(
+                        max(_Ncp * (_Ncp - _Kcp) / (2.0 * _Kcp), 1e-8),
+                        device=self.device, dtype=torch.float32)
                 else:
                     # 'graf': summed weight of THIS step's sampled edges. Assignment-independent
                     # (so gamma still gets a gradient) but minibatch-scaled -- mismatched against
@@ -1802,7 +1821,17 @@ class SCProtoTrainer(AdoptiveTrainer):
                                 # reward each present link, charge gamma for each missing one.
                                 if pairs is None:
                                     return (nassoc_gamma - d).clamp(min=0.0).pow(2).mean()
-                                _den = (cpm_norm_const if nassoc_cpm_norm == 'graf'
+                                # [D8] 'cpar' joins 'graf' as a constant denominator here.
+                                # KNOWN GAP, deliberately left alone: 'gful' and 'dpar' are NOT
+                                # listed, so under nassoc_agg='pbch' they fall through to
+                                # pairs.sum() -- the legacy 'pair' behaviour in which gamma
+                                # cancels to a constant and loses its gradient entirely (see the
+                                # 'pair' entry in defaults.py). No run uses pbch with those
+                                # normalizers (every nassoc run to date is nagg-max), so fixing it
+                                # would change nothing except break reproducibility of any old
+                                # pbch run. Fix it only alongside a deliberate re-run.
+                                _den = (cpm_norm_const
+                                        if nassoc_cpm_norm in ('graf', 'cpar')
                                         else pairs.sum() + eps_na)
                                 return -(((d - nassoc_gamma) * pairs).sum() / _den)
                             elif nassoc_diag_loss == 'nll':
@@ -1845,8 +1874,8 @@ class SCProtoTrainer(AdoptiveTrainer):
                             if nassoc_cpm_norm == 'dpar':
                                 # detached: natural bounded scale, gamma keeps its gradient
                                 _den = pairs_agg.sum().detach().clamp(min=eps_na)
-                            elif nassoc_cpm_norm in ('graf', 'gful'):
-                                _den = cpm_norm_const
+                            elif nassoc_cpm_norm in ('graf', 'gful', 'cpar'):
+                                _den = cpm_norm_const   # [D8] cpar: fixed N*(N-K)/(2K)
                             else:
                                 _den = pairs_agg.sum() + eps_na   # legacy: gamma cancels
                             if nassoc_cpm_free and edges_list:
