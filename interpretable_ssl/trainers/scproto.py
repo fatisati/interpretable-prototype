@@ -1717,7 +1717,22 @@ class SCProtoTrainer(AdoptiveTrainer):
                         # edges/pairs explodes.
                         _sumsq = (S[cell_batch == b] ** 2).sum(0)
                         if nassoc_size_scale == 'full':
-                            _sumsq = _sumsq * (_cell_scale ** 2)
+                            # [D7] sum_i assign^2 is a SUM OVER CELLS, same as size -- it must
+                            # rescale LINEARLY by _cell_scale, exactly like size_eff does two
+                            # lines above. size_eff**2 already picks up the c^2 factor because
+                            # it is the SQUARE of a linearly-rescaled quantity, not because
+                            # sumsq itself is quadratic in cell count.
+                            # Was `_cell_scale ** 2` -- verified wrong two ways:
+                            #  (a) hard-assignment invariant sumsq==size must hold at ANY
+                            #      scale, so sumsq_eff must equal size_eff = size_b*c, not
+                            #      size_b*c^2.
+                            #  (b) on real s28nsc bk08 data (n_total=58423, n_batch=1024,
+                            #      cell_scale=57), a genuinely rare prototype (3 real cells
+                            #      full-dataset, true pairs=4.2) with 1 of its cells landing in
+                            #      the minibatch: c^2-scaling gives pairs_eff=0.0 -- collapses
+                            #      right back to the divide-by-zero this fix exists to prevent.
+                            #      Linear scaling gives 43.3 (noisy from n=1, but never zero).
+                            _sumsq = _sumsq * _cell_scale
                         pairs_b = 0.5 * (size_eff ** 2 - _sumsq).clamp(min=0.0)
                     else:
                         pairs_b = 0.5 * size_eff * (size_eff - 1.0).clamp(min=0.0)
