@@ -782,6 +782,122 @@ Artifacts: `notebooks/s28nsc_dge_lite/tables/lf_i_dpar_exact_g{01,03,05}_{summar
 
 ---
 
+## 12. Turn the usage loss OFF — and all 200 prototypes still survive (2026-09-15)
+
+**Decision: run with `lambda_proto_usage = 0.0` at gamma <= 0.15.** Numbers in
+`EXPERIMENTS.md` §4; this section is the *why*.
+
+**What changed.** At matched gamma=0.15, `latent_dims=16`: usage ON gives DGE 0.819 /
+13 states, usage OFF gives **0.834 / 16 states**. A second matched pair at 8-d
+(gamma 0.025 ON -> 0.781/12 vs 0.024 OFF -> 0.821/13) points the same way. Worth roughly
++0.015 to +0.040 DGE and +1 to +3 states.
+
+**Why nothing dies without it.** This was the real surprise — the usage loss exists to
+stop prototypes collapsing, and removing it killed nothing. **All 200 prototypes stayed
+alive in every usage-OFF run, at every gamma from 0.01 to 0.20.** Two reasons, the first
+measured and the second mechanistic:
+
+1. **The collapse it was guarding against was a BUG, and the bug is fixed.** §2 and §7
+   document the two counting errors that made the loss *pay* the model to kill
+   prototypes — `possible_pairs` clamping to 0 for sub-1-cell soft prototypes, so an
+   empty prototype cost 1 while a merely small one cost ~1e16. With `nassoc_exact=1` and
+   the [D7] `cell_scale` fix in place, the incentive to empty a prototype is gone, so the
+   guard has nothing left to guard.
+2. **Softmax makes emptying a prototype self-defeating.** Every cell's memberships sum to
+   1, so cells vacating prototype `p` must land in other prototypes, inflating those.
+   Under CPM the penalty is quadratic in size, so inflating a neighbour costs more than
+   the vacating prototype saves. The equilibrium keeps all 200 populated on its own.
+
+**Why it was HURTING.** The usage loss is
+`-log(EMA(max over cells of assign[cell, p])).mean()`. It has no headcount term, but it
+*is* a separation pressure: for `max assign[.,p]` to approach 1, prototype `p` needs a
+cell much closer to it than to any other prototype, so prototypes are pushed apart. That
+pressure competes with nassoc for the same prototype positions, and nassoc is the term
+that actually knows about the graph. Removing it frees placement.
+
+**Where it is NOT safe: gamma = 0.20.** Usage OFF there produced a degenerate partition —
+density halved (0.02577 -> 0.01011), `max/median` 9.3, joint purity 0.363, DGE 0.493 —
+even though it hit 20 states, beating SEACells' 19. Coverage bought that way is
+worthless. The usage loss was evidently suppressing that failure mode, so **turning it
+off is a decision coupled to keeping gamma low**, not an independent one.
+
+**What it does NOT do: equalize sizes.** At matched gamma=0.15, `max/median` is 1.2 with
+usage ON and 1.3 with it OFF — no change. The size-equalizing force is CPM's
+`gamma * possible_pairs`, which is quadratic in size and therefore always pushes cells
+from big prototypes to small ones. An earlier note in `main-idea.txt` asserted this
+without a controlled run; it has now been removed from there and the measurement lives in
+`EXPERIMENTS.md` §5.
+
+---
+
+## 13. The gamma sweeps did not solve it — and now we know why (2026-09-15)
+
+**Decision: stop sweeping gamma upward. Confine gamma to below ~0.026.** Full sweep
+results in `EXPERIMENTS.md` §3; this is the reasoning.
+
+Gamma was swept across `{0.01, 0.024, 0.025, 0.03, 0.046, 0.05, 0.15, 0.2, 0.5, 0.7}`,
+with the usage loss both ON and OFF, at 8 and 16 latent dims. **No setting beat SEACells
+on both DGE and coverage.** Higher gamma reliably buys states and loses quality
+(gamma 0.7 -> 18 states at DGE 0.647; gamma 0.20 usage-OFF -> 20 states at DGE 0.493).
+Two independent measurements explain why raising it can never work:
+
+**(a) Above gamma ~= 0.0265 the request is physically unsatisfiable.** Gamma implicitly
+names a metacell size, but size is pinned by the architecture:
+
+```
+requested_size = mean_weighted_degree * internal_fraction / gamma + 1
+actual_size    = N / K = 58,423 / 200 = 292          (every cell is assigned)
+
+gamma_max = mean_weighted_degree * internal_fraction / (N/K - 1)
+          = 26.374 * 0.2926 / 291  =  0.0265
+```
+
+Above it every prototype scores negative, the gradient points the same way everywhere and
+the term stops discriminating between prototypes. Measured consequence: an 8x change in
+gamma (0.024 -> 0.20) moved density by 5%. **Gamma is not a density knob.** Density is
+fixed by `mean_weighted_degree * internal_fraction / (size - 1)` — a formula that predicts
+every uniform-size run to under 1% — and gamma appears nowhere in it.
+
+**(b) Above gamma = 0.0386 the loss RANKS SEACELLS' BETTER PARTITION LOWER.** Evaluating
+our own objective on both label sets:
+
+```
+cpm_total = edges_inside - gamma * total_possible_pairs
+
+                        edges_inside   total_possible_pairs
+SEACells                  343,971          11,650,407
+scProto (best run)        225,400           8,577,888
+
+gamma = 0.024 : scProto  +19,530   SEACells  +64,361   -> SEACells wins 3.3x
+gamma = 0.0386: BREAK-EVEN
+gamma = 0.15  : scProto -1,061,283 SEACells -1,403,590 -> scProto "wins" by 342,307
+```
+
+SEACells captures more edges but is charged for more pairs, because uneven sizes inflate
+the sum of squares. **Our long-standing default gamma=0.15 sits deep in the regime where
+the objective prefers the worse partition** — so the DGE those runs achieved came from the
+UMAP/reconstruction terms, not from nassoc. This splits the problem cleanly:
+
+```
+gamma > 0.0386  ->  MISSPECIFIED objective. Hopeless by construction, no optimizer helps.
+gamma < 0.0386  ->  objective is correct; the optimizer never found the better partition.
+                    A different failure, needing a different fix.
+```
+
+**What this retires.** "Higher gamma will fix coverage" — tested at 0.15/0.2/0.5/0.7 and
+refuted, with a mechanism for why. Also retires the framing that K=200 is too few:
+**SEACells uses the same K=200 on the same 58,423 cells and reaches DGE 0.849 / 19 states
+/ internal_fraction 0.4465**, so K=200 is provably sufficient and the gap is ours.
+
+**Still open.** Why `internal_fraction` is 0.29 vs SEACells' 0.4465 — which is the same
+question as why our density is lower, since the graph and the sizes match and the formula
+leaves no third term. §9 localizes it to prototype placement; `EXPERIMENTS.md` §8-9 record
+the first two attempts to pin it down (an expressivity probe whose strong reading was
+withdrawn, and an untested lead that scProto's encoder never receives spatial context
+while SEACells partitions a BANKSY embedding that does).
+
+---
+
 ## Untested ideas, parked
 
 - **VQ-VAE style restart of dead prototypes** (`proto_reinit_every`). Implemented. Showed
