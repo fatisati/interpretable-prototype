@@ -1,59 +1,53 @@
-"""EXPRESSIVITY LADDER -- what can our assignment head represent AT ALL?
+"""EXPRESSIVITY PROBE -- is our learned z worse than plain PCA at the SAME dimension?
 
 THE QUESTION
 ------------
 scProto's internal_fraction is 0.2926; SEACells' is 0.4465. Is that because
   (a) our LOSS points the wrong way, or
-  (b) our MODEL physically cannot produce a partition that good?
-These need completely different fixes, so they must be separated before more tuning.
+  (b) the FEATURES our assignment head sees cannot support a partition that good?
+These need opposite fixes, so guessing is expensive.
 
 THE METHOD
 ----------
-Hand our assignment head SEACells' own 200 labels as a SUPERVISED target and let it copy
-them. Delete the loss, delete the competing terms, fit in-sample. If the head can copy a
-good partition, the architecture is fine and the loss is at fault. If it cannot copy it
-even when handed the answer key, no loss will ever get there.
+Hand a linear head SEACells' own 200 labels as a SUPERVISED target and let it copy them.
+No loss, no competing terms, fit IN-SAMPLE on purpose -- the question is what a feature
+space CAN represent, not how it generalizes, so memorizing is allowed and makes the test
+as generous as possible. Then measure the internal_fraction of the partition that head
+produces. A feature space that cannot support a good partition even when handed the
+answer key will never support one under any loss.
 
-Already measured (diag_and_train_correct_gamma.py):
-    SEACells (target)                 int_frac 0.4465
-    best linear softmax on our z      int_frac 0.3156   <- closes only 15% of the gap
-    what our trained loss achieved    int_frac 0.2926
+THE CONTROL THAT MATTERS: PCA AT THE SAME DIMENSION
+---------------------------------------------------
+z is a LEARNED 16-d representation. PCA-16 is an untrained, closed-form 16-d
+representation of the same cells. The encoder is supposed to make z BETTER than that.
 
-THIS SCRIPT decomposes that ceiling along three axes, to say WHICH restriction binds:
+    linear head on PCA-16  <  linear head on z-16   -> encoder is concentrating signal;
+                                                       the features are fine, look at the loss
+    linear head on PCA-16  >  linear head on z-16   -> THE ENCODER IS DESTROYING INFORMATION
+                                                       relative to a trivial baseline at equal
+                                                       dimension. No loss tuning fixes that.
 
-  1. BIAS.  Our head is  logits[cell,p] = dot(z[cell], prototype[p])  with NO bias.
-     Without a bias, scaling z by any c>0 leaves the argmax unchanged:
-         argmax_p dot(c*z, proto_p) = argmax_p c*dot(z, proto_p) = argmax_p dot(z, proto_p)
-     so the assignment depends ONLY ON THE DIRECTION of z, never its magnitude, and each
-     metacell is a CONE radiating from the origin. Adding a per-prototype bias b[p] turns
-     the decision boundaries from hyperplanes THROUGH THE ORIGIN into arbitrary offset
-     hyperplanes -- i.e. general polytopes, magnitude now matters. fit_intercept=True
-     measures exactly what that would buy, without writing any model code.
+The 8/16/32/50 PCA ladder answers "does raw DIMENSION help?" from the same run, and it
+also addresses a real objection to the earlier frozen-z probe: that probe held z fixed
+from one trained run, while in reality the encoder is trainable and z can reshape itself.
+PCA-16 sidesteps that entirely -- it is a fixed, assumption-free reference point at the
+same dimension, so "is 16-d enough?" gets answered without depending on any trained z.
 
-  2. DIMENSION. 16-d z vs 50-d X_pca. 8->16 latent dims was already worth +0.025 int_frac
-     in real training, so dimensionality is a live suspect.
+NO BIAS ANYWHERE. Our real head is logits[cell,p] = dot(z[cell], prototype[p]) with no
+bias term (confirmed at runtime: head bias present = False), so every probe here uses
+fit_intercept=False. This matches the architecture exactly and keeps the comparison
+honest. Note the consequence: without a bias the argmax is unchanged by scaling z, so the
+assignment depends only on the DIRECTION of a feature vector from the origin. The origin
+therefore matters, and features are used AS-IS -- not re-centred -- because re-centring
+would move the origin and change what a no-bias head can express.
 
-  3. LINEARITY. A one-hidden-layer MLP on z -- the boundaries need not be flat at all.
-     Upper bound on what any re-parameterized head could reach on this same z.
-
-HOW TO READ THE RESULT
-----------------------
-  a bias alone recovers most of the gap  -> add a bias to the prototype layer (small change)
-  50-d PCA recovers it but 16-d z cannot -> raise latent_dims; the encoder is compressing
-                                            away what the partition needs
-  only the MLP recovers it               -> the LINEAR head is the binding constraint;
-                                            the head itself must change
-  nothing recovers it                    -> SEACells' partition is not a function of these
-                                            features at all; the graph must enter the
-                                            ASSIGNMENT, not just the loss
-
-CAVEAT, stated up front: each probe fits SEACells' specific LABEL IDENTITIES, not
+CAVEAT, stated up front: each probe imitates SEACells' specific LABEL IDENTITIES, not
 internal_fraction directly. Some other partition in the same family could score higher
-without imitating SEACells. So every number here is a LOWER BOUND on what that family can
-express, not a proven ceiling. It is strong evidence, not proof.
+without imitating SEACells. Every number is a LOWER BOUND on what that family can
+express -- strong evidence, not proof.
 
 Run: PYTHONIOENCODING=utf-8 PYTHONUTF8=1 modal run --detach modal_scripts/probe_expressivity_ladder.py
-Cost: no training. A few minutes on a T4 (GPU only to load the checkpoint reliably), cents.
+Cost: no training at all. A few minutes on a T4 (GPU only to load the checkpoint for z).
 """
 import time
 import modal
@@ -84,6 +78,9 @@ image = (
 volume = modal.Volume.from_name("scproto-data")
 
 REF_RUN = dict(name="lf_L16_g015_uOFF", gamma=0.15, usage=0.0)
+PCA_DIMS = [8, 16, 32, 50]      # 16 is the matched-dimension control against our z
+C_WEAK = 100.0                  # weak regularization: this is a CAPACITY test, not a
+                                # generalization test, so we want near-unpenalized MLE
 
 
 @app.function(image=image, gpu="T4", timeout=3600, volumes={"/vol": volume})
@@ -115,12 +112,14 @@ def probe_ladder():
     from interpretable_ssl.evaluation.collapse_diagnostics import labels_from_trainer
 
     adata = sc.read_h5ad(DATASETS["s28nsc"]["path"])
+    print(f"[data] {adata.shape}   obsm keys: {list(adata.obsm.keys())}")
 
     with open("/vol/code/graphs/affinity_s28nsc58423_ncomp50_kneighbors50_bk02.pkl", "rb") as f:
         _A = pickle.load(f).tocsr()
     _A = _A.tocsr(copy=True); _A.setdiag(0); _A.eliminate_zeros()
     _Atri = sp.triu(_A, k=1).tocoo()
     _m = float(_Atri.sum()); _row, _col, _dat = _Atri.row, _Atri.col, _Atri.data
+    print(f"[graph] m = {_m:,.0f}")
 
     def partition_stats(li):
         li = np.asarray(li, dtype=np.int64)
@@ -148,7 +147,7 @@ def probe_ladder():
                    if d.startswith("seacell") and
                    os.path.exists(os.path.join(mdir, d, "seacell_sc.h5ad")))
     pick = next((d for d in cands if "bklam02" in d or "bk02" in d), cands[0])
-    print(f"[seacells] using {pick}")
+    print(f"[seacells] dirs={cands}  using {pick}")
     from interpretable_ssl.evaluation.metric_helpers.metacell_metrics import _reconstruct_from_delta
     sad = sc.read_h5ad(os.path.join(mdir, pick, "seacell_sc.h5ad"))
     if sad.uns.get("_seacell_delta"):
@@ -175,96 +174,106 @@ def probe_ladder():
     with torch.no_grad():
         Z = trainer.encode_adata(adata, trainer.model, z_idx=1).cpu().numpy()
     trained_stats = partition_stats(to_ints(labels_from_trainer(trainer, adata).dropna()))
-    print(f"[ref] z={Z.shape}  trained partition {trained_stats}")
+    print(f"[ref] z={Z.shape}   our head bias present: "
+          f"{getattr(trainer.model.prototypes, 'bias', None) is not None}")
+    print(f"[ref] trained partition {trained_stats}")
 
-    # ---------------------------------------------------------------------- X_pca (50-d)
-    if "X_pca" in adata.obsm and adata.obsm["X_pca"].shape[1] >= 50:
-        P = np.asarray(adata.obsm["X_pca"])[:, :50]
-        print(f"[pca] reusing adata.obsm['X_pca'] -> {P.shape}")
+    # ------------------------------------------------------------------------- features
+    # PCA is computed ONCE at max dim and truncated, so PCA-8 is exactly the first 8
+    # components of PCA-50 -- a clean nested ladder.
+    if "X_pca" in adata.obsm and adata.obsm["X_pca"].shape[1] >= max(PCA_DIMS):
+        PCA_FULL = np.asarray(adata.obsm["X_pca"])[:, :max(PCA_DIMS)]
+        print(f"[pca] reusing adata.obsm['X_pca'] -> {PCA_FULL.shape}")
     else:
-        print("[pca] computing 50-comp PCA (same n_comps the affinity was built with)")
-        tmp = adata.copy(); sc.pp.pca(tmp, n_comps=50)
-        P = np.asarray(tmp.obsm["X_pca"]); del tmp
-    # scale-match PCA to z so the linear fits are conditioned comparably
-    P = P / (P.std(0).mean() + 1e-12) * (Z.std(0).mean() + 1e-12)
+        print(f"[pca] computing {max(PCA_DIMS)}-comp PCA")
+        tmp = adata.copy(); sc.pp.pca(tmp, n_comps=max(PCA_DIMS))
+        PCA_FULL = np.asarray(tmp.obsm["X_pca"]); del tmp
 
-    # -------------------------------------------------------------------------- probes
+    feats = {"z16 (OUR ENCODER)": Z}
+    for d in PCA_DIMS:
+        feats[f"pca{d}"] = PCA_FULL[:, :d]
+    # BANKSY: the embedding SEACells itself partitioned (seacell_X_bklam02_K200). Included
+    # because it is the one feature space KNOWN to contain spatial context, which scProto's
+    # encoder never receives. Free to test; drop this line if it is not wanted.
+    for k in adata.obsm.keys():
+        if "bklam02" in k or k == "X_bk02":
+            feats[f"BANKSY {k}"] = np.asarray(adata.obsm[k])
+            print(f"[banksy] found {k} -> {adata.obsm[k].shape}")
+            break
+    else:
+        print("[banksy] no bklam02 obsm key on this adata -- skipping that row")
+
+    # ------------------------------------------------------------------------- probes
     from sklearn.linear_model import LogisticRegression
     from sklearn.metrics import adjusted_rand_score
     ok = sea_li >= 0
     y = sea_li[ok]
     out = {}
 
-    def run_probe(tag, X, make_clf, note):
+    print("\n" + "=" * 84)
+    print("PROBE: linear head, NO BIAS (matches our real head), fit to SEACells' 200 labels")
+    print("in-sample. Features used AS-IS -- not re-centred, because a no-bias head is")
+    print("origin-sensitive and re-centring would change what it can express.")
+    print("=" * 84)
+
+    for tag, X in feats.items():
         t0 = time.time()
         try:
-            clf = make_clf()
-            clf.fit(X[ok], y)
-            pred = clf.predict(X[ok])
+            # scale to comparable magnitude WITHOUT moving the origin
+            Xs = X / (float(np.abs(X).mean()) + 1e-12)
+            clf = LogisticRegression(fit_intercept=False, C=C_WEAK, max_iter=400, n_jobs=-1)
+            clf.fit(Xs[ok], y)
+            pred = clf.predict(Xs[ok])
             li = np.full(len(sea_li), -1, dtype=np.int64); li[ok] = pred
             st = partition_stats(li)
             st["accuracy"] = float((pred == y).mean())
             st["ari"] = float(adjusted_rand_score(y, pred))
+            st["dim"] = int(X.shape[1])
             st["seconds"] = time.time() - t0
-            st["note"] = note
             out[tag] = st
-            print(f"[{tag}] {note}\n        int_frac={st['internal_fraction']:.4f} "
+            print(f"[{tag:<20}] dim={st['dim']:<3} int_frac={st['internal_fraction']:.4f} "
                   f"acc={st['accuracy']:.4f} ari={st['ari']:.4f} "
-                  f"density={st['aggregate_density']:.5f} alive={st['n_alive']} "
+                  f"density={st['aggregate_density']:.5f} alive={st['n_alive']:<4} "
                   f"({st['seconds']:.0f}s)")
         except Exception as e:
             import traceback; traceback.print_exc()
             print(f"[{tag}] FAILED: {type(e).__name__}: {e}")
-            out[tag] = {"error": f"{type(e).__name__}: {e}", "note": note}
-
-    print("\n" + "=" * 80)
-    print("EXPRESSIVITY LADDER -- each row is the BEST that function family can do when")
-    print("handed SEACells' labels directly. In-sample on purpose: this measures what the")
-    print("family CAN represent, not how it generalizes, so memorizing is allowed.")
-    print("=" * 80)
-
-    run_probe("z16_nobias", Z,
-              lambda: LogisticRegression(fit_intercept=False, max_iter=300, n_jobs=-1),
-              "16-d z, no bias  <- EXACTLY our current head: softmax(dot(z, proto))")
-    run_probe("z16_bias", Z,
-              lambda: LogisticRegression(fit_intercept=True, max_iter=300, n_jobs=-1),
-              "16-d z, WITH bias  <- what adding b[p] to the prototype layer would buy")
-    run_probe("pca50_nobias", P,
-              lambda: LogisticRegression(fit_intercept=False, max_iter=300, n_jobs=-1),
-              "50-d PCA, no bias  <- does more DIMENSION help, holding the head fixed?")
-    run_probe("pca50_bias", P,
-              lambda: LogisticRegression(fit_intercept=True, max_iter=300, n_jobs=-1),
-              "50-d PCA, WITH bias  <- dimension AND bias together")
-
-    try:
-        from sklearn.neural_network import MLPClassifier
-        run_probe("z16_mlp", Z,
-                  lambda: MLPClassifier(hidden_layer_sizes=(256,), max_iter=60,
-                                        early_stopping=False, random_state=0),
-                  "16-d z, 1-hidden-layer MLP  <- upper bound for ANY head on this same z")
-    except Exception as e:
-        print(f"[z16_mlp] skipped: {e}")
+            out[tag] = {"error": f"{type(e).__name__}: {e}"}
 
     # ------------------------------------------------------------------------- summary
-    print("\n\n===== HOW MUCH OF THE internal_fraction GAP EACH FAMILY CAN REACH =====")
     lo, hi = trained_stats["internal_fraction"], sea_stats["internal_fraction"]
+    print("\n\n===== HOW MUCH OF THE internal_fraction GAP EACH FEATURE SPACE REACHES =====")
     print(f"floor  = what our trained loss achieved : {lo:.4f}")
     print(f"target = SEACells                       : {hi:.4f}")
     print(f"gap                                     : {hi - lo:.4f}\n")
-    print(f"{'family':<16}{'int_frac':>10}{'gap closed':>12}{'acc':>8}{'ari':>8}"
+    print(f"{'features':<22}{'dim':>5}{'int_frac':>10}{'gap closed':>12}{'acc':>8}{'ari':>8}"
           f"{'density':>10}{'max/med':>9}")
     for tag, st in out.items():
         if "error" in st:
-            print(f"{tag:<16}   FAILED"); continue
+            print(f"{tag:<22}   FAILED"); continue
         gc = (st["internal_fraction"] - lo) / (hi - lo) * 100
-        print(f"{tag:<16}{st['internal_fraction']:>10.4f}{gc:>11.0f}%{st['accuracy']:>8.3f}"
-              f"{st['ari']:>8.3f}{st['aggregate_density']:>10.5f}{st['max_over_median']:>9.1f}")
-    print(f"{'SEACells':<16}{hi:>10.4f}{100:>11.0f}%{'--':>8}{'--':>8}"
+        print(f"{tag:<22}{st['dim']:>5}{st['internal_fraction']:>10.4f}{gc:>11.0f}%"
+              f"{st['accuracy']:>8.3f}{st['ari']:>8.3f}{st['aggregate_density']:>10.5f}"
+              f"{st['max_over_median']:>9.1f}")
+    print(f"{'SEACells (target)':<22}{'--':>5}{hi:>10.4f}{100:>11.0f}%{'--':>8}{'--':>8}"
           f"{sea_stats['aggregate_density']:>10.5f}{sea_stats['max_over_median']:>9.1f}")
-    print(f"{'our trained run':<16}{lo:>10.4f}{0:>11.0f}%{'--':>8}{'--':>8}"
+    print(f"{'our trained run':<22}{16:>5}{lo:>10.4f}{0:>11.0f}%{'--':>8}{'--':>8}"
           f"{trained_stats['aggregate_density']:>10.5f}{trained_stats['max_over_median']:>9.1f}")
+
+    zr = out.get("z16 (OUR ENCODER)", {})
+    pr = out.get("pca16", {})
+    if "internal_fraction" in zr and "internal_fraction" in pr:
+        print("\n>>> THE MATCHED-DIMENSION VERDICT (pca16 vs our z16, both 16-d, both no bias):")
+        print(f">>>   our learned z16 : {zr['internal_fraction']:.4f}")
+        print(f">>>   plain pca16     : {pr['internal_fraction']:.4f}")
+        if pr["internal_fraction"] > zr["internal_fraction"]:
+            print(">>>   PCA WINS -> the encoder is DESTROYING information relative to a")
+            print(">>>   trivial baseline at equal dimension. Not a loss-tuning problem.")
+        else:
+            print(">>>   z WINS -> the encoder is concentrating signal as intended; 16-d")
+            print(">>>   features are not the bottleneck, so look at the loss.")
     print("\nREMINDER: each probe imitates SEACells' LABEL IDENTITIES, so every number is a")
-    print("LOWER BOUND on what that family can express -- strong evidence, not proof.")
+    print("LOWER BOUND on what that feature space can express -- evidence, not proof.")
     return {"seacells": sea_stats, "trained": trained_stats, "probes": out}
 
 
