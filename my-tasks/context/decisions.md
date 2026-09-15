@@ -898,6 +898,69 @@ while SEACells partitions a BANKSY embedding that does).
 
 ---
 
+## 14. The gap is INFORMATION, not the loss: the encoder never sees spatial context (2026-09-15)
+
+**This supersedes the working assumption behind sections 3-13.** All of that work treated
+the gap to SEACells as a loss-design problem. It is not.
+
+**The measurement** (`probe_expressivity_ladder.py`, numbers in `EXPERIMENTS.md` §8b). Fit a
+linear, **no-bias** head — matching our real head exactly — to SEACells' own 200 labels,
+in-sample, from different feature spaces, and measure the internal_fraction of the
+partition each produces:
+
+```
+features            dim   int_frac   gap closed    accuracy
+pca50                50    0.2790       -9%         0.436
+z16 (our encoder)    16    0.3016        6%         0.410
+BANKSY X_bklam02     50    0.4262       87%         0.714
+SEACells (target)    --    0.4465      100%          --
+```
+
+`pca50` and `BANKSY` are the SAME dimension, the SAME head and the SAME target. The only
+difference is that BANKSY mixes each cell's expression with its **spatial neighbours'**.
+That alone moves internal_fraction from 0.2790 to 0.4262.
+
+**scProto's encoder cannot see that.** `encode_adata` (trainer.py:257) feeds a scPoli
+dataloader over `adata`: gene expression plus batch key. Spatial information reaches
+scProto *only* through the affinity graph inside the nassoc loss — never through the
+encoder input. SEACells, by contrast, partitions `X_bklam02` directly (its run is stored
+as `seacell_X_bklam02_K200`).
+
+**Two hypotheses this kills:**
+- *The encoder is destroying information.* No — z16 (0.3016) beats pca16 (0.2624) at
+  matched dimension. The encoder concentrates signal as intended. PCA-16 was the right
+  control because it needs no trained encoder, so it answers "is 16-d enough?" without
+  depending on any particular trained z.
+- *We need more dimensions.* No — pca8 -> pca50 buys only 0.2402 -> 0.2790, and pca50
+  still loses to our 16-d z. Latent 32/64 would not have helped.
+
+**Corroborated independently by §13's follow-up.** Running gamma inside the provably
+correct window (0.020-0.032, §13(a)+(b)) fixed the loss's internal behaviour — density
+finally tracks gamma (asked/achieved ratio 1.02 at gamma=0.026, confirming the satisfiable
+bound exactly), internal_fraction rose to 0.3338, sizes became SEACells-like (median 259
+vs 258, max/median 2.7 vs 3.6) — and moved **neither DGE nor coverage** outside noise. A
+correct loss on blind features still cannot find the partition.
+
+**The circularity caveat, stated because it is significant.** SEACells was fit on
+`X_bklam02`, and the `bk02` affinity graph on which internal_fraction is measured was also
+built from `X_bklam02`. So BANKSY features predict a BANKSY-built partition scored on a
+BANKSY-built graph, and part of the 87% is circular. **But that circularity is the
+finding**: our nassoc loss optimizes containment on that same graph, so scProto is asked
+to maximize a spatially-defined objective with an encoder that is structurally blind to
+space. Also note the probe imitates SEACells' *label identities*, so each number is a
+lower bound on what a feature space can express — evidence, not proof.
+
+**Decision: stop tuning the loss for this gap.** The remaining loss-side levers (gamma,
+normalizer, usage, latent dims) are exhausted — see `EXPERIMENTS.md` §10 for the full
+ruled-out list. The next change is to what the ENCODER CONSUMES: feed `X_bklam02` (already
+present in `adata.obsm`, no computation needed) instead of raw expression. That is also the
+fairness fix — SEACells currently gets spatially-aware features and scProto does not, so
+the published comparison is not like-for-like as things stand.
+
+**Not yet implemented** — it is a trainer change, pending sign-off.
+
+---
+
 ## Untested ideas, parked
 
 - **VQ-VAE style restart of dead prototypes** (`proto_reinit_every`). Implemented. Showed

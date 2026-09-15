@@ -126,7 +126,48 @@ moved density 5%.
 
 **(ii) Above gamma = 0.0386 the loss prefers the WRONG partition.** See section 6.
 
-### 3d. Density is not a free parameter — the formula holds to <1%
+### 3d. The CORRECTED gamma window — mechanism fixed, outcome unchanged (2026-09-15)
+
+First runs inside **both** the satisfiable bound (0.0265) and the correctly-specified
+regime (< 0.0386). `latent_dims=16`, usage OFF, gful.
+
+```
+run                gamma    DGE  n_pairs   density  int_frac  med  max/med  jointP   asked/got
+lf_L16_cg02_uOFF   0.020  0.842     13     0.02593   0.3338   259    2.7     0.437     1.30
+lf_L16_cg026_uOFF  0.026  0.812     15     0.02648   0.3183   272    2.2     0.440     1.02
+lf_L16_cg032_uOFF  0.032  0.830     13     0.02679   0.3149   271    2.0     0.442     0.84
+--- references ---
+lf_L16_g015_uOFF   0.15   0.834     16     0.02628   0.2926   293    1.3     0.438     0.18
+SEACells bk02       --    0.849     19     0.02952   0.4465   258    3.6     0.504      --
+```
+
+**What improved — the mechanism.**
+
+1. **Density finally tracks gamma, and the satisfiable bound is confirmed exactly.**
+   `asked/got` is `achieved_density / gamma`. At gamma=0.026 — which is the predicted
+   ceiling 0.0265 — the ratio is **1.02**, essentially exact. Below it the model overshoots
+   (0.020 -> ratio 1.30, it cannot go that low); above it the model undershoots (0.032 ->
+   ratio 0.84, saturating as predicted). This is the *real* validation of the size formula;
+   the earlier "density converged to gamma" claim at gamma=0.024 was a coincidence (§3d).
+2. **internal_fraction rose for all three** vs the gamma=0.15 run: 0.3338 / 0.3183 / 0.3149
+   vs 0.2926. Lower gamma gives better containment. +0.041 at gamma=0.020 is the largest
+   internal_fraction gain from any loss-side change tested.
+3. **Size distribution became SEACells-like.** median 259 vs SEACells' 258; `max/median`
+   2.7 vs 3.6, up from a rigid 1.3.
+
+**What did NOT improve — the outcome.**
+
+- DGE 0.842 / 0.812 / 0.830 vs 0.834 before: **all within single-seed noise** (std 0.08-0.25).
+- Coverage 13 / 15 / 13 vs 16 before, and vs SEACells' 19. No gain.
+- Frontier: at 13 states the best was already 0.846 (so 0.842 is not a lift); at 15 states
+  0.800 -> 0.812 is a lift of +0.012, far inside noise. **The frontier did not move.**
+- Joint purity 0.437-0.442, flat, vs SEACells' 0.504.
+
+**Conclusion: putting gamma in the correct window fixes the loss's internal behaviour but
+does not close the gap to SEACells.** Combined with §8, this is strong evidence the gap is
+not in the loss at all.
+
+### 3e. Density is not a free parameter — the formula holds to <1%
 
 ```
 run                int_frac  size   predicted   measured   error
@@ -282,7 +323,56 @@ The probe closes only **15%** of the internal_fraction gap.
 
 ---
 
-## 9. Open lead: scProto's encoder never sees spatial context
+### 8b. The feature-space ladder — **the answer** (2026-09-15)
+
+Same probe, but comparing FEATURE SPACES instead of head variants. All linear, **no bias**
+(matching our real head exactly), fit to SEACells' 200 labels in-sample, features used
+as-is (a no-bias head is origin-sensitive, so re-centring would change what it can
+express), weak regularization `C=100` because this is a capacity test.
+
+```
+features                dim  int_frac  gap closed     acc     ari   density  max/med
+our trained run          16    0.2926          0%      --      --   0.02628      1.3
+pca8                      8    0.2402        -34%   0.265   0.129   0.01097      7.3
+pca16                    16    0.2624        -20%   0.361   0.186   0.01438      5.8
+pca32                    32    0.2745        -12%   0.413   0.220   0.01608      5.1
+pca50                    50    0.2790         -9%   0.436   0.237   0.01659      5.0
+z16 (OUR ENCODER)        16    0.3016          6%   0.410   0.226   0.01721      5.2
+BANKSY X_bklam02         50    0.4262         87%   0.714   0.519   0.02753      3.8
+SEACells (target)        --    0.4465        100%      --      --   0.02952      3.6
+```
+
+**1. Spatial context is the whole story.** `pca50` and `BANKSY` have the SAME dimension
+(50), the SAME linear no-bias head and the SAME target. The only difference is that BANKSY
+mixes each cell's expression with its **spatial neighbours'**. internal_fraction
+0.2790 -> **0.4262**; accuracy 0.436 -> 0.714; ARI 0.237 -> 0.519. **A trivial linear head
+on spatially-aware features closes 87% of the gap.** Nothing built on expression alone
+passes 30%.
+
+**2. The encoder is FINE.** z16 (0.3016) beats pca16 (0.2624) at matched dimension — it
+concentrates signal, +0.039 over an untrained closed-form baseline. This kills the "the
+encoder destroys information" hypothesis, and it was the sharpest available test of it
+because PCA-16 requires no trained encoder, sidestepping the objection that a frozen z is
+not the architecture's capacity.
+
+**3. Dimension is NOT the fix.** pca8 -> pca50 buys only 0.2402 -> 0.2790, and **pca50
+still loses to our 16-d z**. Raising `latent_dims` to 32 or 64 would not have helped. (The
+real 8 -> 16 gain in §6 was about representation quality, not raw capacity.)
+
+**The circularity caveat, which is significant.** SEACells was *fit on* `X_bklam02`, and
+the `bk02` affinity graph that `internal_fraction` is measured on was *also* built from
+`X_bklam02`. So BANKSY features are predicting a BANKSY-built partition scored on a
+BANKSY-built graph, and some of that 87% is circular.
+
+**But the circularity is itself the finding.** Our `nassoc` loss optimizes edge containment
+on that same `bk02` graph. scProto is therefore asked to maximize a spatially-defined
+objective while its encoder is structurally blind to space. That misalignment is real, not
+a probe artifact — and it is the same reason §3d's corrected-gamma runs improved the loss's
+internal behaviour without moving DGE or coverage.
+
+---
+
+## 9. CONFIRMED: scProto's encoder never sees spatial context
 
 The SEACells run is stored as `seacell_X_bklam02_K200`, i.e. `build_kernel_on =
 'X_bklam02'` — the **BANKSY embedding at lambda=0.2**, which mixes each cell's expression
@@ -292,14 +382,37 @@ scProto's `encode_adata` feeds a scPoli dataloader over `adata`: **gene expressi
 batch key, no spatial features.** Spatial information reaches scProto only through the
 affinity graph inside the nassoc loss — never through the encoder input.
 
-If that is the binding constraint it is an **information** gap, not a loss or architecture
-gap, and neither latent dims nor gamma nor a bias term would close it. **Not yet tested**
-— `probe_expressivity_ladder.py` is written to test it and has not been run.
+§8b tested this and it holds: at matched dimension, spatially-aware features reach
+internal_fraction 0.4262 while expression-only features cap at 0.2790. **This is an
+information gap, not a loss gap, not an architecture gap, not a dimension gap.** Neither
+gamma, nor the normalizer, nor latent dims, nor a bias term can close it — confirmed
+independently by §3d, where putting gamma in the provably-correct window improved the
+loss's internal behaviour and moved neither DGE nor coverage.
+
+It is also the *fairness* point: SEACells is given spatially-aware features and scProto is
+not, so the current comparison is not like-for-like.
+
+**Next step (not yet run):** feed `X_bklam02` to the encoder instead of raw expression. It
+already exists in `adata.obsm` — no computation needed. This is a change to what the
+encoder consumes, i.e. a trainer change, so it needs sign-off before implementing.
 
 ---
 
-## 10. Running now
+## 10. What has been ruled out
 
-`diag_and_train_correct_gamma.py` — latent 16, usage OFF, gamma in
-`{0.020, 0.026, 0.032}`: the first runs inside **both** the satisfiable bound (0.0265) and
-the correctly-specified regime (< 0.0386). Every previous gamma was outside at least one.
+Each of these was tested and did **not** close the gap to SEACells:
+
+```
+gamma, swept 0.01 -> 0.7, usage ON and OFF, 8-d and 16-d      §3
+  incl. the provably-correct window 0.020-0.032               §3d
+higher gamma specifically (the "more resolution" hypothesis)  §3c -- refuted with mechanism
+the usage loss (on vs off)                                    §4  -- worth +0.015-0.040, not the gap
+size uniformity / letting sizes go uneven                     §5  -- uneven always made it WORSE
+latent dimension 8 -> 16                                      §6  -- best loss-side gain, +0.061, still short
+raw feature dimension (PCA 8 -> 50)                           §8b -- barely moves, pca50 < our z16
+the encoder destroying information                            §8b -- refuted, z16 beats pca16
+K = 200 being too few                                         §7  -- SEACells uses the same K=200
+```
+
+**Not ruled out, and now the leading explanation: the encoder receives no spatial
+context (§9).**
