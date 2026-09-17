@@ -133,7 +133,9 @@ def eval_salvage():
             'lambda_proto_usage': 0.0,
         }
         try:
-            trainer, _ = find_metacells(
+            # NOTE: find_metacells returns THREE values (trainer, metrics, _); its
+            # docstring claims two, which is stale -- use *_ so it cannot bite again.
+            trainer, *_ = find_metacells(
                 "s28nsc",
                 cvae_epochs=50, train_epochs=20, eval_freq=2, patience=4,
                 batch_size=1024, affinity_type="bk02", num_prototypes=200,

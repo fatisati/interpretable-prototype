@@ -458,6 +458,62 @@ class SCProtoTrainer(AdoptiveTrainer):
         else:  # dotp
             return (s_i.unsqueeze(1) * s_neg).sum(dim=-1)
 
+    def _calibrate_gamma_scale(self, affinity):
+        """[D10] Measure soft_density / hard_density on the real data, once.
+
+        nassoc_gamma is a density threshold, and every value we can MEASURE is a hard
+        one (measure_gamma_from_graph.py derives 0.026-0.030 for s28nsc/bk02 from the
+        graph and from SEACells' partition). But the loss compares gamma against a
+        density built from SOFT memberships, and the two are not the same number --
+        measured in the ht_L16 run, the logged soft density plateaued at 0.011 while the
+        final hard aggregate density of that same run was 0.02695.
+
+        Both densities are computed here from the SAME encoder state and the SAME graph:
+
+            soft:  sum_p edges_p / sum_p pairs_p  with  S = softmax(logits/epsilon)
+            hard:  the same, with S replaced by its argmax one-hot
+
+        so their ratio is a pure units conversion. It never looks at any target, so it
+        is not circular. Computed once, from the pretrained encoder.
+        """
+        import scipy.sparse as _sp
+        A = _sp.triu(_sp.csr_matrix(affinity), k=1).tocoo()
+        r = torch.as_tensor(A.row.astype('int64'), device=self.device)
+        c = torch.as_tensor(A.col.astype('int64'), device=self.device)
+        w = torch.as_tensor(A.data.astype('float32'), device=self.device)
+
+        self.model.eval()
+        with torch.no_grad():
+            z = self.encode_adata(self.train_ds.adata, self.model, z_idx=1).to(self.device)
+            S = torch.softmax(self.model.prototypes(z) / self.epsilon, dim=1)
+            H = torch.zeros_like(S).scatter_(1, S.argmax(1, keepdim=True), 1.0)
+
+            def _dens(M):
+                e = torch.zeros((), device=self.device)
+                for lo in range(0, r.numel(), 2_000_000):      # chunk: 2.3M edges x K
+                    hi = min(lo + 2_000_000, r.numel())
+                    e = e + (w[lo:hi] * (M[r[lo:hi]] * M[c[lo:hi]]).sum(1)).sum()
+                size = M.sum(0)
+                pairs = 0.5 * (size.pow(2).sum() - M.pow(2).sum())
+                return (e / pairs.clamp(min=1e-8)).item(), e.item(), pairs.item()
+
+            d_soft, e_soft, p_soft = _dens(S)
+            d_hard, e_hard, p_hard = _dens(H)
+            effk = (1.0 / S.pow(2).sum(1)).mean().item()
+
+        ratio = d_soft / d_hard if d_hard > 0 else 1.0
+        self._nassoc_gamma_scale_factor = float(ratio)
+        g = getattr(self, 'nassoc_gamma', 0.0)
+        print(f"   [D10] gamma scale calibration (epsilon={self.epsilon:.4f}, effk={effk:.2f})")
+        print(f"         SOFT density = {d_soft:.5f}   (edges {e_soft:,.0f} / pairs {p_soft:,.0f})")
+        print(f"         HARD density = {d_hard:.5f}   (edges {e_hard:,.0f} / pairs {p_hard:,.0f})")
+        print(f"         ratio soft/hard = {ratio:.4f}"
+              f"  ->  nassoc_gamma {g} interpreted as {g * ratio:.5f} in soft units")
+        if ratio < 0.5 or ratio > 2.0:
+            print(f"         NOTE: a ratio this far from 1 means an UNCONVERTED gamma was "
+                  f"off by {1/ratio if ratio else float('nan'):.1f}x -- see defaults.py [D10]")
+        return ratio
+
     def calibrate_epsilon(self, n_samples=5000):
         """Calibrate epsilon for proto mode.
 
@@ -927,6 +983,13 @@ class SCProtoTrainer(AdoptiveTrainer):
         if self.calibrate_eps and umap_similarity == 'proto' and not skip_calibration:
             self.calibrate_epsilon()
 
+        # [D10] Convert nassoc_gamma from the HARD/graph density scale (the one we can
+        # measure) to the SOFT scale the loss actually compares it against.
+        if (getattr(self, 'nassoc_gamma_scale', 'none') == 'soft'
+                and getattr(self, 'lambda_nassoc', 0.0) > 0
+                and umap_similarity == 'proto'):
+            self._calibrate_gamma_scale(affinity)
+
         # Build cell -> ds_id mapping
         if self.condition_key is not None:
             batch_labels = self.train_ds.adata.obs[self.condition_key]
@@ -1194,6 +1257,10 @@ class SCProtoTrainer(AdoptiveTrainer):
         nassoc_diag = getattr(self, 'nassoc_diag', True)
         nassoc_diag_norm = getattr(self, 'nassoc_diag_norm', 'volume')
         nassoc_gamma = getattr(self, 'nassoc_gamma', 0.0)
+        if getattr(self, 'nassoc_gamma_scale', 'none') == 'soft':
+            # [D10] gamma was supplied on the hard/graph density scale; convert it to the
+            # soft scale the CPM terms below actually live on.
+            nassoc_gamma = nassoc_gamma * float(getattr(self, '_nassoc_gamma_scale_factor', 1.0))
         nassoc_offdiag_norm = getattr(self, 'nassoc_offdiag_norm', 'sqrt')
         nassoc_size_scale = getattr(self, 'nassoc_size_scale', 'btch')
         nassoc_cpm_norm = getattr(self, 'nassoc_cpm_norm', 'pair')
