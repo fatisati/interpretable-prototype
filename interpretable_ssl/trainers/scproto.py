@@ -1199,6 +1199,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         nassoc_cpm_norm = getattr(self, 'nassoc_cpm_norm', 'pair')
         nassoc_cpm_free = int(getattr(self, 'nassoc_cpm_free', 0))
         nassoc_exact = int(getattr(self, 'nassoc_exact', 0))
+        nassoc_ht = int(getattr(self, 'nassoc_ht', 0))
         lambda_collapse = getattr(self, 'lambda_collapse', 0.0)
         # full-dataset totals, used by nassoc_size_scale='full' to undo the minibatch
         # sampling bias in size / possible_pairs (see defaults.py [D5])
@@ -1209,6 +1210,26 @@ class SCProtoTrainer(AdoptiveTrainer):
             _w = self._umap_state['edge_dataset'].weights
             self._full_graph_weight = torch.as_tensor(
                 float(_w.sum()), device=self.device).clamp(min=1e-8)
+        # [D9] Horvitz-Thompson inclusion probability per cell, for nassoc_ht=1.
+        # A step draws B edges WITH REPLACEMENT proportional to w from the DIRECTED
+        # list, and cell i is an endpoint of directed entries totalling 2*d_i of the
+        # weight mass, so P(one draw touches i) = 2*d_i/W and
+        #     p_i = 1 - (1 - 2*d_i/W)^B
+        # Floored at its own 5th percentile so 1/p_i cannot blow up for an isolated
+        # cell. Measured (measure_estimator_bias.py): mean p_i 0.0344 over s28nsc/bk02
+        # at B=1024, predicting 2009 unique cells per batch against 2006 simulated.
+        if nassoc_ht and not hasattr(self, '_nassoc_p_in'):
+            _d = self._cell_degree.to(self.device).to(torch.float32)
+            _p = 1.0 - torch.pow(
+                (1.0 - 2.0 * _d / self._full_graph_weight).clamp(min=0.0),
+                float(self.batch_size))
+            _pos = _p[_p > 0]
+            _floor = (torch.quantile(_pos, 0.05) if _pos.numel()
+                      else torch.as_tensor(1e-4, device=self.device))
+            self._nassoc_p_in = _p.clamp(min=_floor)
+            print(f"   [D9] nassoc_ht=1: inclusion prob mean={self._nassoc_p_in.mean():.4f} "
+                  f"min={self._nassoc_p_in.min():.4f} max={self._nassoc_p_in.max():.4f} "
+                  f"-> expected unique cells/batch = {self._nassoc_p_in.sum():.0f}")
         lambda_sim_recon = getattr(self, 'lambda_sim_recon', 0.0)
         sim_recon_target = getattr(self, 'sim_recon_target', 'full')
         use_proto_sim = getattr(self, 'umap_similarity', 'embedding') == 'proto'
@@ -1639,6 +1660,18 @@ class SCProtoTrainer(AdoptiveTrainer):
                     cpm_norm_const = torch.as_tensor(
                         max(_Ncp * (_Ncp - _Kcp) / (2.0 * _Kcp), 1e-8),
                         device=self.device, dtype=torch.float32)
+                elif nassoc_cpm_norm == 'btsz':
+                    # [D9] BATCH SIZE: the number of edges drawn this step. The partner
+                    # normalizer for nassoc_ht=1, where both CPM halves are batch-scale
+                    # quantities. reward/B is then literally the mean membership overlap
+                    # over the sampled edges -- i.e. the soft internal fraction, bounded
+                    # in [0,1] -- so the term is interpretable and independent of N, K and
+                    # the graph's total weight. Assignment-independent, so gamma keeps its
+                    # gradient. Requires re-tuning lambda_nassoc (the scale is ~1e2 larger
+                    # than gful's) and gamma (~1.13x the full-graph value).
+                    cpm_norm_const = torch.as_tensor(
+                        max(float(weights.numel()), 1.0),
+                        device=self.device, dtype=torch.float32)
                 else:
                     # 'graf': summed weight of THIS step's sampled edges. Assignment-independent
                     # (so gamma still gets a gradient) but minibatch-scaled -- mismatched against
@@ -1774,6 +1807,51 @@ class SCProtoTrainer(AdoptiveTrainer):
                     # at all, it is crash avoidance that silently returns a huge number, and
                     # under (density-1)^2 that huge number became 1e8 vs 1 for an empty
                     # prototype -- i.e. the loss paid to kill prototypes (see defaults.py [D5]).
+                    if nassoc_ht:
+                        # [D9] Replace BOTH estimates with unbiased ones. Everything
+                        # above assumed a uniform sample; the batch is neither uniform in
+                        # its edges (drawn proportional to w) nor in its cells (endpoints
+                        # of those edges, so degree-biased). Measured biases and the
+                        # simulation that produced them: defaults.py [D9] and
+                        # modal_scripts/measure_estimator_bias.py.
+                        #
+                        # BATCH-ONLY CPM. Both halves are computed on THIS batch and
+                        # nothing else; no full-dataset rescaling anywhere. The batch/full
+                        # scale factors are constants (reward ~ 2B/W, pairs ~ (n_b/N)^2,
+                        # ratio 1.13) and a constant only shifts gamma, so it is absorbed
+                        # into gamma rather than carried around. What is NOT absorbable is
+                        # anything that differs PER PROTOTYPE -- that is what the two
+                        # corrections below remove.
+                        #
+                        # REWARD = sum over the sampled edges of the membership overlap.
+                        # NOTE THE ABSENCE OF w: edges are already drawn with probability
+                        # proportional to w, so multiplying by w again (as A_part does)
+                        # weights the objective by w^2. The UMAP term does not do this, so
+                        # the two losses were weighting the same batch differently.
+                        # Measured bias 1.046 overall but 1.347 for prototypes under 25
+                        # cells -- size-dependent, so gamma cannot absorb it.
+                        edges_eff = (S_h * S_t).sum(0)
+                        # CHARGE = pairs among THIS batch's cells, over ALL of them,
+                        # connected or not. It cannot be read off the sampled edges: every
+                        # edge has A >> gamma (1st pct 0.22 vs gamma 0.03), so an
+                        # edges-only charge carries no repulsion at all and the model
+                        # collapses into one prototype. The batch's cells are the endpoints
+                        # of weight-sampled edges, so cells in sparse regions are
+                        # under-represented -- p_i ranges 0.021..0.210 on bk02, a 10x
+                        # spread. Dividing by the RELATIVE propensity q_i = p_i/mean(p_i)
+                        # is a survey weight: it removes that bias while leaving the batch
+                        # scale intact. Measured: size bias 0.82->1.04 becomes flat.
+                        _cm = (cell_batch == b)
+                        _pin = self._nassoc_p_in[unique_idx.to(self.device)][_cm]
+                        _q = _pin / _pin.mean().clamp(min=1e-8)   # mean 1 -> batch scale
+                        _u = S[_cm] / _q.unsqueeze(1).clamp(min=1e-8)
+                        _usum = _u.sum(0)
+                        size_eff = _usum
+                        pairs_b = 0.5 * (_usum ** 2 - (_u ** 2).sum(0)).clamp(min=0.0)
+                        # nassoc_size_scale is irrelevant here: both halves are batch
+                        # quantities on one scale, ready to subtract. Pair with
+                        # nassoc_cpm_norm='btsz' (divide by the batch's edge count).
+
                     density_b = edges_eff / (pairs_b + 1.0)
                     pairs_list.append(pairs_b)
                     size_list.append(size_b)
@@ -1831,7 +1909,7 @@ class SCProtoTrainer(AdoptiveTrainer):
                                 # would change nothing except break reproducibility of any old
                                 # pbch run. Fix it only alongside a deliberate re-run.
                                 _den = (cpm_norm_const
-                                        if nassoc_cpm_norm in ('graf', 'cpar')
+                                        if nassoc_cpm_norm in ('graf', 'cpar', 'btsz')
                                         else pairs.sum() + eps_na)
                                 return -(((d - nassoc_gamma) * pairs).sum() / _den)
                             elif nassoc_diag_loss == 'nll':
@@ -1874,7 +1952,7 @@ class SCProtoTrainer(AdoptiveTrainer):
                             if nassoc_cpm_norm == 'dpar':
                                 # detached: natural bounded scale, gamma keeps its gradient
                                 _den = pairs_agg.sum().detach().clamp(min=eps_na)
-                            elif nassoc_cpm_norm in ('graf', 'gful', 'cpar'):
+                            elif nassoc_cpm_norm in ('graf', 'gful', 'cpar', 'btsz'):
                                 _den = cpm_norm_const   # [D8] cpar: fixed N*(N-K)/(2K)
                             else:
                                 _den = pairs_agg.sum() + eps_na   # legacy: gamma cancels

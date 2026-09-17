@@ -142,6 +142,7 @@ ABBREVIATIONS = {
     'nassoc_cpm_norm': 'nacn',
     'nassoc_cpm_free': 'nacf',
     'nassoc_exact': 'naex',
+    'nassoc_ht': 'naht',
     'lambda_collapse': 'lcol',
     'proto_reinit_every': 'prie',
     'proto_reinit_thresh': 'prit',
