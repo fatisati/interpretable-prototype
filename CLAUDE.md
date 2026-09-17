@@ -282,9 +282,29 @@ metrics were plausible, and the loss decreased monotonically the whole time.
 
 Corollary for hyperparameters: a threshold parameter (`nassoc_gamma`) is only
 interpretable once the quantity it is compared against is on a known scale. Derive it
-from something real (`gamma = mean_weighted_degree * internal_fraction / (target_size -
-0.5)` — measure `mean_weighted_degree` from the affinity, don't guess) rather than
-sweeping blind, and re-derive it if the scaling of the underlying quantity changes.
+from measured properties of the actual affinity graph rather than sweeping blind, and
+re-derive it if the scaling of the underlying quantity changes.
+
+**How to derive `nassoc_gamma` — settled 2026-09-18** (`decisions.md` §15,
+`EXPERIMENTS.md` §11a). The CPM move rule is
+
+```
+delta(move cell i into p) = size[p] * ( mean_affinity(i -> ALL members of p) - gamma )
+=> cell i joins p  iff  mean_affinity(i -> members of p) > gamma
+```
+
+so gamma is **the minimum AVERAGE affinity a cell needs to a group to be worth joining
+it** — a property of the graph, measurable with no training. The mean is over *all*
+members including non-neighbours, so gamma is far below a typical edge weight. Measure
+it with `modal_scripts/measure_gamma_from_graph.py`; gamma is **not portable across
+graphs** (`s28nsc`/`bk02` → 0.026-0.030, `pancreas`/`arbf` → 0.11).
+
+Two scale traps that made gamma meaningless before, both now handled:
+- the loss compares gamma against a **soft** density while every measurable value is a
+  **hard** one — pass `nassoc_gamma_scale='soft'` and the code converts it ([D10]);
+- `epsilon` calibration **fails on every dataset tried** and silently falls back to
+  `umap_proto_effk=5.0`, a hard-coded default nothing chose, which then drifts during
+  training. **Still unfixed** — check the `[eps calibration]` line in any run log.
 
 ## 9c. scProto base config — always start from this
 
@@ -297,7 +317,9 @@ also rescued the affinities where the old loss collapsed to 15/200 (0.342 -> 0.7
 lambda_config = dict(LAMBDA_PROTO_UMAP_PRECON) | {
     'nassoc_diag_norm': 'pair',   # [D1] density, not containment: fixes the merge bias
     'nassoc_diag_loss': 'cpm',    # [D2] CPM reward, not an unreachable target of 1
-    'nassoc_gamma':     0.15,     # derived from a 75-cell target, see §9b -- re-derive per graph
+    'nassoc_gamma':     0.15,     # empirical: the value validated on s28nsc/K=200 below.
+                                  # How to derive it from the graph is UNSETTLED -- see
+                                  # decisions.md. Don't treat 0.15 as principled.
     'nassoc_size_scale': 'full',  # [D5] THE important one: without it density explodes (§9b)
     'nassoc_cpm_norm': 'gful',    # full-graph normalizer so gamma keeps a gradient AND the
                                   # term stays on the same scale as the other losses

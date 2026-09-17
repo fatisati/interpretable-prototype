@@ -961,6 +961,117 @@ the published comparison is not like-for-like as things stand.
 
 ---
 
+---
+
+## 15. gamma is DERIVED from the graph now, not swept (2026-09-17)
+
+**Decision: gamma = 0.026-0.030 for `s28nsc`/`bk02`, and the derivation method replaces
+sweeping on any new graph.** Numbers in `EXPERIMENTS.md` 11a; this is the reasoning.
+
+CLAUDE.md 9b demanded gamma be derived from measured graph properties, and the
+2026-09-17 edit marked the derivation UNSETTLED. It is now settled, and the derivation
+is the CPM move rule itself:
+
+```
+delta(move cell i into p) = (affinity from i to p's members) - gamma * size[p]
+                          = size[p] * ( MEAN affinity from i to p's members - gamma )
+=> cell i joins p  iff  mean_affinity(i -> members of p) > gamma
+```
+
+So gamma is **the minimum AVERAGE affinity a cell needs to a group to be worth joining
+it** -- a property of the graph, measurable with no training. The mean is over ALL
+members, including the ones i has no edge to, which is why gamma is far smaller than a
+typical edge weight (0.34 on `bk02`).
+
+**What this retires.** Blind gamma sweeping. Any new graph gets measured instead --
+`modal_scripts/measure_gamma_from_graph.py`. Pancreas/`arbf`, for contrast, measures
+0.11 rather than 0.028: gamma is not portable across graphs.
+
+**What it does NOT do.** The derived value lands inside the window already swept in
+`EXPERIMENTS.md` 3d, which moved neither DGE nor coverage. Deriving gamma made it
+principled; it did not make it a lever.
+
+---
+
+## 16. Three loss bugs fixed, and the honest verdict on them (2026-09-18)
+
+**Decision: keep all three fixes ON for spatial work (`nassoc_exact=1, nassoc_ht=1,
+nassoc_cpm_norm='btsz', nassoc_gamma_scale='soft'`), but do NOT report any of them as
+closing the gap to SEACells, because none of them moved it.** Results in
+`EXPERIMENTS.md` 11d-11f.
+
+**Why they were made.** All three are genuine defects, found by simulating the real
+sampler rather than by algebra -- two earlier algebraic derivations in this session were
+both wrong, because a batch is 1024 EDGES drawn proportional to `w` and its cells are
+their deduplicated endpoints, so nothing in a batch is a uniform sample.
+
+```
+[D9]  w applied twice: edges sampled proportional to w, then multiplied by w again, so
+      the objective was effectively weighted by w^2 -- while the UMAP term reading the
+      SAME batch was not. Bias 1.046 overall, 1.347 under 25 cells (size-dependent, so
+      no gamma retune can absorb it). Fixed: sum the membership overlap with NO w.
+[D9]  possible_pairs estimated from degree-biased cells with a uniform N/n_b rescale,
+      which cannot correct a non-uniform sample. Fixed with a Horvitz-Thompson survey
+      weight q_i = p_i/mean(p_i), p_i = 1-(1-2 d_i/W)^B. Bias 1.124 -> 0.999, and flat
+      at every prototype size, with LOWER spread than before (p90 1.281 vs 4.157).
+[D10] gamma specified on the HARD density scale but compared against a SOFT one.
+      Measured ratio 0.68, i.e. gamma was ~1.47x too strict. Fixed by measuring the
+      ratio once from the pretrained encoder and converting.
+```
+
+**Why they did not help.** The estimator bias is ~1.0x in the 200-900 cell band where
+every prototype actually sits (it is 2.4x only below 25 cells), and the gamma rescale is
+1.47x, inside a window already swept flat. Both were predicted in advance not to move
+the metrics, and both did not. That prediction holding is itself evidence the model of
+the system is now correct.
+
+**A hypothesis this KILLED.** "The estimator over-charges small prototypes, which is why
+our sizes are rigid, which is why we miss rare states." Correcting it made sizes MORE
+uniform (max/median 2.7 -> 1.7, nothing under 100 cells). Size uniformity is CPM's
+intrinsic quadratic charge, exactly as section 5 said -- not the estimator, not the
+usage loss.
+
+**Still unfixed, deliberately.** Epsilon calibration FAILS on both datasets tried and
+silently falls back to `umap_proto_effk=5.0`, a hard-coded default nothing chose; effk
+then drifts 5.0 -> 2.7 because calibration runs once. That is the root cause behind
+[D10] and it is a real repair, not bundled here.
+
+---
+
+## 17. The CPM rewrite is a SPATIAL-specific fix, not a general improvement (2026-09-18)
+
+**Decision: do NOT port the CPM diagonal to the non-spatial main-table datasets. The
+published `volume` + `(M_kk-1)^2` objective stays for those.** Numbers in
+`EXPERIMENTS.md` 11g.
+
+**How this came up.** The published objective in `neurips_manuscript/sections/method.tex`
+is `M[k,j] = A[k,j]/sqrt(vol[k] vol[j])` with `L = (1/K) sum_k (M_kk - 1)^2 + alpha *
+mean_offdiag(M^2)`, at `lambda_nassoc=1` with usage on. **It has no gamma at all.** So
+every pathology chased in sections 3-16 -- the density scale, the saturation, the
+estimator bias, gamma itself -- belongs to the CPM rewrite, which exists to fix the
+spatial collapse of section 2 (15/200 survivors on `s28nsc`) that pancreas never had.
+
+**Evidence.** Reproducing the published pancreas config with today's code gives
+modularity 0.617/0.611 against the paper's 0.61 and purity 0.981/0.972 against 0.98 --
+an essentially exact match, with 0 unused prototypes and coverage up to 1.0. Porting the
+CPM rewrite to pancreas (`gamma=0.11`, `lambda_nassoc=200`, usage off) collapsed
+modularity to 0.3127, early-stopped at epoch 4, `min_size=1`, `max/median=17.2`.
+
+That comparison changed four things at once (lambda 1 -> 200, usage 0.1 -> 0, latent
+20 -> 8, and the whole diagonal), so it does not isolate the cause -- `lambda_nassoc`
+at 200 on a saturated term is the prime suspect. But the direction is clear enough to
+stop porting by default.
+
+**Bonus: the reproduction is a REGRESSION TEST and it passed.** Every option added in
+this session ([D9], [D9b], [D10]) claims to be behaviour-preserving at its default.
+Reproducing the published numbers with the new code proves that, rather than asserting it.
+
+**Process note, worth keeping.** `TASK1_METRICS` in `result_tables.py` uses
+`weighted_mean_batch_entropy` / `weighted_mean_cell_type_purity`, NOT the `mean_*` keys.
+Reading the unweighted ones in-session produced a spurious "the paper does not
+reproduce, 2.5x off" alarm that cost real time. Check the metric keys against
+`result_tables.py` before ever claiming a reproduction failure.
+
 ## Untested ideas, parked
 
 - **VQ-VAE style restart of dead prototypes** (`proto_reinit_every`). Implemented. Showed

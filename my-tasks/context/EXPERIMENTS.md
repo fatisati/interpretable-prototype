@@ -416,3 +416,282 @@ K = 200 being too few                                         §7  -- SEACells u
 
 **Not ruled out, and now the leading explanation: the encoder receives no spatial
 context (§9).**
+
+---
+
+## 11. Linear probe: how much niche information is in gene expression? (2026-09-16)
+
+Scripts: `notebooks/s28nsc_dge_lite/scripts/niche_probe_auc.py`, `niche_mc_coverage.py`
+Tables: `tables/s28nsc_niche_probe_auc.csv`, `tables/s28nsc_niche_mc_coverage.csv`
+Note: `notes/niche_probe_auc_findings.md`. CPU only, ~5 min, no Modal.
+
+### Method
+
+Standard linear probing (Alain & Bengio 2016 arXiv:1610.01644; control task from Hewitt &
+Liang 2019 EMNLP; V-information framing from Xu et al. 2020 ICLR). Within each cell type,
+one-vs-rest per niche, 5-fold CV ROC-AUC, plus the same probe on permuted labels.
+
+Probes are valid: control AUC = 0.494 / 0.489 / 0.490 (sd ~0.04) for expr960 / pca50 /
+pca50+GBM. So ~0.60 is the meaningful-signal threshold.
+
+### Result A -- niche IS decodable from expression, in most states
+
+```
+best-of-probes AUC     mean 0.727   median 0.727
+  >= 0.60   91/99 pairs  (92%)
+  >= 0.65   72/99  (73%)
+  >= 0.70   61/99  (62%)
+  >= 0.80   20/99  (20%)
+```
+
+`pca50` (0.715) beats `expr960` (0.656): 960 correlated features with a few hundred
+positives overfits, PCA denoises. Report best-of-probes, not the raw-matrix probe alone.
+
+### Result B -- DGE is CONSERVATIVE here, not liberal
+
+```
+2x2, n_dge_genes >= 20  vs  best AUC >= 0.65
+                  not decodable   decodable
+no/few DE genes        26            33
+many DE genes           1            39
+
+spearman(n_dge_genes, AUC)   = 0.674
+spearman(max_abs_logfc, AUC) = 0.720
+```
+
+Only **1 of 99** pairs has many DE genes but is not decodable -- and it is the largest
+group (`Tumor cells / Tumor surface`, n_pos=2855, 270 DE genes, AUC 0.624), exactly where
+"significance grows with sqrt(n_cells) while AUC does not" predicts. The dominant
+discordance is the opposite: **33 pairs with few/no DE genes are still decodable**, 9 of
+them with ZERO significant DE genes. Per-gene Wilcoxon at n_pos ~30-200 is underpowered;
+the multivariate probe pools weak evidence across all 960 genes.
+
+=> Using "has DE genes" as the feasibility screen is safe but misses ~1/3 of recoverable
+states.
+
+### Result C -- per-state metacell coverage, scProto vs SEACells on the SAME affinity
+
+Run: `lf_L16_g015_uOFF` (latent 16, gamma 0.15, usage OFF, bk02) vs `seacell_X_bklam02_K200`
+-- both on bk02/BANKSY-lambda-0.2, both K=200. Fetched from the Modal volume.
+Table: `tables/s28nsc_niche_mc_coverage.csv` (one row per state, with the SIZES of each
+method's metacells for that state, plus probe AUC and DGE gene count).
+
+Size distributions (effective n_mc = `1 / sum(share_k^2)`):
+
+```
+run                n_mc  eff_n_mc  median   max   min  max/med    cv
+L16_g015_uOFF       200     198.3     293    367   209    1.25   0.09
+L16_g015_uON        200     198.0     293    357   177    1.22   0.10
+L16_cg026_uOFF      200     183.7     272    586    32    2.15   0.30
+L16_g02_uOFF        200      99.1     178   1664    17    9.32   1.01
+seacell_bklam02     200     146.1     258    925    33    3.59   0.61
+```
+
+scProto at gamma 0.15 uses MORE effective metacells than SEACells (198.3 vs 146.1) and is
+far more uniform. **The prototype budget is not the constraint.** Note gamma 0.2 halves
+effective n_mc to 99.1 -- size uniformity is sharply gamma-dependent in 0.15-0.20.
+
+States covered (a state = a (cell type, niche) pair with >=30 cells; "covered" = at least
+one metacell whose majority vote is that state):
+
+```
+                             all states      decodable states (AUC>=0.65)
+scProto  L16_g015_uOFF      31/99  (31%)          24/72  (33%)
+SEACells bklam02            46/99  (46%)          36/72  (50%)
+```
+
+So with an equal and better-distributed prototype budget, scProto claims 15 fewer states
+than SEACells, and 12 fewer of the states that are provably decodable from expression.
+This is a PLACEMENT difference, not a budget or a collapse difference.
+
+### Also corrected while checking
+
+- `epsilon` is NOT fixed: all s28nsc runs carry `ecal1` = `calibrate_eps=1` (p/q matching,
+  falling back to effk target 5.0). The `0.05` in `defaults.py` is the uncalibrated SwAV
+  value and `sep3.py`'s `.get('epsilon', 0.05)` fallback -- neither is what ran.
+- Measured on the bk08 affinity: `mean_weighted_degree = 25.97`, `internal_fraction = 0.628`
+  (SEACells) / 0.607 (scProto-old). The two partitions score nearly the SAME internal
+  fraction despite wildly different size distributions -- i.e. internal_fraction alone does
+  not distinguish a good partition from a degenerate one.
+- The gamma formula was REMOVED from `CLAUDE.md` on request pending discussion. It is the
+  CPM stability condition (Traag, Van Dooren & Nesterov 2011, Phys Rev E 84:016114):
+  a community is stable when `edges_inside / pairs_inside >= gamma`, giving
+  `gamma = mean_weighted_degree * internal_fraction / (target_size - 1)`.
+  CLAUDE.md had `- 0.5` in the denominator, which does not follow from that derivation.
+  Measured values: target 292 cells -> gamma 0.056; target 75 cells -> gamma 0.221.
+  Neither equals the 0.15 CLAUDE.md attributed to a 75-cell target. **gamma 0.056 has not
+  been tested**; section 3d's tested window was 0.020-0.032 and section 7's crossover is
+  0.0386.
+
+---
+
+## 11. The 2026-09-17/18 session: three real loss bugs, none of them the gap
+
+Everything below is `s28nsc` / `bk02` / K=200 unless stated. Scripts:
+`modal_scripts/measure_gamma_from_graph.py`, `measure_affinity_distribution.py`,
+`measure_estimator_bias.py`, `train_ht_nousage_latent8_16.py`, `train_ht_lowgamma.py`,
+`repro_pancreas_paper.py`.
+
+### 11a. gamma, derived from the graph instead of swept
+
+The CPM move rule is `delta = size[p] * (mean affinity from i to p's members - gamma)`,
+so **gamma is the minimum AVERAGE affinity a cell needs to a group to be worth joining
+it** -- measurable without training anything.
+
+```
+best a perfect 292-cell same-state group could give   0.041
+SEACells' own metacells, median per-metacell density  0.0449
+SEACells' aggregate density                           0.0295
+=> usable gamma                                       0.026 - 0.030
+```
+
+That is exactly the window already swept in section 3d, now derived rather than found.
+**Gamma is settled, and gamma is not the problem.**
+
+### 11b. The affinity WEIGHTS carry almost no state signal
+
+```
+                      mean weight of a    fraction of pairs
+                      connected pair       connected
+same (celltype,niche)     0.3428              0.0159
+different                 0.3299              0.00078
+ratio                     1.04                20.5
+```
+
+98.4% of same-state pairs have no edge, so the median including zeros is 0 and only the
+mean -- which IS the density -- is meaningful. All the state information is in **which
+pairs are connected**, none in how strongly. Since `density = connected_fraction *
+mean_weight` and the second factor is fixed at ~0.34, gamma is a sparsity knob.
+
+### 11c. THE CEILING -- there is almost no headroom above SEACells
+
+```
+internal_fraction
+  celltype only                            0.8137
+  niche only                               0.5514
+  celltype x niche (GROUND TRUTH)          0.4549   <- the ceiling
+  SEACells                                 0.4465   <- 98% of the ceiling
+  scProto, best runs                       0.29 - 0.36   <- 65-79%
+```
+
+**The true labels themselves keep only 45.5% of the affinity inside their own classes.**
+So the question was never "beat SEACells" -- it is "why are we at two thirds of a
+ceiling SEACells already touches".
+
+### 11d. Two minibatch estimator bugs, measured by simulation
+
+Two algebraic attempts failed because the sampling is not uniform: a batch is 1024
+EDGES drawn with replacement PROPORTIONAL TO w, and its cells are their deduplicated
+endpoints, so a cell's inclusion probability grows with its weighted degree.
+Simulating the real sampler against a known partition (estimate / truth):
+
+```
+                                 total   <25   50-100  200-300  500-1k
+size  [code]                     1.000  0.821   0.856   0.943   0.958
+size  [Horvitz-Thompson]         0.997  0.996   0.983   1.005   0.991
+pairs [code: c^2 size^2-c sumsq] 1.124  2.386   1.127   1.021   0.982
+pairs [Horvitz-Thompson]         0.999  1.108   1.034   1.028   0.996
+edges [code: w applied twice]    1.046  1.347   1.042   1.101   1.049
+edges [count-only]               1.001  1.025   1.016    --      --
+```
+
+(a) edges are sampled proportional to w and then multiplied by w AGAIN, so the objective
+was effectively weighted by w^2; the UMAP term does not do this. (b) `possible_pairs` was
+rescaled by a uniform `N/n_b`, which cannot correct a non-uniform sample -- neither the
+[D7] linear-c form nor the pre-[D7] c^2 form is unbiased. Both fixed by `nassoc_ht=1`.
+
+**In the 200-900 cell band where every prototype sits, the net effect is ~8%.**
+
+### 11e. gamma was on the wrong SCALE -- [D10]
+
+gamma is compared against a SOFT density; every gamma we ever set came from HARD
+statistics. Measured by `nassoc_gamma_scale='soft'` on the real data:
+
+```
+SOFT density 0.00674   HARD density 0.00990   ratio 0.68   (stable across 4 runs)
+=> gamma was ~1.47x too strict in the units the loss uses
+```
+
+Root cause, NOT fixed: epsilon calibration **fails on both datasets** and silently falls
+back to `umap_proto_effk=5.0`, a hard-coded default nothing chose -- and effk then
+drifts 5.0 -> 2.7 because calibration runs once, before training.
+
+```
+s28nsc:   E[p_pos]=0.3357 unreachable (max E[q_pos]=0.2051) -> effk=5.0
+pancreas: E[p_pos]=0.3397 unreachable (max E[q_pos]=0.2992) -> effk=5.0
+```
+
+### 11f. RESULTS -- all three fixes moved nothing
+
+```
+run                  gamma      DGE  pairs  jointP  int_frac  max/med  min  n<100
+ht_L16_g028_uOFF     0.028    0.833    14   0.436   0.3137     1.7    150     0
+ht_L8_g028_uOFF      0.028    0.815    13   0.435   0.2976     1.8     99     1
+d10_L16_gh028_uOFF   0.019*   0.840    13   0.440   0.3284     2.2    126     0
+d10_L16_gh02_uOFF    0.014*   0.787    15   0.438   0.3604     3.0     77     4
+--- references ---
+lf_L16_cg02_uOFF     0.020    0.842    13   0.437   0.3338     2.7     --    --
+SEACells bk02          --     0.849    19   0.504   0.4465     3.6     --    --
+GROUND-TRUTH ceiling   --      --      --     --    0.4549
+```
+`*` = converted from the hard scale by [D10].
+
+Every difference is inside single-seed noise (std 0.08-0.25). At `n_pairs=15` the
+previous best was 0.812, so `d10_gh02`'s 0.787 is ON the frontier, not above it.
+**The frontier did not move.**
+
+One result contradicts the hypothesis that the estimator bias caused size rigidity:
+correcting it made sizes MORE uniform (max/med 2.7 -> 1.7), consistent with section 5
+localizing uniformity to CPM's intrinsic quadratic charge.
+
+### 11g. PANCREAS -- the CPM rewrite is a SPATIAL-specific fix, not a general one
+
+The published objective (`sections/method.tex`) is `volume` normalization +
+`(M_kk - 1)^2`, `lambda_nassoc=1`, usage on -- **it has no gamma at all**. Every
+pathology above belongs to the CPM rewrite, which exists to fix a spatial collapse
+(decisions.md 1-3: 15/200 survivors on s28nsc) that pancreas never had.
+
+Reproduced with today's code (`repro_pancreas_paper.py`, `train_epochs=20`):
+
+```
+                       purity            batch_entropy      modularity        coverage
+PAPER scProto        0.98 +- 0.07        1.04 +- 0.66      0.61 +- 0.08         --
+repro LD20           0.9806 +- 0.0549    0.8319 +- 0.5720  0.6170 +- 0.0757   0.9286
+repro LDdefault      0.9724 +- 0.0796    0.8640 +- 0.5486  0.6109 +- 0.0899   1.0000
+PAPER SEACells       0.97 +- 0.08        0.19 +- 0.30      0.67 +- 0.05         --
+```
+
+Modularity and purity match the paper essentially exactly; batch entropy is ~20% low
+but well inside its own std of 0.55-0.67. **The paper's pancreas result reproduces, and
+today's commits are behaviour-preserving at their defaults -- verified, not assumed.**
+
+By contrast, the CPM rewrite ported to pancreas (`gamma=0.11`, `lambda_nassoc=200`,
+usage off) **regressed badly**: modularity 0.3127 against 0.66-0.70 for the published
+objective, early-stopped at epoch 4, `min_size=1`, `max/median=17.2`. That comparison
+was not controlled (4 simultaneous changes), but the direction is clear.
+
+**NOTE the table keys.** `TASK1_METRICS` in `result_tables.py` uses
+`weighted_mean_batch_entropy` and `weighted_mean_cell_type_purity`, NOT `mean_*`.
+Reading the unweighted keys makes scProto's pancreas batch entropy look like 0.40
+instead of 0.90 and produces a spurious 2.5x "reproducibility failure". This happened
+in-session and cost a false alarm.
+
+### 11h. What this session establishes
+
+```
+three genuine loss bugs found and fixed:   w^2 double-count, degree-biased pairs,
+                                           gamma scale
+frontier movement from any of them:        none
+gamma:                                     settled by measurement, not a lever
+the ceiling:                               0.455, and SEACells is at 98% of it
+still unfixed:                             the epsilon fallback (arbitrary effk=5.0,
+                                           fails on both datasets, drifts in training)
+still untested:                            leidenalg hard-CPM control -- the only cheap
+                                           experiment that DISCRIMINATES between
+                                           "objective wrong" and "optimizer weak"
+```
+
+**The loss was buggy, but the bugs were not what was holding back coverage and joint
+purity.** Section 8's information-gap reading remains a hypothesis, not a fact --
+section 8 itself withdraws the strong version, because the probe froze `z` and fit a
+linear head to SEACells' label identities, making every number a lower bound.
