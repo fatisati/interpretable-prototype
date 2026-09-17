@@ -1848,6 +1848,24 @@ class SCProtoTrainer(AdoptiveTrainer):
                         _usum = _u.sum(0)
                         size_eff = _usum
                         pairs_b = 0.5 * (_usum ** 2 - (_u ** 2).sum(0)).clamp(min=0.0)
+                        # [D9b] Put gamma back on the GRAPH's density scale, so it is a
+                        # property of the graph alone and NOT of the batch size.
+                        # The two halves are sampled at different rates:
+                        #     edges at  2B/W          pairs at  n_b(n_b-1)/(N(N-1))
+                        # and n_b ~ 2B, so pairs are sampled ~B^2 while edges are sampled
+                        # ~B. Left alone, gamma would scale as N^2/(2*B*W), i.e. HALVE
+                        # when the batch size doubles -- silently changing what the loss
+                        # means if batch_size is ever touched. Rescaling the charge by the
+                        # ratio of the two rates makes reward and charge both scale as B,
+                        # so their ratio -- and therefore gamma -- is batch-size free.
+                        # Measured on s28nsc/bk02 at B=1024 the factor is 1.13, which is
+                        # why the batch-only and full-graph gammas nearly coincided there.
+                        _Bw = float(w_b.numel())
+                        _nb = _cm.sum().clamp(min=2).to(pairs_b.dtype)
+                        _Nt = float(n_total_cells)
+                        pairs_b = pairs_b * (
+                            (2.0 * _Bw / self._full_graph_weight)
+                            * (_Nt * (_Nt - 1.0) / (_nb * (_nb - 1.0))))
                         # nassoc_size_scale is irrelevant here: both halves are batch
                         # quantities on one scale, ready to subtract. Pair with
                         # nassoc_cpm_norm='btsz' (divide by the batch's edge count).
