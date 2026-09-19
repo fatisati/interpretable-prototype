@@ -1,0 +1,67 @@
+======problem=====
+the dge seems fine between seacell and scproto [in which mode of scproto? full or dpar? whith what params? all params fine?]
+but coverage and joint purity is worse - so still we need to work - we need scproto find correct cell states 
+highly granular [same or better coverage than seacell on same affinity graph]
+high joint purity [group cells of same niche and cell type same or better than seacell]
+same or better dge metrics
+that is our current goal
+
+===what is happening===
+we are giving the model signal - and saying it to assigne high aff pairs to same proto
+and we know that our affinity has good spatial signal in it [seacell results show it - we expect our results get close to seacell] [is this valid assumption?]
+but it seems our model is not doing it properly the loss is not doing its job correctly
+
+it seems it not asisgning highl simialr pairs to distinct prototypes
+why?
+
+maybe the nasso loss is not good enough
+diagonal: 
+we want to form dense clusters, gamma define how much ignoring an edge being inside a comm cost us
+tuning this is an imporatant param
+we are also normalizing this denisty value - and our loss definition matters here
+
+also off diag we are sayign we dont want share of cells between 
+
+=====possible reasons and solutions=====
+but why still not there?
+i feel the loss is not doing its job properly yet
+possible bugs in the loss:
+
+
+1. we had problem with how we calc possible pairs when we have soft clustering [initial formula could 1. go neg - 2. wrong value]
+# we tried new formual for calculating possible pairs
+
+2. also the way edge inside has been calcuted was worng - why exatcly?
+also i dont know crrecting this really solved anythin or not - becase i dont know if gamma was fine or not 
+also i dont know if 5 prevent the correction shows its effect or not
+
+3. also gamma
+
+4. also i have not understand which one is better dpar or gful - still no idea
+also we still dont have a good reasbale comparison yet - same correct gamma - same affinity - comparison with seacell
+this is bad
+
+5. also in the gfull mode - it seems new numbers [correct way of calcuating pairs and edge isnide] 
+they effected the gfull mode normalizer - and this is also beign tested if sove or not
+
+
+sum(possible pairs*(density - gamma))/normalizer
+
+
+denisty - gamma [-gamma, 1-gamma]: already bounded so fine
+
+normalizer = max(sum possible pairs): n*(n-1)/2 [and i think n shoud be number of nodes in current batch]
+but if so we dont have anything from number of proto in normalizer - is it fine? but come into the sum itself i assume
+
+====what we are testing now?====
+first we are training linear classier to predict seacell partiion on pca 8, 16, 50 to get some baseline performance achivale from gene expression data
+thats somthing scproto difinitly shoud be able to achive is loss is correct
+
+another thing is that the higher gamma prefered current scproto results over seacell results [which now we thing is better]
+so now we are testing lower gamma would achive what seacell achived or not 
+also we are working to realize if latent dim is bottleneck or not
+
+still may be problem
+the diag normalizer
+the off diag?
+also nest tiem try to clear this file and include things in decisons and experimetns to log your path - keep this file clean
