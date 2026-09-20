@@ -1269,6 +1269,8 @@ class SCProtoTrainer(AdoptiveTrainer):
         nassoc_ht = int(getattr(self, 'nassoc_ht', 0))
         lambda_modularity = float(getattr(self, 'lambda_modularity', 0.0))
         modularity_res = float(getattr(self, 'modularity_res', 1.0))
+        modularity_agg = str(getattr(self, 'modularity_agg', 'glob'))
+        modularity_res_pbch = float(getattr(self, 'modularity_res_pbch', 0.0) or 0.0)
         lambda_collapse = getattr(self, 'lambda_collapse', 0.0)
         # full-dataset totals, used by nassoc_size_scale='full' to undo the minibatch
         # sampling bias in size / possible_pairs (see defaults.py [D5])
@@ -1299,6 +1301,31 @@ class SCProtoTrainer(AdoptiveTrainer):
             print(f"   [D9] nassoc_ht=1: inclusion prob mean={self._nassoc_p_in.mean():.4f} "
                   f"min={self._nassoc_p_in.min():.4f} max={self._nassoc_p_in.max():.4f} "
                   f"-> expected unique cells/batch = {self._nassoc_p_in.sum():.0f}")
+
+        # [D12] Per-BIOLOGICAL-BATCH degrees for modularity_agg='pbch'.
+        #   W_b[i,j] = affinity[i,j] if batch(i)==b or batch(j)==b, else 0
+        # so for a cell INSIDE b every one of its edges qualifies (degree_b == degree),
+        # and for a cell outside b only its edges INTO b do. Computed once.
+        # With a single batch this gives degree_b == degree and total_degree_b ==
+        # total_degree, so the 'pbch' path reduces EXACTLY to 'glob'.
+        if modularity_agg == 'pbch' and not hasattr(self, '_modu_degree_b'):
+            import scipy.sparse as _sp
+            _A = _sp.csr_matrix(self.train_ds.aff_raw if hasattr(self.train_ds, 'aff_raw')
+                                else self.train_ds.aff)
+            _cds = self._umap_state['cell_ds'].cpu().numpy()
+            _deg_all = np.asarray(_A.sum(axis=1)).ravel()
+            self._modu_batches = [int(b) for b in np.unique(_cds)]
+            _rows = []
+            for _b in self._modu_batches:
+                _m = (_cds == _b)
+                _into_b = np.asarray(_A[:, _m].sum(axis=1)).ravel()
+                _rows.append(np.where(_m, _deg_all, _into_b))
+            self._modu_degree_b = torch.tensor(np.stack(_rows), dtype=torch.float32)
+            self._modu_total_degree_b = self._modu_degree_b.sum(dim=1).to(self.device)
+            self._modu_volume_ema_b = None
+            print(f"   [D12] modularity_agg='pbch': {len(self._modu_batches)} batch(es), "
+                  f"total_degree_b = "
+                  f"{[f'{v:,.0f}' for v in self._modu_total_degree_b.tolist()]}")
         lambda_sim_recon = getattr(self, 'lambda_sim_recon', 0.0)
         sim_recon_target = getattr(self, 'sim_recon_target', 'full')
         use_proto_sim = getattr(self, 'umap_similarity', 'embedding') == 'proto'
@@ -2129,42 +2156,67 @@ class SCProtoTrainer(AdoptiveTrainer):
             # matches igraph's modularity to 1e-16 at four resolutions (K=9..573).
             modularity_loss = torch.tensor(0.0, device=self.device)
             if lambda_modularity > 0 and use_proto_sim:
-                S = soft_assign                                    # [n_unique, K]
-                total_deg = self._full_graph_weight                # = 2m
-                n_edges_b = float(weights.numel())
-
-                # affinity_inside: scale the sampled-edge sum back to full-graph scale.
-                # NO affinity factor in the sum -- the sampler already drew edges
-                # proportional to it. Multiplying again is the [D9] w^2 bug.
+                S = soft_assign
+                _gidx = unique_idx.to(self.device)
+                _pin = self._nassoc_p_in[_gidx].clamp(min=1e-8)
                 S_h = S[_gather(head)]
                 S_t = S[_gather(tail)]
-                affinity_inside = (total_deg / max(n_edges_b, 1.0)) * (S_h * S_t).sum(0)
-
-                # volume: Horvitz-Thompson over the batch's cells. Cells arrive with
-                # probability roughly proportional to degree, which is the weighting
-                # volume wants, so the bias and the weighting largely cancel -- but
-                # prob_in_batch saturates for hubs (0.21 vs 0.034 mean), so use it exactly.
-                _gidx = unique_idx.to(self.device)
-                _deg = self._cell_degree.to(self.device)[_gidx]
-                _pin = self._nassoc_p_in[_gidx].clamp(min=1e-8)
-                volume = (S * (_deg / _pin).unsqueeze(1)).sum(0)   # [K]
-
-                # volume^2: live estimate x a DETACHED running average. NEVER square the
-                # estimate: E[X^2] = (E X)^2 + Var inflates it, and the simulation
-                # (measure_modularity_estimator.py) measures that at 1.9x for 25-50 cell
-                # prototypes and 3.2x under 25 -- i.e. it would punish exactly the rare
-                # states we are trying to resolve. The product form measures 0.999, flat.
-                if getattr(self, '_modu_volume_ema', None) is None:
-                    _vol_prev = volume.detach()
-                else:
-                    _vol_prev = self._modu_volume_ema.to(self.device)
-                volume_sq = volume * _vol_prev
                 _alpha = float(getattr(self, 'modularity_ema_alpha', 0.9))
-                self._modu_volume_ema = (
-                    _alpha * _vol_prev + (1.0 - _alpha) * volume.detach()).cpu()
 
-                modularity = (affinity_inside.sum()
-                              - modularity_res * volume_sq.sum() / total_deg) / total_deg
+                if modularity_agg == 'pbch':
+                    # [D12] per BIOLOGICAL BATCH, then max per prototype, then sum.
+                    # Direct analogue of nassoc's element-wise max on its diagonal.
+                    # Each batch keeps its OWN total_degree_b in the edge rescaling AND
+                    # the normalizer, and its OWN volume EMA -- with 9 technologies a
+                    # batch sees ~1024/9 = 114 sampled edges, so a shared EMA would
+                    # reinstate the variance bias (1.9x at 25-50 cells, measured).
+                    _res = modularity_res_pbch if modularity_res_pbch > 0 else modularity_res
+                    _head_b = cell_batch[_gather(head)]
+                    _nb = len(self._modu_batches)
+                    if self._modu_volume_ema_b is None:
+                        self._modu_volume_ema_b = torch.zeros(
+                            _nb, S.shape[1], dtype=torch.float32)
+                        self._modu_ema_init_b = torch.zeros(_nb, dtype=torch.bool)
+                    _contrib = []
+                    for _bi, _b in enumerate(self._modu_batches):
+                        _em = (_head_b == _b)
+                        _ne = float(_em.sum().item())
+                        if _ne < 1.0:
+                            continue          # no sampled edges touch this batch
+                        _td_b = self._modu_total_degree_b[_bi].clamp(min=1e-8)
+                        _aff_in = (_td_b / _ne) * (S_h[_em] * S_t[_em]).sum(0)
+                        _deg_b = self._modu_degree_b[_bi].to(self.device)[_gidx]
+                        _vol = (S * (_deg_b / _pin).unsqueeze(1)).sum(0)
+                        if bool(self._modu_ema_init_b[_bi]):
+                            _prev = self._modu_volume_ema_b[_bi].to(self.device)
+                        else:
+                            _prev = _vol.detach()
+                            self._modu_ema_init_b[_bi] = True
+                        _contrib.append((_aff_in - _res * _vol * _prev / _td_b) / _td_b)
+                        self._modu_volume_ema_b[_bi] = (
+                            _alpha * _prev + (1.0 - _alpha) * _vol.detach()).cpu()
+                    if _contrib:
+                        # max over batches FOR EACH PROTOTYPE, then sum over prototypes.
+                        # With one batch this is the identity, so 'pbch' == 'glob' exactly.
+                        modularity = torch.stack(_contrib, dim=0).max(dim=0).values.sum()
+                    else:
+                        modularity = torch.zeros((), device=self.device)
+                else:
+                    total_deg = self._full_graph_weight
+                    n_edges_b = float(weights.numel())
+                    affinity_inside = (total_deg / max(n_edges_b, 1.0)) * (S_h * S_t).sum(0)
+                    _deg = self._cell_degree.to(self.device)[_gidx]
+                    volume = (S * (_deg / _pin).unsqueeze(1)).sum(0)
+                    if getattr(self, '_modu_volume_ema', None) is None:
+                        _vol_prev = volume.detach()
+                    else:
+                        _vol_prev = self._modu_volume_ema.to(self.device)
+                    self._modu_volume_ema = (
+                        _alpha * _vol_prev + (1.0 - _alpha) * volume.detach()).cpu()
+                    modularity = (affinity_inside.sum()
+                                  - modularity_res * (volume * _vol_prev).sum() / total_deg
+                                  ) / total_deg
+
                 modularity_loss = -modularity
                 loss = loss + lambda_modularity * modularity_loss
                 total_metrics['modularity_term'] += modularity.item()

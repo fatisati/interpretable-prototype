@@ -146,6 +146,8 @@ ABBREVIATIONS = {
     'nassoc_gamma_scale': 'nags',
     'lambda_modularity': 'lmod',
     'modularity_res': 'mres',
+    'modularity_agg': 'magg',
+    'modularity_res_pbch': 'mrsp',
     'lambda_collapse': 'lcol',
     'proto_reinit_every': 'prie',
     'proto_reinit_thresh': 'prit',

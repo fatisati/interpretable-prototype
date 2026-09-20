@@ -135,3 +135,38 @@ WHAT TO MEASURE
   size of the revived prototypes are they real, or junk built around an outlier?
                                  (teleporting to the WORST-SERVED cell makes this a
                                   genuine risk, not a hypothetical one)
+
+
+=========================================================================
+ADDENDUM 2026-09-18 — CPM MAY HAVE THE SAME MULTI-BATCH PROBLEM
+=========================================================================
+Raised by Fatemeh after the global-modularity pancreas failure (batch entropy 0.2471
+vs the published loss's 0.4220). Checked in code:
+
+  scproto.py:2053   M_agg     = stack(M_list).max(0)    <- OFF-DIAGONAL uses MAX
+  scproto.py:2061   pairs_agg = stack(pairs_list).mean(0)  <- DIAGONAL uses MEAN
+  scproto.py:2082   edges_agg = stack(edges_list).mean(0)  <- DIAGONAL uses MEAN
+
+So CPM IS already per-batch -- it loops over unique_batches -- but under
+nassoc_cpm_free=1 its DIAGONAL aggregates by MEAN, not by the MAX the published nassoc
+uses on its diagonal (sections/method.tex: "a prototype is considered compact if it
+forms a tight community in at least ONE batch").
+
+WHY THIS MATTERS. Mean over batches penalises a prototype for EVERY batch where it is
+loose. A prototype spanning nine technologies is therefore charged nine times for the
+cross-batch structure it cannot have, which is the same batch-separation pressure that
+collapsed global modularity's batch entropy -- milder, because CPM is at least
+per-batch, but the same mechanism.
+
+This is a plausible contributor to CPM's pancreas result (modularity 0.4652 against the
+published 0.6924) and it was never attributed.
+
+TO TEST (cheap, one run):
+  nassoc_agg='max' already exists but under cpm_free it only reaches the OFF-diagonal.
+  The diagonal would need a max path added -- i.e. take the element-wise max of
+  (edges_b - gamma*pairs_b) across batches per prototype, then sum, instead of the
+  mean of edges and pairs separately.
+  NOTE these are NOT the same operation: mean-then-subtract != subtract-then-max.
+
+Until that is tested, "CPM is worse than modularity on pancreas" is NOT established --
+both may simply have been mis-aggregated across batches, in different ways.
