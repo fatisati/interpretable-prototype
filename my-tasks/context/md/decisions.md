@@ -1445,7 +1445,112 @@ value of an existing key, 4-char distinct from mse/hing/cpm/nll/nll2, so no
 
 ---
 
-## 19. How to choose `lambda_modularity`: match GRADIENTS, not values (2026-09-18)
+## 19. How to choose `modularity_res` (2026-09-18)
+
+**Decision: get it by bisecting Leiden's resolution until it returns the K we use. Use
+the min-size formula only as a sanity scale, never as a prediction.**
+
+```
+s28nsc / bk02     resolution 19.431  ->  Leiden K = 200
+pancreas / arbf   resolution 36.517  ->  Leiden K = 220
+```
+
+### Why the value transfers at all
+
+Because the loss divides by `total_degree` (DMoN's convention), our number IS igraph's
+modularity -- verified exactly, at four resolutions spanning K=9 to K=573:
+
+```
+res 0.5    K=9     ours 0.82789317  igraph 0.82789317   diff 1.1e-16
+res 1.0    K=16    ours 0.76310434  igraph 0.76310434   diff 0.0
+res 19.43  K=200   ours 0.39538153  igraph 0.39538153   diff 1.1e-16
+res 50.0   K=573   ours 0.26917881  igraph 0.26917881   diff 5.6e-17
+```
+
+This is the property `gamma` never had. Every gamma we tried (0.028 from SEACells'
+density, 0.00686 K-matched, 0.00444 after the [D10] soft conversion) was internal to our
+own loss with nothing external to check it against. `resolution` is a parameter of a
+standard, independently implemented objective, so a value measured with `leidenalg`
+means the same thing inside our loss.
+
+### There is NO closed form for K(resolution) -- which is why we bisect
+
+`K` depends on the graph's actual cut structure, not on summary statistics, so no
+formula from `n`, `2m` and mean degree can give it. An empirical power law fits ONE
+graph but its prefactor does not transfer:
+
+```
+bk02:      K ~ 16  * resolution^0.9     (+-12% over resolution 0.5 - 50)
+pancreas:  K ~ 8.6 * resolution^0.9     -- nearly 2x different prefactor
+```
+
+The bisection is ~18 Leiden runs and finishes in under a minute, so a formula would buy
+nothing. Re-derive per graph.
+
+### The min-size formula: correct algebra, WRONG as a predictor
+
+Derived from modularity's exact merge rule (two communities merge iff
+`affinity_between > resolution * vol_X * vol_Y / total_degree`):
+
+```
+min_resolvable_size = n_cells * sqrt(mean_edge_weight) / sqrt(total_degree * resolution)
+```
+
+The user's original form assumed a connecting edge of weight 1; on bk02 that
+overestimates by `1/sqrt(0.3357) = 1.73x`. The rearrangement
+`resolution = K^2 * mean_edge_weight / (floor_fraction^2 * total_degree)` round-trips
+exactly at every resolution tested, so the algebra is sound.
+
+**But tested against what Leiden actually produces, it fails in BOTH directions:**
+
+```
+resolution     K   formula min   ACTUAL min   actual p5   median
+      1.0     16         27.3          310         439       3729
+      5.0     52         12.2          163         351       1134
+   19.431    200          6.2           15          90        282
+     50.0    573          3.9            1          24         92
+```
+
+It underestimates by 11x at resolution 1 and 2.4x at 19.43, then overestimates at 50
+(says 3.9, Leiden makes singletons). It describes when a BARELY-CONNECTED PAIR would
+merge -- not the smallest community an optimizer will actually build.
+
+**Correction to an earlier claim in section 18.** I wrote that at resolution 19.43 the
+floor is 6.2 cells, "below all but 5 of 175 states, so the limit does not bind". The
+empirical floor is **15 cells** with a 5th percentile of 90. Against a state-size
+distribution with p10=6 and p25=19, that means roughly the bottom fifth of states would
+not get their own metacell. That is a real constraint on coverage, not a non-issue.
+
+### Use the empirical size distribution, not the formula
+
+At the chosen resolution, report what Leiden actually produces and compare it to the
+target partition:
+
+```
+                              K    median   min    p5
+Leiden-modularity res 19.43  200     282     15    90
+SEACells bk02                200     258     33    --
+```
+
+That comparison is the one that tells you whether the resolution is reasonable.
+
+### Caveat specific to scProto
+
+In Leiden, K is an OUTPUT that resolution determines. In scProto, **K is fixed at 200 by
+the architecture**, so resolution does not set the count -- it sets the PRESSURE toward
+smaller or larger groups. Choosing the value at which Leiden naturally lands on 200
+means asking for something the graph already supports. That is an argument, not a
+guarantee, and it is part of what the first runs test.
+
+Worth recording alongside it: Leiden at resolution 1 gives K=16 on bk02. **The graph's
+natural community count is 16 and we ask for 200** -- we deliberately partition ~12x
+finer than the graph's own structure, because metacells are sub-community objects. That
+is also why the resolution has to be pushed so far above 1.
+
+
+---
+
+## 20. How to choose `lambda_modularity`: match GRADIENTS, not values (2026-09-18)
 
 **Decision: set `lambda_modularity` by matching the modularity term's GRADIENT NORM to
 the community term's, measured on one batch before training. Do NOT set it by matching
@@ -1512,7 +1617,7 @@ measure once.
 - It measures the quantity that actually drives training. Gradient descent moves
   parameters by gradients; the loss VALUE never enters the update.
 - **It absorbs the resolution coupling automatically.** `resolution` sits inside the
-  gradient, so the `lambda = base/resolution` correction proposed earlier becomes
+  gradient, so the `lambda = base/resolution` correction proposed earlier (see section 19) becomes
   unnecessary rather than approximate. One fewer hand-tuned factor.
 - It is cheap and dataset-agnostic: one batch, no training, a few GPU-minutes per
   dataset.
