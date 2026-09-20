@@ -1202,6 +1202,177 @@ vs SEACells:          parity on DGE (0.856 vs 0.849) and coverage (18 vs 19), BE
 i.e. matching SEACells on its own terms while beating it on joint purity -- the stated
 goal, which no scProto run has reached.
 
+### The loss, exactly
+
+**Step 1 -- DMoN's form, on the whole graph.**
+
+```
+affinity_inside[k] = sum over ALL ordered pairs (i,j) of
+                       affinity[i,j] * assign[i,k] * assign[j,k]
+volume[k]          = sum over ALL cells i of  weighted_degree[i] * assign[i,k]
+total_degree       = sum over ALL cells i of  weighted_degree[i]        # = 2m = 1,540,839
+
+modularity = (  sum_k affinity_inside[k]
+              - resolution * sum_k volume[k]^2 / total_degree  ) / total_degree
+
+loss_diag_modularity = -modularity
+```
+
+Each prototype earns the affinity it actually contains and is charged the affinity it
+would contain BY CHANCE given how connected its members are. That charge is the only
+structural difference from CPM, which charges a flat `gamma` per pair.
+
+**Step 2 -- what one training step actually sees.**
+
+```
+n_sampled_edges = 1024        edges drawn WITH REPLACEMENT, probability proportional
+                              to affinity, from the DIRECTED list (each undirected edge
+                              appears twice, so the list's total weight IS total_degree)
+batch_cells     = ~2000       the deduplicated endpoints of those edges
+assign[i,k]     = softmax(logits[i] / epsilon)[k]
+```
+
+Both sums above run over the whole graph, so both must be estimated. **The degrees are
+NOT estimated** -- `weighted_degree` and `total_degree` are precomputed constants
+(`self._cell_degree`, `self._full_graph_weight`). Only the two sums carry sampling error.
+
+**Step 3 -- the edge sum.** A draw picks edge e with probability
+`affinity[i,j] / total_degree`, so for a single draw
+
+```
+E[ assign[head,k] * assign[tail,k] ]
+    = sum over all edges of (affinity[i,j]/total_degree) * assign[i,k]*assign[j,k]
+    = affinity_inside[k] / total_degree
+```
+
+One draw returns, on average, `affinity_inside[k] / total_degree`. Scaling back up:
+
+```
+affinity_inside_est[k] = (total_degree / n_sampled_edges)
+                       * sum over sampled edges of assign[head,k] * assign[tail,k]
+```
+
+**There is deliberately NO `affinity` factor inside the sum** -- the sampler already
+applied it. Multiplying again weights the objective by `affinity^2`; that was the [D9]
+bug, measured at 1.046 overall and 1.347 for prototypes under 25 cells.
+
+**Step 4 -- the cell sum (Horvitz-Thompson).** Cells appear unevenly: a cell is in the
+batch only if one of ITS edges was drawn, so high-degree cells appear more often.
+Horvitz-Thompson (1952) is the standard repair -- count each sampled item as
+`1 / its probability of being sampled`:
+
+```
+prob_in_batch[i] = 1 - ( 1 - 2*weighted_degree[i]/total_degree ) ^ n_sampled_edges
+                   # "1 minus the chance no draw touched it"; already computed as
+                   # self._nassoc_p_in for [D9]
+
+volume_est[k] = sum over batch_cells of
+                  weighted_degree[i] * assign[i,k] / prob_in_batch[i]
+```
+
+Exactly unbiased, because
+`E[ sum over sampled of f(i)/p_i ] = sum over all i of p_i * f(i)/p_i = sum over all i of f(i)`.
+
+**Why this is cheap here.** For most cells `prob_in_batch[i]` is close to
+`n_sampled_edges * 2*weighted_degree[i]/total_degree`, so
+
+```
+weighted_degree[i] / prob_in_batch[i]  ~  total_degree / (2*n_sampled_edges)   -- a CONSTANT
+```
+
+The degree weighting and the sampling bias cancel: it reduces to "count assignments and
+scale". The exact form is still used because `prob_in_batch` saturates for hub cells
+(0.21 against a 0.034 mean), so the constant is not quite constant at the top end. This is
+the opposite of CPM's `possible_pairs`, an UNWEIGHTED pair count where the same sampling
+bias had nothing to cancel against and Horvitz-Thompson did real work.
+
+**Step 5 -- the squared term, which is still biased.** `volume[k]^2` must NOT be computed
+by squaring an estimate: `E[X^2] = (E X)^2 + Var(X)`, so noise inflates it. Concretely, a
+true volume of 100 estimated as 90 or 110 with equal probability averages to 100
+correctly, but squaring gives `(8100+12100)/2 = 10,100` against a true 10,000. Small
+prototypes wobble most, so they are over-charged most -- exactly the 2.4x measured on
+CPM's possible_pairs below 25 cells. The fix is to multiply the live estimate by a STEADY
+one rather than by itself:
+
+```
+volume_running[k] <- 0.9 * volume_running[k] + 0.1 * volume_est[k].detach()
+volume_squared_est[k] = volume_est[k] * volume_running[k].detach()
+```
+
+`90*100 = 9,000` and `110*100 = 11,000` average to exactly 10,000. The gradient still
+flows at full strength through the live factor.
+
+**Step 6 -- the objective.**
+
+```
+modularity_est = (  sum_k affinity_inside_est[k]
+                  - resolution * sum_k volume_squared_est[k] / total_degree
+                 ) / total_degree
+
+loss_total = loss_community
+           + 0.01 * loss_proto_recon
+           + lambda_nassoc * ( -modularity_est + alpha * loss_offdiag )
+```
+
+### The normalizer, and why `total_degree`
+
+Divide the whole thing by `total_degree`, which is DMoN's own convention. Two reasons,
+the second worth more than the first:
+
+1. **Scale.** The raw numerator is of order 1.5 million; dividing puts modularity in
+   `[-1, 1]`, so `lambda_nassoc` stays interpretable against the UMAP term.
+2. **It makes our number THE modularity number** -- bit-for-bit what igraph and Leiden
+   report for a partition. That buys two things CPM never had:
+   - `resolution` transfers in from Leiden unchanged (19.43 -> K=200 on bk02);
+   - the implementation is verifiable -- feed Leiden's hard one-hot partition into the
+     formula and it must equal igraph's modularity at the same resolution, before any
+     GPU time is spent.
+
+**Alternatives considered and rejected.**
+
+```
+divide by the batch edge count ('btsz', what CPM uses)
+   -> the term becomes batch-native, so `resolution` stops being a graph property,
+      drifts with batch size, and no longer transfers from Leiden. This is precisely
+      the calibration trap that consumed the CPM work (sections 15-17).
+
+use batch-local degrees instead of the precomputed ones
+   -> FATAL. 1024 edges give 2048 endpoints over ~2006 unique cells, i.e. 1.02
+      appearances per cell: almost every cell appears exactly once regardless of its
+      true degree. The batch degree distribution is nearly FLAT while the real one
+      spans 17.8x, so the null model becomes a constant charge and modularity
+      DEGENERATES BACK INTO CPM. The exact degrees are precomputed and free; there is
+      no reason to do this.
+
+no normalizer
+   -> the term is ~1e6 against a UMAP term of ~3.
+```
+
+### Checks before trusting any number (CLAUDE.md 9b)
+
+```
+range         modularity_est must lie in [-1, 1]. Outside that is a bug -- stop.
+at init       near-uniform assignments give (1 - resolution)/n_prototypes
+              = (1 - 19.43)/200 = -0.092
+one big blob  gives 1 - resolution = -18.43, so collapse is never rewarded
+balance       lambda_nassoc * loss_diag should sit in the same range as loss_community (~2.5)
+EXACT TEST    our formula on Leiden's partition == igraph's modularity at that resolution
+```
+
+### Choosing `resolution`
+
+Ask Leiden: bisect its resolution parameter until it returns the K we use. Already
+measured on `bk02`: **resolution = 19.43 gives K = 200**. Because of the normalization
+above, that value drops straight into the loss -- no derivation, no sweep, no soft/hard
+conversion. Pancreas needs its own from the same one-line search on `arbf`.
+
+Caveat specific to us: in Leiden, K is an OUTPUT that resolution determines; in scProto K
+is fixed at 200 architecturally. So resolution here sets the PRESSURE, not the count.
+Choosing the value at which the graph naturally supports 200 communities means asking for
+something the graph already agrees with -- an argument, not a guarantee. Verify after the
+first run by counting non-empty prototypes.
+
+
 **Status: NOT implemented.** Config shape when it is: `nassoc_diag_loss='modu'` (a new
 value of an existing key, 4-char distinct from mse/hing/cpm/nll/nll2, so no
 `constants.py` change) plus a new numeric key `nassoc_modu_res` (needs BOTH
