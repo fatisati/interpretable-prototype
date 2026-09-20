@@ -1072,6 +1072,141 @@ Reading the unweighted ones in-session produced a spurious "the paper does not
 reproduce, 2.5x off" alarm that cost real time. Check the metric keys against
 `result_tables.py` before ever claiming a reproduction failure.
 
+---
+
+## 18. Adopting DMoN modularity as an alternative to CPM (2026-09-18)
+
+**Decision: add `nassoc_diag_loss='modu'` -- a soft modularity diagonal in DMoN's exact
+form -- as an alternative to the CPM diagonal. CPM stays available; nothing is removed.**
+Numbers in `EXPERIMENTS.md` 11i and the Leiden control; this section is the reasoning.
+
+### Why: CPM's own optimum is a bad partition
+
+`leiden_cpm_control.py` ran three optimizers on the same graph at the same K=200:
+
+```
+                     DGE   pairs  jointP  int_frac   med   min
+Leiden-modularity   0.856    18    0.534   0.5147    282    15
+Louvain             0.859    18    0.542   0.5062    291    37
+SEACells            0.849    19    0.504   0.4465    258    --
+Leiden-CPM          0.630    23    0.530   0.5509    309     1
+scProto best (CPM)  0.842    13    0.437   0.3338    259    --
+scProto at CPM-opt  0.605    15    0.425   0.5501     42     1
+```
+
+**Modularity beats CPM by +0.23 DGE with the same optimizer, same graph, same K.** And
+scProto at the K-matched gamma reproduced Leiden-CPM's DGE almost exactly (0.605 vs
+0.630) -- so our implementation is faithful and CPM's optimum is simply a poor partition.
+
+Note what is NOT different: **joint purity is a tie** (0.530 vs 0.534) and CPM resolves
+MORE states (23 vs 18). CPM is not broadly worse; it is specifically bad at DGE.
+
+### Two mechanisms, both measured
+
+**(a) Degree-awareness.** `bk02` weighted degree spans 17.8x (min 9.95, mean 26.37, max
+177.26). CPM charges a flat gamma per pair; modularity charges
+`resolution * degree_i * degree_j / total_degree`. Tested directly -- community purity
+against the mean degree of its members:
+
+```
+purity by mean-degree quartile   sparsest -> densest     spearman(degree, purity)
+Leiden-modularity   0.499  0.526  0.522  0.484                +0.025
+Leiden-CPM          0.438  0.534  0.537  0.520                +0.118
+scProto-CPM         0.302  0.244  0.269  0.414                +0.304
+```
+
+Under modularity, being in a sparse region costs nothing. Under CPM the sparsest
+communities are the worst, and in our own run the coupling is strongest of all.
+
+**(b) CPM permits singletons; modularity does not.** Minimum community size: CPM **1**,
+modularity **15**, Louvain **37**. CPM's resolution-limit-freeness cuts both ways --
+nothing stops a 1-cell community. DGE is computed from pseudobulk, and tiny communities
+give noisy profiles. This is a plausible route from "more states resolved" to "worse
+correlation"; it is consistent with the numbers but was not isolated experimentally.
+
+### Practical reasons, which weigh as much as the metric
+
+```
+resolution TRANSFERS from Leiden (19.43 -> K=200 on bk02). gamma never transferred:
+  derived from SEACells density -> 0.028, which gives Leiden K=1043 not 200
+  K-matched -> 0.00686; after the [D10] soft conversion -> 0.00444; three different
+  numbers in one session, none externally checkable.
+
+CORRECTNESS IS VERIFIABLE. Feed Leiden's hard partition into our modularity formula;
+  it must equal igraph's modularity at the same resolution. CPM had no reference
+  implementation -- which is how two counting bugs survived for weeks (9b).
+
+THE SAMPLER SUITS IT. prototype_volume is a DEGREE-WEIGHTED sum over cells, and our
+  cells arrive with probability roughly proportional to degree, so the bias and the
+  weighting cancel. CPM's possible_pairs is an UNWEIGHTED pair count, which the same
+  sampling gets wrong and needed Horvitz-Thompson to repair ([D9]).
+
+PUBLISHED PRECEDENT. DMoN (Tsitsulin et al., JMLR 24 2023) and DGCluster (arXiv
+  2312.12697) both optimize soft modularity in a deep model. A search for a soft or
+  differentiable CPM found nothing published -- ours is an unvalidated adaptation.
+
+IT RETURNS TO THE PUBLISHED FAMILY. The NeurIPS loss (volume normalization +
+  (M_kk - 1)^2) is normalized association -- degree-aware by DIVIDING by volume.
+  CPM moved out of the degree-aware family entirely, and that is when the calibration
+  problems started. Modularity is a better-behaved member of the original family.
+```
+
+### Why the degrees must be the FULL-GRAPH ones, not batch-local
+
+A tempting simplification -- treat the batch as its own graph and use batch degrees --
+**destroys the objective**, and the arithmetic is decisive:
+
+```
+1024 sampled edges -> 2048 endpoint slots -> ~2006 unique cells
+average appearances per cell = 1.02
+```
+
+Almost every cell appears exactly ONCE regardless of its true degree, so the batch
+degree distribution is nearly flat while the real one spans 17.8x. A flat null model is
+a constant charge -- i.e. **batch-local modularity degenerates back into CPM.** It would
+also make `resolution` batch-size-dependent and non-transferable, which is exactly the
+problem that consumed the CPM work.
+
+So: `weighted_degree` and `total_degree` are used EXACTLY (precomputed, free). Only the
+two sums are estimated from the batch. Unlike CPM, where `possible_pairs` had to be
+estimated in full, here the null model itself carries no sampling error.
+
+### Known costs, recorded so they are not rediscovered
+
+1. **Resolution limit** (Fortunato & Barthelemy, PNAS 2007). Modularity cannot resolve
+   communities below a scale `sqrt(2m/resolution)`. Measured on bk02: at resolution 1 the
+   threshold is 1,241 internal edge weight and **39% of SEACells' metacells fall below
+   it**; at resolution 19.43 the threshold is 282 and only **7.5%** do. Not binding in the
+   regime we use, but it WOULD be at scanpy's default resolution=1.
+2. **The squared term is still biased.** `volume^2` is estimated by squaring an estimate,
+   so `E[X^2] = (E X)^2 + Var(X)` inflates it -- the same defect as CPM's possible_pairs.
+   Fix with one live factor times one detached running average, not by squaring the
+   estimate.
+3. **DMoN reports needing a collapse regularizer.** Modularity does penalize the one-blob
+   solution (it scores `1 - resolution` = -18.4 at our resolution), but the gradient near
+   a uniform assignment is weak. Three guards already exist: the off-diagonal term,
+   `lambda_proto_usage`, and `lambda_collapse` (DMoN's own, implemented and parked).
+4. **All the DGE evidence is from Leiden, a hard optimizer.** One data point says
+   objectives transfer to scProto (Leiden-CPM 0.630 -> scProto-CPM 0.605). That is
+   encouraging, not proof.
+5. **Single seed throughout.**
+
+### What it would buy
+
+```
+vs our current best:  +5 resolved states (13 -> 18) at equal DGE, +0.10 joint purity
+vs SEACells:          parity on DGE (0.856 vs 0.849) and coverage (18 vs 19), BETTER on
+                      joint purity (0.534 vs 0.504) and internal fraction (0.515 vs 0.447)
+```
+
+i.e. matching SEACells on its own terms while beating it on joint purity -- the stated
+goal, which no scProto run has reached.
+
+**Status: NOT implemented.** Config shape when it is: `nassoc_diag_loss='modu'` (a new
+value of an existing key, 4-char distinct from mse/hing/cpm/nll/nll2, so no
+`constants.py` change) plus a new numeric key `nassoc_modu_res` (needs BOTH
+`defaults.py` and `interpretable_ssl/constants.py`, per section 9).
+
 ## Untested ideas, parked
 
 - **VQ-VAE style restart of dead prototypes** (`proto_reinit_every`). Implemented. Showed
