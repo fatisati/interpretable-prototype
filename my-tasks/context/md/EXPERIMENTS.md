@@ -36,6 +36,7 @@ Every cell is assigned (softmax memberships sum to 1, there is no "unassigned" s
 ```
 run                    latent  gamma  usage    DGE  n_pairs   density  int_frac  med  max/med  jointP
 SEACells bk02             --     --    --    0.849     19     0.02952   0.4465   258    3.6     0.504
+SEACells PCA              --     --    --    0.747     16     0.01462   0.2343   249    4.5     0.401
 lf_L16_g015_uOFF          16   0.15   OFF    0.834     16     0.02628   0.2926   293    1.3     0.438
 lf_j_nousage_g024          8   0.024  OFF    0.821     13     0.02449   0.3000   268    2.4      --
 lf_L16_g015_uON           16   0.15   ON     0.819     13     0.02614   0.2914   293    1.2     0.441
@@ -51,7 +52,25 @@ E5_gful_bk02 (lam=1)       8   0.15   ON     0.496     27        --        --   
 lf_L16_g02_uOFF           16   0.20   OFF    0.493     20     0.01011   0.2255   178    9.3     0.363
 ```
 
-**Zero runs beat SEACells on both DGE and coverage.**
+**Zero runs beat SEACells bk02 on both DGE and coverage.**
+
+**The two SEACells rows are different baselines and the distinction matters.** `SEACells
+bk02` is SEACells fitted on the **BANKSY lambda=0.2 embedding**, which mixes each cell's
+expression with its spatial neighbours' (`seacell_X_bklam02_K200`). `SEACells PCA` is
+SEACells fitted on the **PCA of expression alone**, same 58,423 cells, same K=200
+(`models/s28nsc/seacell_K200`, run 2026-09-20 by `modal_scripts/train_seacell_pca_k200.py`).
+scProto's encoder receives expression only -- spatial information reaches it solely
+through the affinity graph in the nassoc loss (section 9) -- so `SEACells PCA` is the
+information-matched comparator and `SEACells bk02` is not. Both are scored here on the
+**same bk02 graph** and against the **same niche-DGE ground truth**, so the DGE, n_pairs
+and jointP columns are directly comparable across all rows; only the features each
+SEACells run was *fitted on* differ. `SEACells PCA`'s int_frac on the other graphs:
+0.1814 (bk04), 0.0743 (bk08) -- `files/tables/s28nsc_seacell_pca_k200/partition_stats.csv`.
+Full metric set (purity, niche purity, modularity, coverage, DGE consistency, scGraph,
+ct-niche RBO, each with std) is in `models/s28nsc/seacell_K200/metrics.json`.
+
+*What this row implies for the section's conclusions has NOT been written in -- see
+`files/notes/s28nsc_seacell_pca_k200.md` for the raw comparison, undecided.*
 
 ---
 
