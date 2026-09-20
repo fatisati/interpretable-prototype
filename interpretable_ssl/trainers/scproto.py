@@ -1267,6 +1267,8 @@ class SCProtoTrainer(AdoptiveTrainer):
         nassoc_cpm_free = int(getattr(self, 'nassoc_cpm_free', 0))
         nassoc_exact = int(getattr(self, 'nassoc_exact', 0))
         nassoc_ht = int(getattr(self, 'nassoc_ht', 0))
+        lambda_modularity = float(getattr(self, 'lambda_modularity', 0.0))
+        modularity_res = float(getattr(self, 'modularity_res', 1.0))
         lambda_collapse = getattr(self, 'lambda_collapse', 0.0)
         # full-dataset totals, used by nassoc_size_scale='full' to undo the minibatch
         # sampling bias in size / possible_pairs (see defaults.py [D5])
@@ -1285,7 +1287,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         # Floored at its own 5th percentile so 1/p_i cannot blow up for an isolated
         # cell. Measured (measure_estimator_bias.py): mean p_i 0.0344 over s28nsc/bk02
         # at B=1024, predicting 2009 unique cells per batch against 2006 simulated.
-        if nassoc_ht and not hasattr(self, '_nassoc_p_in'):
+        if (nassoc_ht or lambda_modularity > 0) and not hasattr(self, '_nassoc_p_in'):
             _d = self._cell_degree.to(self.device).to(torch.float32)
             _p = 1.0 - torch.pow(
                 (1.0 - 2.0 * _d / self._full_graph_weight).clamp(min=0.0),
@@ -1310,6 +1312,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             'loss_pos': 0, 'loss_neg': 0, 'recon': 0, 'kl': 0,
             'proto_recon': 0, 'r1r2': 0, 'proto_attract': 0, 'proto_anchor': 0, 'nassoc': 0, 'proto_usage': 0, 'n_unused_protos': 0,
             'nassoc_diag_val': 0, 'nassoc_offdiag_val': 0, 'sim_recon': 0,
+            'modularity_term': 0,
             'sim_recon_pred_std': 0, 'sim_recon_target_std': 0,
             # collapse watch (see evaluation/collapse_diagnostics.py for the eval-time
             # versions computed on the full graph)
@@ -2113,6 +2116,58 @@ class SCProtoTrainer(AdoptiveTrainer):
                                         (_rd * _rs).sum()
                                         / (_rd.norm() * _rs.norm()).clamp(min=eps_na)).item()
                     loss = loss + lambda_nassoc * nassoc_loss
+
+            # ------------------- [D11] SOFT MODULARITY (DMoN) -------------------
+            # A COMPLETE objective on its own -- one scalar, no diagonal/off-diagonal
+            # split. Modularity scores every cell pair exactly once, and pairs in
+            # DIFFERENT prototypes contribute zero, so "keep communities separate" is
+            # already in it. Set lambda_nassoc=0 when using this.
+            #   modularity = ( sum_k affinity_inside[k]
+            #                  - resolution * sum_k volume[k]^2 / total_degree )
+            #                / total_degree
+            # Validated before any training: this formula on a hard one-hot partition
+            # matches igraph's modularity to 1e-16 at four resolutions (K=9..573).
+            modularity_loss = torch.tensor(0.0, device=self.device)
+            if lambda_modularity > 0 and use_proto_sim:
+                S = soft_assign                                    # [n_unique, K]
+                total_deg = self._full_graph_weight                # = 2m
+                n_edges_b = float(weights.numel())
+
+                # affinity_inside: scale the sampled-edge sum back to full-graph scale.
+                # NO affinity factor in the sum -- the sampler already drew edges
+                # proportional to it. Multiplying again is the [D9] w^2 bug.
+                S_h = S[_gather(head)]
+                S_t = S[_gather(tail)]
+                affinity_inside = (total_deg / max(n_edges_b, 1.0)) * (S_h * S_t).sum(0)
+
+                # volume: Horvitz-Thompson over the batch's cells. Cells arrive with
+                # probability roughly proportional to degree, which is the weighting
+                # volume wants, so the bias and the weighting largely cancel -- but
+                # prob_in_batch saturates for hubs (0.21 vs 0.034 mean), so use it exactly.
+                _gidx = unique_idx.to(self.device)
+                _deg = self._cell_degree.to(self.device)[_gidx]
+                _pin = self._nassoc_p_in[_gidx].clamp(min=1e-8)
+                volume = (S * (_deg / _pin).unsqueeze(1)).sum(0)   # [K]
+
+                # volume^2: live estimate x a DETACHED running average. NEVER square the
+                # estimate: E[X^2] = (E X)^2 + Var inflates it, and the simulation
+                # (measure_modularity_estimator.py) measures that at 1.9x for 25-50 cell
+                # prototypes and 3.2x under 25 -- i.e. it would punish exactly the rare
+                # states we are trying to resolve. The product form measures 0.999, flat.
+                if getattr(self, '_modu_volume_ema', None) is None:
+                    _vol_prev = volume.detach()
+                else:
+                    _vol_prev = self._modu_volume_ema.to(self.device)
+                volume_sq = volume * _vol_prev
+                _alpha = float(getattr(self, 'modularity_ema_alpha', 0.9))
+                self._modu_volume_ema = (
+                    _alpha * _vol_prev + (1.0 - _alpha) * volume.detach()).cpu()
+
+                modularity = (affinity_inside.sum()
+                              - modularity_res * volume_sq.sum() / total_deg) / total_deg
+                modularity_loss = -modularity
+                loss = loss + lambda_modularity * modularity_loss
+                total_metrics['modularity_term'] += modularity.item()
 
             sim_recon_loss = torch.tensor(0.0, device=self.device)
             if lambda_sim_recon > 0 and use_proto_sim:
