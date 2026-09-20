@@ -1443,6 +1443,107 @@ value of an existing key, 4-char distinct from mse/hing/cpm/nll/nll2, so no
 `constants.py` change) plus a new numeric key `nassoc_modu_res` (needs BOTH
 `defaults.py` and `interpretable_ssl/constants.py`, per section 9).
 
+---
+
+## 19. How to choose `lambda_modularity`: match GRADIENTS, not values (2026-09-18)
+
+**Decision: set `lambda_modularity` by matching the modularity term's GRADIENT NORM to
+the community term's, measured on one batch before training. Do NOT set it by matching
+loss values, and do NOT use the `1/resolution` heuristic -- gradient matching absorbs
+that automatically.**
+
+### Why value-matching fails here, with the decomposition
+
+CLAUDE.md 9b says to print every loss term and compare magnitudes. That check is for
+spotting a term that is 1000x off. It is NOT a way to CHOOSE a weight, and modularity
+shows why. Split the term:
+
+```
+modularity = reward/total_degree  -  resolution * charge/total_degree
+
+s28nsc, lambda=10 run:
+  epoch 1:   reward ~ 0.08     resolution*charge ~ 1.43     ratio 18x
+  epoch 8:   reward ~ 0.15     resolution*charge ~ 1.21     ratio  8x
+```
+
+**The value is dominated by the charge, which is a slow bulk quantity.** The part that
+actually reshapes the partition is the reward. Matching values therefore calibrates
+against the wrong half of the term. This is the same trap that made `lambda_nassoc`
+uninterpretable for CPM (sections 15-17), arriving by a different route.
+
+Concretely, the two rules disagree by an order of magnitude on `s28nsc`:
+
+```
+value-matching  (lambda*|loss_mod| ~ umap 2.5)      ->  lambda ~ 2
+convergence-matching (reach Leiden's 0.395 in 20 ep) ->  lambda ~ 22
+```
+
+### The measured evidence that lambda=10 is not merely "too weak"
+
+```
+epoch      1      8     13         Leiden's reference
+modularity -1.35  -1.06  -1.04          +0.395
+```
+
+Epochs 1->8 moved +0.29; epochs 8->13 moved +0.02. It is **plateauing at about -1.04**,
+not creeping toward the target. So "raise lambda until it converges" is not obviously
+the right frame either -- the stall may be the PARAMETERIZATION, not the weight. (The
+lambda=100 arm is the test: same plateau => lambda is not the limit.)
+
+Meanwhile the run is healthy -- eval modularity rose monotonically 0.2162 -> 0.2952 and
+`unused_proto = 0` at every epoch -- so this is the loss's own objective stalling, not
+training failing.
+
+### The rule adopted
+
+```
+1. build the trainer, load the pretrain checkpoint, take ONE batch
+2. backward on loss_community  alone  ->  ||grad_community||
+3. backward on loss_modularity alone  ->  ||grad_modularity||
+4. lambda_modularity = ||grad_community|| / ||grad_modularity||  * desired_ratio
+```
+
+Standard multi-task loss balancing; GradNorm (Chen, Badrinarayanan, Lee, Rabinovich,
+ICML 2018) is the canonical reference, though GradNorm re-balances continuously and we
+measure once.
+
+**Three reasons it is the correct rule and not just a different heuristic:**
+
+- It measures the quantity that actually drives training. Gradient descent moves
+  parameters by gradients; the loss VALUE never enters the update.
+- **It absorbs the resolution coupling automatically.** `resolution` sits inside the
+  gradient, so the `lambda = base/resolution` correction proposed earlier becomes
+  unnecessary rather than approximate. One fewer hand-tuned factor.
+- It is cheap and dataset-agnostic: one batch, no training, a few GPU-minutes per
+  dataset.
+
+**Guard rails kept, since gradient matching alone can still misbehave:**
+
+```
+if lambda*|loss_modularity| is >100x the other terms  -> something is wrong, stop
+if unused_proto rises or max/median size explodes     -> lambda too high, back off
+```
+
+### Validation, on both datasets
+
+Run the probe on `s28nsc` (resolution 19.431) and `pancreas` (36.517) and check whether
+the heuristic we are replacing was ever real:
+
+```
+lambda_s28nsc * 19.431  ~=  lambda_pancreas * 36.517   ->  the 1/resolution rule holds
+they differ substantially                              ->  it was a bad heuristic, dropped
+```
+
+Either result is informative, and it costs a few GPU-minutes.
+
+### Caveat, stated because it is real
+
+Gradient norms drift during training, so a single measurement at initialization is an
+approximation, not a guarantee of balance throughout. GradNorm exists precisely because
+of this. Mitigation: re-measure at the end of a run and record how far the ratio moved;
+if it moves a lot, periodic re-balancing becomes worth implementing.
+
+
 ## Untested ideas, parked
 
 - **VQ-VAE style restart of dead prototypes** (`proto_reinit_every`). Implemented. Showed
