@@ -166,10 +166,14 @@ def eval_seacell_task2(ds_id, build_kernel_on="X_pca", compute_dge=True, num_pro
     return scalars
 
 
-def eval_seacell_task3(ds_id, build_kernel_on="X_pca"):
+def eval_seacell_task3(ds_id, build_kernel_on="X_pca", num_prototypes=None):
     """Compute and save task 3 spatial metrics (niche DGE consistency) for SEACells.
 
     Only runs if dataset has a niche_key defined.
+
+    num_prototypes: mirrors eval_seacell_task1/task2 -- None keeps the pre-existing
+    path, an int resolves to the '..._K{n}' directory so a specific-K run is evaluated
+    instead of silently falling back to the dataset-default-K run.
 
     Returns:
         dict with key 'ct_niche_rbo_avg', or empty dict if no niche_key.
@@ -183,13 +187,14 @@ def eval_seacell_task3(ds_id, build_kernel_on="X_pca"):
     from interpretable_ssl.evaluation.de_helper import celltype_niche_dge
     from interpretable_ssl.evaluation.mc_metric_utils import calc_purity
 
-    save_path = get_seacell_path(ds_id, build_kernel_on)
+    save_path = get_seacell_path(ds_id, build_kernel_on, num_prototypes=num_prototypes)
     sc_file = os.path.join(save_path, 'seacell_sc.h5ad')
     if not os.path.exists(sc_file):
         raise FileNotFoundError(f"SEACell files not found at {save_path}. Run train mode first.")
 
     print(f"Loading SEACell from {save_path} ...")
-    ad, mc_ad = load_seacell(ds_id, build_kernel_on=build_kernel_on)
+    ad, mc_ad = load_seacell(ds_id, build_kernel_on=build_kernel_on,
+                             num_prototypes=num_prototypes)
     lk = DATASETS[ds_id]['label_key']
 
     # Propagate niche labels to metacells via majority vote
