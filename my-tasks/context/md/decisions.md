@@ -1171,6 +1171,71 @@ So: `weighted_degree` and `total_degree` are used EXACTLY (precomputed, free). O
 two sums are estimated from the batch. Unlike CPM, where `possible_pairs` had to be
 estimated in full, here the null model itself carries no sampling error.
 
+### Are small / rare states safe now? Yes, down to ~6 cells -- and it took TWO things
+
+This is the question the whole coverage problem reduces to, so it is worth separating
+the two independent failure modes. BOTH had to be fixed; neither alone is enough.
+
+**(1) The ESTIMATOR must not over-charge small prototypes.** This was the binding
+constraint under CPM. Measured by simulating the real sampler 400 times against known
+partitions (`modal_scripts/measure_modularity_estimator.py`):
+
+```
+                              overall   25-50 cells   under 25 cells
+affinity_inside                1.001       1.011            --         unbiased, flat
+volume (Horvitz-Thompson)      0.998       0.993          0.987        unbiased, flat
+volume^2 BY SQUARING           1.095       1.923          3.245        BROKEN
+volume^2 by the EMA product    0.999       0.988          0.989        unbiased, flat
+```
+
+Squaring an estimate inflates it by its own variance (`E[X^2] = (E X)^2 + Var`), and
+small prototypes have the most variance -- so they would be charged up to **3.2x too
+much**, i.e. the loss would systematically punish exactly the rare states we want.
+Multiplying the live estimate by a DETACHED running average removes it completely.
+**FIXED.** For comparison, CPM's `possible_pairs` had the same defect at 2.4x under 25
+cells, and it was never fully fixed -- `[D9]`'s Horvitz-Thompson repaired the linear
+part, not the square.
+
+**(2) The OBJECTIVE ITSELF must be able to resolve them.** This is modularity's
+resolution limit and it is NOT an estimator issue -- it would apply to a full-batch
+implementation too. Derived from modularity's exact merge rule (two communities merge
+iff `affinity_between > resolution * vol_X * vol_Y / total_degree`):
+
+```
+min_resolvable_size = n_cells * sqrt(mean_edge_weight) / sqrt(total_degree * resolution)
+
+s28nsc / bk02   at resolution 19.431 ->  6.2 cells
+pancreas / arbf at resolution 36.517 ->  2.5 cells
+```
+
+Against the data: `s28nsc` has **175 non-empty celltype x niche states**, of which
+**149 have at least 10 cells** and only **5 have 3 or fewer** (the smallest are
+`Plasma cells | Tumor core` and `Dendritic cells | Smooth muscle structures`, 1 cell
+each). So the limit sits below everything we could plausibly resolve at K=200.
+
+**Conclusion: yes, small states are safe down to ~6 cells**, with the floor set by the
+objective rather than by our sampling. The 5 states below that are out of reach for any
+method at K=200.
+
+**Two caveats, recorded so they are not forgotten.**
+
+- "Can resolve 6 cells" is not "will produce 6-cell communities". Leiden-modularity's
+  smallest community on `bk02` was **15 cells** (CPM's was 1). Modularity may simply
+  decline to make very small communities even where the limit permits them. Untested
+  for our soft version.
+- The user's original form of the size formula, `n / sqrt(2m * resolution)`, is correct
+  up to a factor: it implicitly assumes the connecting edge has weight 1. With
+  `mean_edge_weight = 0.3357` on bk02 it overestimates by `1/sqrt(0.3357) = 1.73x`.
+  The derived form above is the one to use.
+
+**Why this is a real improvement over CPM, not just a different failure.** Under CPM,
+small prototypes were hit twice: the estimator over-charged them (2.4x under 25 cells),
+AND the flat `gamma` meant sparse-region communities were lower quality regardless of
+size (purity-vs-degree spearman +0.304 in our run, +0.118 for Leiden-CPM, against
++0.025 for modularity). Modularity removes both: the estimator is flat across size, and
+the degree-proportional charge removes the density dependence.
+
+
 ### Known costs, recorded so they are not rediscovered
 
 1. **Resolution limit** (Fortunato & Barthelemy, PNAS 2007). Modularity cannot resolve
