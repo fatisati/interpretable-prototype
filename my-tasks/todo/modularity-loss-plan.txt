@@ -116,6 +116,25 @@ STEP 3 — range checks on epoch 1 (CLAUDE.md §9b)
   at init, near-uniform assignments  ~ (1 - resolution)/K = -0.092
   lambda_modularity * loss_modularity  same order as loss_community (~2.5)
 
+STEP 3b — GRADIENT PROBE: set lambda the correct way   (~$0.08, both datasets)
+  decisions.md §20. What balances loss terms in gradient descent is how hard each
+  PUSHES the parameters (its gradient norm), not how big its value is. Our modularity
+  term has a big value but a small push -- the bulk charge is 18x the reward at init --
+  which is why value-matching and convergence-matching disagreed 10x.
+
+    1. build the trainer, load the pretrain checkpoint, take ONE batch
+    2. backward on loss_community  alone -> ||grad_community||
+    3. backward on loss_modularity alone -> ||grad_modularity||
+    4. lambda = ||grad_community|| / ||grad_modularity||
+
+  Ref: GradNorm (Chen et al., ICML 2018) -- they re-balance every step, we measure once.
+  Run on BOTH datasets and check whether lambda*resolution is constant. That tests
+  whether the 1/resolution heuristic being replaced was ever real. Either answer is
+  useful. Gradient matching absorbs the resolution coupling automatically, so if it
+  works we drop that heuristic for good.
+
+  IF IT WORKS -> update decisions.md §20 with the measured numbers.
+
 STEP 4 — s28nsc, latent 16, usage off, resolution 19.43   (~$0.25)
   Compare against:
     Leiden-modularity   DGE 0.856  18 pairs  jointP 0.534  int_frac 0.5147
