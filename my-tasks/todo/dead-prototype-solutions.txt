@@ -1,0 +1,137 @@
+DEAD PROTOTYPES UNDER A WEAK MODULARITY CHARGE — OPTIONS
+=========================================================
+written 2026-09-18 · observed in modu_L16_r19_l1_uOFF (lambda=1, res 19.431, usage OFF)
+
+
+THE OBSERVATION
+---------------
+  epoch   q+      effk   unused
+     1  0.140     4.2      0
+     2  0.177     3.7      0
+     3  0.199     3.4      1
+     4  0.210     3.3      1
+     5  0.215     3.2      2
+     6  0.224     3.1      2
+
+Monotone, ~+1 dead prototype every 2 epochs. Extrapolates to ~9 of 200 by epoch 20.
+Deaths never reverse — with lambda_proto_usage = 0 there is no mechanism to revive one.
+
+For comparison at the same epoch:
+  lambda=1    unused 2   q+ 0.224
+  lambda=10   unused 0   q+ 0.133      <- charge protects, but community loss 70% slower
+  lambda=100  unused 0   q+ worse
+
+
+WHY IT HAPPENS
+--------------
+The modularity charge (resolution * volume[k]^2 / total_degree) IS the anti-collapse
+force — it penalises concentrating mass, so it implicitly protects small prototypes.
+Turning lambda down to f = 0.03 weakens that protection. This is the predicted cost of
+the regularizer setting, not a bug.
+
+
+THE KEY ASYMMETRY — read this before choosing
+---------------------------------------------
+From defaults.py proto_reinit_every:
+
+    "Gradient-based penalties cannot revive a prototype that already has zero assigned
+     mass -- there is no gradient path back -- so a direct re-teleport is the only
+     mechanism that acts on an already-dead slot."
+
+So the options split by PHASE:
+
+    PREVENT death   raise lambda      |  usage loss
+    REVIVE  death   reinit ONLY
+
+Since our deaths are monotone (they accumulate and never reverse), prevention alone
+leaves the already-lost slots lost.
+
+
+THE OPTIONS
+-----------
+
+1. RAISE LAMBDA  (lambda = 3, i.e. f ~ 0.10)
+   mechanism  more charge = more anti-collapse pressure. Uses the knob we already
+              derived analytically: lambda = f * (K/resolution) * (S_typical/q_pos).
+   pro        no new term, no new weight to tune, mechanism fully understood.
+   con        also slows the community loss -- that is exactly the tradeoff that made
+              lambda=10 worse on DGE. Sits between the two measured points.
+   status     one run, ~$0.21.
+   PREVENTS, does not revive.
+
+2. TURN THE USAGE LOSS ON  (lambda_proto_usage = 0.1)
+   mechanism  strongest_cell[p] = max over cells of assign[cell,p];
+              usage_loss = -log(EMA(strongest_cell)).mean()/(1-alpha)
+              i.e. "every prototype must have at least ONE cell that strongly
+              belongs to it". Says NOTHING about size.
+   pro        targets the symptom directly, minimal distortion to sizes.
+   con        it SATURATES -- once strongest_cell nears 1 the gradient vanishes.
+              And EXPERIMENTS section 4 measured usage-OFF worth +0.015 to +0.040 DGE
+              under CPM. CAVEAT: that was measured when NOTHING was dying, so it was
+              pure cost there; it may not transfer to this situation.
+   status     config only, no code change.
+   PREVENTS, does not revive (no gradient path to a zero-mass slot).
+
+3. REINIT DEAD PROTOTYPES  (proto_reinit_every = 2, proto_reinit_thresh = 0.01)
+   mechanism  every N epochs, any prototype whose EMA usage is below the threshold is
+              TELEPORTED onto the currently worst-served cell (lowest max assignment
+              probability, i.e. the cell farthest from every existing prototype).
+              VQ-VAE codebook restarts (van den Oord et al. 2017); the random-restart
+              trick in Jukebox (Dhariwal et al. 2020).
+   pro        the ONLY option that acts on an already-dead slot. No loss term, no
+              weight to tune, no gradient distortion -- it is a discrete intervention
+              between epochs. Zero cost when nothing is dead.
+              Already implemented (scproto.py:2382).
+   con        teleporting to the "worst-served cell" places a prototype at an OUTLIER
+              by construction, which may create a junk prototype rather than a useful
+              one. Untested in a setting where deaths actually occur.
+   status     config only, no code change.
+   REVIVES.   <-- the precondition for this is met for the first time
+
+4. DMoN'S COLLAPSE REGULARIZER  —  RULED OUT, do not use
+   mechanism  collapse = (sqrt(K)/n_cells) * ||sum_i assign[i]||_2 - 1
+              Work out the extremes: equal sizes -> 0 (its MINIMUM);
+              all cells in one prototype -> sqrt(K)-1 = 13.1.
+   why out    it is a SIZE-UNIFORMITY term, not an anti-death term. It pushes every
+              size toward n/K = 292. EXPERIMENTS section 5 already found CPM's
+              quadratic charge equalises sizes TOO hard, and SEACells -- the partition
+              we are chasing -- is UNEVEN (max/median 3.6). This pushes the wrong way.
+
+
+WHY THE PARKED NOTE NO LONGER APPLIES
+-------------------------------------
+decisions.md lists proto_reinit_every under "Untested ideas, parked" with:
+
+    "Implemented. Showed nothing -- but only because there were no dead prototypes
+     left to revive."
+
+That precondition has now changed. lambda=1 is the first configuration that actually
+produces dead prototypes, so it is the first setting in which reinit CAN do anything.
+
+
+ORDER I WOULD TRY THEM
+----------------------
+  0. FIRST, see whether the deaths cost anything. If lambda=1 gives the best DGE of
+     {1, 10, 100} despite ~9 deaths, we are fixing a non-problem. K=191 vs 200 is not
+     obviously harmful -- the CPM-at-optimum run ran at K=195 and its failure was
+     fragmentation, not deaths.
+
+  1. reinit (option 3) -- free, no new weight, the only one that recovers lost slots,
+     and its precondition is finally met.
+  2. lambda = 3 (option 1) -- if the deaths are better prevented than repaired.
+  3. usage on (option 2) -- last, because it saturates and has a measured DGE cost,
+     even if that measurement may not transfer.
+  4. DMoN collapse -- no.
+
+  These are not exclusive: reinit + lambda=1 is the natural pairing, since reinit costs
+  nothing when nothing is dead.
+
+
+WHAT TO MEASURE
+---------------
+  n_unused_protos per epoch      does the leak stop, or just slow?
+  n_reinit                       already logged by the reinit path
+  DGE / n_pairs / jointP         does recovering the slots actually buy anything?
+  size of the revived prototypes are they real, or junk built around an outlier?
+                                 (teleporting to the WORST-SERVED cell makes this a
+                                  genuine risk, not a hypothetical one)
