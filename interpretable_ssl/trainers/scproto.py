@@ -2171,7 +2171,10 @@ class SCProtoTrainer(AdoptiveTrainer):
                     # batch sees ~1024/9 = 114 sampled edges, so a shared EMA would
                     # reinstate the variance bias (1.9x at 25-50 cells, measured).
                     _res = modularity_res_pbch if modularity_res_pbch > 0 else modularity_res
-                    _head_b = cell_batch[_gather(head)]
+                    # cell_batch is built inside the nassoc block, which is skipped when
+                    # lambda_nassoc==0 -- so derive it here independently.
+                    _cell_batch = self._umap_state['cell_ds'][unique_idx.cpu()].to(self.device)
+                    _head_b = _cell_batch[_gather(head)]
                     _nb = len(self._modu_batches)
                     if self._modu_volume_ema_b is None:
                         self._modu_volume_ema_b = torch.zeros(
