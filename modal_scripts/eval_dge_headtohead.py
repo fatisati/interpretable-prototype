@@ -50,11 +50,11 @@ volume = modal.Volume.from_name("scproto-data")
 # distribution (rt2_A median 136 vs 13-15 for every arm carrying one). If their DGE is
 # decent then cohesion is fine and the off-diagonal was the entire problem.
 ARMS = {
-    "mch_A  modularity + cohesion l=1":  ["mch_A_modu_coh1"],
-    "mch_C  modularity + cohesion l=20": ["mch_C_modu_coh20"],
-    "dnl_A  modularity + degree-norm":   ["dnl_A_modu_degnorm"],
-    "modu   modularity l=10 (baseline)": ["modu_L16_r19_l10_uOFF"],
-    "SEACells bk02 K=200":               ["seacell_X_bklam02_K200"],
+    "pub_A  EXACT published":        ["pub_A_published"],
+    "pub_C  corrected diagonal":     ["pub_C_diagonal"],
+    "pub_D  both corrections":       ["pub_D_both"],
+    "mch_C  modularity + cohesion":  ["mch_C_modu_coh20"],
+    "SEACells bk02 K=200":           ["seacell_X_bklam02_K200"],
 }
 
 

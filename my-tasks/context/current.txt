@@ -11,3 +11,31 @@ so i decided to go with another term - and i
     more slots nominally occupied: what can we do for this?
 
 what is signal only version?
+=====
+the neurips loss works well on arbf on pca [seacell aff] - but not good on spatial [s28nsc] - we have severe collapse
+the reason is that the diagonal term has real merge bias - combining with hierarchical property of spatial aff - we had a very bad collapse
+[possible simple solutions - correct off diagonal - correct the diagonal]
+we then tried cpm loss - it seems collapse problem somhow solved but the coverage and compactness of scproto cpm was not as good as seacell
+[for cpm i am not sure if the normalization term and the impleented cpm formula is correct or not]
+then we tried leiden with both cpm and modualirty - and interestnly modualirty had better results 
+so we tried modulairty - and then we realized that although high lambda of madualirty again prevent collapse - but the quality of foudned clusters were not good enough comapring to seacell
+[yet not good enough coverag - not good enough within cluster edge fraction - density - and thus for sure dge]
+then we realized that both cpm and modualirty anti collapse machanisms - they are somehow just trying to make the size distribution close to uniform
+i think cpm wsa trying to make the size distribution uniform - but modualryt trying to make volume distribtion uniform
+non is what i want
+the only help cpm / modualirty had was some global view of attraction while communtiy loss is foing local attraction
+[which i think we need this as well - i can say it becasue i rememebr the results specialy for rar ct changed when i added nassoc diagonal [in pca arbf] -
+ that was same family of global [although batch global] attraction]
+
+then i also realized that the off diagonal term of nassoc - it seems it was perventing the the diagonla term to cause collapse
+but its averaging was wrong for sure - so i decided to correct it but i am not sure if i found the real correct formula or not - and if test this or not?
+
+so i decided to go with another term - i wanted cells within each commutiy be very simialr - and i wanted precise communities
+i was able to define simiary between cells in 2 way - exact cell cell simialrty [aff[i][j]] - then we woudl have very simialr formula to nassoc diagonal [published neruips]
+but it seems this this does not have the merge bias - but i am not surre on this - need verification
+also i was able to define sim[i, j] cos/dot(aff[i], aff[j]) then doing this we will pass new seconf order info to the model 
+which i dont know what was the effect
+
+i also tried adding reinit - i dont knwo what was the effect
+
+so i am confused what happened at the end - can you clear up the stry for me? so i can realize what i can do?

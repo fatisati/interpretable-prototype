@@ -1,5 +1,5 @@
 {
- "generated": "2026-09-21 18:41:26",
+ "generated": "2026-09-21 23:37:22",
  "runs": [
   {
    "dataset": "pancreas",
@@ -1446,6 +1446,432 @@
    "cohesion": 0.0159,
    "nassoc": null,
    "log": "mch.log"
+  },
+  "pcx_B_l20": {
+   "arms": [
+    "pcx_B_l20",
+    "pcx_A_l10"
+   ],
+   "epochs": [
+    {
+     "epoch": 1,
+     "loss": 46.4118,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 37.4422,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 44.7254,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 35.1054,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 44.1032,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 34.6758,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 43.7041,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 34.2408,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 43.4706,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 33.9994,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 43.2828,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 33.7443,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 43.1024,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 33.4439,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 42.9325,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 33.4381,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 42.7971,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 33.1877,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 42.8709,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 33.1364,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 42.5836,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 33.0498,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 42.6249,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 32.973,
+     "unused": 0
+    },
+    {
+     "epoch": 13,
+     "loss": 42.3844,
+     "unused": 0
+    },
+    {
+     "epoch": 14,
+     "loss": 42.5367,
+     "unused": 0
+    },
+    {
+     "epoch": 13,
+     "loss": 32.9389,
+     "unused": 0
+    },
+    {
+     "epoch": 15,
+     "loss": 42.3212,
+     "unused": 0
+    },
+    {
+     "epoch": 14,
+     "loss": 32.8822,
+     "unused": 0
+    },
+    {
+     "epoch": 16,
+     "loss": 42.4098,
+     "unused": 0
+    },
+    {
+     "epoch": 15,
+     "loss": 32.7386,
+     "unused": 0
+    },
+    {
+     "epoch": 17,
+     "loss": 42.2668,
+     "unused": 0
+    },
+    {
+     "epoch": 16,
+     "loss": 32.7634,
+     "unused": 0
+    },
+    {
+     "epoch": 18,
+     "loss": 42.2512,
+     "unused": 0
+    },
+    {
+     "epoch": 17,
+     "loss": 32.7066,
+     "unused": 0
+    },
+    {
+     "epoch": 19,
+     "loss": 42.221,
+     "unused": 0
+    },
+    {
+     "epoch": 20,
+     "loss": 42.1898,
+     "unused": 0
+    },
+    {
+     "epoch": 18,
+     "loss": 32.6234,
+     "unused": 0
+    },
+    {
+     "epoch": 19,
+     "loss": 32.5992,
+     "unused": 0
+    },
+    {
+     "epoch": 20,
+     "loss": 32.6471,
+     "unused": 0
+    }
+   ],
+   "reinit": [],
+   "cohesion": 0.0175,
+   "nassoc": null,
+   "log": "pcx.log"
+  },
+  "pub_A_published": {
+   "arms": [
+    "pub_A_published",
+    "pub_C_diagonal",
+    "pub_B_offdiag",
+    "pub_D_both"
+   ],
+   "epochs": [
+    {
+     "epoch": 1,
+     "loss": 15.6236,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 14.8597,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 14.9781,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 14.292,
+     "unused": 63
+    },
+    {
+     "epoch": 1,
+     "loss": 18.2148,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 14.7458,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 14.2226,
+     "unused": 12
+    },
+    {
+     "epoch": 4,
+     "loss": 14.6018,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 13.9968,
+     "unused": 111
+    },
+    {
+     "epoch": 5,
+     "loss": 14.4903,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 17.9454,
+     "unused": 90
+    },
+    {
+     "epoch": 1,
+     "loss": 18.9386,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 14.4337,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 14.0392,
+     "unused": 4
+    },
+    {
+     "epoch": 6,
+     "loss": 13.8824,
+     "unused": 120
+    },
+    {
+     "epoch": 7,
+     "loss": 13.9618,
+     "unused": 12
+    },
+    {
+     "epoch": 3,
+     "loss": 18.0388,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 13.8095,
+     "unused": 117
+    },
+    {
+     "epoch": 2,
+     "loss": 18.3729,
+     "unused": 61
+    },
+    {
+     "epoch": 9,
+     "loss": 13.8146,
+     "unused": 13
+    },
+    {
+     "epoch": 10,
+     "loss": 13.7141,
+     "unused": 108
+    },
+    {
+     "epoch": 4,
+     "loss": 17.7954,
+     "unused": 110
+    },
+    {
+     "epoch": 11,
+     "loss": 13.8787,
+     "unused": 3
+    },
+    {
+     "epoch": 3,
+     "loss": 18.2911,
+     "unused": 16
+    },
+    {
+     "epoch": 12,
+     "loss": 13.7493,
+     "unused": 111
+    },
+    {
+     "epoch": 5,
+     "loss": 17.8197,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 18.013,
+     "unused": 114
+    },
+    {
+     "epoch": 6,
+     "loss": 17.7317,
+     "unused": 151
+    },
+    {
+     "epoch": 5,
+     "loss": 18.0631,
+     "unused": 8
+    },
+    {
+     "epoch": 7,
+     "loss": 17.7904,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 17.7049,
+     "unused": 101
+    },
+    {
+     "epoch": 6,
+     "loss": 17.9175,
+     "unused": 117
+    },
+    {
+     "epoch": 7,
+     "loss": 17.9822,
+     "unused": 10
+    },
+    {
+     "epoch": 8,
+     "loss": 17.8787,
+     "unused": 129
+    },
+    {
+     "epoch": 9,
+     "loss": 18.0075,
+     "unused": 10
+    },
+    {
+     "epoch": 10,
+     "loss": 17.8727,
+     "unused": 131
+    }
+   ],
+   "reinit": [
+    116,
+    132,
+    175,
+    132,
+    135,
+    120,
+    137,
+    180,
+    142,
+    130,
+    181,
+    181,
+    135,
+    144,
+    143
+   ],
+   "cohesion": 0.0021,
+   "nassoc": {
+    "total": 0.0962,
+    "diag": 0.073,
+    "offdiag": 0.008
+   },
+   "log": "pub.log"
   },
   "rat_A_l5": {
    "arms": [

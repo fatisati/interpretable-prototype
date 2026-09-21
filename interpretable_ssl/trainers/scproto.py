@@ -2125,6 +2125,16 @@ class SCProtoTrainer(AdoptiveTrainer):
                             """
                             _om = ~torch.eye(M_mat.shape[0], dtype=torch.bool,
                                              device=M_mat.device)
+                            if nassoc_offdiag_agg == 'hnlv':
+                                # [D24] hinge, averaged over LIVE prototypes ONLY. Dead
+                                # slots contribute a hard 0 and would drag the mean down
+                                # for free. Measured on bk02 under min(vol): overlap
+                                # detection 4.32x and K-transfer 0.93, against 1.28x and
+                                # 0.10 for the published mean-over-pairs.
+                                _ex = (M_mat - nassoc_offdiag_thresh).clamp(min=0.0)
+                                _rows = ((_ex ** 2) * _om).sum(dim=1)
+                                _lv = (M_mat.abs().sum(dim=1) > 0)
+                                return _rows[_lv].mean() if bool(_lv.any()) else _rows.mean() * 0.0
                             if nassoc_offdiag_agg == 'hnge':
                                 # [D19] only EXCESS leakage is charged: ordinary adjacency
                                 # between neighbouring niches is free, so the term cannot be
@@ -2204,9 +2214,13 @@ class SCProtoTrainer(AdoptiveTrainer):
                         else:
                             _om_agg = ~torch.eye(M_agg.shape[0], dtype=torch.bool,
                                                  device=M_agg.device)
-                            if nassoc_offdiag_agg == 'hnge':
+                            if nassoc_offdiag_agg in ('hnge', 'hnlv'):
                                 _exa = (M_agg - nassoc_offdiag_thresh).clamp(min=0.0)
-                                offdiag_term = nassoc_alpha * ((_exa ** 2) * _om_agg).sum(dim=1).mean()
+                                _rws = ((_exa ** 2) * _om_agg).sum(dim=1)
+                                if nassoc_offdiag_agg == 'hnlv':   # [D24] LIVE only
+                                    _lva = (M_agg.abs().sum(dim=1) > 0)
+                                    _rws = _rws[_lva] if bool(_lva.any()) else _rws * 0.0
+                                offdiag_term = nassoc_alpha * _rws.mean()
                             elif nassoc_offdiag_agg == 'pclu':
                                 offdiag_term = nassoc_alpha * ((M_agg ** 2) * _om_agg).sum(dim=1).mean()
                             else:
@@ -2431,7 +2445,17 @@ class SCProtoTrainer(AdoptiveTrainer):
                 # possible_pairs it carries no E[X^2] != E[X]^2 inflation and needs no
                 # detached-EMA correction. Clamp only guards a fully-empty prototype,
                 # which contributes 0 to both numerator and the size sum.
-                if cohesion_form == 'qwcw':
+                if cohesion_form == 'pcex':
+                    # [D23] Cell c excluded from its OWN divisor. The numerator already
+                    # excludes the self-pair (Gram diagonal zeroed below), so the only
+                    # change is the denominator: size[k] - assign[c][k] rather than
+                    # size[k]. Negligible for a 290-cell prototype, a 50% correction for
+                    # a 2-cell one -- it stops small prototypes being under-scored.
+                    _Gnd = _Gb - torch.diag(torch.diagonal(_Gb))
+                    _num = _Gnd @ _Sc                              # (n_batch, K)
+                    _den = (_csize.unsqueeze(0) - _Sc).clamp(min=1e-8)
+                    cohesion = (_Sc * (_num / _den)).sum() / float(_Sc.shape[0])
+                elif cohesion_form == 'qwcw':
                     # [D21] MISSING internal connections: size^2 - within. Gradient is
                     # 2*(size[k] - similarity_of_i_to_k), so a well-fitting cell joins a
                     # group of ANY size for free while a poorly-fitting one pays O(size).

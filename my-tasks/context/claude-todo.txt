@@ -1,4 +1,12 @@
-Option 1 — published nassoc, stronger off-diagonal, reinit ON, on s28nsc. nassoc_diag_norm='volume' (the published containment), nassoc_offdiag_norm='min', nassoc_alpha raised (3, 10), reinit on. This is the derived fix: it attacks the merge bias directly with a scale-free term instead of replacing the diagonal with a size-uniform one. Config only, no new code. My recommendation — it is the only option that follows from the analysis rather than from a sweep.
-try this - check the value of off diag and check the effect and choose a correct lambda for it - make sure re init works properly
+--to clear up---
+what is correct off diagonal [nassoc loss] 
+what is correct diagonal [which has no collapse - still has good performance on arbf pca]
+the cpm loss normalization is correct?
+in s28nsc - how do we compare leiden with cpm vs seacell [archetypal i mean] - bk02?
+does really nassoc diag has merge bias - but cohesion formual if we define sim[i, j] = aff[i, j] has no mereg bias? why?
+the community loss with weighted sampling is correct? what can we do?
 
-yes and plan for cohesion and do it - i will come back in 20 min i woud like to see some results
+---todo---
+try published neurips loss - but with corrected off diagonal
+try published neruips - but with corrcted diagonal term with no merge bias - the cohesion formula but with sim[i, j] = aff[i, j]
+turn usage loss off - insted turn re init on
