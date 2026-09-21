@@ -1,0 +1,964 @@
+{
+ "generated": "2026-09-21 11:01:28",
+ "runs": [
+  {
+   "dataset": "pancreas",
+   "name": "cpmk_panc_gk042",
+   "cfg": "NP220 aff-arbf lpu0.1 lna1 nadl-cpm nadn-pair nagm0.04209",
+   "w_purity": 0.9710047613234037,
+   "w_niche": null,
+   "b_entropy": 1.6343822512299224,
+   "modularity": 0.682190924530728,
+   "coverage": 0.9285714285714286,
+   "dead": 0,
+   "k_live": 220,
+   "complete": true
+  },
+  {
+   "dataset": "pancreas",
+   "name": "cpmk_panc_gk042_l200_uOFF",
+   "cfg": "NP220 aff-arbf lna200 nadl-cpm nadn-pair nagm0.04209",
+   "w_purity": 0.9475643999511659,
+   "w_niche": null,
+   "b_entropy": 1.5880641334876997,
+   "modularity": 0.39704035746524036,
+   "coverage": 0.8571428571428571,
+   "dead": 2,
+   "k_live": 218,
+   "complete": true
+  },
+  {
+   "dataset": "pancreas",
+   "name": "cpmk_panc_gk042_l50_uOFF",
+   "cfg": "NP220 aff-arbf lna50 nadl-cpm nadn-pair nagm0.04209",
+   "w_purity": 0.9658771822732267,
+   "w_niche": null,
+   "b_entropy": 1.536640049551485,
+   "modularity": 0.46522420585675534,
+   "coverage": 0.9285714285714286,
+   "dead": 40,
+   "k_live": 180,
+   "complete": true
+  },
+  {
+   "dataset": "pancreas",
+   "name": "modu_panc_r36_l10_uOFF",
+   "cfg": "NP220 aff-arbf lmod10.0 mres36.517",
+   "w_purity": 0.9727139543401294,
+   "w_niche": null,
+   "b_entropy": 0.2326115035727682,
+   "modularity": 0.5069750428605317,
+   "coverage": 0.7857142857142857,
+   "dead": 0,
+   "k_live": 220,
+   "complete": true
+  },
+  {
+   "dataset": "pancreas",
+   "name": "modupb_panc_r1658_l02_uOFF_reinit",
+   "cfg": "NP220 aff-arbf lmod0.2 magg-pbch mrsp16.58 prie2",
+   "w_purity": 0.9670369918202906,
+   "w_niche": null,
+   "b_entropy": 1.5989875668887361,
+   "modularity": 0.7195451523824081,
+   "coverage": 0.7857142857142857,
+   "dead": 188,
+   "k_live": 32,
+   "complete": true
+  },
+  {
+   "dataset": "pancreas",
+   "name": "repro_paper_LD20",
+   "cfg": "LD20 NP220 LD20 aff-arbf lpu0.1 lna1",
+   "w_purity": 0.9805884507386156,
+   "w_niche": null,
+   "b_entropy": 0.8319228059744936,
+   "modularity": 0.6993187845368538,
+   "coverage": 0.9285714285714286,
+   "dead": 0,
+   "k_live": 220,
+   "complete": true
+  },
+  {
+   "dataset": "pancreas",
+   "name": "repro_paper_LDdef",
+   "cfg": "NP220 aff-arbf lpu0.1 lna1",
+   "w_purity": 0.9724087413014284,
+   "w_niche": null,
+   "b_entropy": 0.8640044045705918,
+   "modularity": 0.6924148963130563,
+   "coverage": 1.0,
+   "dead": 0,
+   "k_live": 220,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "coh_L16_l10_reinit",
+   "cfg": "NP200 LD16 aff-bk02 prie2 lcoh10.0",
+   "w_purity": 0.7822432945928829,
+   "w_niche": 0.4277596152200332,
+   "b_entropy": -1.0000000826903712e-10,
+   "modularity": 0.6705916992453643,
+   "coverage": null,
+   "dead": 163,
+   "k_live": 37,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "coh_L16_l1_reinit",
+   "cfg": "NP200 LD16 aff-bk02 prie2 lcoh1.0",
+   "w_purity": 0.7498416719442685,
+   "w_niche": 0.4357016928264553,
+   "b_entropy": -1.000000082690371e-10,
+   "modularity": 0.628504261178639,
+   "coverage": 0.5555555555555556,
+   "dead": 174,
+   "k_live": 26,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "cpmk_L16_gk00686_uOFF",
+   "cfg": "NP200 LD16 aff-bk02 lna200 nadl-cpm nadn-pair nagm0.00686",
+   "w_purity": 0.8538760419697722,
+   "w_niche": 0.4833541584649881,
+   "b_entropy": -1.000000082690371e-10,
+   "modularity": 0.5279686523739141,
+   "coverage": null,
+   "dead": 5,
+   "k_live": 195,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "modu_L16_r19_l100_uOFF",
+   "cfg": "NP200 LD16 aff-bk02 lmod100.0 mres19.431",
+   "w_purity": 0.8507608304948394,
+   "w_niche": 0.4801533642572275,
+   "b_entropy": -1.000000082690371e-10,
+   "modularity": 0.27502244288323097,
+   "coverage": null,
+   "dead": 0,
+   "k_live": 200,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "modu_L16_r19_l10_uOFF",
+   "cfg": "NP200 LD16 aff-bk02 lmod10.0 mres19.431",
+   "w_purity": 0.868596272016158,
+   "w_niche": 0.4939150676959417,
+   "b_entropy": -1.0000000826903709e-10,
+   "modularity": 0.30870889059978907,
+   "coverage": null,
+   "dead": 0,
+   "k_live": 200,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "modu_L16_r19_l1_uOFF",
+   "cfg": "NP200 LD16 aff-bk02 lmod1.0 mres19.431",
+   "w_purity": 0.8473204046351608,
+   "w_niche": 0.4833370419184225,
+   "b_entropy": -1.000000082690371e-10,
+   "modularity": 0.3893359286087574,
+   "coverage": null,
+   "dead": 42,
+   "k_live": 158,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "nao_A_alpha1_reinit",
+   "cfg": "NP200 LD16 aff-bk02 lna1.0 prie2",
+   "w_purity": 0.7833729866662102,
+   "w_niche": 0.43126850726597404,
+   "b_entropy": -1.0000000826903709e-10,
+   "modularity": 0.6188793782470392,
+   "coverage": 0.6666666666666666,
+   "dead": 169,
+   "k_live": 31,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "nao_C_alpha2000_min",
+   "cfg": "NP200 LD16 aff-bk02 lna1.0 naa2000.0 naon-min prie2",
+   "w_purity": 0.8286291357855639,
+   "w_niche": 0.45434161203635554,
+   "b_entropy": -1.000000082690371e-10,
+   "modularity": 0.5936185920561039,
+   "coverage": 0.9444444444444444,
+   "dead": 30,
+   "k_live": 170,
+   "complete": true
+  }
+ ],
+ "traces": {
+  "coh_L16_l1_reinit": {
+   "arms": [
+    "coh_L16_l1_reinit",
+    "coh_L16_l10_reinit"
+   ],
+   "epochs": [
+    {
+     "epoch": 1,
+     "loss": 14.2153,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 23.0117,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 13.9127,
+     "unused": 101
+    },
+    {
+     "epoch": 2,
+     "loss": 22.6748,
+     "unused": 77
+    },
+    {
+     "epoch": 3,
+     "loss": 13.8568,
+     "unused": 73
+    },
+    {
+     "epoch": 3,
+     "loss": 22.6156,
+     "unused": 59
+    },
+    {
+     "epoch": 4,
+     "loss": 13.7668,
+     "unused": 143
+    },
+    {
+     "epoch": 4,
+     "loss": 22.546,
+     "unused": 87
+    },
+    {
+     "epoch": 5,
+     "loss": 13.759,
+     "unused": 121
+    },
+    {
+     "epoch": 5,
+     "loss": 22.5134,
+     "unused": 95
+    },
+    {
+     "epoch": 6,
+     "loss": 13.7359,
+     "unused": 151
+    },
+    {
+     "epoch": 6,
+     "loss": 22.4938,
+     "unused": 102
+    },
+    {
+     "epoch": 7,
+     "loss": 13.7326,
+     "unused": 132
+    },
+    {
+     "epoch": 7,
+     "loss": 22.4748,
+     "unused": 90
+    },
+    {
+     "epoch": 8,
+     "loss": 22.4411,
+     "unused": 101
+    },
+    {
+     "epoch": 8,
+     "loss": 13.7,
+     "unused": 152
+    }
+   ],
+   "reinit": [
+    19,
+    11,
+    8,
+    2,
+    25,
+    12,
+    34,
+    53
+   ],
+   "cohesion": 0.0222,
+   "nassoc": null,
+   "log": "coh.log"
+  },
+  "b0x3rzza1.output": {
+   "arms": [],
+   "epochs": [
+    {
+     "epoch": 1,
+     "loss": 15.4316,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 104.1593,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 83.5721,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 72.9953,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 66.9193,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 62.4052,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 59.3332,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 56.914,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 55.4143,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 53.7552,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 52.8829,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 52.181,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 51.3985,
+     "unused": 0
+    },
+    {
+     "epoch": 13,
+     "loss": 50.6541,
+     "unused": 0
+    },
+    {
+     "epoch": 14,
+     "loss": 50.4102,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 258.6344,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 239.6699,
+     "unused": 0
+    }
+   ],
+   "reinit": [],
+   "cohesion": null,
+   "nassoc": {
+    "total": 0.2252,
+    "diag": 0.009,
+    "offdiag": 0.004
+   },
+   "log": "b0x3rzza1.output"
+  },
+  "b5z5xnh8c.output": {
+   "arms": [],
+   "epochs": [
+    {
+     "epoch": 1,
+     "loss": 827.4794,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 810.9529,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 803.7183,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 797.6317,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 792.5847,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 788.135,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 784.4076,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 781.8949,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 779.586,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 777.8022,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 776.3838,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 774.6548,
+     "unused": 0
+    },
+    {
+     "epoch": 13,
+     "loss": 773.6306,
+     "unused": 0
+    },
+    {
+     "epoch": 14,
+     "loss": 772.7217,
+     "unused": 0
+    },
+    {
+     "epoch": 15,
+     "loss": 771.5885,
+     "unused": 0
+    },
+    {
+     "epoch": 16,
+     "loss": 770.8692,
+     "unused": 0
+    },
+    {
+     "epoch": 17,
+     "loss": 770.2241,
+     "unused": 0
+    },
+    {
+     "epoch": 18,
+     "loss": 769.4055,
+     "unused": 0
+    },
+    {
+     "epoch": 19,
+     "loss": 768.9411,
+     "unused": 0
+    },
+    {
+     "epoch": 20,
+     "loss": 768.3113,
+     "unused": 0
+    }
+   ],
+   "reinit": [],
+   "cohesion": null,
+   "nassoc": {
+    "total": 0.754,
+    "diag": 0.015,
+    "offdiag": 0.004
+   },
+   "log": "b5z5xnh8c.output"
+  },
+  "b9dwib641.output": {
+   "arms": [],
+   "epochs": [
+    {
+     "epoch": 1,
+     "loss": 78.9623,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 49.7872,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 38.0682,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 32.0252,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 28.6843,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 26.3745,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 24.1912,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 22.7186,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 21.479,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 20.546,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 20.0618,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 18.9438,
+     "unused": 0
+    },
+    {
+     "epoch": 13,
+     "loss": 18.7435,
+     "unused": 0
+    },
+    {
+     "epoch": 14,
+     "loss": 18.1018,
+     "unused": 0
+    },
+    {
+     "epoch": 15,
+     "loss": 17.4009,
+     "unused": 0
+    },
+    {
+     "epoch": 16,
+     "loss": 16.9547,
+     "unused": 0
+    },
+    {
+     "epoch": 17,
+     "loss": 16.4665,
+     "unused": 0
+    },
+    {
+     "epoch": 18,
+     "loss": 16.0288,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 119.0039,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 90.4242,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 77.6381,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 71.0616,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 67.1224,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 64.1181,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 61.8353,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 60.2761,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 58.8242,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 57.749,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 57.1969,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 56.1847,
+     "unused": 0
+    },
+    {
+     "epoch": 13,
+     "loss": 55.8754,
+     "unused": 0
+    },
+    {
+     "epoch": 14,
+     "loss": 55.1046,
+     "unused": 0
+    },
+    {
+     "epoch": 15,
+     "loss": 54.3067,
+     "unused": 0
+    },
+    {
+     "epoch": 16,
+     "loss": 53.7516,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 156.2516,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 129.8965,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 114.9852,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 107.2821,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 102.7858,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 99.9978,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 97.6282,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 95.8957,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 94.5905,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 93.7848,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 92.9834,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 92.3193,
+     "unused": 0
+    },
+    {
+     "epoch": 13,
+     "loss": 91.8162,
+     "unused": 0
+    },
+    {
+     "epoch": 14,
+     "loss": 91.1076,
+     "unused": 0
+    },
+    {
+     "epoch": 15,
+     "loss": 90.3585,
+     "unused": 0
+    },
+    {
+     "epoch": 16,
+     "loss": 89.9463,
+     "unused": 0
+    },
+    {
+     "epoch": 17,
+     "loss": 89.5918,
+     "unused": 0
+    },
+    {
+     "epoch": 18,
+     "loss": 88.8782,
+     "unused": 0
+    }
+   ],
+   "reinit": [],
+   "cohesion": null,
+   "nassoc": {
+    "total": 0.0749,
+    "diag": 0.016,
+    "offdiag": 0.004
+   },
+   "log": "b9dwib641.output"
+  },
+  "btmfxkgvg.output": {
+   "arms": [],
+   "epochs": [
+    {
+     "epoch": 1,
+     "loss": 25.0043,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 24.4943,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 24.2752,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 24.1455,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 24.0593,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 24.0031,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 23.9569,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 23.9317,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 23.9058,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 23.8905,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 23.8765,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 23.8645,
+     "unused": 0
+    },
+    {
+     "epoch": 13,
+     "loss": 23.8484,
+     "unused": 0
+    },
+    {
+     "epoch": 14,
+     "loss": 23.8398,
+     "unused": 0
+    },
+    {
+     "epoch": 15,
+     "loss": 23.8276,
+     "unused": 0
+    },
+    {
+     "epoch": 16,
+     "loss": 23.8189,
+     "unused": 0
+    },
+    {
+     "epoch": 17,
+     "loss": 23.8139,
+     "unused": 0
+    },
+    {
+     "epoch": 18,
+     "loss": 23.8081,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 45.582,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 45.0053,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 44.7461,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 44.5894,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 65.6296,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 65.1396,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 64.8797,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 64.7174,
+     "unused": 0
+    }
+   ],
+   "reinit": [],
+   "cohesion": null,
+   "nassoc": {
+    "total": 0.05,
+    "diag": 0.0,
+    "offdiag": 0.005
+   },
+   "log": "btmfxkgvg.output"
+  },
+  "bmb1t0ajn.output": {
+   "arms": [],
+   "epochs": [
+    {
+     "epoch": 2,
+     "loss": 24.9469,
+     "unused": 145
+    },
+    {
+     "epoch": 3,
+     "loss": 24.8767,
+     "unused": 152
+    },
+    {
+     "epoch": 4,
+     "loss": 24.8291,
+     "unused": 151
+    },
+    {
+     "epoch": 5,
+     "loss": 24.8082,
+     "unused": 153
+    },
+    {
+     "epoch": 6,
+     "loss": 24.7795,
+     "unused": 157
+    }
+   ],
+   "reinit": [],
+   "cohesion": null,
+   "nassoc": null,
+   "log": "bmb1t0ajn.output"
+  }
+ }
+}

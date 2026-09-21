@@ -1262,6 +1262,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             # soft scale the CPM terms below actually live on.
             nassoc_gamma = nassoc_gamma * float(getattr(self, '_nassoc_gamma_scale_factor', 1.0))
         nassoc_offdiag_norm = getattr(self, 'nassoc_offdiag_norm', 'sqrt')
+        nassoc_offdiag_agg = getattr(self, 'nassoc_offdiag_agg', 'pair')   # [D16]
         nassoc_size_scale = getattr(self, 'nassoc_size_scale', 'btch')
         nassoc_cpm_norm = getattr(self, 'nassoc_cpm_norm', 'pair')
         nassoc_cpm_free = int(getattr(self, 'nassoc_cpm_free', 0))
@@ -2053,6 +2054,32 @@ class SCProtoTrainer(AdoptiveTrainer):
                                 return -torch.log((1 - (d - 1) ** 2).clamp(min=1e-8)).mean()
                             else:
                                 return ((d - 1) ** 2).mean()
+                        def _offdiag_agg(M_mat):
+                            """[D16] Aggregate the squared off-diagonal entries of M_mat.
+
+                            'pair' divides by the number of PROTOTYPE PAIRS (K*K-K). But
+                            nonzero pairs grow roughly LINEARLY in K -- a prototype only
+                            borders its spatial neighbours (measured on bk02: 14 nonzero
+                            partners per prototype at K=16, rising to only 168 at K=1774)
+                            -- while K^2 grows quadratically. So 'pair' divides by
+                            something growing far faster than the signal, and the
+                            nassoc_alpha needed for diagonal/off-diagonal parity drifts
+                            77 -> 87,009 across that K range (1130x), i.e. alpha does not
+                            transfer across K at all.
+
+                            'pclu' sums the squared leakages OUT OF each prototype and
+                            then means over the K prototypes -- K terms, which is the form
+                            normalized cut itself uses. Same measurement: 5.2 -> 49 (9.5x).
+                            It is also bounded by 1, because the leakages out of one
+                            prototype sum to 1 - containment[k] <= 1, and squares of
+                            non-negative numbers summing to <= 1 also sum to <= 1.
+                            """
+                            _om = ~torch.eye(M_mat.shape[0], dtype=torch.bool,
+                                             device=M_mat.device)
+                            if nassoc_offdiag_agg == 'pclu':
+                                return ((M_mat ** 2) * _om).sum(dim=1).mean()
+                            return (M_mat[_om] ** 2).mean()
+
                         def _offdiag_loss(m):
                             if nassoc_diag_loss == 'nll':
                                 return -torch.log((1 - m.clamp(max=1-1e-8) ** 0.5).clamp(min=1e-8)).mean()
@@ -2062,7 +2089,9 @@ class SCProtoTrainer(AdoptiveTrainer):
                             ((_diag_loss(M_b.diag(),
                                          pairs_list[bi] if pairs_list else None)
                               if nassoc_diag else 0.0)
-                             + nassoc_alpha * _offdiag_loss(M_b[off_mask]))
+                             + nassoc_alpha * (_offdiag_agg(M_b)
+                                               if nassoc_diag_loss != 'nll'
+                                               else _offdiag_loss(M_b[off_mask])))
                             for bi, M_b in enumerate(M_list)
                         ]
                         nassoc_loss = torch.stack(batch_losses).mean()
@@ -2117,7 +2146,12 @@ class SCProtoTrainer(AdoptiveTrainer):
                         if nassoc_diag_loss == 'nll':
                             offdiag_term = nassoc_alpha * -torch.log((1 - M_agg[off_mask].clamp(max=1-1e-8) ** 0.5).clamp(min=1e-8)).mean()
                         else:
-                            offdiag_term = nassoc_alpha * (M_agg[off_mask] ** 2).mean()
+                            _om_agg = ~torch.eye(M_agg.shape[0], dtype=torch.bool,
+                                                 device=M_agg.device)
+                            offdiag_term = nassoc_alpha * (
+                                ((M_agg ** 2) * _om_agg).sum(dim=1).mean()
+                                if nassoc_offdiag_agg == 'pclu'
+                                else (M_agg[_om_agg] ** 2).mean())
                         nassoc_loss = (diag_term if nassoc_diag else 0.0) + offdiag_term
                         total_metrics['nassoc_diag_val'] += diag_M.mean().item()
                         total_metrics['nassoc_offdiag_val'] += M_agg[off_mask].mean().item()
@@ -2542,7 +2576,19 @@ class SCProtoTrainer(AdoptiveTrainer):
             _usage = self._c_k_ema if self._c_k_ema is not None else self._n_k_ema
             if _usage is not None and _last_soft_assign is not None:
                 _usage = _usage.to(self.device)
-                _dead = (_usage < _thresh).nonzero(as_tuple=True)[0]
+                # [D15] Pick the cut on the scale of whichever EMA we are reading.
+                # _c_k_ema is a max-assignment PROBABILITY -> absolute 0.01 is meaningful.
+                # _n_k_ema is a soft MASS whose natural scale is batch_size/K (~5 at
+                # 1024/200) -> the same 0.01 flags almost nothing. Measured on the first
+                # working-reinit run: 10 flagged while 145 prototypes were unused. So for
+                # the mass path the cut is a FRACTION OF MEAN USAGE, which is scale-free
+                # in both batch_size and K.
+                if self._c_k_ema is not None:
+                    _cut = _thresh
+                else:
+                    _rel = float(getattr(self, 'proto_reinit_rel', 0.1))
+                    _cut = _rel * float(_usage.mean().clamp(min=1e-8).item())
+                _dead = (_usage < _cut).nonzero(as_tuple=True)[0]
                 if len(_dead) > 0:
                     with torch.no_grad():
                         # worst-served cells in the last minibatch: lowest max assignment
@@ -2560,7 +2606,8 @@ class SCProtoTrainer(AdoptiveTrainer):
                             self._n_k_ema[_dead[:_n_take].cpu()] = 1.0
                     total_metrics['n_reinit'] = float(_n_take)
                     print(f"   [reinit] revived {_n_take} dead prototypes "
-                          f"(usage < {_thresh}) onto worst-served cells")
+                          f"(usage < {_cut:.4g}; mean usage {float(_usage.mean()):.3f}) "
+                          f"onto worst-served cells")
 
         # Hartigan dip test on the FULL-dataset prototype size distribution.
         # Summing the per-step soft masses over every mini-batch of the epoch gives the
