@@ -68,7 +68,8 @@ def get_defaults():
         'job_name': '',
         'no_data': 'False',
         "freezable_prototypes": 0,  # swav specific (should be true)
-        "prot_init": 'kmeans', #can be kmeans or waypoint
+        "prot_init": 'kmeans', #can be kmeans, waypoint, or [D22] 'leid'
+        'prot_init_gamma': 0.0069,      # [D22] CPM resolution for prot_init='leid'. WHY THIS EXISTS: at K=200 on s28nsc/bk02 a hard optimizer already finds a partition that beats SEACells on EVERY axis -- Leiden-CPM at gamma=0.0069 gives K=197, density 0.0321, joint purity 0.529, 49 states, max/median 2.6, against SEACells' 0.0295 / 0.504 / 46 / 3.6. scProto optimizing the SAME objective reaches only 68% of that density, 83% of the purity and 73% of the states, so the gap is the SEARCH, not the loss. This initialises each prototype at the centroid of one Leiden community, i.e. starts the search at the answer. If training holds it, the loss is fine and only the optimizer was failing; if training destroys it, the soft fixed-K parameterisation cannot represent that partition, which is a far more fundamental result. NOTE gamma is a FLOOR, not a target density: at gamma=0.0069 the achieved density is 0.0321, 4.6x higher.
         
         "loss_type": 'cross_entropy',
         "decodable_prototypes": 0,

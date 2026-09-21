@@ -42,6 +42,7 @@ ABBREVIATIONS = {
     'epsilon': "eps",
     'freeze_prototypes_nepochs': 'frz',
     'prot_init': 'prtInit',
+    'prot_init_gamma': 'pigm',
     'lambda_proto': 'proto',
     'lambda_commit': 'cmit',
     'loss_type': 'loss',

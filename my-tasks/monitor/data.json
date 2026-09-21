@@ -1,5 +1,5 @@
 {
- "generated": "2026-09-21 13:21:34",
+ "generated": "2026-09-21 15:36:13",
  "runs": [
   {
    "dataset": "pancreas",
@@ -962,6 +962,59 @@
    },
    "log": "fin.log"
   },
+  "mch_A_modu_coh1": {
+   "arms": [
+    "mch_A_modu_coh1",
+    "mch_B_modu_coh5",
+    "mch_C_modu_coh20"
+   ],
+   "epochs": [
+    {
+     "epoch": 1,
+     "loss": 28.3844,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 32.4314,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 46.6501,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 26.4318,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 30.4196,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 44.6933,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 25.8739,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 29.6731,
+     "unused": 0
+    }
+   ],
+   "reinit": [],
+   "cohesion": 0.0159,
+   "nassoc": null,
+   "log": "mch.log"
+  },
   "rat_A_l5": {
    "arms": [
     "rat_A_l5",
@@ -1340,6 +1393,93 @@
     "offdiag": 0.006
    },
    "log": "rt2.log"
+  },
+  "wrm_A_leid_modu": {
+   "arms": [
+    "wrm_A_leid_modu",
+    "wrm_B_leid_none"
+   ],
+   "epochs": [
+    {
+     "epoch": 1,
+     "loss": 25.7398,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 13.1334,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 24.5812,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 12.8117,
+     "unused": 148
+    },
+    {
+     "epoch": 3,
+     "loss": 24.2049,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 12.9289,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 24.0323,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 12.759,
+     "unused": 97
+    },
+    {
+     "epoch": 5,
+     "loss": 23.9074,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 12.8034,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 23.8845,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 12.7046,
+     "unused": 169
+    },
+    {
+     "epoch": 7,
+     "loss": 12.7644,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 12.6865,
+     "unused": 92
+    }
+   ],
+   "reinit": [
+    177,
+    179,
+    179,
+    179
+   ],
+   "cohesion": null,
+   "nassoc": null,
+   "log": "wrm.log"
   },
   "b0x3rzza1.output": {
    "arms": [],
