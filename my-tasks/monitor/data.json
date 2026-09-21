@@ -1,5 +1,5 @@
 {
- "generated": "2026-09-21 12:20:30",
+ "generated": "2026-09-21 12:45:49",
  "runs": [
   {
    "dataset": "pancreas",
@@ -364,6 +364,36 @@
      "epoch": 11,
      "loss": 13.9127,
      "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 13.8855,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 22.7187,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 13.8619,
+     "unused": 2
+    },
+    {
+     "epoch": 12,
+     "loss": 22.6822,
+     "unused": 0
+    },
+    {
+     "epoch": 13,
+     "loss": 22.7031,
+     "unused": 0
+    },
+    {
+     "epoch": 14,
+     "loss": 22.6679,
+     "unused": 0
     }
    ],
    "reinit": [
@@ -381,12 +411,16 @@
     149,
     174,
     167,
+    151,
+    174,
+    167,
+    151,
     151
    ],
    "cohesion": 0.0236,
    "nassoc": {
-    "total": 0.2227,
-    "diag": 0.092,
+    "total": 0.2548,
+    "diag": 0.117,
     "offdiag": 0.006
    },
    "log": "cod.log"
@@ -492,6 +526,151 @@
    "nassoc": null,
    "log": "coh.log"
   },
+  "fin_A_hinge_splt": {
+   "arms": [
+    "fin_A_hinge_splt",
+    "fin_B_hinge_splt_use",
+    "fin_C_noOD_splt"
+   ],
+   "epochs": [
+    {
+     "epoch": 1,
+     "loss": 18.6283,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 19.7825,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 18.0188,
+     "unused": 109
+    },
+    {
+     "epoch": 2,
+     "loss": 19.5083,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 18.1633,
+     "unused": 2
+    },
+    {
+     "epoch": 3,
+     "loss": 19.434,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 17.8155,
+     "unused": 147
+    },
+    {
+     "epoch": 1,
+     "loss": 18.1879,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 19.3755,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 18.1037,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 17.883,
+     "unused": 98
+    },
+    {
+     "epoch": 5,
+     "loss": 19.3367,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 17.9532,
+     "unused": 143
+    },
+    {
+     "epoch": 6,
+     "loss": 19.3021,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 18.193,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 18.0376,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 19.271,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 17.8753,
+     "unused": 170
+    },
+    {
+     "epoch": 8,
+     "loss": 17.7984,
+     "unused": 141
+    },
+    {
+     "epoch": 8,
+     "loss": 19.2552,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 18.0409,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 17.871,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 19.2292,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 17.8609,
+     "unused": 131
+    }
+   ],
+   "reinit": [
+    148,
+    159,
+    178,
+    149,
+    182,
+    152,
+    141
+   ],
+   "cohesion": 0.0065,
+   "nassoc": {
+    "total": 0.0855,
+    "diag": 0.067,
+    "offdiag": 0.009
+   },
+   "log": "fin.log"
+  },
   "rat_A_l5": {
    "arms": [
     "rat_A_l5",
@@ -547,21 +726,287 @@
      "epoch": 5,
      "loss": 32.8583,
      "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 17.8928,
+     "unused": 4
+    },
+    {
+     "epoch": 6,
+     "loss": 32.8024,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 17.9299,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 32.8138,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 17.871,
+     "unused": 6
+    },
+    {
+     "epoch": 8,
+     "loss": 32.7717,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 17.9062,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 32.7873,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 17.8533,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 32.7449,
+     "unused": 1
+    },
+    {
+     "epoch": 11,
+     "loss": 17.9016,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 32.775,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 17.8502,
+     "unused": 1
+    },
+    {
+     "epoch": 12,
+     "loss": 32.7346,
+     "unused": 0
     }
    ],
    "reinit": [
     159,
     134,
     171,
-    160
+    160,
+    172,
+    162,
+    171,
+    162,
+    172,
+    164,
+    172,
+    164
    ],
    "cohesion": 0.0064,
    "nassoc": {
-    "total": 0.2535,
-    "diag": 0.09,
+    "total": 0.2008,
+    "diag": 0.094,
     "offdiag": 0.006
    },
    "log": "rat.log"
+  },
+  "rt2_A_noOD": {
+   "arms": [
+    "rt2_A_noOD",
+    "rt2_B_weakOD",
+    "rt2_C_usageON"
+   ],
+   "epochs": [
+    {
+     "epoch": 1,
+     "loss": 18.4467,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 18.137,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 20.0347,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 17.9352,
+     "unused": 46
+    },
+    {
+     "epoch": 2,
+     "loss": 17.7943,
+     "unused": 100
+    },
+    {
+     "epoch": 2,
+     "loss": 19.9645,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 17.9669,
+     "unused": 1
+    },
+    {
+     "epoch": 3,
+     "loss": 18.0131,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 19.8499,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 17.8281,
+     "unused": 23
+    },
+    {
+     "epoch": 4,
+     "loss": 17.8152,
+     "unused": 124
+    },
+    {
+     "epoch": 4,
+     "loss": 19.8031,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 17.8353,
+     "unused": 4
+    },
+    {
+     "epoch": 5,
+     "loss": 17.822,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 19.7269,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 17.7836,
+     "unused": 35
+    },
+    {
+     "epoch": 6,
+     "loss": 17.7146,
+     "unused": 159
+    },
+    {
+     "epoch": 6,
+     "loss": 19.676,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 17.8127,
+     "unused": 2
+    },
+    {
+     "epoch": 7,
+     "loss": 17.7391,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 19.6386,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 17.7684,
+     "unused": 14
+    },
+    {
+     "epoch": 8,
+     "loss": 17.6672,
+     "unused": 143
+    },
+    {
+     "epoch": 8,
+     "loss": 19.6328,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 17.786,
+     "unused": 1
+    },
+    {
+     "epoch": 9,
+     "loss": 17.7211,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 19.6467,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 17.7502,
+     "unused": 12
+    },
+    {
+     "epoch": 10,
+     "loss": 17.6617,
+     "unused": 168
+    },
+    {
+     "epoch": 10,
+     "loss": 19.668,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 17.898,
+     "unused": 1
+    },
+    {
+     "epoch": 11,
+     "loss": 17.7021,
+     "unused": 0
+    }
+   ],
+   "reinit": [
+    169,
+    173,
+    168,
+    177,
+    168,
+    177,
+    169,
+    179,
+    169,
+    179
+   ],
+   "cohesion": 0.0067,
+   "nassoc": {
+    "total": 0.1326,
+    "diag": 0.069,
+    "offdiag": 0.007
+   },
+   "log": "rt2.log"
   },
   "b0x3rzza1.output": {
    "arms": [],
