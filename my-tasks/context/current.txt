@@ -1,3 +1,13 @@
 ===state===
 yesterday i tried leiden with both cpm and modualirty
 modualirty was beter on s28nsc
+i tried to imeplemtn modulairty in the loss - but turn out to be both cpm and modualirty - they just try to make the cluster size uniform - that was what their charge term doing
+nothing to do with the asisgemnts
+so i decided to go with another term - and i 
+
+
+====
+(b) just make its assignments more confident, and keep     <- cheap; requires learning NOTHING,
+    more slots nominally occupied: what can we do for this?
+
+what is signal only version?

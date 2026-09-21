@@ -1272,6 +1272,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         lambda_cohesion = float(getattr(self, 'lambda_cohesion', 0.0))   # [D14]
         cohesion_row_norm = getattr(self, 'cohesion_row_norm', 'l2')      # [D14]
         cohesion_self = int(getattr(self, 'cohesion_self', 1))            # [D17]
+        cohesion_sim = getattr(self, 'cohesion_sim', 'gram')              # [D18]
         modularity_res = float(getattr(self, 'modularity_res', 1.0))
         modularity_agg = str(getattr(self, 'modularity_agg', 'glob'))
         modularity_res_pbch = float(getattr(self, 'modularity_res_pbch', 0.0) or 0.0)
@@ -2352,7 +2353,14 @@ class SCProtoTrainer(AdoptiveTrainer):
                           f"row_norm={cohesion_row_norm}, nnz={self._coh_A.nnz:,}")
                 _cidx = unique_idx.cpu().numpy()
                 _Ab = self._coh_A[_cidx]                       # (n_batch, N) sparse
-                _Gb = torch.as_tensor(np.asarray((_Ab @ _Ab.T).todense()),
+                # [D18] 'aff': use the affinity itself (1-hop) instead of the Gram of
+                # affinity rows (2-hop). The term then equals sum_k
+                # affinity_within[k]/size[k] -- RATIO association, i.e. the published
+                # diagonal with volume swapped for a cell count, which removes the merge
+                # bias and, unlike the off-diagonal alone, genuinely REDUCES total leakage
+                # instead of redistributing it.
+                _Gsrc = _Ab[:, _cidx] if cohesion_sim == 'aff' else (_Ab @ _Ab.T)
+                _Gb = torch.as_tensor(np.asarray(_Gsrc.todense()),
                                       dtype=torch.float32, device=self.device)
                 _Gb = _Gb / float(getattr(self, '_coh_scale', 1.0) or 1.0)
                 _Sc = soft_assign
