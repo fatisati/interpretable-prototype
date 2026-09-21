@@ -85,3 +85,8 @@ thats the loss fault not that the info is not in the gene expression
 
 and we know affinity has the signal if seacell can find it on same affinity
 
+====
+we have local push: community loss
+we need some global eval term [batch level global] [i think can be nassoc / cohesion]
+we need prevent collapase - all samples go to same proto [maybe above term can do it]
+some term say prototypes shoud carry disticnt cells - i think nassoc off diag is the only option -

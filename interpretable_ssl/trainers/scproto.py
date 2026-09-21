@@ -1271,6 +1271,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         lambda_modularity = float(getattr(self, 'lambda_modularity', 0.0))
         lambda_cohesion = float(getattr(self, 'lambda_cohesion', 0.0))   # [D14]
         cohesion_row_norm = getattr(self, 'cohesion_row_norm', 'l2')      # [D14]
+        cohesion_self = int(getattr(self, 'cohesion_self', 1))            # [D17]
         modularity_res = float(getattr(self, 'modularity_res', 1.0))
         modularity_agg = str(getattr(self, 'modularity_agg', 'glob'))
         modularity_res_pbch = float(getattr(self, 'modularity_res_pbch', 0.0) or 0.0)
@@ -2333,15 +2334,34 @@ class SCProtoTrainer(AdoptiveTrainer):
                         _nrm[_nrm == 0] = 1.0
                         _cA = _csp.diags(1.0 / _nrm) @ _cA
                     self._coh_A = _csp.csr_matrix(_cA)
+                    # [D17] 'glob': one global divisor = mean ||row||^2, estimated once on a
+                    # sample. Keeps RELATIVE row magnitudes (SEACells' geometry) while making
+                    # the value dataset-independent. It is input data, not a parameter, so no
+                    # detach is needed and computing it ONCE keeps the loss comparable across
+                    # steps, runs and datasets.
+                    self._coh_scale = 1.0
+                    if cohesion_row_norm == 'glob':
+                        _smp = np.random.default_rng(0).choice(
+                            self._coh_A.shape[0], min(4096, self._coh_A.shape[0]),
+                            replace=False)
+                        _sr = self._coh_A[_smp]
+                        self._coh_scale = float(_sr.multiply(_sr).sum(axis=1).mean())
+                        print(f"   [D17] cohesion 'glob' divisor (mean ||row||^2) "
+                              f"= {self._coh_scale:.5f}")
                     print(f"   [D14] cohesion: affinity cached, shape={self._coh_A.shape}, "
                           f"row_norm={cohesion_row_norm}, nnz={self._coh_A.nnz:,}")
                 _cidx = unique_idx.cpu().numpy()
                 _Ab = self._coh_A[_cidx]                       # (n_batch, N) sparse
                 _Gb = torch.as_tensor(np.asarray((_Ab @ _Ab.T).todense()),
                                       dtype=torch.float32, device=self.device)
+                _Gb = _Gb / float(getattr(self, '_coh_scale', 1.0) or 1.0)
                 _Sc = soft_assign
                 _csize = _Sc.sum(0)                            # (K,)
                 _cpair = ((_Gb @ _Sc) * _Sc).sum(0)            # (K,) = S_k' G S_k
+                if cohesion_self == 0:
+                    # [D17] remove the i==j self-pairs. Breaks the exact SEACells identity
+                    # but leaves ONLY the "are the members alike" signal.
+                    _cpair = _cpair - (_Sc.pow(2) * torch.diagonal(_Gb).unsqueeze(1)).sum(0)
                 # denominator is LINEAR in the cells (size, not size^2), so unlike
                 # possible_pairs it carries no E[X^2] != E[X]^2 inflation and needs no
                 # detached-EMA correction. Clamp only guards a fully-empty prototype,
@@ -2350,8 +2370,9 @@ class SCProtoTrainer(AdoptiveTrainer):
                 cohesion_loss = 1.0 - cohesion
                 if not getattr(self, '_coh_checked', False):
                     _cv = float(cohesion.item())
-                    assert -1e-4 <= _cv <= 1.0 + 1e-4, (
-                        f"[D14] cohesion={_cv} outside its theoretical range [0,1] -- "
+                    _hi = 1.0 + 1e-4 if (cohesion_row_norm == 'l2' and cohesion_self) else 1e4
+                    assert -1e-4 <= _cv <= _hi, (
+                        f"[D14] cohesion={_cv} outside its plausible range -- "
                         f"this is a bug, not a tuning problem (CLAUDE.md 9b)")
                     print(f"   [D14] cohesion epoch-1 value = {_cv:.4f} (range [0,1], "
                           f"higher = members more alike); loss = {1.0 - _cv:.4f}")

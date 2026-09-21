@@ -154,6 +154,7 @@ ABBREVIATIONS = {
     'proto_reinit_thresh': 'prit',
     'proto_reinit_rel': 'prir',
     'lambda_cohesion': 'lcoh',
+    'cohesion_self': 'cslf',
     'cohesion_row_norm': 'crn',
     'lambda_sim_recon': 'lsr',
     'sim_recon_hidden_dim': 'srhd',

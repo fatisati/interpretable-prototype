@@ -1,0 +1,4 @@
+Option 1 — published nassoc, stronger off-diagonal, reinit ON, on s28nsc. nassoc_diag_norm='volume' (the published containment), nassoc_offdiag_norm='min', nassoc_alpha raised (3, 10), reinit on. This is the derived fix: it attacks the merge bias directly with a scale-free term instead of replacing the diagonal with a size-uniform one. Config only, no new code. My recommendation — it is the only option that follows from the analysis rather than from a sweep.
+try this - check the value of off diag and check the effect and choose a correct lambda for it - make sure re init works properly
+
+yes and plan for cohesion and do it - i will come back in 20 min i woud like to see some results

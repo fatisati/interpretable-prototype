@@ -1680,3 +1680,183 @@ if it moves a lot, periodic re-balancing becomes worth implementing.
 4. **Gamma cannot act as a resolution parameter while K is fixed.** This is structural, not
    a tuning issue, and it should not be described as a resolution knob in a paper as things
    stand.
+
+---
+
+## 21. Dropping the containment diagonal: the off-diagonal normalizer and cohesion (2026-09-21)
+
+**Decision: drop the containment diagonal. Keep the off-diagonal with a PER-CLUSTER
+normalizer ([D16] `nassoc_offdiag_agg='pclu'`). Add `lambda_cohesion` ([D14]) as the
+within-group quality term in its place.** Each job goes to the term shaped for it:
+
+```
+cohesion      within-group quality      no merge bias, no size term, == SEACells' objective
+off-diagonal  between-group separation  the anti-overlap force cohesion is blind to
+containment   DROPPED                   unconditional merge bias
+reinit        revives zero-mass slots   no gradient term can (D13/D15)
+```
+
+### Why the containment diagonal has to go
+
+`containment[k] = affinity_within[k] / volume[k]`. Merge k and j:
+
+```
+containment[merged] = ( within_k + within_j + between_kj ) / ( volume_k + volume_j )
+                                              ^^^^^^^^^^^^ PURE GAIN, no offsetting cost
+```
+
+The numerator picks up the between-affinity for free; the denominator merely adds. So the
+merged prototype's containment is **always** above the volume-weighted average of its
+parents -- unconditionally, regardless of the data. There is no test to fail. That is the
+merge bias, and it is why the published loss collapses on spatial graphs (sections 1-3:
+15/200 survivors). Measured this session with a working off-diagonal:
+
+```
+s28nsc/bk02, K=200, LD16, usage OFF, reinit ON
+nassoc alpha=1        w_purity 0.7834  niche 0.4313  dead 169  K_live  31  coverage 0.667
+nassoc alpha=2000+min w_purity 0.8286  niche 0.4543  dead  30  K_live 170  coverage 0.944
+```
+
+### How the off-diagonal normalizer was chosen -- measured, not argued
+
+The plain SUM of prototype k's off-diagonal row is redundant with the diagonal:
+
+```
+volume[k] = affinity that stays INSIDE k  +  affinity that leaks to every other j
+=> 1 = containment[k] + total_leakage[k]      so the row sum is just 1 - containment[k]
+```
+
+**Squaring is what breaks the redundancy.** Given a fixed total leakage, the sum of
+squares is small when leakage is spread thin and large when concentrated in one partner:
+
+```
+k leaks 20% over 199 neighbours  -> each 0.001 -> sum of squares 0.0002
+k leaks 20% into ONE neighbour   ->       0.2  -> sum of squares 0.04     (200x)
+```
+
+Concentrated leakage is the signature of **two prototypes sitting on the same cells** --
+the configuration from which one absorbs the other. So the square penalises exactly the
+configuration that kills prototypes. That is the 169 -> 30 result above.
+
+**The normalizer: `mean over PAIRS` was non-portable.** Nonzero prototype pairs grow
+roughly LINEARLY in K (a prototype only borders its spatial neighbours: measured 14
+nonzero partners per prototype at K=16, only 168 at K=1774) while `K^2` grows
+quadratically. Measured on bk02, the `nassoc_alpha` needed for diagonal/off-diagonal
+parity:
+
+```
+K              16      52     200     573    1774
+'pair'         77     495   3,806  17,452  87,009    <- 1130x drift, alpha cannot transfer
+'pclu'        5.2     9.7    19.1    30.5     49.1    <- 9.5x drift
+```
+
+`'pclu'` sums the squared leakages OUT OF each prototype then means over the K prototypes
+-- K terms, the form normalized cut itself uses. It is also bounded by 1, since the
+leakages out of one prototype sum to `1 - containment[k] <= 1`.
+
+Five options were considered: (1) per-cluster, (2) divide by the NONZERO pair count,
+(3) top-k mean / hard-example mining, (4) max over pairs, (5) just rescale alpha.
+(5) is what `alpha=2000` did: correct at K=200, wrong by 23x at K=573. (2) would likely be
+flattest still and is worth testing. (1) was taken because it matches the objective family
+the loss already belongs to.
+
+Separating the off-diagonal from the diagonal needed **no new config key** --
+`nassoc_diag: False` already existed for exactly this. With `lambda_nassoc` pinned to 1,
+`nassoc_alpha` IS the off-diagonal weight.
+
+### Cohesion: the derivation
+
+```
+similarity[i][j]     = dot( affinity_row[i], affinity_row[j] )     the 2-step kernel A^2
+prototype_size[k]    = sum over i of assign[i][k]
+within_similarity[k] = sum over i,j of assign[i][k]*assign[j][k]*similarity[i][j]
+cohesion             = ( sum over k of within_similarity[k]/prototype_size[k] ) / n_cells
+cohesion_loss        = -cohesion
+```
+
+**Step 1, what to measure.** Average similarity over all member pairs:
+`within_similarity[k] / size[k]^2` -- a ratio of two quadratics, hence intensive and
+scale-free in size. A 20-cell state is as viable as a 2000-cell one.
+
+**Step 2, how to combine over prototypes. Average over CELLS, not over prototypes.**
+Averaging over prototypes is degenerate: a 1-cell prototype has cohesion 1.0 by
+construction (a cell is perfectly similar to itself), so the model learns to peel single
+cells into their own slots and the score climbs while the partition shatters:
+
+```
+998 cells in one bad cluster (cohesion 0.10) + 2 singletons (cohesion 1.0)
+  average over PROTOTYPES  (0.10+1.0+1.0)/3     = 0.70   "excellent"
+  average over CELLS       (998*0.10+1+1)/1000  = 0.102  "almost every cell is misplaced"
+```
+
+**The `/size` and not `/size^2` is NOT a weighting choice.** Averaging over cells gives it
+automatically: `sum_i my_fit[i]` with `my_fit[i] = sum_j assign[j][k]*sim[i][j]/size[k]`
+expands exactly to `sum_k within_similarity[k]/size[k]`. The square cancels.
+
+**It equals SEACells' objective -- verified numerically to 1.8e-12.** SEACells minimizes
+`||M - M B A||_F^2`. In the hard-assignment limit that expands to
+
+```
+  sum over cells of ||row[i]||^2           <- CONSTANT, partition-free
+- sum over k of within_dot[k] / size[k]    <- exactly our cohesion numerator
+```
+
+so our term is a soft, differentiable, minibatch form of the objective SEACells itself
+optimizes. Far stronger framing for the paper than "kernel k-means, novelty uncertain".
+(Dhillon/Guan/Kulis KDD 2004 additionally prove weighted kernel k-means equals normalized
+cut / normalized association -- the same family as the published nassoc loss.)
+
+**No merge bias.** Merging k and j changes cohesion by
+
+```
+n_k * n_j * ( 2*cross_similarity - cohesion_k - cohesion_j ) / ( n_k + n_j )
+=> merging helps IFF  2*cross > cohesion_k + cohesion_j
+```
+
+a real data-dependent test that well-separated groups fail. Measured on the six most
+strongly-coupled Leiden communities on bk02 -- the actual merge candidates -- cohesion
+DROPS on every one, by 0.3-0.7% of its value.
+
+**Gradient.** `d(loss)/d assign[i][k] = -( 2*mean_sim_to_k(i) - cohesion[k] ) / n_cells`.
+A cell joins k when it is more like k's members than they are like each other, i.e. when
+it would IMPROVE k. The `-cohesion[k]` term is a quality tax making an already-tight
+prototype less attractive -- the self-limiting force that stops good prototypes growing
+forever. **No size, volume or degree appears**, which is the whole point: CPM's,
+modularity's and DMoN's charges are all functions of the assignment COLUMN SUMS only, so
+none of them can move a cell for similarity reasons at all.
+
+**Which similarity measure: it does not matter.** Seven were measured on bk02 (dot,
+cosine, Dice, Resource-Allocation, Adamic-Adar, Hellinger, lazy `A+I`). Discrimination
+between the Leiden and random partitions ranged only 50.8x to 53.8x -- smaller than seed
+noise. Gram density was **3.37% for every one of them**, because they all merely reweight
+the same nonzero pattern.
+
+**The limitation that DOES matter: 96.6% of cell pairs have similarity exactly zero.**
+Two cells sharing no neighbour score 0 under any formula, so cohesion only ever sees pairs
+within 2 hops. It is a *local-but-deeper* term (the community loss sees 1 hop), **not** the
+batch-global view it was meant to supply. The off-diagonal remains the only genuinely
+global term -- a second reason to keep both rather than have cohesion replace nassoc.
+
+### Unresolved: `cohesion_self` ([D17])
+
+Keeping the `i==j` self-pairs is SEACells-exact. But measured at batch 1024 / K=200 the
+self part equals `K_live/n_batch = 0.1875` -- **71% of the Leiden value (0.2627) and 97%
+of the random value (0.1937)**. For HARD assignments `sum_i assign^2 / sum_i assign = 1`
+exactly, so it is a constant with no gradient. For SOFT ones it is below 1 and measures
+ASSIGNMENT SHARPNESS, so it has a live gradient rewarding "sharpen assignments, keep more
+slots alive" rather than "group similar cells". The risk is that the model takes the cheap
+route (raise confidence) instead of the real one (learn the grouping). With K fixed at 200
+that pressure is arguably wanted. Both sides are being run (`cod_A` self=1, `cod_B`/
+`cod_C` self=0) rather than guessed.
+
+### Two corrections recorded so they are not repeated
+
+1. I claimed "splitting the largest community improves cohesion, k-means property holds".
+   The measured gain was **+0.000474 against a K/n bookkeeping gain of +0.000499** -- the
+   term was rewarding *any* split equally. I then called K/n an artifact; that was also
+   wrong. It is the standard k-means property that more clusters always fit better, and
+   with K fixed it is desirable. Both statements retracted the same day.
+2. I recommended raising `nassoc_alpha` to 3 or 10. Measurement put parity at **3,806x**,
+   so the recommendation was wrong by three orders of magnitude and would have changed
+   nothing. Always measure a term's scale against the term it is meant to balance before
+   proposing a weight.

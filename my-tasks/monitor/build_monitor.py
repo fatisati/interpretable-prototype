@@ -38,7 +38,7 @@ OUT = os.path.join(HERE, "index.html")
 VOL = "scproto-data"
 
 # Only runs whose folder name starts with one of these is pulled from the volume.
-RUN_PREFIXES = ("nao_", "coh_", "modu_", "modupb_", "cpmk_", "repro_paper_")
+RUN_PREFIXES = ("nao_", "coh_", "cod_", "modu_", "modupb_", "cpmk_", "repro_paper_")
 DATASETS = ("s28nsc", "pancreas")
 
 # Where to look for local Modal run logs (epoch traces for in-flight runs).
