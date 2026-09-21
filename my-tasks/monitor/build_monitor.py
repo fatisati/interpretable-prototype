@@ -179,6 +179,23 @@ def collect():
                 m = json.load(open(mpath, encoding="utf-8", errors="replace"))
             except Exception:
                 m = {}
+        # [2026-09-21] K_live ALONE IS NOT A HEALTH METRIC. A run can show K_live=192 and
+        # still be a soft collapse: median metacell size 15 against a mean of 292, i.e. a
+        # few enormous prototypes plus ~190 slivers. That run scored DGE 0.68 while one
+        # with K_live=200 and median 288 scored 0.82. Median size is the column that
+        # separates them, so it is pulled and shown next to K_live.
+        spath = pull(ds, name, "size_per_mc.csv")
+        med_size = mx_med = None
+        if spath and os.path.exists(spath):
+            try:
+                v = sorted(int(float(r.split(",")[-1])) for r in
+                           open(spath, encoding="utf-8", errors="replace").read()
+                           .splitlines()[1:] if r.strip())
+                if v:
+                    med_size = v[len(v) // 2]
+                    mx_med = round(v[-1] / max(med_size, 1), 1)
+            except Exception:
+                pass
         cpath = pull(ds, name, "purity_per_mc.csv")
         k_live = None
         if cpath and os.path.exists(cpath):
@@ -195,7 +212,7 @@ def collect():
             "modularity": m.get("modularity"),
             "coverage": m.get("coverage"),
             "dead": m.get("n_unused_protos"),
-            "k_live": k_live,
+            "k_live": k_live, "med_size": med_size, "mx_med": mx_med,
             "complete": bool(m.get("weighted_mean_cell_type_purity") is not None),
         })
     data["runs"].sort(key=lambda r: (r["dataset"], not r["complete"], r["name"]))
@@ -307,7 +324,8 @@ def build(data):
         B.append(f"<h2>{ds}</h2><div class='wrap'><table><tr>"
                  "<th>run</th><th>config</th><th>purity</th><th>niche pur</th>"
                  "<th>batch ent</th><th>modularity</th><th>coverage</th>"
-                 "<th>dead</th><th>K live</th><th class='note'>note</th></tr>")
+                 "<th>dead</th><th>K live</th><th>med size</th><th>max/med</th>"
+                 "<th class='note'>note</th></tr>")
         for r in runs:
             cls = "" if r["complete"] else ' class="live"'
             B.append(
@@ -315,11 +333,13 @@ def build(data):
                 + fmt(r["w_purity"]) + fmt(r["w_niche"]) + fmt(r["b_entropy"])
                 + fmt(r["modularity"]) + fmt(r["coverage"], 3)
                 + fmt(r["dead"], 0, bad=20) + fmt(r["k_live"], 0)
+                + fmt(r["med_size"], 0) + fmt(r["mx_med"], 1)
                 + f"<td class='note'>{'' if r['complete'] else 'running / eval in progress'}</td></tr>")
         for name, wp, wn, mod, cov, note in REFERENCES.get(ds, []):
             B.append(f"<tr class='ref'><td>{name}</td><td class='cfg'>reference</td>"
                      + fmt(wp) + fmt(wn) + "<td>--</td>" + fmt(mod) + fmt(cov, 3)
-                     + "<td>--</td><td>--</td>" + f"<td class='note'>{note}</td></tr>")
+                     + "<td>--</td><td>--</td><td>--</td><td>--</td>"
+                     + f"<td class='note'>{note}</td></tr>")
         B.append("</table></div>")
     return "\n".join(B)
 

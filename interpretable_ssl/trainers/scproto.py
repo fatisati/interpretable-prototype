@@ -1274,6 +1274,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         cohesion_row_norm = getattr(self, 'cohesion_row_norm', 'l2')      # [D14]
         cohesion_self = int(getattr(self, 'cohesion_self', 1))            # [D17]
         cohesion_sim = getattr(self, 'cohesion_sim', 'gram')              # [D18]
+        cohesion_form = getattr(self, 'cohesion_form', 'perc')            # [D21]
         modularity_res = float(getattr(self, 'modularity_res', 1.0))
         modularity_agg = str(getattr(self, 'modularity_agg', 'glob'))
         modularity_res_pbch = float(getattr(self, 'modularity_res_pbch', 0.0) or 0.0)
@@ -2385,7 +2386,17 @@ class SCProtoTrainer(AdoptiveTrainer):
                 # possible_pairs it carries no E[X^2] != E[X]^2 inflation and needs no
                 # detached-EMA correction. Clamp only guards a fully-empty prototype,
                 # which contributes 0 to both numerator and the size sum.
-                cohesion = (_cpair / _csize.clamp(min=1e-8)).sum() / float(_Sc.shape[0])
+                if cohesion_form == 'qwcw':
+                    # [D21] MISSING internal connections: size^2 - within. Gradient is
+                    # 2*(size[k] - similarity_of_i_to_k), so a well-fitting cell joins a
+                    # group of ANY size for free while a poorly-fitting one pays O(size).
+                    # That is the O(m) size control 'perc' lacks (its strength decays 1/m),
+                    # and it targets DENSITY, the quantity measured to separate good
+                    # partitions from bad.
+                    _nb = float(_Sc.shape[0])
+                    cohesion = 1.0 - ((_csize ** 2 - _cpair).sum() / (_nb ** 2))
+                else:
+                    cohesion = (_cpair / _csize.clamp(min=1e-8)).sum() / float(_Sc.shape[0])
                 cohesion_loss = 1.0 - cohesion
                 if not getattr(self, '_coh_checked', False):
                     _cv = float(cohesion.item())

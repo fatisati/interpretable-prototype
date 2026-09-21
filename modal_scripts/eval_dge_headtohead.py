@@ -46,12 +46,14 @@ image = (
 volume = modal.Volume.from_name("scproto-data")
 
 # substrings that uniquely identify each run folder under /vol/models/s28nsc
+# Round 2: the arms WITHOUT an off-diagonal, which are the only ones with a healthy size
+# distribution (rt2_A median 136 vs 13-15 for every arm carrying one). If their DGE is
+# decent then cohesion is fine and the off-diagonal was the entire problem.
 ARMS = {
-    "cod_C  cohesion 2hop l=10": ["cod_C_self0_l10"],
-    "rat_B  ratio-assoc l=20":   ["rat_B_l20"],
-    "nao_C  nassoc alpha=2000":  ["nao_C_alpha2000_min"],
-    "modu   modularity l=10":    ["modu_L16_r19_l10_uOFF"],
-    "SEACells bk02 K=200":       ["seacell_X_bklam02_K200"],
+    "fin_A  hinge off-diag + split-reinit": ["fin_A_hinge_splt"],
+    "fin_C  no off-diag + split-reinit":    ["fin_C_noOD_splt"],
+    "modu   modularity l=10":               ["modu_L16_r19_l10_uOFF"],
+    "SEACells bk02 K=200":                  ["seacell_X_bklam02_K200"],
 }
 
 

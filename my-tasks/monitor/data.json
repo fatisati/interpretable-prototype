@@ -1,5 +1,5 @@
 {
- "generated": "2026-09-21 12:45:49",
+ "generated": "2026-09-21 13:21:34",
  "runs": [
   {
    "dataset": "pancreas",
@@ -12,6 +12,8 @@
    "coverage": 0.9285714285714286,
    "dead": 0,
    "k_live": 220,
+   "med_size": 2,
+   "mx_med": 878.0,
    "complete": true
   },
   {
@@ -25,6 +27,8 @@
    "coverage": 0.8571428571428571,
    "dead": 2,
    "k_live": 218,
+   "med_size": 40,
+   "mx_med": 11.4,
    "complete": true
   },
   {
@@ -38,6 +42,8 @@
    "coverage": 0.9285714285714286,
    "dead": 40,
    "k_live": 180,
+   "med_size": 38,
+   "mx_med": 13.3,
    "complete": true
   },
   {
@@ -51,6 +57,8 @@
    "coverage": 0.7857142857142857,
    "dead": 0,
    "k_live": 220,
+   "med_size": 72,
+   "mx_med": 2.3,
    "complete": true
   },
   {
@@ -64,6 +72,8 @@
    "coverage": 0.7857142857142857,
    "dead": 188,
    "k_live": 32,
+   "med_size": 485,
+   "mx_med": 3.8,
    "complete": true
   },
   {
@@ -77,6 +87,8 @@
    "coverage": 0.9285714285714286,
    "dead": 0,
    "k_live": 220,
+   "med_size": 5,
+   "mx_med": 243.4,
    "complete": true
   },
   {
@@ -90,6 +102,53 @@
    "coverage": 1.0,
    "dead": 0,
    "k_live": 220,
+   "med_size": 4,
+   "mx_med": 355.2,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "cod_A_self1_l1",
+   "cfg": "NP200 LD16 aff-bk02 lna1.0 naa10.0 naon-min prie2 lcoh1.0",
+   "w_purity": 0.7972202728377522,
+   "w_niche": 0.4419834654160177,
+   "b_entropy": -1.000000082690371e-10,
+   "modularity": 0.5943920393585234,
+   "coverage": 0.6666666666666666,
+   "dead": 13,
+   "k_live": 187,
+   "med_size": 13,
+   "mx_med": 275.2,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "cod_B_self0_l1",
+   "cfg": "NP200 LD16 aff-bk02 lna1.0 naa10.0 naon-min prie2 lcoh1.0",
+   "w_purity": 0.8239563185731646,
+   "w_niche": 0.4509354192698081,
+   "b_entropy": -1.000000082690371e-10,
+   "modularity": 0.5798780900669123,
+   "coverage": 0.8888888888888888,
+   "dead": 9,
+   "k_live": 191,
+   "med_size": 14,
+   "mx_med": 265.9,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "cod_C_self0_l10",
+   "cfg": "NP200 LD16 aff-bk02 lna1.0 naa10.0 naon-min prie2 lcoh10.0",
+   "w_purity": 0.8420998579326635,
+   "w_niche": 0.4668709241223491,
+   "b_entropy": -1.000000082690371e-10,
+   "modularity": 0.5577082186925222,
+   "coverage": 0.9444444444444444,
+   "dead": 8,
+   "k_live": 192,
+   "med_size": 15,
+   "mx_med": 213.9,
    "complete": true
   },
   {
@@ -103,6 +162,8 @@
    "coverage": null,
    "dead": 163,
    "k_live": 37,
+   "med_size": 641,
+   "mx_med": 8.8,
    "complete": true
   },
   {
@@ -116,6 +177,8 @@
    "coverage": 0.5555555555555556,
    "dead": 174,
    "k_live": 26,
+   "med_size": 1841,
+   "mx_med": 3.0,
    "complete": true
   },
   {
@@ -129,6 +192,53 @@
    "coverage": null,
    "dead": 5,
    "k_live": 195,
+   "med_size": 42,
+   "mx_med": 45.9,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "fin_A_hinge_splt",
+   "cfg": "NP200 LD16 aff-bk02 lna1.0 naa10.0 naon-min prie2 lcoh5.0",
+   "w_purity": 0.8131557776902932,
+   "w_niche": 0.4428392927442959,
+   "b_entropy": -1.000000082690371e-10,
+   "modularity": 0.4631686242327026,
+   "coverage": 0.7777777777777778,
+   "dead": 6,
+   "k_live": 194,
+   "med_size": 86,
+   "mx_med": 40.6,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "fin_B_hinge_splt_use",
+   "cfg": "NP200 LD16 aff-bk02 lpu0.1 lna1.0 naa10.0 naon-min prie2 lcoh5.0",
+   "w_purity": 0.799394074251579,
+   "w_niche": 0.4415726682984441,
+   "b_entropy": -1.000000082690371e-10,
+   "modularity": 0.6002943093937773,
+   "coverage": 0.7777777777777778,
+   "dead": 1,
+   "k_live": 199,
+   "med_size": 11,
+   "mx_med": 403.3,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "fin_C_noOD_splt",
+   "cfg": "NP200 LD16 aff-bk02 naa0.0 naon-min prie2 lcoh5.0",
+   "w_purity": 0.766033924995293,
+   "w_niche": 0.4311658079865806,
+   "b_entropy": -1.000000082690371e-10,
+   "modularity": 0.43801850369504663,
+   "coverage": null,
+   "dead": 4,
+   "k_live": 196,
+   "med_size": 97,
+   "mx_med": 45.7,
    "complete": true
   },
   {
@@ -142,6 +252,8 @@
    "coverage": null,
    "dead": 0,
    "k_live": 200,
+   "med_size": 267,
+   "mx_med": 4.3,
    "complete": true
   },
   {
@@ -155,6 +267,8 @@
    "coverage": null,
    "dead": 0,
    "k_live": 200,
+   "med_size": 289,
+   "mx_med": 2.7,
    "complete": true
   },
   {
@@ -168,6 +282,8 @@
    "coverage": null,
    "dead": 42,
    "k_live": 158,
+   "med_size": 322,
+   "mx_med": 4.9,
    "complete": true
   },
   {
@@ -181,6 +297,8 @@
    "coverage": 0.6666666666666666,
    "dead": 169,
    "k_live": 31,
+   "med_size": 1265,
+   "mx_med": 4.0,
    "complete": true
   },
   {
@@ -194,6 +312,83 @@
    "coverage": 0.9444444444444444,
    "dead": 30,
    "k_live": 170,
+   "med_size": 9,
+   "mx_med": 465.1,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "rat_A_l5",
+   "cfg": "NP200 LD16 aff-bk02 lna1.0 naa10.0 naon-min prie2 lcoh5.0",
+   "w_purity": 0.8162196395255293,
+   "w_niche": 0.4485562192971946,
+   "b_entropy": -1.000000082690371e-10,
+   "modularity": 0.5914965371113369,
+   "coverage": 0.7777777777777778,
+   "dead": 9,
+   "k_live": 191,
+   "med_size": 13,
+   "mx_med": 257.2,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "rat_B_l20",
+   "cfg": "NP200 LD16 aff-bk02 lna1.0 naa10.0 naon-min prie2 lcoh20.0",
+   "w_purity": 0.8214915358677233,
+   "w_niche": 0.4463139516971056,
+   "b_entropy": -1.000000082690371e-10,
+   "modularity": 0.5788746690576565,
+   "coverage": 0.8888888888888888,
+   "dead": 8,
+   "k_live": 192,
+   "med_size": 14,
+   "mx_med": 246.1,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "rt2_A_noOD",
+   "cfg": "NP200 LD16 aff-bk02 naa0.0 naon-min prie2 lcoh5.0",
+   "w_purity": 0.730979237629016,
+   "w_niche": 0.42647587422761585,
+   "b_entropy": -1.000000082690371e-10,
+   "modularity": 0.2919041386312641,
+   "coverage": null,
+   "dead": 2,
+   "k_live": 198,
+   "med_size": 136,
+   "mx_med": 25.9,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "rt2_B_weakOD",
+   "cfg": "NP200 LD16 aff-bk02 lna1.0 naa2.0 naon-min prie2 lcoh5.0",
+   "w_purity": 0.7974427879431046,
+   "w_niche": 0.42231655341218355,
+   "b_entropy": -1.000000082690371e-10,
+   "modularity": 0.6143953881117452,
+   "coverage": 0.7222222222222222,
+   "dead": 14,
+   "k_live": 186,
+   "med_size": 13,
+   "mx_med": 376.8,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "rt2_C_usageON",
+   "cfg": "NP200 LD16 aff-bk02 lpu0.1 lna1.0 naa10.0 naon-min prie2 lcoh5.0",
+   "w_purity": 0.8055731475617479,
+   "w_niche": 0.4251065505023706,
+   "b_entropy": -1.000000082690371e-10,
+   "modularity": 0.6091916035088075,
+   "coverage": null,
+   "dead": 3,
+   "k_live": 197,
+   "med_size": 12,
+   "mx_med": 333.5,
    "complete": true
   }
  ],
@@ -652,6 +847,96 @@
      "epoch": 10,
      "loss": 17.8609,
      "unused": 131
+    },
+    {
+     "epoch": 6,
+     "loss": 17.7526,
+     "unused": 165
+    },
+    {
+     "epoch": 10,
+     "loss": 19.2159,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 17.7715,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 19.2019,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 17.6906,
+     "unused": 153
+    },
+    {
+     "epoch": 12,
+     "loss": 19.1954,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 17.7357,
+     "unused": 0
+    },
+    {
+     "epoch": 13,
+     "loss": 19.1803,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 17.6738,
+     "unused": 170
+    },
+    {
+     "epoch": 14,
+     "loss": 19.1751,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 17.7161,
+     "unused": 0
+    },
+    {
+     "epoch": 15,
+     "loss": 19.1666,
+     "unused": 0
+    },
+    {
+     "epoch": 16,
+     "loss": 19.1581,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 17.6672,
+     "unused": 157
+    },
+    {
+     "epoch": 13,
+     "loss": 17.6917,
+     "unused": 0
+    },
+    {
+     "epoch": 14,
+     "loss": 17.6505,
+     "unused": 169
+    },
+    {
+     "epoch": 15,
+     "loss": 17.6906,
+     "unused": 0
+    },
+    {
+     "epoch": 16,
+     "loss": 17.6527,
+     "unused": 152
     }
    ],
    "reinit": [
@@ -661,13 +946,19 @@
     149,
     182,
     152,
-    141
+    141,
+    180,
+    180,
+    180,
+    180,
+    180,
+    180
    ],
    "cohesion": 0.0065,
    "nassoc": {
-    "total": 0.0855,
-    "diag": 0.067,
-    "offdiag": 0.009
+    "total": 0.0791,
+    "diag": 0.085,
+    "offdiag": 0.007
    },
    "log": "fin.log"
   },
@@ -986,6 +1277,46 @@
      "epoch": 11,
      "loss": 17.7021,
      "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 17.771,
+     "unused": 11
+    },
+    {
+     "epoch": 11,
+     "loss": 19.6644,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 17.6512,
+     "unused": 137
+    },
+    {
+     "epoch": 12,
+     "loss": 19.6548,
+     "unused": 0
+    },
+    {
+     "epoch": 13,
+     "loss": 19.6124,
+     "unused": 0
+    },
+    {
+     "epoch": 14,
+     "loss": 19.5925,
+     "unused": 0
+    },
+    {
+     "epoch": 15,
+     "loss": 19.5882,
+     "unused": 0
+    },
+    {
+     "epoch": 16,
+     "loss": 19.5856,
+     "unused": 0
     }
    ],
    "reinit": [
@@ -998,13 +1329,15 @@
     169,
     179,
     169,
+    179,
+    168,
     179
    ],
    "cohesion": 0.0067,
    "nassoc": {
-    "total": 0.1326,
-    "diag": 0.069,
-    "offdiag": 0.007
+    "total": 0.1896,
+    "diag": 0.072,
+    "offdiag": 0.006
    },
    "log": "rt2.log"
   },
