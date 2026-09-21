@@ -1,5 +1,5 @@
 {
- "generated": "2026-09-21 12:17:10",
+ "generated": "2026-09-21 12:20:30",
  "runs": [
   {
    "dataset": "pancreas",
@@ -349,6 +349,21 @@
      "epoch": 10,
      "loss": 13.8718,
      "unused": 1
+    },
+    {
+     "epoch": 10,
+     "loss": 22.6996,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 13.9496,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 13.9127,
+     "unused": 0
     }
    ],
    "reinit": [
@@ -365,12 +380,13 @@
     167,
     149,
     174,
-    167
+    167,
+    151
    ],
    "cohesion": 0.0236,
    "nassoc": {
-    "total": 0.1864,
-    "diag": 0.09,
+    "total": 0.2227,
+    "diag": 0.092,
     "offdiag": 0.006
    },
    "log": "cod.log"
@@ -521,6 +537,16 @@
      "epoch": 4,
      "loss": 32.8779,
      "unused": 1
+    },
+    {
+     "epoch": 5,
+     "loss": 17.957,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 32.8583,
+     "unused": 0
     }
    ],
    "reinit": [
@@ -531,8 +557,8 @@
    ],
    "cohesion": 0.0064,
    "nassoc": {
-    "total": 0.2471,
-    "diag": 0.086,
+    "total": 0.2535,
+    "diag": 0.09,
     "offdiag": 0.006
    },
    "log": "rat.log"

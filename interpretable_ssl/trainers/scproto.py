@@ -1263,6 +1263,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             nassoc_gamma = nassoc_gamma * float(getattr(self, '_nassoc_gamma_scale_factor', 1.0))
         nassoc_offdiag_norm = getattr(self, 'nassoc_offdiag_norm', 'sqrt')
         nassoc_offdiag_agg = getattr(self, 'nassoc_offdiag_agg', 'pair')   # [D16]
+        nassoc_offdiag_thresh = float(getattr(self, 'nassoc_offdiag_thresh', 0.0))  # [D19]
         nassoc_size_scale = getattr(self, 'nassoc_size_scale', 'btch')
         nassoc_cpm_norm = getattr(self, 'nassoc_cpm_norm', 'pair')
         nassoc_cpm_free = int(getattr(self, 'nassoc_cpm_free', 0))
@@ -2078,6 +2079,13 @@ class SCProtoTrainer(AdoptiveTrainer):
                             """
                             _om = ~torch.eye(M_mat.shape[0], dtype=torch.bool,
                                              device=M_mat.device)
+                            if nassoc_offdiag_agg == 'hnge':
+                                # [D19] only EXCESS leakage is charged: ordinary adjacency
+                                # between neighbouring niches is free, so the term cannot be
+                                # satisfied by spreading and it targets the one pathology
+                                # ratio association is blind to (two prototypes, same cells).
+                                _ex = (M_mat - nassoc_offdiag_thresh).clamp(min=0.0)
+                                return ((_ex ** 2) * _om).sum(dim=1).mean()
                             if nassoc_offdiag_agg == 'pclu':
                                 return ((M_mat ** 2) * _om).sum(dim=1).mean()
                             return (M_mat[_om] ** 2).mean()
@@ -2150,10 +2158,13 @@ class SCProtoTrainer(AdoptiveTrainer):
                         else:
                             _om_agg = ~torch.eye(M_agg.shape[0], dtype=torch.bool,
                                                  device=M_agg.device)
-                            offdiag_term = nassoc_alpha * (
-                                ((M_agg ** 2) * _om_agg).sum(dim=1).mean()
-                                if nassoc_offdiag_agg == 'pclu'
-                                else (M_agg[_om_agg] ** 2).mean())
+                            if nassoc_offdiag_agg == 'hnge':
+                                _exa = (M_agg - nassoc_offdiag_thresh).clamp(min=0.0)
+                                offdiag_term = nassoc_alpha * ((_exa ** 2) * _om_agg).sum(dim=1).mean()
+                            elif nassoc_offdiag_agg == 'pclu':
+                                offdiag_term = nassoc_alpha * ((M_agg ** 2) * _om_agg).sum(dim=1).mean()
+                            else:
+                                offdiag_term = nassoc_alpha * (M_agg[_om_agg] ** 2).mean()
                         nassoc_loss = (diag_term if nassoc_diag else 0.0) + offdiag_term
                         total_metrics['nassoc_diag_val'] += diag_M.mean().item()
                         total_metrics['nassoc_offdiag_val'] += M_agg[off_mask].mean().item()
@@ -2623,7 +2634,37 @@ class SCProtoTrainer(AdoptiveTrainer):
                         # worst-served cells in the last minibatch: lowest max assignment
                         _served = _last_soft_assign.max(dim=1).values
                         _n_take = min(len(_dead), _served.numel())
-                        _worst = torch.argsort(_served)[:_n_take]
+                        if getattr(self, 'proto_reinit_target', 'wrst') == 'splt':
+                            # [D20] Split the prototypes holding the MOST mass instead of
+                            # chasing the worst-served cell. The old target is an outlier by
+                            # construction -- nothing to claim -- which is why the revival
+                            # count never fell in any configuration. Here each revived slot
+                            # is seeded from a cell belonging to an overloaded prototype, so
+                            # it lands where there is real mass, and the k-means splitting
+                            # property says the objective improves when such a group splits.
+                            _own = _last_soft_assign.argmax(dim=1)
+                            _mass = _last_soft_assign.sum(dim=0)
+                            _rank = torch.argsort(_mass, descending=True)
+                            _pick = []
+                            for _p in _rank:
+                                _cells = (_own == _p).nonzero(as_tuple=True)[0]
+                                if _cells.numel() < 2:
+                                    continue
+                                # take the members that fit their own prototype WORST --
+                                # the sub-population most likely to be a distinct state
+                                _fit = _last_soft_assign[_cells, _p]
+                                _k = max(1, min(_cells.numel() // 2,
+                                                _n_take - len(_pick)))
+                                _pick.append(_cells[torch.argsort(_fit)[:_k]])
+                                if sum(x.numel() for x in _pick) >= _n_take:
+                                    break
+                            if _pick:
+                                _worst = torch.cat(_pick)[:_n_take]
+                                _n_take = _worst.numel()
+                            else:
+                                _worst = torch.argsort(_served)[:_n_take]
+                        else:
+                            _worst = torch.argsort(_served)[:_n_take]
                         _new = _last_z_unique[_worst]
                         _new = F.normalize(_new, dim=1) if self.l2norm == 1 else _new
                         self.model.prototypes.weight[_dead[:_n_take]] = _new
