@@ -151,6 +151,8 @@ ABBREVIATIONS = {
     'lambda_collapse': 'lcol',
     'proto_reinit_every': 'prie',
     'proto_reinit_thresh': 'prit',
+    'lambda_cohesion': 'lcoh',
+    'cohesion_row_norm': 'crn',
     'lambda_sim_recon': 'lsr',
     'sim_recon_hidden_dim': 'srhd',
     'sim_recon_target': 'srt',

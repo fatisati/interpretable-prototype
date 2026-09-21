@@ -1268,6 +1268,8 @@ class SCProtoTrainer(AdoptiveTrainer):
         nassoc_exact = int(getattr(self, 'nassoc_exact', 0))
         nassoc_ht = int(getattr(self, 'nassoc_ht', 0))
         lambda_modularity = float(getattr(self, 'lambda_modularity', 0.0))
+        lambda_cohesion = float(getattr(self, 'lambda_cohesion', 0.0))   # [D14]
+        cohesion_row_norm = getattr(self, 'cohesion_row_norm', 'l2')      # [D14]
         modularity_res = float(getattr(self, 'modularity_res', 1.0))
         modularity_agg = str(getattr(self, 'modularity_agg', 'glob'))
         modularity_res_pbch = float(getattr(self, 'modularity_res_pbch', 0.0) or 0.0)
@@ -1339,6 +1341,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             'loss_pos': 0, 'loss_neg': 0, 'recon': 0, 'kl': 0,
             'proto_recon': 0, 'r1r2': 0, 'proto_attract': 0, 'proto_anchor': 0, 'nassoc': 0, 'proto_usage': 0, 'n_unused_protos': 0,
             'nassoc_diag_val': 0, 'nassoc_offdiag_val': 0, 'sim_recon': 0,
+            'cohesion_term': 0,
             'modularity_term': 0,
             'sim_recon_pred_std': 0, 'sim_recon_target_std': 0,
             # collapse watch (see evaluation/collapse_diagnostics.py for the eval-time
@@ -1660,6 +1663,23 @@ class SCProtoTrainer(AdoptiveTrainer):
                         n_k_ema = ema_alpha * self._n_k_ema.to(self.device) + (1 - ema_alpha) * n_k
                         self._n_k_ema = n_k_ema.detach().cpu()
                     proto_usage_loss = torch.log(1.0 + 1.0 / n_k_ema.clamp(min=1e-8)).mean()
+
+            # [D13] Keep the usage EMA alive for proto_reinit_every even when the usage
+            # LOSS is off. The reinit path below reads _c_k_ema/_n_k_ema to decide which
+            # prototypes are dead, but both were only ever written inside the
+            # `lambda_proto_usage > 0` branch above. With usage OFF they stayed None, so
+            # `if _usage is not None` was False and reinit silently did NOTHING -- in every
+            # run ever done, including the ones whose folder names carry `prie`. That is
+            # exactly backwards: usage OFF is the configuration where prototypes actually
+            # die, so it is the only one where reinit is needed. Tracked under no_grad, so
+            # this is pure bookkeeping and adds no gradient path.
+            if (lambda_proto_usage == 0 and use_proto_sim
+                    and int(getattr(self, 'proto_reinit_every', 0) or 0) > 0):
+                with torch.no_grad():
+                    _nk = soft_assign.sum(dim=0).detach().cpu()
+                    _a = float(getattr(self, 'usage_nk_alpha', 0.9))
+                    self._n_k_ema = (_nk if self._n_k_ema is None
+                                     else _a * self._n_k_ema + (1.0 - _a) * _nk)
 
             # DMoN collapse regularization (Tsitsulin et al., JMLR 2023, eq. 5):
             #   (sqrt(K)/n_cells) * ||soft_sizes||_2 - 1
@@ -2223,6 +2243,87 @@ class SCProtoTrainer(AdoptiveTrainer):
                 modularity_loss = -modularity
                 loss = loss + lambda_modularity * modularity_loss
                 total_metrics['modularity_term'] += modularity.item()
+
+            # === [D14] AFFINITY-VECTOR COHESION =================================
+            # The defect this fixes: CPM's, modularity's and DMoN's charges are all
+            # functions of the assignment COLUMN SUMS only --
+            #     d(CPM charge)/d assign[i,k]        = gamma * (size[k] - assign[i,k])
+            #     d(modularity charge)/d assign[i,k] = res * degree[i] * volume[k]/total_degree
+            #     d(DMoN collapse)/d assign[i,k]     proportional to size[k]/||sizes||
+            # NONE contains a term relating cell i to prototype k, so none can move a
+            # cell for SIMILARITY reasons -- only for size reasons. That is why they all
+            # push toward uniform sizes (sum_k size[k]^2 is minimised at equal sizes)
+            # while the partition we want is uneven.
+            #
+            # This term instead measures how alike the members of a prototype are, using
+            # each cell's AFFINITY VECTOR (its row of the affinity matrix = who it
+            # connects to) as the descriptor:
+            #
+            #   similarity(i,j) = cos(affinity_row[i], affinity_row[j])   Salton index
+            #   cohesion[k]     = sum_ij assign[i,k]*assign[j,k]*similarity(i,j) / size[k]^2
+            #   loss            = 1 - sum_k size[k]*cohesion[k] / n_cells
+            #
+            #   d(loss)/d assign[i,k] = -( mean similarity of i to k's members - cohesion[k] )
+            #
+            # i.e. cell i joins k exactly when it is MORE similar to k's members than they
+            # are to each other -- when adding it would IMPROVE k. No size, volume or
+            # degree appears. cohesion[k] is a ratio of two quadratics, hence intensive
+            # and scale-free: a 20-cell state is as viable as a 2000-cell one.
+            #
+            # Note Gram = affinity @ affinity.T is the TWO-HOP matrix, so this asks the
+            # graph a question one hop deeper than the community loss, which only ever
+            # sees direct edges. Two cells can be adjacent yet sit across a boundary;
+            # identical affinity vectors cannot.
+            #
+            # This is weighted kernel k-means. Dhillon, Guan & Kulis (KDD 2004) prove that
+            # family is equivalent to normalized cut / normalized association -- the same
+            # family as the published nassoc loss, which is why both are scale-free and
+            # CPM/modularity (grafted on from outside it) are not.
+            #
+            # SCALE (CLAUDE.md 9b): loss is bounded in [0,1] BY CONSTRUCTION and needs no
+            # calibration. similarity <= 1 entrywise and assign >= 0, so
+            # pair[k] <= size[k]^2, hence pair[k]/size[k] <= size[k]; sum_k size[k] equals
+            # the batch size exactly (rows of assign sum to 1), so the ratio is in [0,1]
+            # for ANY batch size. Self-normalising -- no minibatch scale mismatch is
+            # possible. It is asserted below on the first step rather than assumed.
+            cohesion_loss = torch.tensor(0.0, device=self.device)
+            if lambda_cohesion > 0 and use_proto_sim:
+                if not hasattr(self, '_coh_A'):
+                    import scipy.sparse as _csp
+                    _cA = _csp.csr_matrix(self.train_ds.aff_raw
+                                          if hasattr(self.train_ds, 'aff_raw')
+                                          else self.train_ds.aff).astype(np.float32)
+                    _cA.setdiag(0); _cA.eliminate_zeros()
+                    if cohesion_row_norm == 'l2':
+                        _nrm = np.sqrt(_cA.multiply(_cA).sum(axis=1)).A.ravel()
+                        _nrm[_nrm == 0] = 1.0
+                        _cA = _csp.diags(1.0 / _nrm) @ _cA
+                    self._coh_A = _csp.csr_matrix(_cA)
+                    print(f"   [D14] cohesion: affinity cached, shape={self._coh_A.shape}, "
+                          f"row_norm={cohesion_row_norm}, nnz={self._coh_A.nnz:,}")
+                _cidx = unique_idx.cpu().numpy()
+                _Ab = self._coh_A[_cidx]                       # (n_batch, N) sparse
+                _Gb = torch.as_tensor(np.asarray((_Ab @ _Ab.T).todense()),
+                                      dtype=torch.float32, device=self.device)
+                _Sc = soft_assign
+                _csize = _Sc.sum(0)                            # (K,)
+                _cpair = ((_Gb @ _Sc) * _Sc).sum(0)            # (K,) = S_k' G S_k
+                # denominator is LINEAR in the cells (size, not size^2), so unlike
+                # possible_pairs it carries no E[X^2] != E[X]^2 inflation and needs no
+                # detached-EMA correction. Clamp only guards a fully-empty prototype,
+                # which contributes 0 to both numerator and the size sum.
+                cohesion = (_cpair / _csize.clamp(min=1e-8)).sum() / float(_Sc.shape[0])
+                cohesion_loss = 1.0 - cohesion
+                if not getattr(self, '_coh_checked', False):
+                    _cv = float(cohesion.item())
+                    assert -1e-4 <= _cv <= 1.0 + 1e-4, (
+                        f"[D14] cohesion={_cv} outside its theoretical range [0,1] -- "
+                        f"this is a bug, not a tuning problem (CLAUDE.md 9b)")
+                    print(f"   [D14] cohesion epoch-1 value = {_cv:.4f} (range [0,1], "
+                          f"higher = members more alike); loss = {1.0 - _cv:.4f}")
+                    self._coh_checked = True
+                loss = loss + lambda_cohesion * cohesion_loss
+                total_metrics['cohesion_term'] += cohesion.item()
 
             sim_recon_loss = torch.tensor(0.0, device=self.device)
             if lambda_sim_recon > 0 and use_proto_sim:
