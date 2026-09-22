@@ -2565,10 +2565,20 @@ class SCProtoTrainer(AdoptiveTrainer):
                 # by the zero-weight diagnostics; both want RAW affinity, never the norm.
                 _AffB = self._coh_A_aff[_cidx][:, _cidx]
                 _AffT = _to_t(_AffB)
-                _GS_aff = torch.sparse.mm(_AffT, _Sc)                    # (nb, K)
+                _GS_aff_raw = torch.sparse.mm(_AffT, _Sc)                # (nb, K), diag 0
                 _deg_b = torch.as_tensor(np.asarray(_AffB.sum(axis=1)).ravel(),
                                          dtype=torch.float32, device=self.device)
-                _dg_aff = torch.zeros(_Sc.shape[0], device=self.device)  # diag is 0
+                # [D27] self-similarity for the 1-HOP term too. A cell is maximally
+                # similar to itself in EITHER mode; the gram descriptor already gets this
+                # from cohesion_diag (its cosine diagonal is then exactly 1), but the raw
+                # affinity carries setdiag(0) -- the no-self-loop convention the graph-cut
+                # consumers need -- so the 1-hop similarity had sim[c][c] = 0 and
+                # cohesion_self could not act on it at all.
+                # No second matrix is needed: sim[c][c] = d contributes exactly
+                # d * assign[c][k] to numer[c][k], so it is one elementwise add.
+                _GS_aff = _GS_aff_raw + cohesion_diag * _Sc
+                _dg_aff = torch.full((_Sc.shape[0],), cohesion_diag,
+                                     dtype=_Sc.dtype, device=self.device)
 
                 _GS_gram = _dg_gram = None
                 if cohesion_sim != 'aff' and lambda_cohesion > 0:
@@ -2678,7 +2688,10 @@ class SCProtoTrainer(AdoptiveTrainer):
                 _redund = None
                 if _want_diag:
                     with torch.no_grad():
-                        _App = _Sc.T @ _GS_aff                     # (K, K) proto-proto mass
+                        # diagnostics use the RAW (zero-diagonal) affinity: they are
+                        # graph-cut quantities and must keep the no-self-loop convention
+                        # so they stay comparable with the nassoc numbers.
+                        _App = _Sc.T @ _GS_aff_raw                 # (K, K) proto-proto mass
                         _degb = _deg_b                             # within-batch degree
                         _volp = _Sc.T @ _degb                      # (K,) volume
                         _M = _App / torch.sqrt((_volp[:, None] + 1e-8)
