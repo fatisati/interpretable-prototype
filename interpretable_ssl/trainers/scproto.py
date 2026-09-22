@@ -2499,11 +2499,20 @@ class SCProtoTrainer(AdoptiveTrainer):
                     return torch.as_tensor(np.asarray(_sp.todense()),
                                            dtype=torch.float32, device=self.device)
 
-                # The 1-hop block is materialised unconditionally: lambda_cohesion_aff
-                # uses it as its similarity, and the redundancy/modularity diagnostics
-                # below need real affinity (not the 2-hop Gram) to be comparable with the
-                # nassoc numbers. Same cost as the slice the gram path already does.
-                _Gaff = _densify(self._coh_A_aff[_cidx][:, _cidx])
+                # [D26] The 1-hop block is an n_batch x n_batch DENSIFY -- at ~7000 unique
+                # cells that is a 196MB allocation, the same order as the Gram path's own
+                # densify. So build it only when it is actually needed: every step when
+                # lambda_cohesion_aff > 0 (it IS the similarity then), but only every
+                # coh_diag_every steps when it is wanted purely for the zero-weight
+                # diagnostics. Diagnostics are a per-epoch summary, so sampling them costs
+                # nothing real and stops them doubling the per-step cost of an arm that
+                # does not use the 1-hop term at all.
+                _diag_n = int(getattr(self, 'coh_diag_every', 50) or 0)
+                self._coh_step = getattr(self, '_coh_step', 0) + 1
+                _want_diag = _diag_n > 0 and (self._coh_step % _diag_n == 1
+                                              or not getattr(self, '_coh_checked', False))
+                _Gaff = (_densify(self._coh_A_aff[_cidx][:, _cidx])
+                         if (lambda_cohesion_aff > 0 or _want_diag) else None)
 
                 def _cohesion_from(_Gb):
                     """Aggregate one similarity matrix into a cohesion value.
@@ -2594,30 +2603,44 @@ class SCProtoTrainer(AdoptiveTrainer):
                 # MEASURED at zero weight rather than left to surface as a mystery in the
                 # metrics. Normaliser is sqrt(vol_p*vol_q) -- nassoc's own (scproto.py
                 # :1877) -- so these numbers are directly comparable with nassoc runs.
-                with torch.no_grad():
-                    _Md = _Gaff @ _Sc                              # (n_batch, K)
-                    _App = _Sc.T @ _Md                             # (K, K) proto-proto mass
-                    _degb = _Gaff.sum(1)                           # within-batch degree
-                    _volp = _Sc.T @ _degb                          # (K,) volume
-                    _M = _App / torch.sqrt((_volp[:, None] + 1e-8)
-                                           * (_volp[None, :] + 1e-8))
-                    _K = _M.shape[0]
-                    _off = _M[~torch.eye(_K, dtype=torch.bool, device=_M.device)]
-                    # m = 20: at K=200 there are 19,900 unordered off-diagonal pairs, so
-                    # 20 is the top 0.1%. Sized to catch A HANDFUL of duplicated
-                    # prototypes without being diluted by the ~19,880 unrelated pairs --
-                    # a single twinned pair shows up in _max, a systematic problem in
-                    # _top20. Both are reported because they fail differently.
-                    _topm = torch.topk(_off, min(20, _off.numel())).values
-                    total_metrics['coh_redund_mean'] += _off.mean().item()
-                    total_metrics['coh_redund_top20'] += _topm.mean().item()
-                    total_metrics['coh_redund_max'] += _off.max().item()
-                    # modularity VALUE at zero weight, batch-scale, resolution 1:
-                    #   Q = sum_p A_pp[p][p]/(2m) - sum_p (vol[p]/(2m))^2
-                    _twom = _degb.sum().clamp(min=1e-8)
-                    _q = (torch.diagonal(_App).sum() / _twom
-                          - ((_volp / _twom) ** 2).sum())
-                    total_metrics['modularity_diag'] += _q.item()
+                # Sampled every coh_diag_every steps (see above) rather than every step:
+                # they summarise an epoch, so sampling loses nothing and keeps them from
+                # doubling the per-step dense cost of an arm that has no 1-hop term.
+                _redund = None
+                if _Gaff is not None:
+                    with torch.no_grad():
+                        _Md = _Gaff @ _Sc                          # (n_batch, K)
+                        _App = _Sc.T @ _Md                         # (K, K) proto-proto mass
+                        _degb = _Gaff.sum(1)                       # within-batch degree
+                        _volp = _Sc.T @ _degb                      # (K,) volume
+                        _M = _App / torch.sqrt((_volp[:, None] + 1e-8)
+                                               * (_volp[None, :] + 1e-8))
+                        _K = _M.shape[0]
+                        _off = _M[~torch.eye(_K, dtype=torch.bool, device=_M.device)]
+                        # m = 20: at K=200 there are 19,900 unordered off-diagonal pairs,
+                        # so 20 is the top 0.1%. Sized to catch A HANDFUL of duplicated
+                        # prototypes without being diluted by the ~19,880 unrelated pairs
+                        # -- a single twinned pair shows up in max, a systematic problem
+                        # in top20. Both are reported because they fail differently.
+                        _topm = torch.topk(_off, min(20, _off.numel())).values
+                        # modularity VALUE at zero weight, batch-scale, resolution 1:
+                        #   Q = sum_p A_pp[p][p]/(2m) - sum_p (vol[p]/(2m))^2
+                        _twom = _degb.sum().clamp(min=1e-8)
+                        _q = (torch.diagonal(_App).sum() / _twom
+                              - ((_volp / _twom) ** 2).sum())
+                        _redund = {'mean': _off.mean().item(),
+                                   'top20': _topm.mean().item(),
+                                   'max': _off.max().item(),
+                                   'q': _q.item(),
+                                   'deg': _degb.mean().item()}
+                    # counted per SAMPLED step, so the epoch mean must divide by the
+                    # number of samples, not the number of steps -- track both.
+                    total_metrics['coh_redund_mean'] += _redund['mean']
+                    total_metrics['coh_redund_top20'] += _redund['top20']
+                    total_metrics['coh_redund_max'] += _redund['max']
+                    total_metrics['modularity_diag'] += _redund['q']
+                    total_metrics['coh_diag_samples'] = \
+                        total_metrics.get('coh_diag_samples', 0) + 1
 
                 if not getattr(self, '_coh_checked', False):
                     # CLAUDE.md 9b: print each term's own value against its theoretical
@@ -2651,11 +2674,12 @@ class SCProtoTrainer(AdoptiveTrainer):
                     # not compared against a differently-weighted training estimate.
                     print(f"   [D26] cohesion sample: {_Sc.shape[0]} unique cells "
                           f"(2B={2 * B}, 7B={7 * B}); mean batch degree "
-                          f"{_degb.mean().item():.4f}")
-                    print(f"   [D26] redund mean={_off.mean().item():.4f} "
-                          f"top20={_topm.mean().item():.4f} "
-                          f"max={_off.max().item():.4f}   modularity_diag="
-                          f"{_q.item():.4f}   (both at ZERO weight)")
+                          f"{_redund['deg'] if _redund else float('nan'):.4f}")
+                    if _redund is not None:
+                        print(f"   [D26] redund mean={_redund['mean']:.4f} "
+                              f"top20={_redund['top20']:.4f} "
+                              f"max={_redund['max']:.4f}   modularity_diag="
+                              f"{_redund['q']:.4f}   (both at ZERO weight)")
                     self._coh_checked = True
 
             sim_recon_loss = torch.tensor(0.0, device=self.device)
@@ -2857,6 +2881,18 @@ class SCProtoTrainer(AdoptiveTrainer):
                 if k in total_metrics:
                     total_metrics[k] += v
             n_batches += 1
+
+        # [D26] The zero-weight diagnostics are accumulated only on SAMPLED steps (every
+        # coh_diag_every), but the loop below divides every key by n_batches. Rescale them
+        # to their own sample count first, or they would be reported ~coh_diag_every times
+        # too small -- a silently wrong number is worse than no number.
+        _ds = total_metrics.pop('coh_diag_samples', 0)
+        for _k in ('coh_redund_mean', 'coh_redund_top20', 'coh_redund_max',
+                   'modularity_diag'):
+            if _ds:
+                total_metrics[_k] *= max(n_batches, 1) / _ds
+            elif _k in total_metrics:
+                total_metrics[_k] = float('nan')   # never sampled: say so, don't print 0
 
         for k in total_metrics:
             total_metrics[k] /= max(n_batches, 1)
