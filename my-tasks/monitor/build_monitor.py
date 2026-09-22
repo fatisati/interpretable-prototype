@@ -70,7 +70,11 @@ REFERENCES = {
 EPOCH_RE = re.compile(
     r">>> Epoch (\d+)/~\d+ \| loss=([\d.]+).*?unused_proto=(\d+)")
 REINIT_RE = re.compile(r"\[reinit\] revived (\d+) dead prototypes")
-COH_RE = re.compile(r"\[D14\] cohesion epoch-1 value = ([\d.]+)")
+COH_RE = re.compile(r"\[D14\] cohesion(?:\(\S+\))? epoch-1 (?:value )?= ([\d.]+)")
+# [D26] the 1-hop companion term and the zero-weight redundancy diagnostics.
+COHAFF_RE = re.compile(r"\[D26\] cohesion\(aff\) epoch-1 = ([\d.]+)")
+REDUND_RE = re.compile(r"redund mean=([\d.]+) top20=([\d.]+) max=([\d.]+)")
+SELFSHARE_RE = re.compile(r"self-share of descriptor\s+median=([\d.]+)")
 NASSOC_RE = re.compile(r"nassoc=([\d.]+) \[diag=([\d.]+) offdiag=([\d.]+)\]")
 
 
@@ -155,13 +159,25 @@ def parse_logs():
             if not ep:
                 continue
             t = traces.setdefault(key, {"arms": names, "epochs": [], "reinit": [],
-                                        "cohesion": None, "nassoc": None,
+                                        "cohesion": None, "cohesion_aff": None,
+                                        "redund": None, "selfshare": None,
+                                        "nassoc": None,
                                         "log": os.path.basename(path)})
             t["epochs"] = ep
             t["reinit"] = [int(x) for x in REINIT_RE.findall(txt)]
             m = COH_RE.search(txt)
             if m:
                 t["cohesion"] = float(m.group(1))
+            m = COHAFF_RE.search(txt)
+            if m:
+                t["cohesion_aff"] = float(m.group(1))
+            m = SELFSHARE_RE.search(txt)
+            if m:
+                t["selfshare"] = float(m.group(1))
+            m = REDUND_RE.findall(txt)
+            if m:
+                t["redund"] = {"mean": float(m[-1][0]), "top20": float(m[-1][1]),
+                               "max": float(m[-1][2])}
             m = NASSOC_RE.findall(txt)
             if m:
                 t["nassoc"] = {"total": float(m[-1][0]), "diag": float(m[-1][1]),
@@ -301,6 +317,15 @@ def build(data):
             if t["cohesion"] is not None:
                 extra.append(f'cohesion epoch-1 <b>{t["cohesion"]:.4f}</b> '
                              f'(range [0,1]; Leiden reference 0.179)')
+            if t.get("cohesion_aff") is not None:
+                extra.append(f'cohesion(aff) epoch-1 <b>{t["cohesion_aff"]:.5f}</b>')
+            if t.get("selfshare") is not None:
+                extra.append(f'descriptor self-share median <b>{t["selfshare"]:.3f}</b> '
+                             f'(high =&gt; sparse cells near-orthogonal to everything)')
+            if t.get("redund"):
+                r = t["redund"]
+                extra.append(f'proto redundancy (zero weight) mean {r["mean"]:.4f} '
+                             f'top20 <b>{r["top20"]:.4f}</b> max <b>{r["max"]:.4f}</b>')
             if t["nassoc"]:
                 n = t["nassoc"]
                 extra.append(f'nassoc {n["total"]:.4f} '

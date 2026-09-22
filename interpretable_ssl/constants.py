@@ -162,6 +162,8 @@ ABBREVIATIONS = {
     'cohesion_sim': 'csim',
     'cohesion_self': 'cslf',
     'cohesion_row_norm': 'crn',
+    'cohesion_diag': 'cdia',          # [D26] closed-neighbourhood self-affinity for the gram descriptor
+    'lambda_cohesion_aff': 'lcha',    # [D26] weight of the second (1-hop) cohesion term
     'lambda_sim_recon': 'lsr',
     'sim_recon_hidden_dim': 'srhd',
     'sim_recon_target': 'srt',

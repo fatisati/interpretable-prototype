@@ -1321,6 +1321,8 @@ class SCProtoTrainer(AdoptiveTrainer):
         cohesion_sim = getattr(self, 'cohesion_sim', 'gram')              # [D18]
         cohesion_form = getattr(self, 'cohesion_form', 'perc')            # [D21]
         cohesion_floor = float(getattr(self, 'cohesion_floor', 0.0))     # [D25]
+        cohesion_diag = float(getattr(self, 'cohesion_diag', 0.0))       # [D26]
+        lambda_cohesion_aff = float(getattr(self, 'lambda_cohesion_aff', 0.0))  # [D26]
         modularity_res = float(getattr(self, 'modularity_res', 1.0))
         modularity_agg = str(getattr(self, 'modularity_agg', 'glob'))
         modularity_res_pbch = float(getattr(self, 'modularity_res_pbch', 0.0) or 0.0)
@@ -1393,6 +1395,11 @@ class SCProtoTrainer(AdoptiveTrainer):
             'proto_recon': 0, 'r1r2': 0, 'proto_attract': 0, 'proto_anchor': 0, 'nassoc': 0, 'proto_usage': 0, 'n_unused_protos': 0,
             'nassoc_diag_val': 0, 'nassoc_offdiag_val': 0, 'sim_recon': 0,
             'cohesion_term': 0,
+            'cohesion_aff_term': 0,      # [D26] the 1-hop companion term
+            'coh_redund_mean': 0,        # [D26] prototype-prototype leakage diagnostics,
+            'coh_redund_top20': 0,       #       computed at ZERO weight -- see the block
+            'coh_redund_max': 0,         #       in the cohesion section for definitions
+            'modularity_diag': 0,        # [D26] modularity VALUE at zero weight
             'modularity_term': 0,
             'sim_recon_pred_std': 0, 'sim_recon_target_std': 0,
             # collapse watch (see evaluation/collapse_diagnostics.py for the eval-time
@@ -2395,16 +2402,77 @@ class SCProtoTrainer(AdoptiveTrainer):
             # for ANY batch size. Self-normalising -- no minibatch scale mismatch is
             # possible. It is asserted below on the first step rather than assumed.
             cohesion_loss = torch.tensor(0.0, device=self.device)
-            if lambda_cohesion > 0 and use_proto_sim:
+            cohesion_aff_loss = torch.tensor(0.0, device=self.device)
+            if (lambda_cohesion > 0 or lambda_cohesion_aff > 0) and use_proto_sim:
                 if not hasattr(self, '_coh_A'):
                     import scipy.sparse as _csp
-                    _cA = _csp.csr_matrix(self.train_ds.aff_raw
-                                          if hasattr(self.train_ds, 'aff_raw')
-                                          else self.train_ds.aff).astype(np.float32)
+                    # [D26] EXPLICIT copy. csr_matrix(X) on an already-CSR X does NOT
+                    # copy (copy=False is the default); this only ever worked because
+                    # .astype() defaults to copy=True. Without a real copy the setdiag
+                    # calls below mutate train_ds.aff ITSELF and silently corrupt degree,
+                    # edge sampling, UMAP and nassoc. scproto.py:1104 already takes the
+                    # explicit-copy route for the sim_recon target; match it.
+                    _src = (self.train_ds.aff_raw if hasattr(self.train_ds, 'aff_raw')
+                            else self.train_ds.aff)
+                    _cA = _csp.csr_matrix(_src, copy=True).astype(np.float32)
                     _cA.setdiag(0); _cA.eliminate_zeros()
+
+                    # --- 1-hop matrix, for lambda_cohesion_aff and for the redundancy
+                    # diagnostic. RAW affinity, deliberately NOT row-normalised: the
+                    # term slices this as _Ab[:, _cidx], and row-normalising first would
+                    # divide row c by ||row c|| while leaving column j alone, giving an
+                    # ASYMMETRIC matrix that is not a similarity at all.
+                    self._coh_A_aff = _csp.csr_matrix(_cA)
+
+                    # --- descriptor matrix for the 'gram' term ----------------------
+                    # [D26] cohesion_diag is the CLOSED-neighbourhood self-affinity and
+                    # is applied BEFORE the row norm, on purpose.
+                    #
+                    # The affinity is an RBF kernel, so K[c][c] = exp(0) = 1 BY
+                    # CONSTRUCTION; setdiag(0) above is the artificial step, made only
+                    # because every graph-cut consumer needs a no-self-loop convention
+                    # (scproto.py:1100-1107 says exactly this, and restores 1 for the
+                    # sim_recon target under the 'SEACells RSS convention'). Restoring
+                    # the diagonal and THEN L2-normalising yields the genuine cosine
+                    # between CLOSED neighbourhood vectors
+                    #     v[c] = aff_row[c] + delta * e_c
+                    #     Gram[c][j] = cos(v[c], v[j])
+                    # which is a well-defined similarity. Normalising first and setting
+                    # the diagonal afterwards would NOT be a cosine (rows would not be
+                    # unit norm and Gram[c][c] would be 1 + delta^2), so the order here
+                    # is load-bearing, not incidental.
+                    #
+                    # Why close the neighbourhood at all: at delta = 0, two DIRECTLY
+                    # ADJACENT cells in a locally triangle-free region get Gram[c][j] = 0
+                    # exactly -- the open-neighbourhood Gram calls two neighbours
+                    # completely dissimilar. On the un-normalised scale setdiag(delta)
+                    # adds exactly 2*delta*aff[c][j] to the off-diagonal, so delta is
+                    # also the 1-hop/2-hop MIXTURE knob (see defaults.py).
+                    #
+                    # This is a DIFFERENT diagonal from the Gram's own diagonal: a cell's
+                    # similarity to ITSELF must not count toward its prototype's
+                    # cohesion, and cohesion_form='pcex' removes Gram[c][c] below.
+                    if cohesion_diag != 0.0:
+                        # add delta*I rather than setdiag() -- setdiag on a CSR with
+                        # structural zeros reallocates the whole index array.
+                        _cA = _cA + cohesion_diag * _csp.eye(
+                            _cA.shape[0], format='csr', dtype=np.float32)
                     if cohesion_row_norm == 'l2':
                         _nrm = np.sqrt(_cA.multiply(_cA).sum(axis=1)).A.ravel()
                         _nrm[_nrm == 0] = 1.0
+                        # [D26] share of each descriptor that is the self-entry. For a
+                        # sparse-region cell ||aff_row|| is small, so the self-entry
+                        # dominates its unit vector and its cosine with everything
+                        # collapses toward 0. That is the honest reading (we know little
+                        # about that cell) but it weakens the term exactly on rare cells,
+                        # so it is MEASURED rather than assumed away.
+                        if cohesion_diag != 0.0:
+                            _share = (cohesion_diag ** 2) / np.maximum(_nrm ** 2, 1e-12)
+                            print(f"   [D26] cohesion_diag={cohesion_diag}: self-share of "
+                                  f"descriptor  median={np.median(_share):.3f}  "
+                                  f"p90={np.percentile(_share, 90):.3f}  "
+                                  f"frac>0.9={(_share > 0.9).mean():.3f}  "
+                                  f"(high => that cell is near-orthogonal to everything)")
                         _cA = _csp.diags(1.0 / _nrm) @ _cA
                     self._coh_A = _csp.csr_matrix(_cA)
                     # [D17] 'glob': one global divisor = mean ||row||^2, estimated once on a
@@ -2424,70 +2492,171 @@ class SCProtoTrainer(AdoptiveTrainer):
                     print(f"   [D14] cohesion: affinity cached, shape={self._coh_A.shape}, "
                           f"row_norm={cohesion_row_norm}, nnz={self._coh_A.nnz:,}")
                 _cidx = unique_idx.cpu().numpy()
-                _Ab = self._coh_A[_cidx]                       # (n_batch, N) sparse
-                # [D18] 'aff': use the affinity itself (1-hop) instead of the Gram of
-                # affinity rows (2-hop). The term then equals sum_k
-                # affinity_within[k]/size[k] -- RATIO association, i.e. the published
-                # diagonal with volume swapped for a cell count, which removes the merge
-                # bias and, unlike the off-diagonal alone, genuinely REDUCES total leakage
-                # instead of redistributing it.
-                _Gsrc = _Ab[:, _cidx] if cohesion_sim == 'aff' else (_Ab @ _Ab.T)
-                _Gb = torch.as_tensor(np.asarray(_Gsrc.todense()),
-                                      dtype=torch.float32, device=self.device)
-                _Gb = _Gb / float(getattr(self, '_coh_scale', 1.0) or 1.0)
                 _Sc = soft_assign
                 _csize = _Sc.sum(0)                            # (K,)
-                _cpair = ((_Gb @ _Sc) * _Sc).sum(0)            # (K,) = S_k' G S_k
-                if cohesion_self == 0:
-                    # [D17] remove the i==j self-pairs. Breaks the exact SEACells identity
-                    # but leaves ONLY the "are the members alike" signal.
-                    _cpair = _cpair - (_Sc.pow(2) * torch.diagonal(_Gb).unsqueeze(1)).sum(0)
-                # denominator is LINEAR in the cells (size, not size^2), so unlike
-                # possible_pairs it carries no E[X^2] != E[X]^2 inflation and needs no
-                # detached-EMA correction. Clamp only guards a fully-empty prototype,
-                # which contributes 0 to both numerator and the size sum.
-                if cohesion_form == 'flor':
-                    # [D25] one-sided FLOOR over ALL K slots. A dead prototype has
-                    # pair/size -> 0 and pays the full floor^2, which is the anti-collapse
-                    # signal the per-cell forms lack (there a dead slot contributes exactly
-                    # 0 and is never penalised). Size denominator -> no merge bias. Floor
-                    # measured from the graph -> reachable, unlike the published target of 1.
-                    _perk = _cpair / _csize.clamp(min=1e-8)
-                    _pen = (cohesion_floor - _perk).clamp(min=0.0).pow(2).mean()
-                    cohesion = -_pen            # loss = 1 - cohesion = 1 + penalty
-                elif cohesion_form == 'pcex':
-                    # [D23] Cell c excluded from its OWN divisor. The numerator already
-                    # excludes the self-pair (Gram diagonal zeroed below), so the only
-                    # change is the denominator: size[k] - assign[c][k] rather than
-                    # size[k]. Negligible for a 290-cell prototype, a 50% correction for
-                    # a 2-cell one -- it stops small prototypes being under-scored.
-                    _Gnd = _Gb - torch.diag(torch.diagonal(_Gb))
-                    _num = _Gnd @ _Sc                              # (n_batch, K)
-                    _den = (_csize.unsqueeze(0) - _Sc).clamp(min=1e-8)
-                    cohesion = (_Sc * (_num / _den)).sum() / float(_Sc.shape[0])
-                elif cohesion_form == 'qwcw':
-                    # [D21] MISSING internal connections: size^2 - within. Gradient is
-                    # 2*(size[k] - similarity_of_i_to_k), so a well-fitting cell joins a
-                    # group of ANY size for free while a poorly-fitting one pays O(size).
-                    # That is the O(m) size control 'perc' lacks (its strength decays 1/m),
-                    # and it targets DENSITY, the quantity measured to separate good
-                    # partitions from bad.
-                    _nb = float(_Sc.shape[0])
-                    cohesion = 1.0 - ((_csize ** 2 - _cpair).sum() / (_nb ** 2))
-                else:
-                    cohesion = (_cpair / _csize.clamp(min=1e-8)).sum() / float(_Sc.shape[0])
-                cohesion_loss = 1.0 - cohesion
+
+                def _densify(_sp):
+                    return torch.as_tensor(np.asarray(_sp.todense()),
+                                           dtype=torch.float32, device=self.device)
+
+                # The 1-hop block is materialised unconditionally: lambda_cohesion_aff
+                # uses it as its similarity, and the redundancy/modularity diagnostics
+                # below need real affinity (not the 2-hop Gram) to be comparable with the
+                # nassoc numbers. Same cost as the slice the gram path already does.
+                _Gaff = _densify(self._coh_A_aff[_cidx][:, _cidx])
+
+                def _cohesion_from(_Gb):
+                    """Aggregate one similarity matrix into a cohesion value.
+
+                    Shared by both terms so the four cohesion_form variants cannot drift
+                    apart between them. _Gb is (n_batch, n_batch).
+                    """
+                    _cpair = ((_Gb @ _Sc) * _Sc).sum(0)        # (K,) = S_k' G S_k
+                    if cohesion_self == 0:
+                        # [D17] remove the i==j self-pairs. Breaks the exact SEACells
+                        # identity but leaves ONLY the "are the members alike" signal.
+                        _cpair = _cpair - (_Sc.pow(2)
+                                           * torch.diagonal(_Gb).unsqueeze(1)).sum(0)
+                    # denominator is LINEAR in the cells (size, not size^2), so unlike
+                    # possible_pairs it carries no E[X^2] != E[X]^2 inflation and needs no
+                    # detached-EMA correction. Clamp only guards a fully-empty prototype,
+                    # which contributes 0 to both numerator and the size sum.
+                    if cohesion_form == 'flor':
+                        # [D25] one-sided FLOOR over ALL K slots. A dead prototype has
+                        # pair/size -> 0 and pays the full floor^2, which is the
+                        # anti-collapse signal the per-cell forms lack (there a dead slot
+                        # contributes exactly 0 and is never penalised). Size denominator
+                        # -> no merge bias. Floor measured from the graph -> reachable,
+                        # unlike the published target of 1.
+                        _perk = _cpair / _csize.clamp(min=1e-8)
+                        _pen = (cohesion_floor - _perk).clamp(min=0.0).pow(2).mean()
+                        return -_pen            # loss = 1 - cohesion = 1 + penalty
+                    if cohesion_form == 'pcex':
+                        # [D23] Cell c excluded from its OWN divisor AND from its own
+                        # numerator. _Gnd zeroes the similarity diagonal, so a cell's
+                        # similarity to ITSELF never counts toward its prototype's
+                        # cohesion -- which is what cohesion is supposed to mean, and is
+                        # a separate question from cohesion_diag (that one is the
+                        # self-affinity used to BUILD the descriptor). The divisor is
+                        # size[k] - assign[c][k]: negligible for a 290-cell prototype, a
+                        # 50% correction for a 2-cell one, so it stops small prototypes
+                        # being systematically under-scored.
+                        _Gnd = _Gb - torch.diag(torch.diagonal(_Gb))
+                        _num = _Gnd @ _Sc                              # (n_batch, K)
+                        _den = (_csize.unsqueeze(0) - _Sc).clamp(min=1e-8)
+                        return (_Sc * (_num / _den)).sum() / float(_Sc.shape[0])
+                    if cohesion_form == 'qwcw':
+                        # [D21] MISSING internal connections: size^2 - within. Gradient is
+                        # 2*(size[k] - similarity_of_i_to_k), so a well-fitting cell joins
+                        # a group of ANY size for free while a poorly-fitting one pays
+                        # O(size). That is the O(m) size control 'perc' lacks (its
+                        # strength decays 1/m), and it targets DENSITY, the quantity
+                        # measured to separate good partitions from bad.
+                        _nb = float(_Sc.shape[0])
+                        return 1.0 - ((_csize ** 2 - _cpair).sum() / (_nb ** 2))
+                    return (_cpair / _csize.clamp(min=1e-8)).sum() / float(_Sc.shape[0])
+
+                cohesion = torch.tensor(0.0, device=self.device)
+                cohesion_aff = torch.tensor(0.0, device=self.device)
+
+                if lambda_cohesion > 0:
+                    # [D18] 'aff': the affinity itself (1-hop) instead of the Gram of
+                    # affinity rows (2-hop). The term then equals sum_k
+                    # affinity_within[k]/size[k] -- RATIO association, i.e. the published
+                    # diagonal with volume swapped for a cell count, which removes the
+                    # merge bias and, unlike the off-diagonal alone, genuinely REDUCES
+                    # total leakage instead of redistributing it.
+                    if cohesion_sim == 'aff':
+                        _Gb = _Gaff
+                    else:
+                        _Ab = self._coh_A[_cidx]               # (n_batch, N) sparse
+                        _Gb = _densify(_Ab @ _Ab.T)
+                        _Gb = _Gb / float(getattr(self, '_coh_scale', 1.0) or 1.0)
+                    cohesion = _cohesion_from(_Gb)
+                    cohesion_loss = 1.0 - cohesion
+                    loss = loss + lambda_cohesion * cohesion_loss
+                    total_metrics['cohesion_term'] += cohesion.item()
+
+                if lambda_cohesion_aff > 0:
+                    # [D26] the 1-hop companion, always on the RAW affinity. See
+                    # defaults.py: proximity and structural equivalence are the classic
+                    # non-redundant pair and neither sees the other's failure case.
+                    cohesion_aff = _cohesion_from(_Gaff)
+                    cohesion_aff_loss = 1.0 - cohesion_aff
+                    loss = loss + lambda_cohesion_aff * cohesion_aff_loss
+                    total_metrics['cohesion_aff_term'] += cohesion_aff.item()
+
+                # === [D26] ZERO-WEIGHT DIAGNOSTICS ==============================
+                # Cohesion has NO between-prototype term: nothing stops two prototypes
+                # converging onto the same region with both scoring high. nassoc's
+                # off-diagonal did that job explicitly; here it is only implicit, via the
+                # softmax partition, and gets weaker as epsilon rises. So the leakage is
+                # MEASURED at zero weight rather than left to surface as a mystery in the
+                # metrics. Normaliser is sqrt(vol_p*vol_q) -- nassoc's own (scproto.py
+                # :1877) -- so these numbers are directly comparable with nassoc runs.
+                with torch.no_grad():
+                    _Md = _Gaff @ _Sc                              # (n_batch, K)
+                    _App = _Sc.T @ _Md                             # (K, K) proto-proto mass
+                    _degb = _Gaff.sum(1)                           # within-batch degree
+                    _volp = _Sc.T @ _degb                          # (K,) volume
+                    _M = _App / torch.sqrt((_volp[:, None] + 1e-8)
+                                           * (_volp[None, :] + 1e-8))
+                    _K = _M.shape[0]
+                    _off = _M[~torch.eye(_K, dtype=torch.bool, device=_M.device)]
+                    # m = 20: at K=200 there are 19,900 unordered off-diagonal pairs, so
+                    # 20 is the top 0.1%. Sized to catch A HANDFUL of duplicated
+                    # prototypes without being diluted by the ~19,880 unrelated pairs --
+                    # a single twinned pair shows up in _max, a systematic problem in
+                    # _top20. Both are reported because they fail differently.
+                    _topm = torch.topk(_off, min(20, _off.numel())).values
+                    total_metrics['coh_redund_mean'] += _off.mean().item()
+                    total_metrics['coh_redund_top20'] += _topm.mean().item()
+                    total_metrics['coh_redund_max'] += _off.max().item()
+                    # modularity VALUE at zero weight, batch-scale, resolution 1:
+                    #   Q = sum_p A_pp[p][p]/(2m) - sum_p (vol[p]/(2m))^2
+                    _twom = _degb.sum().clamp(min=1e-8)
+                    _q = (torch.diagonal(_App).sum() / _twom
+                          - ((_volp / _twom) ** 2).sum())
+                    total_metrics['modularity_diag'] += _q.item()
+
                 if not getattr(self, '_coh_checked', False):
-                    _cv = float(cohesion.item())
-                    _hi = 1.0 + 1e-4 if (cohesion_row_norm == 'l2' and cohesion_self) else 1e4
-                    assert -1e-4 <= _cv <= _hi, (
-                        f"[D14] cohesion={_cv} outside its plausible range -- "
-                        f"this is a bug, not a tuning problem (CLAUDE.md 9b)")
-                    print(f"   [D14] cohesion epoch-1 value = {_cv:.4f} (range [0,1], "
-                          f"higher = members more alike); loss = {1.0 - _cv:.4f}")
+                    # CLAUDE.md 9b: print each term's own value against its theoretical
+                    # range, and print the terms side by side, BEFORE reading any result.
+                    _cv, _cav = float(cohesion.item()), float(cohesion_aff.item())
+                    _hi = (1.0 + 1e-4 if (cohesion_row_norm == 'l2' and cohesion_self
+                                          and cohesion_diag == 0.0) else 1e4)
+                    if lambda_cohesion > 0 and cohesion_sim != 'aff':
+                        # NOTE the bound is only 1.0 for the pure cosine. cohesion_diag
+                        # > 0 keeps v[c] unit-norm so the cosine is still <= 1, but the
+                        # 'glob'/'none' row norms and the 'aff' similarity are not
+                        # bounded by 1 -- do not widen this assert, re-derive it.
+                        assert -1e-4 <= _cv <= _hi, (
+                            f"[D14] cohesion={_cv} outside its plausible range -- "
+                            f"this is a bug, not a tuning problem (CLAUDE.md 9b)")
+                    print(f"   [D14] cohesion(gram/{cohesion_sim}) epoch-1 = {_cv:.4f} "
+                          f"(higher = members more alike); loss = {1.0 - _cv:.4f}")
+                    if lambda_cohesion_aff > 0:
+                        print(f"   [D26] cohesion(aff) epoch-1 = {_cav:.6f}; "
+                              f"loss = {1.0 - _cav:.6f}")
+                        print(f"   [D26] WEIGHTED contributions -- gram "
+                              f"{lambda_cohesion * (1.0 - _cv):.4f}  vs  aff "
+                              f"{lambda_cohesion_aff * (1.0 - _cav):.4f}  "
+                              f"(these are what the ratio check in CLAUDE.md 9b is about; "
+                              f"one 1000x the other is a bug until proven otherwise)")
+                    # [D26] the cohesion mean is over the UNIQUE CELLS of an EDGE batch,
+                    # and edges are drawn proportional to affinity weight -- so the sample
+                    # is DEGREE-BIASED, not uniform. Negatives (5 per edge) are drawn
+                    # uniformly and dilute it. Near 2B = bias at ~full strength; near 7B =
+                    # mostly diluted. Reported so offline (uniform) reference numbers are
+                    # not compared against a differently-weighted training estimate.
+                    print(f"   [D26] cohesion sample: {_Sc.shape[0]} unique cells "
+                          f"(2B={2 * B}, 7B={7 * B}); mean batch degree "
+                          f"{_degb.mean().item():.4f}")
+                    print(f"   [D26] redund mean={_off.mean().item():.4f} "
+                          f"top20={_topm.mean().item():.4f} "
+                          f"max={_off.max().item():.4f}   modularity_diag="
+                          f"{_q.item():.4f}   (both at ZERO weight)")
                     self._coh_checked = True
-                loss = loss + lambda_cohesion * cohesion_loss
-                total_metrics['cohesion_term'] += cohesion.item()
 
             sim_recon_loss = torch.tensor(0.0, device=self.device)
             if lambda_sim_recon > 0 and use_proto_sim:
