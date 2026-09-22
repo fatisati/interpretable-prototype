@@ -118,6 +118,12 @@ AUTHORITY = 20.0 * 0.077017     # 1.5403 -- d26_A's total, held fixed
 ARMS = [
     ("d27_A_aff_self",  "aff",  0.0, round(AUTHORITY / SPAN_AFF_SELF, 1)),    # 44.6
     ("d27_B_gram_self", "gram", round(AUTHORITY / SPAN_GRAM_SELF, 1), 0.0),   # 20.1
+    # BOTH: same TOTAL authority as the two single arms, split 50/50 between the 2-hop
+    # and 1-hop terms, so the comparison is "does mixing help" and not "is more cohesion
+    # better" -- which two freely chosen lambdas would confound.
+    ("d27_C_both_self", "both",
+     round(0.5 * AUTHORITY / SPAN_GRAM_SELF, 1),                              # 10.0
+     round(0.5 * AUTHORITY / SPAN_AFF_SELF, 1)),                              # 22.3
 ]
 
 
@@ -169,14 +175,17 @@ def run(name: str, which: str, lam_gram: float, lam_aff: float):
     assert lc["lambda_proto_usage"] == 0.0
     assert lc["cohesion_diag"] == 1.0 and lc["cohesion_form"] == "perc"
     assert lc["cohesion_self"] == 1
-    assert (lam_gram > 0) != (lam_aff > 0), "exactly one similarity per arm"
+    if which != "both":
+        assert (lam_gram > 0) != (lam_aff > 0), "exactly one similarity per arm"
+    else:
+        assert lam_gram > 0 and lam_aff > 0, "the both-arm needs both lambdas"
 
-    span = SPAN_AFF_SELF if which == "aff" else SPAN_GRAM_SELF
-    lam = lam_aff if which == "aff" else lam_gram
+    auth = lam_gram * SPAN_GRAM_SELF + lam_aff * SPAN_AFF_SELF
+    lam = f"gram={lam_gram} aff={lam_aff}"
     print(f"\n{'='*78}\n=== {name}\n"
           f"    community + cohesion ONLY. modularity/nassoc/usage OFF, reinit wrst/2.\n"
-          f"    sim={which}  lambda={lam}  perc, cohesion_self=1, sim[c][c]=1.0\n"
-          f"    AUTHORITY (lambda * measured span) = {lam*span:.4f}  "
+          f"    sim={which}  {lam}  perc, cohesion_self=1, sim[c][c]=1.0\n"
+          f"    AUTHORITY (lambda * measured span) = {auth:.4f}  "
           f"(target {AUTHORITY:.4f}, same as d26_A)\n"
           f"    WATCH 1: MEDIAN metacell size -- the usage loss died here (86 -> 11)\n"
           f"    WATCH 2: unused_proto per epoch -- d26 sawtoothed to 120-150\n"

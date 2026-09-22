@@ -1323,6 +1323,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         cohesion_floor = float(getattr(self, 'cohesion_floor', 0.0))     # [D25]
         cohesion_diag = float(getattr(self, 'cohesion_diag', 0.0))       # [D26]
         lambda_cohesion_aff = float(getattr(self, 'lambda_cohesion_aff', 0.0))  # [D26]
+        cohesion_global = int(getattr(self, 'cohesion_global', 0))       # [D28]
         modularity_res = float(getattr(self, 'modularity_res', 1.0))
         modularity_agg = str(getattr(self, 'modularity_agg', 'glob'))
         modularity_res_pbch = float(getattr(self, 'modularity_res_pbch', 0.0) or 0.0)
@@ -2501,6 +2502,57 @@ class SCProtoTrainer(AdoptiveTrainer):
                 _Kp = _Sc.shape[1]
                 _Nall = self._coh_A.shape[0]
 
+                # === [D28] BATCH -> GLOBAL ====================================
+                # A step sees only p = n_batch/N of the cells (0.116 here), and that
+                # breaks the estimate in two separate ways:
+                #
+                # (1) A prototype with S cells is INVISIBLE in a batch with probability
+                #     (1-p)^S -- 29% for S=10, 54% for S=5. The loss cannot tell an
+                #     invisible prototype from an empty one, so a cell joining it is
+                #     scored as if it were FOUNDING one: within = a*a, size = a, ratio =
+                #     a, gradient 1.0 -- the maximum. The truth is its mean similarity to
+                #     the members it cannot see, about 0.08. A 12x overpayment, handed
+                #     out precisely to the small prototypes. Measured on the real d27_A
+                #     partition: 11.1 of 200 prototypes invisible in a typical batch, 35
+                #     invisible in >10% of batches. On the even-sized modularity baseline
+                #     it never happens at all (P = 4e-16 at S=288).
+                #     FIX: divide by the GLOBAL size, which knows the members are there.
+                #     Then within = a*a over size = 10 gives gradient ~0 -- "no evidence,
+                #     no reward" -- instead of 1.0.
+                #
+                # (2) within[k] mixes a PAIR count (the cross terms, which need BOTH
+                #     cells in the batch, so they survive at rate p*p) with a CELL count
+                #     (the self terms, one per cell, surviving at rate p). Dividing both
+                #     by size[k] leaves the cross part unbiased but inflates the self
+                #     part by 1/p = 8.6x. Measured: the self term is 4.3% of the
+                #     full-graph objective but 24.9% of the batch objective -- so
+                #     training pushes toward small prototypes ~9x harder than the
+                #     objective actually asks. Same class as the possible_pairs bug in
+                #     CLAUDE.md 9b: a quadratic and a linear quantity compared across
+                #     scales.
+                #     FIX: rescale each part to its full-graph rate, self/p and
+                #     cross/(p*p).
+                #
+                # Verified on s28nsc/bk02 at n_batch=6757: raw batch estimate 1.25x the
+                # full-graph truth, corrected 1.00x; invisible-prototype gradient 1.000
+                # -> 2.0e-07.
+                _p_batch = float(_Sc.shape[0]) / float(_Nall)
+                if cohesion_global:
+                    with torch.no_grad():
+                        _sz_now = (_csize / _p_batch).detach()
+                        _a = float(getattr(self, 'usage_nk_alpha', 0.9))
+                        if not hasattr(self, '_coh_size_ema'):
+                            self._coh_size_ema = _sz_now.clone()
+                        else:
+                            self._coh_size_ema = (_a * self._coh_size_ema.to(self.device)
+                                                  + (1.0 - _a) * _sz_now)
+                    # detached on purpose: this is a measured property of the current
+                    # partition, not a quantity to backpropagate through. Same treatment
+                    # nassoc_cpm_norm='gful' gives the full-graph normalizer.
+                    _size_g = self._coh_size_ema.clamp(min=1.0)
+                else:
+                    _size_g = None
+
                 # === [D26] NEVER FORM THE GRAM =================================
                 # The Gram is fixed by the input, so nothing about it belongs in a
                 # per-step path -- but caching it outright is the wrong way to act on
@@ -2604,11 +2656,20 @@ class SCProtoTrainer(AdoptiveTrainer):
                     apart between them. Algebraically identical to the old dense path:
                     (Gram @ S) is GS, and (Gram - diag(Gram)) @ S is GS - dg[:,None]*S.
                     """
+                    _self_b = (_Sc.pow(2) * dg.unsqueeze(1)).sum(0)   # (K,) self terms
                     _cpair = (GS * _Sc).sum(0)                 # (K,) = S_k' Sim S_k
                     if cohesion_self == 0:
                         # [D17] remove the i==j self-pairs. Breaks the exact SEACells
                         # identity but leaves ONLY the "are the members alike" signal.
-                        _cpair = _cpair - (_Sc.pow(2) * dg.unsqueeze(1)).sum(0)
+                        _cpair = _cpair - _self_b
+                        _self_b = torch.zeros_like(_self_b)
+                    if cohesion_global:
+                        # [D28] rescale each part to its FULL-GRAPH rate, then divide by
+                        # the global size. The cross part needs both cells in the batch
+                        # (rate p*p); the self part needs only one (rate p).
+                        _cross_b = _cpair - _self_b
+                        _num = _self_b / _p_batch + _cross_b / (_p_batch ** 2)
+                        return (_num / _size_g).sum() / float(_Nall)
                     # denominator is LINEAR in the cells (size, not size^2), so unlike
                     # possible_pairs it carries no E[X^2] != E[X]^2 inflation and needs no
                     # detached-EMA correction. Clamp only guards a fully-empty prototype,
