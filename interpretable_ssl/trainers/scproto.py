@@ -2615,9 +2615,42 @@ class SCProtoTrainer(AdoptiveTrainer):
 
                 # 1-hop block: the within-batch affinity. Used by lambda_cohesion_aff and
                 # by the zero-weight diagnostics; both want RAW affinity, never the norm.
+                # === [D29] REMEMBER EACH PROTOTYPE, instead of only what this batch shows.
+                # Keep the last-known assignment of EVERY cell (N x K). Each step, replace
+                # this batch's rows with the live gradient-carrying ones and leave the rest
+                # as detached context:
+                #     S_eff = S_remembered   with the batch's rows swapped in
+                # Then the two similarities are exact full-graph quantities, and the
+                # profile of a prototype whose members are all absent is still there:
+                #     aff  numer[c][k] = sum over ALL j of aff[c][j] * assign[j][k]
+                #                      = (A_batchrows @ S_eff)[c][k]
+                #     gram numer[c][k] = dot( R[c] , sum over ALL j of assign[j][k]*R[j] )
+                #                      = (R_batchrows @ (R^T @ S_eff))[c][k]
+                # The inner (R^T @ S_eff) IS the per-prototype affinity profile -- one
+                # length-N vector per prototype, summed over its members.
+                # size[k] = S_eff.sum(0) is then EXACT, not an EMA.
+                # Non-batch rows are detached: they are context, so a cell is moved by its
+                # own gradient while its prototype-mates hold still. That is the classic
+                # Lloyd/EM assignment step.
+                if cohesion_global == 2:
+                    if not hasattr(self, '_coh_Sfull'):
+                        # uniform init so that at step 0 no prototype looks empty
+                        self._coh_Sfull = torch.full((_Nall, _Kp), 1.0 / _Kp,
+                                                     dtype=_Sc.dtype, device=self.device)
+                        print(f"   [D29] remembering every cell's assignment: "
+                              f"{_Nall}x{_Kp} = {_Nall*_Kp*4/1e6:.0f}MB")
+                    _S_eff = self._coh_Sfull.clone()
+                    _S_eff[unique_idx] = _Sc               # batch rows carry the gradient
+                    _size_g = _S_eff.sum(0).clamp(min=1.0)  # EXACT global size
+                    with torch.no_grad():                   # remember for later steps
+                        self._coh_Sfull[unique_idx] = _Sc.detach()
+
                 _AffB = self._coh_A_aff[_cidx][:, _cidx]
                 _AffT = _to_t(_AffB)
                 _GS_aff_raw = torch.sparse.mm(_AffT, _Sc)                # (nb, K), diag 0
+                if cohesion_global == 2:
+                    # against ALL cells, not just the batch's
+                    _GS_aff_raw = torch.sparse.mm(_to_t(self._coh_A_aff[_cidx]), _S_eff)
                 _deg_b = torch.as_tensor(np.asarray(_AffB.sum(axis=1)).ravel(),
                                          dtype=torch.float32, device=self.device)
                 # [D27] self-similarity for the 1-HOP term too. A cell is maximally
@@ -2635,10 +2668,20 @@ class SCProtoTrainer(AdoptiveTrainer):
                 _GS_gram = _dg_gram = None
                 if cohesion_sim != 'aff' and lambda_cohesion > 0:
                     _Bb = self._coh_B[_cidx]                             # (nb, N) sparse
-                    _Bt, _BtT = _to_t(_Bb), _to_t(_Bb.T)
-                    _S1 = _Sc / _rnb                                     # D^-1 S
-                    _GS_gram = torch.sparse.mm(
-                        _Bt, torch.sparse.mm(_BtT, _S1)) / (_rnb * _scl)
+                    _Bt = _to_t(_Bb)
+                    if cohesion_global == 2:
+                        # profile[k] = sum over ALL cells j of assign[j][k]*R[j], then one
+                        # dot product per (cell, prototype). R = D^-1 B, so the row norms
+                        # divide on both sides exactly as in the batch-only path.
+                        _rall = torch.as_tensor(self._coh_rn, dtype=torch.float32,
+                                                device=self.device).unsqueeze(1)
+                        _PV = torch.sparse.mm(_to_t(self._coh_B.T), _S_eff / _rall)
+                        _GS_gram = torch.sparse.mm(_Bt, _PV) / (_rnb * _scl)
+                    else:
+                        _BtT = _to_t(_Bb.T)
+                        _S1 = _Sc / _rnb                                 # D^-1 S
+                        _GS_gram = torch.sparse.mm(
+                            _Bt, torch.sparse.mm(_BtT, _S1)) / (_rnb * _scl)
                     _dg_gram = torch.as_tensor(self._coh_dg_np[_cidx], dtype=torch.float32,
                                                device=self.device) / _scl
 
@@ -2663,6 +2706,10 @@ class SCProtoTrainer(AdoptiveTrainer):
                         # identity but leaves ONLY the "are the members alike" signal.
                         _cpair = _cpair - _self_b
                         _self_b = torch.zeros_like(_self_b)
+                    if cohesion_global == 2:
+                        # [D29] GS already spans every cell, so no p-rescaling at all --
+                        # nothing was subsampled away. This is the exact objective.
+                        return (_cpair / _size_g).sum() / float(_Nall)
                     if cohesion_global:
                         # [D28] rescale each part to its FULL-GRAPH rate, then divide by
                         # the global size. The cross part needs both cells in the batch
