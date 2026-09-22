@@ -1320,6 +1320,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         cohesion_self = int(getattr(self, 'cohesion_self', 1))            # [D17]
         cohesion_sim = getattr(self, 'cohesion_sim', 'gram')              # [D18]
         cohesion_form = getattr(self, 'cohesion_form', 'perc')            # [D21]
+        cohesion_floor = float(getattr(self, 'cohesion_floor', 0.0))     # [D25]
         modularity_res = float(getattr(self, 'modularity_res', 1.0))
         modularity_agg = str(getattr(self, 'modularity_agg', 'glob'))
         modularity_res_pbch = float(getattr(self, 'modularity_res_pbch', 0.0) or 0.0)
@@ -2445,7 +2446,16 @@ class SCProtoTrainer(AdoptiveTrainer):
                 # possible_pairs it carries no E[X^2] != E[X]^2 inflation and needs no
                 # detached-EMA correction. Clamp only guards a fully-empty prototype,
                 # which contributes 0 to both numerator and the size sum.
-                if cohesion_form == 'pcex':
+                if cohesion_form == 'flor':
+                    # [D25] one-sided FLOOR over ALL K slots. A dead prototype has
+                    # pair/size -> 0 and pays the full floor^2, which is the anti-collapse
+                    # signal the per-cell forms lack (there a dead slot contributes exactly
+                    # 0 and is never penalised). Size denominator -> no merge bias. Floor
+                    # measured from the graph -> reachable, unlike the published target of 1.
+                    _perk = _cpair / _csize.clamp(min=1e-8)
+                    _pen = (cohesion_floor - _perk).clamp(min=0.0).pow(2).mean()
+                    cohesion = -_pen            # loss = 1 - cohesion = 1 + penalty
+                elif cohesion_form == 'pcex':
                     # [D23] Cell c excluded from its OWN divisor. The numerator already
                     # excludes the self-pair (Gram diagonal zeroed below), so the only
                     # change is the denominator: size[k] - assign[c][k] rather than

@@ -474,3 +474,10 @@ bfore applying new changes - commit old things - and log what was it and why we 
 when explain a formula - use understanble var names
 try to answer all of my questions undetandble - correct and comact - do not hallusincate - do not say many unrelated things many noisy things
 
+===
+i have submitted my work for neurips - and i did alot in the rebuttle - the final decision (Sep 24 '26 (Anywhere on Earth)) would be out only a day before full submission edadline of iclr (Sep 25 '26 (Anywhere on Earth))
+
+so i have to prepare new version of my paper - include new experiments - apply edits based on rebuttles feedbacks
+and prepare paper for iclr submission so in case i got rejetced by neurips i will submit for iclr 
+
+please dont make up hallucinated things from yourself - make sure whatever reasoning you do for me is real and solid - not hallusicianted - this is important
