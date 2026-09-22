@@ -1317,7 +1317,17 @@ class SCProtoTrainer(AdoptiveTrainer):
         lambda_modularity = float(getattr(self, 'lambda_modularity', 0.0))
         lambda_cohesion = float(getattr(self, 'lambda_cohesion', 0.0))   # [D14]
         cohesion_row_norm = getattr(self, 'cohesion_row_norm', 'l2')      # [D14]
-        cohesion_self = int(getattr(self, 'cohesion_self', 1))            # [D17]
+        # [D17]/[D30] weight of the i==j self-pairs in within[k]. Historically a 0/1
+        # switch; now a FLOAT, because the value of the self-pair IS the founder gate:
+        # a singleton scores exactly cohesion_self, so a cell joining it gains 2*sim*a
+        # against a dilution of cohesion_self*a -- it joins iff sim > cohesion_self/2.
+        # At 1.0 the gate is 0.5, and the median cell's BEST neighbour cosine on bk02 is
+        # 0.472 -- most founders can never recruit anyone, which is why d27/d29 held
+        # prototypes alive but tiny. w=0.5 puts the gate at 0.25, below the p5 of
+        # best-neighbour cosine (0.312), so ~97% of cells can follow their best-matching
+        # founder while unrelated cells (typical cosine ~0.08) are still rejected.
+        # 1 and 0 reproduce the old branches exactly.
+        cohesion_self = float(getattr(self, 'cohesion_self', 1))          # [D17]/[D30]
         cohesion_sim = getattr(self, 'cohesion_sim', 'gram')              # [D18]
         cohesion_form = getattr(self, 'cohesion_form', 'perc')            # [D21]
         cohesion_floor = float(getattr(self, 'cohesion_floor', 0.0))     # [D25]
@@ -2699,13 +2709,13 @@ class SCProtoTrainer(AdoptiveTrainer):
                     apart between them. Algebraically identical to the old dense path:
                     (Gram @ S) is GS, and (Gram - diag(Gram)) @ S is GS - dg[:,None]*S.
                     """
-                    _self_b = (_Sc.pow(2) * dg.unsqueeze(1)).sum(0)   # (K,) self terms
+                    _self_raw = (_Sc.pow(2) * dg.unsqueeze(1)).sum(0)  # (K,) self terms
                     _cpair = (GS * _Sc).sum(0)                 # (K,) = S_k' Sim S_k
-                    if cohesion_self == 0:
-                        # [D17] remove the i==j self-pairs. Breaks the exact SEACells
-                        # identity but leaves ONLY the "are the members alike" signal.
-                        _cpair = _cpair - _self_b
-                        _self_b = torch.zeros_like(_self_b)
+                    if cohesion_self != 1.0:
+                        # [D30] within = cross + w*self. w=0 is the old self-off branch;
+                        # fractional w lowers the founder gate to w/2 (see above).
+                        _cpair = _cpair - (1.0 - cohesion_self) * _self_raw
+                    _self_b = cohesion_self * _self_raw
                     if cohesion_global == 2:
                         # [D29] GS already spans every cell, so no p-rescaling at all --
                         # nothing was subsampled away. This is the exact objective.
