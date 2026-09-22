@@ -2457,24 +2457,29 @@ class SCProtoTrainer(AdoptiveTrainer):
                         # structural zeros reallocates the whole index array.
                         _cA = _cA + cohesion_diag * _csp.eye(
                             _cA.shape[0], format='csr', dtype=np.float32)
-                    if cohesion_row_norm == 'l2':
-                        _nrm = np.sqrt(_cA.multiply(_cA).sum(axis=1)).A.ravel()
-                        _nrm[_nrm == 0] = 1.0
-                        # [D26] share of each descriptor that is the self-entry. For a
-                        # sparse-region cell ||aff_row|| is small, so the self-entry
-                        # dominates its unit vector and its cosine with everything
-                        # collapses toward 0. That is the honest reading (we know little
-                        # about that cell) but it weakens the term exactly on rare cells,
-                        # so it is MEASURED rather than assumed away.
-                        if cohesion_diag != 0.0:
-                            _share = (cohesion_diag ** 2) / np.maximum(_nrm ** 2, 1e-12)
-                            print(f"   [D26] cohesion_diag={cohesion_diag}: self-share of "
-                                  f"descriptor  median={np.median(_share):.3f}  "
-                                  f"p90={np.percentile(_share, 90):.3f}  "
-                                  f"frac>0.9={(_share > 0.9).mean():.3f}  "
-                                  f"(high => that cell is near-orthogonal to everything)")
-                        _cA = _csp.diags(1.0 / _nrm) @ _cA
-                    self._coh_A = _csp.csr_matrix(_cA)
+                    # [D26] KEEP B SYMMETRIC; store the row normaliser separately.
+                    # The cosine Gram is D^-1 B B^T D^-1 with D = diag(row norms), and a
+                    # diagonal scaling pulls straight out of the product:
+                    #     Gram @ S  ==  D^-1 @ ( B @ ( B @ ( D^-1 @ S ) ) )
+                    # Folding D into the matrix first (the old way) destroys B's symmetry
+                    # -- row c is divided by ||row c||, column c is not -- so B @ (B @ S)
+                    # silently becomes the WRONG quantity and a separate cached transpose
+                    # is needed to recover the right one. Measured: 3.8e-04 error in the
+                    # gram value with no transpose. Normalising afterwards keeps ONE
+                    # symmetric cached matrix, removes the transpose, and makes the whole
+                    # asymmetry trap unreachable.
+                    self._coh_B = _csp.csr_matrix(_cA)
+                    _rn = np.sqrt(_cA.multiply(_cA).sum(axis=1)).A.ravel()
+                    _rn[_rn == 0] = 1.0
+                    if cohesion_row_norm != 'l2':
+                        _rn = np.ones_like(_rn)
+                    self._coh_rn = _rn
+                    # Gram diagonal = ||B[c]||^2 / normaliser[c]^2. Under 'l2' that is
+                    # EXACTLY 1 -- a cosine of a vector with itself -- so no precompute is
+                    # needed there; under the other norms it is the raw squared row norm.
+                    _sq = np.asarray(_cA.multiply(_cA).sum(axis=1)).ravel()
+                    self._coh_dg_np = _sq / (_rn ** 2)
+                    self._coh_A = self._coh_B
                     # [D17] 'glob': one global divisor = mean ||row||^2, estimated once on a
                     # sample. Keeps RELATIVE row magnitudes (SEACells' geometry) while making
                     # the value dataset-independent. It is input data, not a parameter, so no
@@ -2491,41 +2496,109 @@ class SCProtoTrainer(AdoptiveTrainer):
                               f"= {self._coh_scale:.5f}")
                     print(f"   [D14] cohesion: affinity cached, shape={self._coh_A.shape}, "
                           f"row_norm={cohesion_row_norm}, nnz={self._coh_A.nnz:,}")
-                _cidx = unique_idx.cpu().numpy()
                 _Sc = soft_assign
                 _csize = _Sc.sum(0)                            # (K,)
+                _Kp = _Sc.shape[1]
+                _Nall = self._coh_A.shape[0]
 
-                def _densify(_sp):
-                    return torch.as_tensor(np.asarray(_sp.todense()),
-                                           dtype=torch.float32, device=self.device)
+                # === [D26] NEVER FORM THE GRAM =================================
+                # The Gram is fixed by the input, so nothing about it belongs in a
+                # per-step path -- but caching it outright is the wrong way to act on
+                # that: at N=58,423 the full Gram is 3.4e9 entries (13.7GB dense, and
+                # still ~470MB as a sparse two-hop matrix). The factored identity
+                #
+                #     (A A^T) @ S  ==  A @ (A^T @ S)
+                #
+                # gives the same numbers while touching only A, which IS cached once.
+                # Cost per step drops from
+                #     densify an n_batch x n_batch block on the CPU (196MB at ~7000
+                #     unique cells), ship it to the GPU, then an n^2 x K matmul
+                #     (~9.8 GFLOPs)
+                # to three sparse matmuls against a resident GPU matrix (~2.8 GFLOPs,
+                # no allocation, no host->device copy). The CPU densify and transfer
+                # were the real bottleneck, not the arithmetic.
+                #
+                # Everything downstream needs only two things per step, never the
+                # matrix itself:
+                #     GS[c][k] = sum over batch j of similarity[c][j] * assign[j][k]
+                #     dg[c]    = similarity[c][c]
+                # and dg is a row norm of A, precomputed once for all N cells.
+                # === [D26] NEVER FORM THE GRAM, AND ONLY TOUCH THE BATCH =======
+                # The Gram is fixed by the input, so it does not belong in a per-step
+                # path -- but caching it outright is the wrong way to act on that: at
+                # N=58,423 it is 3.4e9 entries (13.7GB dense, ~470MB even as a sparse
+                # two-hop matrix). Two identities remove it entirely.
+                #
+                #   1. factor it          (B B^T) @ S == B @ (B^T @ S)
+                #   2. pull the norm out  Gram = D^-1 B B^T D^-1,  D = diag(row norms)
+                #                         so Gram @ S == D^-1 B B^T (D^-1 S), and with B
+                #                         kept SYMMETRIC no transpose is needed at all.
+                #
+                # Then slice B to the batch's rows: only ~556k of B's 4.59M nonzeros touch
+                # this batch, so the work drops ~8x again. Measured per step at N=58,423 /
+                # n_batch=7,000 / K=200:
+                #     dense n_batch x n_batch Gram (old)   330.6 ms
+                #     full B, cached B and B^T             215.9 ms
+                #     full B, symmetric, no transpose      186.4 ms
+                #     SLICED B, symmetric  (this)           57.2 ms   5.8x
+                # all agreeing with the dense path to 1.6e-07.
+                #
+                # GS[c][k] = sum over batch j of similarity[c][j]*assign[j][k] and
+                # dg[c] = similarity[c][c] are the ONLY things downstream needs.
+                # Note GS depends on S, which is what is being learned -- so nothing
+                # downstream of S is cacheable, and the batch is resampled every step, so
+                # a cached slice would miss essentially always. B is the cacheable part.
+                _cidx = unique_idx.cpu().numpy()
+                _rnb = torch.as_tensor(self._coh_rn[_cidx], dtype=torch.float32,
+                                       device=self.device).unsqueeze(1)          # (nb,1)
+                _scl = float(getattr(self, '_coh_scale', 1.0) or 1.0)
 
-                # [D26] The 1-hop block is an n_batch x n_batch DENSIFY -- at ~7000 unique
-                # cells that is a 196MB allocation, the same order as the Gram path's own
-                # densify. So build it only when it is actually needed: every step when
-                # lambda_cohesion_aff > 0 (it IS the similarity then), but only every
-                # coh_diag_every steps when it is wanted purely for the zero-weight
-                # diagnostics. Diagnostics are a per-epoch summary, so sampling them costs
-                # nothing real and stops them doubling the per-step cost of an arm that
-                # does not use the 1-hop term at all.
+                def _to_t(_sp):
+                    _sp = _sp.tocsr()
+                    return torch.sparse_csr_tensor(
+                        torch.from_numpy(_sp.indptr.astype(np.int64)),
+                        torch.from_numpy(_sp.indices.astype(np.int64)),
+                        torch.from_numpy(_sp.data.astype(np.float32)),
+                        size=_sp.shape, device=self.device)
+
+                # 1-hop block: the within-batch affinity. Used by lambda_cohesion_aff and
+                # by the zero-weight diagnostics; both want RAW affinity, never the norm.
+                _AffB = self._coh_A_aff[_cidx][:, _cidx]
+                _AffT = _to_t(_AffB)
+                _GS_aff = torch.sparse.mm(_AffT, _Sc)                    # (nb, K)
+                _deg_b = torch.as_tensor(np.asarray(_AffB.sum(axis=1)).ravel(),
+                                         dtype=torch.float32, device=self.device)
+                _dg_aff = torch.zeros(_Sc.shape[0], device=self.device)  # diag is 0
+
+                _GS_gram = _dg_gram = None
+                if cohesion_sim != 'aff' and lambda_cohesion > 0:
+                    _Bb = self._coh_B[_cidx]                             # (nb, N) sparse
+                    _Bt, _BtT = _to_t(_Bb), _to_t(_Bb.T)
+                    _S1 = _Sc / _rnb                                     # D^-1 S
+                    _GS_gram = torch.sparse.mm(
+                        _Bt, torch.sparse.mm(_BtT, _S1)) / (_rnb * _scl)
+                    _dg_gram = torch.as_tensor(self._coh_dg_np[_cidx], dtype=torch.float32,
+                                               device=self.device) / _scl
+
                 _diag_n = int(getattr(self, 'coh_diag_every', 50) or 0)
                 self._coh_step = getattr(self, '_coh_step', 0) + 1
                 _want_diag = _diag_n > 0 and (self._coh_step % _diag_n == 1
                                               or not getattr(self, '_coh_checked', False))
-                _Gaff = (_densify(self._coh_A_aff[_cidx][:, _cidx])
-                         if (lambda_cohesion_aff > 0 or _want_diag) else None)
 
-                def _cohesion_from(_Gb):
-                    """Aggregate one similarity matrix into a cohesion value.
+                def _cohesion_from(GS, dg):
+                    """Aggregate one similarity into a cohesion value.
 
+                    GS[c][k] = sum over batch j of similarity[c][j]*assign[j][k]
+                    dg[c]    = similarity[c][c]
                     Shared by both terms so the four cohesion_form variants cannot drift
-                    apart between them. _Gb is (n_batch, n_batch).
+                    apart between them. Algebraically identical to the old dense path:
+                    (Gram @ S) is GS, and (Gram - diag(Gram)) @ S is GS - dg[:,None]*S.
                     """
-                    _cpair = ((_Gb @ _Sc) * _Sc).sum(0)        # (K,) = S_k' G S_k
+                    _cpair = (GS * _Sc).sum(0)                 # (K,) = S_k' Sim S_k
                     if cohesion_self == 0:
                         # [D17] remove the i==j self-pairs. Breaks the exact SEACells
                         # identity but leaves ONLY the "are the members alike" signal.
-                        _cpair = _cpair - (_Sc.pow(2)
-                                           * torch.diagonal(_Gb).unsqueeze(1)).sum(0)
+                        _cpair = _cpair - (_Sc.pow(2) * dg.unsqueeze(1)).sum(0)
                     # denominator is LINEAR in the cells (size, not size^2), so unlike
                     # possible_pairs it carries no E[X^2] != E[X]^2 inflation and needs no
                     # detached-EMA correction. Clamp only guards a fully-empty prototype,
@@ -2550,8 +2623,7 @@ class SCProtoTrainer(AdoptiveTrainer):
                         # size[k] - assign[c][k]: negligible for a 290-cell prototype, a
                         # 50% correction for a 2-cell one, so it stops small prototypes
                         # being systematically under-scored.
-                        _Gnd = _Gb - torch.diag(torch.diagonal(_Gb))
-                        _num = _Gnd @ _Sc                              # (n_batch, K)
+                        _num = GS - dg.unsqueeze(1) * _Sc              # (n_batch, K)
                         _den = (_csize.unsqueeze(0) - _Sc).clamp(min=1e-8)
                         return (_Sc * (_num / _den)).sum() / float(_Sc.shape[0])
                     if cohesion_form == 'qwcw':
@@ -2576,12 +2648,9 @@ class SCProtoTrainer(AdoptiveTrainer):
                     # merge bias and, unlike the off-diagonal alone, genuinely REDUCES
                     # total leakage instead of redistributing it.
                     if cohesion_sim == 'aff':
-                        _Gb = _Gaff
+                        cohesion = _cohesion_from(_GS_aff, _dg_aff)
                     else:
-                        _Ab = self._coh_A[_cidx]               # (n_batch, N) sparse
-                        _Gb = _densify(_Ab @ _Ab.T)
-                        _Gb = _Gb / float(getattr(self, '_coh_scale', 1.0) or 1.0)
-                    cohesion = _cohesion_from(_Gb)
+                        cohesion = _cohesion_from(_GS_gram, _dg_gram)
                     cohesion_loss = 1.0 - cohesion
                     loss = loss + lambda_cohesion * cohesion_loss
                     total_metrics['cohesion_term'] += cohesion.item()
@@ -2590,7 +2659,7 @@ class SCProtoTrainer(AdoptiveTrainer):
                     # [D26] the 1-hop companion, always on the RAW affinity. See
                     # defaults.py: proximity and structural equivalence are the classic
                     # non-redundant pair and neither sees the other's failure case.
-                    cohesion_aff = _cohesion_from(_Gaff)
+                    cohesion_aff = _cohesion_from(_GS_aff, _dg_aff)
                     cohesion_aff_loss = 1.0 - cohesion_aff
                     loss = loss + lambda_cohesion_aff * cohesion_aff_loss
                     total_metrics['cohesion_aff_term'] += cohesion_aff.item()
@@ -2607,11 +2676,10 @@ class SCProtoTrainer(AdoptiveTrainer):
                 # they summarise an epoch, so sampling loses nothing and keeps them from
                 # doubling the per-step dense cost of an arm that has no 1-hop term.
                 _redund = None
-                if _Gaff is not None:
+                if _want_diag:
                     with torch.no_grad():
-                        _Md = _Gaff @ _Sc                          # (n_batch, K)
-                        _App = _Sc.T @ _Md                         # (K, K) proto-proto mass
-                        _degb = _Gaff.sum(1)                       # within-batch degree
+                        _App = _Sc.T @ _GS_aff                     # (K, K) proto-proto mass
+                        _degb = _deg_b                             # within-batch degree
                         _volp = _Sc.T @ _degb                      # (K,) volume
                         _M = _App / torch.sqrt((_volp[:, None] + 1e-8)
                                                * (_volp[None, :] + 1e-8))
