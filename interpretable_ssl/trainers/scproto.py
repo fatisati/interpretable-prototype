@@ -2839,6 +2839,41 @@ class SCProtoTrainer(AdoptiveTrainer):
                     loss = loss + lambda_cohesion_aff * cohesion_aff_loss
                     total_metrics['cohesion_aff_term'] += cohesion_aff.item()
 
+                    # [D36] DEBUG PROBE, diagnostic cadence only (_want_diag). Answers
+                    # two separate questions the batch metric alone cannot:
+                    #  (1) is the gradient actually flowing? torch.autograd.grad on
+                    #      cohesion_aff_loss w.r.t. _Sc, retain_graph=True so the real
+                    #      loss.backward() later is untouched. None => disconnected
+                    #      graph, the smoking gun. A real nonzero norm => it IS live,
+                    #      and the flat 4-decimal print was a rounding artefact, not a
+                    #      dead term.
+                    #  (2) TRUE full-graph cohesion(aff), computed once from the exact
+                    #      [D29] memory (_S_eff, size_g) against the FULL N x N affinity
+                    #      -- vs the printed batch metric, which sums _cpair over only
+                    #      this batch's ~6-7k cells while dividing by the FULL _Nall.
+                    #      That mismatch alone predicts the batch metric undercounts the
+                    #      true value by roughly n_batch/N (~0.12x here) -- i.e. a truly
+                    #      well-trained cohesion_aff of 0.03-0.04 (Leiden-scale) would
+                    #      PRINT as roughly 0.0035-0.0046 in this batch metric, the same
+                    #      order of magnitude already being observed.
+                    if _want_diag:
+                        _grad = torch.autograd.grad(
+                            cohesion_aff_loss, _Sc, retain_graph=True,
+                            allow_unused=True)[0]
+                        _gn = float(_grad.norm().item()) if _grad is not None else -1.0
+                        with torch.no_grad():
+                            if not hasattr(self, '_coh_A_aff_t'):
+                                self._coh_A_aff_t = _to_t(self._coh_A_aff)
+                            _num_full = torch.sparse.mm(self._coh_A_aff_t, _S_eff)
+                            _num_full = ((_num_full * _S_eff).sum(0)
+                                        + cohesion_diag * _S_eff.pow(2).sum(0))
+                            _true_coh_aff = float((_num_full / _size_g).sum() / _Nall)
+                        print(f"   [D36 DEBUG] step={self._coh_step}  "
+                              f"cohesion_aff(batch-metric)={cohesion_aff.item():.6f}  "
+                              f"cohesion_aff(TRUE full-graph)={_true_coh_aff:.6f}  "
+                              f"grad_norm(wrt soft_assign)={_gn:.6e}"
+                              + ("  <<< GRAPH DISCONNECTED" if _grad is None else ""))
+
                 # === [D26] ZERO-WEIGHT DIAGNOSTICS ==============================
                 # Cohesion has NO between-prototype term: nothing stops two prototypes
                 # converging onto the same region with both scoring high. nassoc's
@@ -3316,9 +3351,9 @@ class SCProtoTrainer(AdoptiveTrainer):
         if getattr(self, 'lambda_proto_usage', 0) > 0:
             extra += f" | proto_usage={metrics['proto_usage']:.4f}"
         if getattr(self, 'lambda_cohesion', 0) > 0:
-            extra += f" | cohesion={metrics['cohesion_term']:.4f}"
+            extra += f" | cohesion={metrics['cohesion_term']:.6f}"
         if getattr(self, 'lambda_cohesion_aff', 0) > 0:
-            extra += f" | cohesion_aff={metrics['cohesion_aff_term']:.4f}"
+            extra += f" | cohesion_aff={metrics['cohesion_aff_term']:.6f}"
         if getattr(self, 'lambda_sim_recon', 0) > 0:
             extra += f" | sim_recon={metrics['sim_recon']:.4f}"
             if getattr(self, 'sim_recon_target', 'full') == 'diffusion':
