@@ -1,0 +1,100 @@
+cell_type,niche,n_cells,scproto_n_mc,scproto_mc_sizes,scproto_cells_in_mc,seacell_n_mc,seacell_mc_sizes,seacell_cells_in_mc,auc_best,n_dge_genes
+Fibroblasts,Desmoplastic stroma,5856,35,"327,326,322,312,305,303,300,299,299,297,294,293,289,289,286,285,281,277,275,272,270,270,267,267,262,256,254,251,250,249,249,249,248,246,232",9751.0,19,"925,869,608,598,588,522,505,484,464,444,331,306,303,289,280,258,251,194,176",8395.0,0.732708626251956,87.0
+Tumor cells,Tumor surface,5443,28,"345,343,323,318,310,308,307,305,305,302,299,296,294,293,293,293,285,274,274,272,271,269,268,264,255,254,251,247",8118.0,19,"565,472,471,467,464,463,463,438,378,372,336,320,318,304,239,219,206,190,126",6811.0,0.6238364172110407,270.0
+Tumor cells,Tumor core,3596,9,"319,315,303,299,292,285,278,275,269",2635.0,11,"490,451,433,404,348,334,327,308,300,252,211",3858.0,0.7801629922565445,290.0
+Fibroblasts,Tumor surface,3147,10,"341,326,320,313,311,306,295,294,262,253",3021.0,10,"505,504,502,459,454,391,388,349,340,118",4010.0,0.8094665836201904,126.0
+Macrophages,Macrophage islands,2501,11,"347,319,319,310,309,296,294,290,288,283,266",3321.0,9,"663,406,389,290,271,225,215,197,178",2834.0,0.7469887263265129,147.0
+Respiratory epithelium,Airways,2187,8,"324,323,307,305,291,290,276,256",2372.0,10,"302,289,282,258,238,216,214,189,151,147",2286.0,0.9330908289241624,67.0
+Fibroblasts,Vascular stroma,2179,7,"305,291,284,275,269,256,240",1920.0,5,"611,501,437,363,211",2123.0,0.7293126097222848,55.0
+Cytotoxic T cells,T cell aggregates,1849,9,"330,327,324,292,286,284,283,263,252",2641.0,4,"577,519,394,333",1823.0,0.7790362873783961,61.0
+Macrophages,Tumor surface,1804,7,"317,305,301,297,265,265,260",2010.0,7,"487,456,421,394,362,353,258",2731.0,0.7425831915089628,290.0
+Macrophages,Desmoplastic stroma,1705,14,"328,321,304,302,297,293,287,277,275,274,273,266,244,209",3950.0,4,"760,668,320,291",2039.0,0.732818705465376,255.0
+Cytotoxic T cells,Desmoplastic stroma,1702,12,"350,343,315,294,290,288,287,285,282,274,261,218",3487.0,6,"721,571,566,546,489,234",3127.0,0.7253170708804335,50.0
+Vascular endothelium,Vascular stroma,1079,5,"340,313,296,291,279",1519.0,8,"238,189,165,165,154,150,100,89",1250.0,0.7433998520546548,96.0
+Fibroblasts,Macrophage islands,1047,0,,,0,,,0.6804689663312044,28.0
+Pericytes,Vascular stroma,1009,4,"332,319,296,273",1220.0,5,"337,272,202,197,187",1195.0,0.6889045105676815,9.0
+Fibroblasts,T cell aggregates,1001,2,"345,273",618.0,2,"608,291",899.0,0.8802616524147898,119.0
+Plasma cells,Desmoplastic stroma,934,5,"350,318,309,307,285",1569.0,7,"343,276,253,202,176,157,148",1555.0,0.6139266796541676,4.0
+Macrophages,T cell aggregates,900,5,"297,297,257,256,251",1358.0,2,"769,555",1324.0,0.8339418304139148,115.0
+Tumor cells,Desmoplastic stroma,865,3,"320,301,293",914.0,3,"470,245,117",832.0,0.8851997918001281,518.0
+Macrophages,Vascular stroma,786,0,,,1,293,293.0,0.7575225082328771,98.0
+Smooth muscle cells,Smooth muscle structures,733,4,"328,324,324,275",1251.0,15,"168,129,113,111,98,90,85,81,75,67,66,61,61,58,51",1314.0,0.861005188647597,20.0
+Basal epithelial cells,Airways,681,2,"334,286",620.0,3,"255,244,196",695.0,0.9163485070974058,37.0
+Monocytes,Desmoplastic stroma,603,4,"367,327,311,267",1272.0,1,654,654.0,0.6415934867051766,2.0
+Tumor cells,Macrophage islands,578,0,,,0,,,0.7070909089875305,97.0
+Cytotoxic T cells,Vascular stroma,567,0,,,1,313,313.0,0.6837368872059965,14.0
+Cytotoxic T cells,Tumor surface,537,1,299,299.0,2,"295,291",586.0,0.7602802424861724,65.0
+Fibroblasts,Tumor core,494,0,,,1,237,237.0,0.882965413648204,74.0
+Cytotoxic T cells,Macrophage islands,456,0,,,0,,,0.6912708310190667,35.0
+Alveolar cells,Alveolar spaces,444,2,"309,283",592.0,6,"133,120,81,72,69,62",537.0,0.6332582582582581,6.0
+Fibroblasts,Alveolar spaces,415,0,,,2,"225,142",367.0,0.8798897218974253,39.0
+Monocytes,Vascular stroma,411,0,,,1,582,582.0,0.6815271507531329,4.0
+Dendritic cells,T cell aggregates,410,2,"327,314",641.0,2,"405,96",501.0,0.7462631461176996,9.0
+Lymphatic endothelial cells,Desmoplastic stroma,391,2,"324,290",614.0,7,"97,94,92,91,77,55,44",550.0,0.6189761765712789,3.0
+Macrophages,Alveolar spaces,388,0,,,1,118,118.0,0.7209973213963502,17.0
+Macrophages,Tumor core,380,0,,,1,264,264.0,0.8609339919173776,229.0
+Fibroblasts,Airways,363,1,288,288.0,1,169,169.0,0.8908542952287778,58.0
+Macrophages,Airways,310,0,,,3,"248,217,183",648.0,0.8479424781917131,74.0
+Fibroblasts,Smooth muscle structures,282,0,,,0,,,0.8655358085518213,57.0
+Regulatory T cells,Desmoplastic stroma,280,2,"337,273",610.0,2,"367,239",606.0,0.7104975618566011,25.0
+Vascular endothelium,Alveolar spaces,276,2,"304,268",572.0,3,"159,154,149",462.0,0.7986372485399093,87.0
+Cycling immune cells,Desmoplastic stroma,251,0,,,1,302,302.0,0.635299010144987,0.0
+Plasma cells,Vascular stroma,229,0,,,0,,,0.5823797532910464,0.0
+Tumor cells,Vascular stroma,227,0,,,0,,,0.8025134190891714,206.0
+Cytotoxic T cells,Alveolar spaces,225,0,,,0,,,0.776164200012181,5.0
+Monocytes,Tumor surface,222,0,,,0,,,0.7894652440106985,20.0
+Regulatory T cells,Tumor surface,220,1,303,303.0,1,316,316.0,0.758578143360752,34.0
+Monocytes,Macrophage islands,216,0,,,0,,,0.7245121150282645,6.0
+Smooth muscle cells,Vascular stroma,206,0,,,0,,,0.7425893156057201,10.0
+Vascular endothelium,Desmoplastic stroma,206,0,,,1,173,173.0,0.6731883050045901,5.0
+Cycling immune cells,Tumor surface,188,0,,,0,,,0.7066543250576928,32.0
+Vascular endothelium,T cell aggregates,183,0,,,1,126,126.0,0.7953755903370175,34.0
+Plasma cells,T cell aggregates,182,0,,,0,,,0.7480980557903635,13.0
+Regulatory T cells,Macrophage islands,182,0,,,0,,,0.7006205268297507,21.0
+Cycling immune cells,T cell aggregates,180,0,,,0,,,0.7910271546635184,31.0
+Regulatory T cells,T cell aggregates,170,1,324,324.0,1,249,249.0,0.7670888555200105,4.0
+Macrophages,Smooth muscle structures,165,0,,,0,,,0.7967198526815473,60.0
+Cytotoxic T cells,Airways,164,0,,,0,,,0.8120829765218011,4.0
+Cytotoxic T cells,Smooth muscle structures,162,0,,,1,121,121.0,0.765118227800107,7.0
+Pericytes,Desmoplastic stroma,151,0,,,0,,,0.6471761753938547,2.0
+Tumor cells,Alveolar spaces,137,0,,,0,,,0.8530173417132215,53.0
+Mast cells,Desmoplastic stroma,136,1,321,321.0,4,"53,44,36,33",166.0,0.6313854489164087,0.0
+Dendritic cells,Tumor surface,136,0,,,0,,,0.7134113504556753,2.0
+Cycling immune cells,Vascular stroma,132,0,,,0,,,0.6239630946334856,0.0
+Plasma cells,Macrophage islands,130,0,,,0,,,0.5979735036916793,0.0
+Dendritic cells,Desmoplastic stroma,129,0,,,1,161,161.0,0.6442001016293125,6.0
+Cycling immune cells,Macrophage islands,127,0,,,0,,,0.6460717410323709,2.0
+Tumor cells,T cell aggregates,117,0,,,0,,,0.8657502827366798,113.0
+Smooth muscle cells,Desmoplastic stroma,115,0,,,0,,,0.8236732447519459,11.0
+Monocytes,T cell aggregates,114,0,,,0,,,0.7265099095150129,3.0
+Regulatory T cells,Vascular stroma,108,0,,,0,,,0.6725895157878543,0.0
+Dendritic cells,Macrophage islands,87,0,,,0,,,0.6247936637741736,0.0
+Lymphatic endothelial cells,T cell aggregates,85,0,,,0,,,0.6936134453781513,2.0
+Pericytes,T cell aggregates,82,0,,,0,,,0.7686521559393928,1.0
+Monocytes,Alveolar spaces,79,0,,,0,,,0.6954722492697176,0.0
+Monocytes,Smooth muscle structures,77,0,,,0,,,0.7664151913278805,0.0
+Pericytes,Alveolar spaces,76,0,,,0,,,0.818444221338379,10.0
+Plasma cells,Tumor surface,74,0,,,0,,,0.5653167922020381,0.0
+Mast cells,Vascular stroma,72,0,,,1,62,62.0,0.6065449010654491,0.0
+Vascular endothelium,Airways,66,0,,,0,,,0.7254883047986496,6.0
+Lymphatic endothelial cells,Vascular stroma,62,0,,,0,,,0.6115752780390638,0.0
+Vascular endothelium,Smooth muscle structures,58,0,,,0,,,0.757218062917828,3.0
+Cycling immune cells,Airways,58,0,,,0,,,0.7449023166435358,0.0
+B cells,Desmoplastic stroma,55,0,,,0,,,0.5808695652173913,0.0
+B cells,T cell aggregates,54,1,292,292.0,1,238,238.0,0.6257982120051085,0.0
+Monocytes,Airways,48,0,,,0,,,0.6296150543789353,0.0
+Cytotoxic T cells,Tumor core,46,0,,,0,,,0.7544501369272901,1.0
+Smooth muscle cells,Alveolar spaces,45,0,,,0,,,0.760808767951625,0.0
+Cycling immune cells,Alveolar spaces,42,0,,,0,,,0.6408508581097414,0.0
+Vascular endothelium,Tumor surface,41,0,,,0,,,0.5945728514876772,0.0
+Smooth muscle cells,Tumor surface,40,0,,,0,,,0.9145850973751058,9.0
+Vascular endothelium,Macrophage islands,38,0,,,0,,,0.5375959501471923,0.0
+Lymphatic endothelial cells,Tumor surface,38,0,,,0,,,0.5511575479060089,0.0
+Alveolar cells,Vascular stroma,37,0,,,0,,,0.6195189496897276,0.0
+Mast cells,T cell aggregates,36,0,,,1,48,48.0,0.6798780487804879,0.0
+Regulatory T cells,Airways,35,0,,,0,,,0.7096249310535024,0.0
+Pericytes,Tumor surface,34,0,,,0,,,0.7006489428511619,0.0
+Smooth muscle cells,T cell aggregates,33,0,,,0,,,0.7269156208550149,1.0
+Mast cells,Airways,32,0,,,0,,,0.6411897590361446,0.0
+Mast cells,Smooth muscle structures,31,0,,,0,,,0.5913009783977526,0.0
+Pericytes,Airways,30,0,,,0,,,0.6661225455405725,0.0

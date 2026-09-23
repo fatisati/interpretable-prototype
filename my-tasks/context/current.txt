@@ -1,41 +1,86 @@
-===state===
-yesterday i tried leiden with both cpm and modualirty
-modualirty was beter on s28nsc
-i tried to imeplemtn modulairty in the loss - but turn out to be both cpm and modualirty - they just try to make the cluster size uniform - that was what their charge term doing
-nothing to do with the asisgemnts
-so i decided to go with another term - and i 
+[nassoc diagonal]
+within / vol
+the proportaion of edges inside a com
+if we merge 2 community - the one being merged of course improve - while the other the vol would get very small - and i think also the within
+so both numerator and devidor get low? and as ass get lower in both i think it shoud not have specific effect
+
+[off diag]
+between / min(vol)
+the ratio of sharing edges - for small volumes - we dont let share
+if we merge 2 community - the volume of one gets lower = although the numerator gets lower too 
+but i think the change on the devidor is more - thus the score gets higher
 
 
-====
-(b) just make its assignments more confident, and keep     <- cheap; requires learning NOTHING,
-    more slots nominally occupied: what can we do for this?
+[modularity]
+join k if your aff > di*dj/2m 
+fraction of your affinity into k > fraction of k affinity of the whole graph
+affinity(i -> k) / d_i   >   D_k / 2m [D_k is the community's total degree (our volume).]
+join k if a larger share of your edges points into k than k's share of the graph
 
-what is signal only version?
-=====
-the neurips loss works well on arbf on pca [seacell aff] - but not good on spatial [s28nsc] - we have severe collapse
-the reason is that the diagonal term has real merge bias - combining with hierarchical property of spatial aff - we had a very bad collapse
-[possible simple solutions - correct off diagonal - correct the diagonal]
-we then tried cpm loss - it seems collapse problem somhow solved but the coverage and compactness of scproto cpm was not as good as seacell
-[for cpm i am not sure if the normalization term and the impleented cpm formula is correct or not]
-then we tried leiden with both cpm and modualirty - and interestnly modualirty had better results 
-so we tried modulairty - and then we realized that although high lambda of madualirty again prevent collapse - but the quality of foudned clusters were not good enough comapring to seacell
-[yet not good enough coverag - not good enough within cluster edge fraction - density - and thus for sure dge]
-then we realized that both cpm and modualirty anti collapse machanisms - they are somehow just trying to make the size distribution close to uniform
-i think cpm wsa trying to make the size distribution uniform - but modualryt trying to make volume distribtion uniform
-non is what i want
-the only help cpm / modualirty had was some global view of attraction while communtiy loss is foing local attraction
-[which i think we need this as well - i can say it becasue i rememebr the results specialy for rar ct changed when i added nassoc diagonal [in pca arbf] -
- that was same family of global [although batch global] attraction]
+[cpm]
+join k  iff  mean over members j of w_ij  >  gamma
 
-then i also realized that the off diagonal term of nassoc - it seems it was perventing the the diagonla term to cause collapse
-but its averaging was wrong for sure - so i decided to correct it but i am not sure if i found the real correct formula or not - and if test this or not?
+[cohesion]
+join k  iff  your mean similarity to k's members  >  cohesion[k]
+join k  iff  your mean similarity to k's members    >  k's internal average
 
-so i decided to go with another term - i wanted cells within each commutiy be very simialr - and i wanted precise communities
-i was able to define simiary between cells in 2 way - exact cell cell simialrty [aff[i][j]] - then we woudl have very simialr formula to nassoc diagonal [published neruips]
-but it seems this this does not have the merge bias - but i am not surre on this - need verification
-also i was able to define sim[i, j] cos/dot(aff[i], aff[j]) then doing this we will pass new seconf order info to the model 
-which i dont know what was the effect
+profile_p = (1-alpha) * profile_p + alpha * [sum over all cell i (ass[i][p] * affinity_row[i]) / sum(ass[i][p])] # shoud be detached
 
-i also tried adding reinit - i dont knwo what was the effect
+size_p = (1-alpha) * size_p + alpha*[sum over all cells i ass[i][p]]
 
-so i am confused what happened at the end - can you clear up the stry for me? so i can realize what i can do?
+then to calc mean sim to k s members
+
+for cell c, proto p
+for cells in batch:
+    sum_sim = ass[c][p] * ass[i][p] * sim[c,i]
+
+sum_sim += size_p * sim_p[i] # if aff would be profile_p[i], if gram would be cosine(profile_p, aff_row[i])
+
+
+sum_sim / [sum(ass[i][p]) + size_p]
+
+
+[metrics / baslines]
+this is also very important part 
+
+sum = 0 
+for each cell c in batch:
+    for ech proto p:
+        for each cell j in the c bio batch graph graph:
+            sum_p = ass[j][p] * w[j] * sim[c][j]
+        sum_p /= for all cells in c bio batch graph sum(ass[j][p] * w[j])
+        sum += sum_p * ass[c][p]
+and consider c bio batch graph is all edges were at least one nodes bio batch is same as c bio batch
+
+
+---for arbf on pca aff---
+we want to say we do preserve good withi batch communities [the reported metric should be what we do optmize - but on test set - i think here we would use coheison maybe]
+but also combine batches [batch entropy]
+and maybe a bio proof: [ct_purity]
+and why usefull? for rare ct: we say thats where why model works better
+so we will show [rare homogeneity - rare f1 - coverage]
+
+--for spatial--
+we shoud check the graph criteria [cohesion]
+we do care to recover correct states [niche - ct]
+so joint purity matter, n covered states matters, mean dge [i think mean spearman wsa it]
+so we know we are grouping correct cells together
+[cohesion, n_dead_proto, joitn_purity, n_covered staes, mean dge [pearson]] 
+we shoud be better / comparable to seacell on these
+
+
+--todo list---
+
+[spatial]
+make sure gram implementaion is correct - the free logit one shoud be more close to seacell - make sure choose correct founder gate value
+then compare between cehsion_aff, cheison_gram [corrceted], both [gram corrceted] and choose best
+the run over lambda sweep for banksy [0.2, 0.5, 0.8] - compare over seacell [joint_purity, ct_purty, coeverd states, dge_pearson [what we have for niche in each ct]]
+
+[pancreas]
+make sure main metrics are fine on pancreas [cohesion, batch entrpy, ct purity, rar homogenity, rar f1, rar ecoverage]
+then try on immune and lung as well
+
+[multi batch spatial]
+then train on muti batch spatial dataset we have
+but for now no need to reort dge pearson
+but ocvere states, joitn purity, rare homgenity, batch netropy, 

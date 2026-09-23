@@ -1,0 +1,2 @@
+,pearson_r,kendall_tau,pearson_r_std,kendall_tau_std,tpr,tpr_std,n_pairs,n_metacells,median_mc_size
+Leiden-modularity,0.8564946718342276,0.5916251631155036,0.10612166376934938,0.10707209627452333,0.9822431203979342,0.018612890444448367,18.0,200.0,282.0

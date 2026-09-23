@@ -50,3 +50,25 @@ demo.ipynb
 files/celltype_niches_full.csv
 files/celltype_niches_full_s28nsc.csv
 files/celltype_niches_3d_full_s28nsc.csv
+# notebook scratch (CLAUDE.md §3: tmp/ is never committed)
+**/tmp/
+
+# saved web pages: filenames exceed Windows MAX_PATH and are not source
+*_files/
+**/rebuttle/examples/
+
+# --- binaries/build output: keep git to source + text (2026-09-23) ---
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.zip
+*.h5ad
+*.pkl
+*.pth
+*.synctex.gz
+*.aux
+*.bbl
+*.blg
+*.out
+*.log

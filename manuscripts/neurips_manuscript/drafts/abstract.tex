@@ -1,0 +1,46 @@
+\begin{abstract}
+Resolving which cell states are present in a tissue, and which cells occupy them, is essential for characterizing cellular heterogeneity in development and disease. Single-cell and spatial transcriptomics now profile many donors and tissue sections at once, but each cell is too sparse to analyse on its own, and cells are therefore aggregated into representative profiles termed metacells. Current methods form these metacells from proximity in observed expression alone, so a metacell follows whatever dominates that expression---batch or abundance---rather than the cell state itself. A state that is rare in every batch, though common across the experiment, therefore cannot be formed at all. A cell's spatial niche can also modulate its expression, but that variation is small beside cell-type differences and is absorbed into them. Adding spatial context to the affinity overcorrects, splitting one state across neighbourhoods even where the niche leaves no signal in expression. We introduce scProto, a prototype-based deep clustering model that learns metacells across an entire experiment rather than within each batch. Instead of clustering the affinity graph directly, scProto uses it as a training objective, learning a batch-corrected representation of expression with a conditional variational autoencoder, jointly with a soft assignment of cells to prototypes. Cells strongly connected in the graph are driven to share prototype assignments, while a graph-partitioning criterion keeps each group internally dense and separated from the others. Assignments are computed from expression alone---spatial information enters only through the affinity graph---so a niche can separate cells only to the extent that it changes their transcriptome. Across single-cell and spatial transcriptomics datasets, scProto recovers both states that no single batch contains enough cells to define and states associated with a cell's spatial niche, improving batch mixing and rare-population recovery while preserving community structure.
+\end{abstract}
+
+% ---------------------------------------------------------------------------
+% PASS 15 -- your four comments (delete this block before pasting)
+%
+% 1. "within a single batch" DROPPED from sentence 3, as you asked. It was
+%    doing no work: "follows whatever dominates that expression -- batch or
+%    abundance" already says it, and the rare-state sentence still follows
+%    (if batch dominates, the same state in different batches never groups,
+%    whether or not the method is literally run per batch).
+%
+% 2. "States DEFINED by a cell's spatial neighbourhood" -- you were right, and
+%    this was the most wrong sentence in the abstract. "Defined" claims a
+%    separate state wherever the niche differs. What you actually claim is the
+%    opposite in size: the niche MODULATES expression within a cell type, and
+%    that modulation is small beside cell-type variance, so it gets absorbed
+%    and lost. Rewritten to say exactly that. This also makes the next
+%    sentence land harder: expression-only loses the signal, spatial-affinity
+%    overcorrects -- too little, then too much.
+%
+% 3. "cells joined by an edge" -> "cells STRONGLY CONNECTED in the graph".
+%    Yours is the accurate one. Edges are sampled and weighted by P_ij, so the
+%    pressure is graded by affinity, not binary per edge. This is also the
+%    method section's own wording: "encourages cells strongly connected in the
+%    affinity graph to share prototype assignments".
+%
+% 4. The gating sentence now rests on THE INPUT, not on the reconstruction
+%    loss -- your question was right. The encoder is a function of expression
+%    (plus the batch covariate); spatial coordinates never enter it, they only
+%    appear in the affinity graph inside the loss. So two cells with the same
+%    expression in the same batch get the SAME assignment whatever the graph
+%    asks: an architectural constraint, not a weighted trade-off that a large
+%    lambda could out-vote. Reconstruction only keeps the latent informative
+%    about expression; it competes with the graph loss, it does not veto it.
+%    The CVAE is now named one sentence earlier, where the architecture is
+%    described, and the claim itself is stated as "only to the extent that it
+%    changes their transcriptome" -- not "only where the signal is real", since
+%    the encoder can still amplify a small or noisy expression difference.
+%    Same rule as before: drop this sentence only if you also drop
+%    "overcorrects" above, or the objection stands unanswered.
+%
+% STILL OPEN: dataset names (the one thing the accepted example does that this
+% does not); whether "(batch entropy)" / "(modularity)" return to the close.
+% ---------------------------------------------------------------------------

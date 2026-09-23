@@ -1,0 +1,46 @@
+i have about a week - to prepare more final paper for iclr submission
+we have the rebuttle notes from neurips
+
+the main issue make me feel confused is the nassoc loss part
+what i realized during neurips rebuttle was that the model was working fine on arbf on pca affinities
+while not wokring goos on spatial aff [I tried on mean spatial neiborhood there]
+then i realized its becasue of hierarchical things - in spatial context graphs - we have hierarchical strture in communities
+and in those the nassoc loss is biased ttoward over merging
+thats pushed me to use cpm like loss - so instead of having nassoc [the diag term]
+we have the cpm like objective
+but then we faced th fact that we needed some sort of noamlization as the original cpm 
+it was like gradual one by one cell algorithm - while here we solve the problem via gradient descent
+and I tried several things and i had sevral issues and experiments
+
+yet i am not sure wetaher the loss worked nice or not
+although in some setups ther esult looked fine - but i wasnt sure they are good enough to make me use tehe new loss
+more importantly - i dont know the effect of new loss on the arbf pca affinities - i did some experimnets on pancreas
+first it looked the results where bad - but then i tried to reproduce the paper result with original nassoc loss 
+then i realized the problem was the way we calcuated metrics [in cpm version i guess as well] that made the results look bad
+
+this is a very critical decision either to use the new cpm loss instead of nassoc
+also i thing maybe same bias happenede in off diagonal too - do i need to change that as well?
+do we need off diagonal at all
+they are key decisons and for each of them i feel maybe many expriemnts needed
+and we dont have time
+so i perefer minimal changes to what worked
+also mathematical - conceptual analysis first then experiment when we wree almost sure
+so i dont get trapped in milions of expriments where i cant alanlyse
+
+i think use of banksy embeddign and arbf on that make more sense then mean neihbrhood [thats what almost all of my new expriemtns on that]
+also for the new loss - what i remember from old results which i think may be able to be used as spatial proof for this new submission
+is that we can show by changing the lambda parameter of banksy - the scproto performance is less dropping comparing to seacell - which matech the core claim we have
+the importance of grounding info from gene expression
+
+but this can be used only if we can make sure in pca affintiies we are still good
+also another thing is that maybe we can report mean density along modulairty - becasue thats what we are opmitizing now
+but not sure if conceptualy ake sense or not
+
+so for now
+first i need exploration of the latest experiments
+i need to know if scproto with cpm like loss worked good enough on s28nsc [the most conceptualy correct variant of it - with most concpetualy correct normalizer]
+i also need to know if same loss works good enough on pca affinities [pancreas]
+then if that was true - we can go and run scproto - and decide whcih experimetns from rebuttle include in mian which bring into appendix - they are imprtat decisions
+each need a concrete plan - of what we have what we need to run and decision what minimal piece of evidence we need to support the main story
+
+but before any of tehse we need to fix the loss function that sthe most importat piece

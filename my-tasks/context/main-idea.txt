@@ -90,3 +90,15 @@ we have local push: community loss
 we need some global eval term [batch level global] [i think can be nassoc / cohesion]
 we need prevent collapase - all samples go to same proto [maybe above term can do it]
 some term say prototypes shoud carry disticnt cells - i think nassoc off diag is the only option -
+
+====
+
+goal:
+
+we need to beat seacell that would mean:
+
+--s28nsc--
+comparable joint purity - dead proto 0 - comparable number of covered state - and comparable cohesion [or any other graph metric]
+
+--pancreas--
+comparable ct purity - better rare metrics [check the rebuttle metrics] - better batch entropy

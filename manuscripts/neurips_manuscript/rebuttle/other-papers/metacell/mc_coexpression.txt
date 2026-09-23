@@ -1,0 +1,853 @@
+                                                    RESEARCH ARTICLE
+
+                                                    Library size-stabilized metacells construction
+                                                    enhances co-expression network analysis in
+                                                    single-cell data
+
+                                                    TianjiaoZhang1*, HaibinZhu 2*
+
+                                                    1 School of Pharmacy and Food Engineering, Wuyi University, Jiangmen, China, 2 Department of
+                                                    Statistics and Data Science, School of Economics, Jinan University, Guangzhou, China
+
+                                                    * haibinzhu@jnu.edu.cn (HZ); tjzhang@wyu.edu.cn (TZ)
+
+                                                    Abstract
+
+                                                    Single-cell RNA sequencing (scRNA-seq) deciphers cell type-specific co-expression
+                                                    networks to resolve biological functions but remains constrained by data sparsity and
+    OPEN ACCESS                                     compositional biases. Conventional metacells construction strategies mitigate spar-
+                                                    sity by aggregating transcriptionally similar cells but often neglect systematic biases
+Citation: Zhang T, Zhu H (2025) Library size-       introduced by compositional data. This problem leads to spurious co-expression
+stabilized metacells construction enhances co-      correlations and obscuring biologically meaningful interactions. Through mathemati-
+expression network analysis in single-cell data.    cal modeling and simulations, we demonstrate that uncontrolled library size variance
+PLoS Comput Biol 21(11): e1013697. https://         in traditional metacells inflates false-positive correlations and distorts co-expression
+doi.org/10.1371/journal.pcbi.1013697                networks. Here, we present LSMetacell (Library Size-stabilized Metacells), a compu-
+                                                    tational framework that explicitly stabilizes library sizes across metacells to reduce
+Editor: Marcel HolgerSchulz,Goethe University       compositional noise while preserving cellular heterogeneity. LSMetacell addresses
+Frankfurt: Goethe-Universitat Frankfurt am          this by stabilizing library sizes during metacells aggregation, thereby enhancing the
+Main, GERMANY                                       accuracy of downstream analyses such as Weighted Gene Co-expression Network
+                                                    Analysis (WGCNA). Applied to a postmortem Alzheimer's disease brain scRNA-
+Received: May 2, 2025                               seq dataset, LSMetacell revealed robust, cell type-specific co-expression modules
+                                                    enriched for disease-relevant pathways, outperforming the conventional metacells
+Accepted: November 3, 2025                          approach. Our work establishes a principled strategy for resolving compositional
+                                                    biases in scRNA-seq data, advancing the reliability of co-expression network infer-
+Published: November 13, 2025                        ence in studying complex biological systems. This framework provides a generaliz-
+                                                    able solution for improving transcriptional analyses in single-cell studies.
+Peer Review History: PLOS recognizes the
+benefits of transparency in the peer review           Author summary
+process; therefore, we enable the publication
+of all of the content of peer review and               Gene co-expression analysis is a widely used method to infer functional rela-
+author responses alongside final, published            tionships between genes by measuring correlations in their normalized gene
+articles. The editorial history of this article is     expression level. However, in this paper, through mathematical modeling and
+available here: https://doi.org/10.1371/journal.       simulations, we demonstrate that these correlations are systematically skewed--
+pcbi.1013697
+
+Copyright: © 2025 Zhang, Zhu. This is an open
+access article distributed under the terms of
+the Creative Commons Attribution License,
+which permits unrestricted use, distribution,
+
+PLOS Computational Biology | https://doi.org/10.1371/journal.pcbi.1013697 November 13, 2025                                                       1 / 16
+and reproduction in any medium, provided the          particularly due to biases caused by variability in sequencing depth (library size).
+original author and source are credited.              This issue distorts co-expression analysis results, inflating false correlations and
+                                                      masking true biological interactions. Traditional methods fail to address library
+Data availability statement: All data-                size biases in single-cell studies where data sparsity compounds these challeng-
+sets supporting this study are accessible.            es. We introduce LSMetacell, a computational framework that simultaneously
+Single-cell RNA-seq data are obtained                 tackles single-cell data sparsity and corrects for library size-induced correlation
+from Synapse repository under acces-                  biases. By constructing metacells with stabilized sequencing depths, our meth-
+sion codes syn18485175 (https://www.                  od reduces technical noise while preserving biological heterogeneity. Applied
+synapse.org/Synapse:syn18485175) and                  to Alzheimer's disease brain data, LSMetacell uncovered microglia-specific
+syn21261143 (https://www.synapse.org/                 co-expression networks linking immune dysregulation to neurodegeneration.
+Synapse:syn21261143). Researchers must                Our work provides a dual solution: enhancing single-cell resolution through cell
+submit their own applications to Synapse for          a ggregation and mitigating systemic biases that plague co-expression studies.
+access to the data. Gene Ontology annota-             LSMetacell integrates technical approaches with biological analysis, enabling
+tions were retrieved from the GO.db snapshot          researchers to extract precise and reproducible findings from compositional data.
+bundled in clusterProfiler v4.15 (https://doi.
+org/10.18129/B9.bioc.GO.db). Protein­pro-          Introduction
+tein interaction data (STRING v12.0) were
+obtained from https://stringdb-downloads.org/      Gene co-expression network analysis serves as a powerful and efficient framework
+download/protein.links.v12.0.txt.gz and https://   for deciphering transcriptional regulatory mechanisms across diverse biological con-
+stringdb-downloads.org/download/protein.           texts, offering an intuitive approach to unravel complex transcriptional interactions.
+aliases.v12.0.txt.gz.                              [1,2]. While bulk RNA-seq enabled early discoveries, its fundamental limitation--
+                                                   confounding by cell-type heterogeneity--persists, masking cell-specific interactions.
+Funding: This work was supported by Wuyi           Single-cell RNA sequencing (scRNA-seq) holds promise to address this limitation
+University (508170020342 to TZ) and National       by resolving transcriptional profiles at cellular resolution. However, the challenge of
+Natural Science Foundation of China (12501361      data sparsity, arising from the constraints of current single-cell sequencing workflows
+to HZ). The funders had no role in study           and technologies, continues to pose significant hurdles for downstream analysis.
+design, data collection and analysis, decision to  [3,4]. A conventional workflow accounts for these considerations by collapsing highly
+publish, or preparation of the manuscript.         similar cells into "metacells" to reduce sparsity while retaining cellular heterogeneity
+                                                   [5,6]. However, the compositional nature of normalized scRNA-seq data (both before
+Competing interests: The authors have              and after metacells aggregation) introduces critical yet underappreciated biases that
+declared that no competing interests exist.        undermine co-expression network inference [7].
+
+                                                      In compositional data, where measurements represent relative abundances
+                                                   (e.g., gene counts normalized to library size, i.e., the total number of gene counts
+                                                   sequenced from a sample), spurious correlations arise due to the "closed-sum"
+                                                   constraint: an increase in one gene's expression inherently distorts the apparent
+                                                   proportions of others [5,8]. While this issue plagues bulk RNA-seq analyses, it is
+                                                   exacerbated in scRNA-seq by two factors: (1) extreme library size variability across
+                                                   cells (e.g., often spanning 10-fold differences in unique molecular identifier [UMI]
+                                                   counts, where UMIs are short nucleotide tags used to accurately quantify transcript
+                                                   molecules and distinguish them from PCR duplicates), amplifying normalization
+                                                   artifacts; and (2) data sparsity, which compounds compositional noise by inflating
+                                                   stochastic zeros [9­11]. Conventional metacells construction strategies, designed
+
+PLOS Computational Biology | https://doi.org/10.1371/journal.pcbi.1013697 November 13, 2025  2 / 16
+primarily to mitigate sparsity, often neglect library size variance, generating metacells where normalized expression values
+(e.g., CPM/TPM, Log-CPM/TPM) remain compositionally biased, propagating technical noise into downstream network
+analyses [7,12,13].
+
+   Here, we rigorously demonstrate through mathematical modeling and in silico simulations that uncontrolled library
+size variance in metacells introduces systematic distortions in co-expression network inference. Specifically, it leads to
+false-positive correlations and obscures biologically meaningful interactions. Furthermore, to address this challenge, we
+introduce LSMetacell (Library Size-stabilized Metacells), a novel framework that explicitly stabilizes library sizes across
+metacells while preserving transcriptional heterogeneity. By explicitly accounting for library size variability, LSMetacell
+reduces compositionally induced biases, enabling more accurate and reliable co-expression network analyses, particularly
+for methods like WGCNA (Weighted Gene Co-expression Network Analysis) that rely on precise correlation estimates.
+Our approach not only enhances the robustness of co-expression network inference but also provides a generalizable
+solution for improving the accuracy of downstream transcriptional analyses in scRNA-seq studies. Finally, we evalu-
+ated the utility of LSMetacell by applying it to postmortem brain samples from Alzheimer's disease patients and controls
+scRNA-seq data set and identified biological meaningful cell type-specific co-expression network.
+
+Results
+
+The magnitudes of correlation are overestimated by sequencing depth variations
+
+To verify the impact of confounding effects of sequencing depth variations on the correlation of independent genes,
+we generated null datasets where genes are not co-expressed (null data) by permuting the single-nucleus RNA-seq
+(snRNA-seq) data from reference [14], while introducing different library size variation across cells (as detailed in the
+Methods section). Fig 1a shows that in null data with no library size variations, there were minimal biases. However, as
+the variations increased, both the mean and variance of correlation estimation increased. Especially, when the variance
+approached that of the original data (Variance Size Factor=1), the biases were almost comparable to those observed with
+a tenfold increase in the original data. Furthermore, we prove mathematically that the growing variations of library size
+induce higher type I error, tending to over-reject independence between gene co-expression (S1 File). Our theoretical
+derivation aligns with the results from simulation.
+
+   We further create a simulated snRNA-seq dataset, incorporating predefined potential correlations that are known in
+advance (as detailed in the Methods section). We observed that as the library size variability increased, the deviations in
+the estimated correlations also grew larger (Figs 1b and S1). Specifically, when the variance in library sizes was high, the
+estimated correlations exhibited significant biases, deviating substantially from the true predefined correlations. This find-
+ing underscores the critical impact of library size variability on the accuracy of correlation estimates in snRNA-seq data,
+highlighting the need for robust normalization and variance stabilization techniques to mitigate such biases.
+
+The library stabilized metacell method achieved robust co-expression modules
+
+To tackle the confounding effects of library size variability in single-cell co-expression analysis, we developed the Library
+size-Stabilized Metacell (LSMetacell) algorithm. This method is based on the hypothesis that cells of the same type share
+similar gene expression patterns. The LSMetacell method simultaneously accomplishes two objectives: (1) aggregat-
+ing transcriptionally similar cells into metacells (2) stabilizing library size variation across metacells. This dual approach,
+which aims to preserve biological signals and minimize technical variance, addresses the key challenge in single-cell co-
+expression analysis, where library size heterogeneity often distorts downstream network inference.
+
+   The LSMetacell algorithm processes three key inputs: a cell-cell similarity network computed from transcriptional
+profiles (Pearson correlation among cells by default), a gene expression count matrix, and the target number of meta-
+cells. It then iteratively builds metacells by: (1) initiating with seed cells and incorporating their most similar neighbors; (2)
+
+PLOS Computational Biology | https://doi.org/10.1371/journal.pcbi.1013697 November 13, 2025  3 / 16
+Fig 1. Relationship between correlation bias and library-size variation. a) Library-size variance-dependent correlation inflation in null data. Scatter
+plot demonstrates systematic overestimation of co-expression (Pearson correlation coefficients between gene pairs) (y-axis) with increasing mean
+expression levels (x-axis) under varying library size variance (Variance size factors). Variance size factors scale the variance of library size of the simu-
+lated data. The higher the variance size factor, the greater the library size variation in the simulated data. b) Library-size variance-dependent correlation
+absolute bias. Scatter plot showing the scale factor (variance of library size/mean of library size) and average absolute bias of the estimated correlation.
+The higher the variance size factor, the greater the library size variation in the simulated data.
+
+https://doi.org/10.1371/journal.pcbi.1013697.g001
+
+dynamically evaluating the cumulative library size relative to the global mean metacells library size µL; and (3) excluding
+cell additions that would substantially alter the library size distribution. This dual refinement strategy guarantees transcrip-
+tional homogeneity while maintaining uniform library sizes across all metacells (See Methods for implementation details).
+When evaluated on null datasets (under the condition variance=1 in Fig 1a), LSMetacell introduced minimal technical
+bias compared to other benchmark methods, demonstrating its enhanced accuracy in mitigating artifactual correlations
+(S2 Fig).
+
+   To rigorously evaluate the enhancement of LSMetacell on WGCNA for single-cell data, we carried out a compre-
+hensive comparison with the conventional high-dimensional WGCNA (hdWGCNA) method, which leverages k-nearest
+neighbor aggregation without library size stabilization [7]. In addition to this primary comparison, we also incorporated
+four other cutting-edge algorithms capable of generating metacells, even though they were not specifically designed
+
+PLOS Computational Biology | https://doi.org/10.1371/journal.pcbi.1013697 November 13, 2025  4 / 16
+for gene co-expression analysis. The first is metacells2 [15,16], which adopts a divide-and-conquer strategy to partition
+large s ingle-cell datasets and identifies metacells by constructing k-nearest neighbor graphs within subsets. Another is
+metaQ [17], which leverages a deep learning framework to quantize single cells into a limited codebook. We also included
+SEACells, a metacell identification method that uses a kernel-based approach to learn a low-dimensional embedding
+of single-cell data and then employs sparse combinatorial optimization to group cells into archetypal aggregates [18].
+Additionally, SuperCell is a method that constructs metacells by merging the most transcriptionally similar cells with a
+k-nearest neighbor network [19]. Furthermore, we incorporated the primary version of LSMetacell into the comparison,
+where cells are aggregated as LSMetacell without strict library size control. Using human dorsolateral prefrontal cortex
+scRNA-seq data spanning five major cell types (excitatory neurons [EN], inhibitory neurons [IN], astrocytes [AC], oligoden-
+drocytes [OC], and microglia [MC]), we evaluated two key aspects of network quality: biological relevance and technical
+robustness. Notably, LSMetacell achieved the lowest coefficient of variation, indicating superior library size stability of the
+generated meta-cells, which is a property essential for reducing noise in downstream analyses (S2 Table). For biological
+validation, we leveraged the principle that functionally related genes (as evidenced by protein-protein interactions) should
+show stronger co-expression. Analysis of the top 10,000 correlated gene pairs revealed superior Protein-Protein Interac-
+tion (PPI) enrichment with LSMetacell across most cell types (Table 1).
+
+   Technical robustness was evaluated through module preservation analysis in an independent human prefrontal cortex
+scRNA-seq data (Fig 2). LSMetacell demonstrated higher and stable module preservation, indicating greater reproduc-
+ibility of the identified co-expression patterns. The improved PPI enrichment and module preservation underscore its
+utility for identifying conserved regulatory programs. These findings demonstrate that stabilizing library size variation in
+metacells enhances co-expression analysis. It is worth noting that the method of aggregation used in the primary version
+of LSMetacell has the potential to generate metacells with reduced library size variation. On this basis, LSMetacell further
+
+Table 1. PPI enrichment among the top 10,000 correlated gene pairs across cell types. Values denote the number of gene pairs exhibiting
+significant PPI enrichment for each method within each cell type. Paired Wilcoxon test comparing LSMetacell with all benchmark methods
+across cell types yielded P=0.031 for every comparison.
+
+    LSMetacell  hdWGCNA                            Metacell2  MetaQ                          SEACells  SuperCell  Primary
+
+EN  3742        3736                               2680       3270                           2827      3460       3732
+
+IN  3946        2983                               1460       2173                           1704      3357       3793
+
+OC  3336        3033                               3033       2762                           1664      3042       2831
+
+AC  3318        2359                               2359       1657                           2358      2303       3203
+
+MC  3753        1735                               3070       2141                           1345      2969       3642
+
+https://doi.org/10.1371/journal.pcbi.1013697.t001
+
+Fig 2. Preservation of co-expression modules constructed by different methods across major cell types. Co-expression modules were con-
+structed separately for excitatory neurons (EN), inhibitory neurons (IN), oligodendrocytes (OC), astrocytes (AC), and microglia (MC). The preservation
+of these modules was subsequently evaluated in a fully independent single-cell sequencing dataset using the Z-Summary statistic. A Z-Summary>10
+indicates strong evidence of preservation, while a Z-Summary>2 suggests moderate preservation.
+
+https://doi.org/10.1371/journal.pcbi.1013697.g002
+
+PLOS Computational Biology | https://doi.org/10.1371/journal.pcbi.1013697 November 13, 2025                       5 / 16
+decouples technical artifacts from biological variation through library size variation stabilization, thereby enhancing co-
+expression analysis.
+
+The microglia immune response in AD
+
+Using LSMetacell method followed by weighted gene co-expression network analysis (WGCNA) on a comprehensive
+single-cell transcriptomic dataset, we identified 73 modules across five major central nervous system cell types (EN: 18;
+IN: 16; AC: 14; MC: 12; OC: 13). Strikingly, only four microglial modules (MC-Brown, MC-Green, MC-Purple, MC-Yellow)
+exhibited significant enrichment for immune-related pathways (GO analysis, FDR<0.01), whereas neuronal modules pre-
+dominantly mapped to synaptic function, metabolic processes, etc. This cell-type-specific functional segregation validates
+our algorithm's precision in recovering biologically coherent signals. This highlights the unique position of microglia as the
+core immune effector of central nervous system in AD pathology (Fig 3a).
+
+   Module MC-Brown exhibited strong positive correlations with AD severity markers (Fig 3b). This gene module
+orchestrates immune cell signaling and regulation through GTPase activity (e.g., RAC1, ARHGAPs, DOCK proteins),
+driving processes like leukocyte activation, phagocytosis, and chemotaxis [20,21]. Furthermore, lipid metabolism per-
+turbations (dysregulated glycerophospholipid and phosphatidylinositol biosynthesis) and vesicle trafficking (autophagy,
+endocytosis) amplify microglial membrane dysfunction, impairing A clearance and amplifying inflammatory cascades
+[22­24] (Fig 3c).
+
+   The MC-Green module is more significantly enriched in pathways associated with adaptive immunity compared to the
+MC-Brown module (Fig 3c). It is worth noting the GO results of T cells, especially CD8-positive T cells. Previous stud-
+ies have shown the double-edged role of T cells in the mouse model of AD [25]. Su et al. reported the protective role of
+CD8T cells in AD development [26], while Chen et al. also reported that microglia-mediated infiltration of T cells exacer-
+bates neurodegeneration in the tauopathy-associated model [27]. Our results show that this module is negatively cor-
+related with AD indicators. This may indicate the protective role of this module in AD. The observed decline in MC-Green
+activity may reflect exhaustion of adaptive-immune surveillance as the disease progresses, thereby accelerating the emer-
+gence of AD-related signatures [28]. In contrast, this module profiled with other benchmark approaches showed a notably
+closer association with innate-immune rather than adaptive-immune processes, along with a weaker correlation with AD
+indicators (S3­S8 Figs).
+
+   MC-Yellow shows significant pathway in chaperone-mediated protein folding, ATP synthesis coupled electron transport,
+and immune related terms (Fig 3c). MC-Yellow hub genes contain ribosome-related and some known AD-related genes,
+including APOE [29], HSP90B1 [30], TREM2 [31], etc. The MC-Red module occupies a central position in the network
+analysis, with its functional enrichment linked to RNA metabolism (Fig 3c). Notably, the hub genes within this module are
+primarily associated with mitochondrial pathways (MT-ND1, MT-ND2, MT-ND3, MT-ND4, MT-ND4L, MT-CO1, MT-CO2,
+MT-ATP6, MTCO3), a finding with particular pathological relevance given the established role of microglial mitochondrial
+dysfunction in driving Alzheimer's pathogenesis through mechanisms involving neuroinflammation and metabolic fail-
+ure. [32]. However, when applying certain benchmark methods, many genes now assigned to the MC-Red module were
+merged into the MC-Brown or MC-Yellow modules, highlighting the enhanced resolution offered by the present workflow
+(S3­S8 Figs).
+
+Discussion
+
+Gene co-expression network analysis is indispensable for uncovering transcriptional regulatory mechanisms in diverse
+biological contexts. Single-cell RNA sequencing (scRNA-seq) has emerged as a powerful tool to overcome the limitations
+of bulk RNA-seq in dealing with cell-type heterogeneity. However, the sparsity of single-cell data and the compositional
+nature of normalized data pose significant challenges for accurate co-expression network inference.
+
+PLOS Computational Biology | https://doi.org/10.1371/journal.pcbi.1013697 November 13, 2025  6 / 16
+Fig 3. Microglia gene co-expression modules. Module names are prefixed with "MC" (abbreviation for microglia) followed by the color label. a)
+UMAP representation of the co-expression network visualizes individual genes (kMEs>0.2) with eigengene of each module indicated by larger circles
+colored by the module color. Positive module eigengene correlations>0.5 are indicated by grey lines connecting the eigengenes. b) Modules-phenotype
+
+PLOS Computational Biology | https://doi.org/10.1371/journal.pcbi.1013697 November 13, 2025  7 / 16
+association analysis. Correlation between the module eigengene and phenotypes. Numbers indicate correlation coefficients and p-values. Braaksc:
+Braak Stage is the semiquantitative measure (from no effect on neocortex to severity effect) of severity of neurofibrillary tangle (NFT) pathology.
+Ceradsc: CERAD score is the semiquantitative measure of neuritic plague (from severity to no effect). Cogdx: Clinical consensus diagnosis of cognitive
+status at time of death (from no cognitive impairment to dementia). Dcfdx_lv: Clinical diagnosis of cognitive status at last visit (from no cognitive impair-
+ment to dementia). c) The biological process gene ontology enrichment analysis of genes. GeneRatio is the ratio between genes of interest in the gene
+set and total genes of interest. Dot color represents the adjusted p-value (Benjamini­Hochberg method) of enrichment analysis.
+
+https://doi.org/10.1371/journal.pcbi.1013697.g003
+
+   Our study rigorously demonstrates the detrimental impact of uncontrolled library size variation in metacells on co-
+expression network analysis. Through mathematical modeling and in silico perturbations, we found that this variance intro-
+duces false-positive correlations and obscures biologically meaningful interactions. The biases in correlation estimates
+increase with higher variability in sequencing depths, as evidenced by both the analysis of null datasets and simulated
+snRNA-seq data. These findings highlight the urgent need for methods that can mitigate the confounding effects of library
+size variability in single-cell co-expression analysis.
+
+   A standard approach to address differences in library size is by scaling the counts for each cell using a specific fac-
+tor, e.g., its total UMI count. While effective in controlling for technical variability, this method introduces a critical artifact:
+applying different scaling factors across cells artificially inflates gene-gene correlations, as the same multiplicative factor is
+applied to all genes within a cell.
+
+   To address this issue, we introduced the Library Size-Stabilized Metacell (LSMetacell) algorithm. By aggregating transcrip-
+tionally similar cells into metacells while simultaneously stabilizing their library sizes, LSMetacell effectively reduces technical
+noise and preserves biological signals. Our proposed pepline controls for library size effects through a two-stage process. In
+the first stage, we form metacells by pooling UMI counts from clusters of similar cells. This initial aggregation step naturally
+equilibrates library sizes across metacells to a large extent, but more importantly, it maintains gene-specific variance. For
+instance, the counts for each gene in a metacell represent the sum from its constituent cells, thereby preserving co-variation
+patterns. In the second stage, we perform a library size normalization on the count profiles of these metacells. The key inno-
+vation lies in applying normalization after aggregation. Since the normalization factors are computed across metacells, which
+already exhibit a more uniform library size distribution, the variance among these factors is significantly reduced. As a result,
+scaling each metacell to a common total count does not materially distort the gene-gene correlation matrix. This two-step
+procedure thus effectively controls for any residual differences in metacell size while minimizing the introduction of spurious
+correlations, leading to a more reliable representation of the data for downstream analysis.
+
+   The significant improvement in protein-protein interaction (PPI) enrichment and module preservation in an independent
+scRNA-seq dataset of human prefrontal cortex demonstrates the biological accuracy and technical robustness of LSMeta-
+cell. This method provides a reliable framework for single-cell co-expression network analysis, enabling the decoupling of
+technical artifacts from biological variation.
+
+   Applying the LSMetacell method to a comprehensive single-cell transcriptomic dataset in Alzheimer's disease (AD), we
+identified distinct co-expression modules in major central nervous system cell types, with a particular focus on microglia.
+The functional segregation of these modules, such as immune-related pathways in microglial modules and synaptic/met-
+abolic functions in neuronal modules, validates the precision of our algorithm in recovering biologically coherent signals.
+These findings confirm the unique role of microglia as the core immune effector in AD pathology. Given the critical role of
+immune mechanisms in AD, we focused on the co-expression network modules of microglia.
+
+   Among the microglial modules, MC-Brown is strongly correlated with AD and is enriched in immune activation path-
+ways. The regulation of small GTPase-mediated signal transduction, innate immunity, and lipid metabolism perturbations
+in this module provide potential therapeutic targets. For example, targeting small GTPases could potentially disrupt
+microglial chemotaxis towards amyloid- (A) plaques. Similarly, restoring normal lipid metabolism in microglia may
+enhance A clearance and alleviate the inflammatory cascades. The MC-Green module, which is more significantly
+
+PLOS Computational Biology | https://doi.org/10.1371/journal.pcbi.1013697 November 13, 2025  8 / 16
+enriched in adaptive immunity pathways and negatively correlated with AD indicators, suggests a potential protective role.
+However, its changing correlation patterns in control and AD groups imply possible exhaustion of the adaptive immune
+system in AD. Future studies could explore ways to boost the function of this module to harness its protective effects
+against AD progression. MC-Yellow and MC-Red also present valuable insights into AD pathogenesis. The involve-
+ment of chaperone-mediated protein folding, ATP synthesis coupled electron transport, and RNA metabolism in these
+modules provides new perspectives on the complex molecular mechanisms underlying AD. For instance, enhancing
+c haperone-mediated protein folding may help prevent the accumulation of misfolded proteins and inhibit pro-inflammatory
+process which are characteristic features of AD.
+
+   In the broader context, our work not only provides a novel methodological framework for single-cell co-expression
+network analysis but also offers in-depth insights into the molecular mechanisms of AD. The LSMetacell algorithm has the
+potential to be applied in other biological systems and diseases, facilitating the discovery of conserved regulatory pro-
+grams and potential therapeutic targets. Future research could focus on validating the proposed targets in in vivo models
+and exploring the translational potential of these findings in clinical settings.
+
+   However, it is important to acknowledge that, like all count-based sequencing data, our meta-cell expression matrices
+remain inherently compositional. Although meta-cell aggregation significantly reduces technical variability and mitigates
+spurious correlations caused by variable library sizes across single cells, it does not eliminate the compositional nature
+of the data, as the data remain subject to the unit-sum constraint. This means that the elevated expression of one gene
+necessarily leads to the relative decrease of others, potentially introducing negative biases in correlation estimates. Another
+notable limitation of LSMetacell is its dependence on pre-annotated and transcriptionally homogeneous cell populations.
+While our method effectively controls for technical variation in library size during metacell construction, it is restrictive that
+cell type labels are uncertain, incomplete, or derived from continuous differentiation trajectories. This design reflects a
+deliberate trade-off in Algorithm 1: by focusing on library size stabilization within annotated groups, we prioritize suppress-
+ing technical variation for co-expression analysis at the potential expense of broader metacell versatility. Interestingly, our
+benchmarking results revealed that metacell2, a method that also achieves relatively stable library sizes, performed well in
+module preservation and other metrics, as might be expected. Furthermore, the co-expression modules derived by meta-
+cell2 exhibited greater similarity to those from LSMetacell than those from other methods. Surprisingly, SuperCell, despite
+showing relatively higher library size variation, also achieved competitive module preservation results, and its co-e xpression
+patterns were likewise more similar to those of LSMetacell compared to others. These observations suggest that, in addi-
+tion to library size control, other factors such as low compactness and high separation of metacells may also play important
+roles in obtaining biologically meaningful co-expression networks. Future work could explore complementary approaches
+to extend the utility of library size stabilization to more complex and heterogeneous single-cell datasets, while incorporat-
+ing features that enhance metacell compactness and transcriptional coherence. Furthermore, while we have significantly
+reduced the number of parameters compared to previous metacells algorithms (only the number of metacells needs to be
+provided), it is still crucial to select a cell-cell similarity algorithm. Fortunately, we achieved good results by simply using
+Pearson correlation in our study, but this aspect warrants further investigation. Finally, the time complexity of LSMetacell
+scales quadratically (O(N2)) with the number of cells (N ), making computational efficiency an important consideration for
+large datasets (S3 Table). Constructing metacells separately for each individual and cell type, rather than pooling cells
+across sources, enhances biological specificity while simultaneously reducing computational expense.
+
+Conclusions
+
+Through mathematical modeling and in silico simulations, we rigorously demonstrate that excessive library size variance
+in single-cell data systematically inflates gene-gene correlations, fundamentally compromising co-expression network
+fidelity. We introduce LSMetacell, a rational metacell framework that strategically balances transcriptional similarity with
+
+PLOS Computational Biology | https://doi.org/10.1371/journal.pcbi.1013697 November 13, 2025  9 / 16
+library size stabilization. By leveraging scRNA-seq's cellular granularity to aggregate phenotypically coherent cells while
+controlling technical variability, LSMetacell mitigates false-positive interactions. Applied to Alzheimer's disease data, our
+method identified robust cell type-specific modules enriched for neurodegeneration pathways, including microglia-driven
+immune dysregulation. This work establishes that systematic technical stabilization during metacell design is essential for
+reliable single-cell network inference, advancing mechanistic discovery in complex biological systems.
+
+Methods
+
+Data collection and preprocessing
+
+Single-cell RNA sequencing (scRNA-seq) datasets were obtained from public repositories: dorsolateral prefrontal cortex
+(DLPFC) data from Synapse (syn18485175; [14]); prefrontal cortex data from Synapse (syn21261143; [33]). Gene count
+matrices for single-cell data were generated using the original authors' preprocessing pipelines [14,33]. Then, we per-
+formed log-normalization with a scale factor of 10,000.
+
+Simulated dataset
+
+To generate null data sets from an authentic scRNA-seq dataset with co-expression levels at or close to zero among all gene
+
+pairs while pre-serving gene expression levels, we adopt the following approach that combines permutation with Poisson sam-
+
+pling.  First,  we  normalize  the  expression  level  of  each  gene  i  in  cell m,  denoted  as  yim  =  , xim  where  xim  represents  the  raw
+
+                                                                                                            sm
+
+expression count and sm is the scaling factor (e.g., sequencing depth) for cell m. Subsequently, for each gene i, we randomly
+
+shuffle its normalized expression values yim across all m cells. This shuffling step decorrelates the gene expressions, effectively
+
+eliminating any potential co-expression patterns among gene pairs. Finally, to generate the UMI (Unique Molecular Identifier)
+
+counts for the permuted data, we sample from a Poisson distribution with parameters derived from the normalized, permuted
+
+expression levels. Specifically, for gene i in cell m, the UMI count is sampled from Poission sm · yim , where sm is the desired
+library size in cell m. The sequencing depth sm is determined from a truncated normal distribution, with sm  0 almost surely,
+using variance of the original scaling factors sm multiplied by different variance size factor. This process ensures that the null data
+
+sets maintain the overall gene expression characteristics of the original data while lacking any meaningful co-expression patterns.
+
+To generate synthetic single-cell RNA-seq data with controlled co-expression structures, we developed a simula-
+
+tion framework integrating a Gamma-Poisson marginal model with a Gaussian copula. First, the Gamma distribution
+
+parameters, ri and pi for the gene i , were estimated from authentic scRNA-seq data to ensure realistic overdispersion.
+Next, given a predefined co-expression matrix R Rp×p, calibrated from the real data, we sampled latent variables
+
+(vi1, vi2, . . . , vip) from multivariate normal distribution, N(0, R). These latent variables were transformed by
+
+                                                                 im = Fi­1 ( (vim))
+
+where ((·) is the) cumulative distribution function (CDF) of a standard normal distribution and Fi(·) is the CDF of
+                1­pi
+Gamma   ri,      pi   . This approach simulates gene expression level i , maintaining their predefined correlation structure for
+
+benchmark. Finally, the simulated UMI count, xim, is sampled from Poission (tm · im), where tm scales expression to match
+
+desired library sizes. By generating tm from a truncated normal distribution (larger than 0) with different variance we simu-
+
+lated datasets with low, moderate, and high library size variability.
+
+LSMetacell method
+
+The LSMetacell algorithm is specifically designed to operate within pre-defined, transcriptionally homogeneous cell
+populations. Before applying the method, users must first annotate cell types using established clustering approaches to
+ensure biologically meaningful aggregation. At its core, the algorithm constructs metacells through an iterative process
+that balances transcriptional similarity (default: Pearson correlation between cells) with library size stabilization. The
+
+PLOS Computational Biology | https://doi.org/10.1371/journal.pcbi.1013697 November 13, 2025                                                          10 / 16
+algorithm begins by calculating the target average library size µL across all cells. Starting with the smallest-library cell as
+a seed, it iteratively aggregates cells based on transcriptional similarity. At each step, a candidate cell is probabilistically
+selected from unassigned cells based on its aggregate affinity to the current metacell. Crucially, the algorithm enforces
+library size stabilization: a candidate is retained only if adding it brings the metacell's cumulative library size closer to µL.
+This process continues until the metacell's library size approaches µL or no suitable candidates remain. The workflow
+proceeds as Algorithm 1.
+
+Algorithm 1 LSMetacell
+
+Input: X , set of single cells with raw gene expression profiles; n, target number of metacells; P,
+
+cell-cell similarity matrix for cells in X .
+
+Output: M, a list of metacells with stabilized library sizes.
+
+Initialization:           size:     µL    1            librarysize(x);
+Target average library                    |X|
+                                                   xX
+Unassigned cells: U  X ;
+
+Metacell list: M  
+
+Main Loop:
+while U =  do
+
+ Step1: Seed Selection
+
+ Select the cell with the smallest library size:
+
+xseed  argminxUlibrarysize(x);
+
+ Initialize current metacell:
+
+Mcurr  xseed;
+
+U  U {xseed};
+Scurr  xMcurr librarysize(x);
+ Step2: Iterative Aggregation
+
+ While Scurr < µL and U =  do
+
+ Compute     affinity     s cores between Mcurr and        all  x  U:
+x  U,                         yMcurr Similarity(x, y; P);
+             wx       1
+                   Mcurr
+
+Normalized weights:
+
+x        U,   px   ;  wx         px;
+ xcand  U    with
+                       xU x
+
+                   probability
+
+Tentatively update:
+
+Stemp  Scurr + librarysize (xcand)
+if |Scurr ­ µL|  |Scurr ­ µL| then
+
+ Accept candidate:
+Mcurr  Mcurr  {xcurr};
+
+Scurr  Stemp;
+U  U  {xcand};
+
+else
+
+Reject xcand.
+
+end if
+
+ end while
+
+end while
+
+   To extend the LSMetacell algorithm for datasets with heterogeneous groups (e.g., individuals, biological replicates), we
+developed a group-aware metacells construction framework (Algorithm 2).
+
+Algorithm 2 LSMetacell by Group
+
+Input: Xg, set of single cells in group g; Pg, cell-cell similarity matrix for cells in group g; ng,
+the target number of metacells for group g.
+Output: M, a list of metacells with stabilized library sizes.
+Main Loop:
+Step1: Proportional Metacells Allocation
+
+PLOS Computational Biology | https://doi.org/10.1371/journal.pcbi.1013697 November 13, 2025  11 / 16
+For each group g, calculate its target metacell count:
+       
+       ;  xXg librarysize(x)
+ng  =
+          g xXg librarysize(x)
+
+Step2: Group-Specific Metacell Construction
+
+For each group g:
+
+Apply Algorithm 1 LSMetacell.
+
+WGCNA and identification of significant modules
+
+   Gene co-expression network construction. Following metacells construction, weighted co-expression network were
+constructed by the common pipeline. First, the gene-gene similarity matrix A is computed by taking the pairwise signed
+correlation of genes.
+
+                                  aij            =  1+  cor (xi, xj)
+                                                          2
+
+To comply with scale-free topology criterion and the recommendations of WGCNA use, we chose appropriate soft-
+
+thresholding powers to convert the gene expression matrices to adjacency matrices. Then topology overlap matrices (TOM)
+
+were calculated by adjacency matrices [34]. We then use hierarchical clustering and dynamic tree cut method to identify
+
+gene clusters [35].
+
+Protein-Protein Interaction (PPI) enrichment. The protein-protein interaction annotation were download from
+
+STRING database (12.0) [36].
+
+Module preservation. We used Z-Summary, a network preservation statistic aggregating multiple preservation
+
+statistics (3 density-based statistics and 3 connectivity-based statistics), to quantify the conservation of the co-expression
+
+network in another dataset [37].
+
+Module eigengenes. Given that each module comprises genes with correlated expression patterns, it is logical to summarize
+
+each module using a single representative expression profile, known as the module eigengene. The module eigengene is
+
+defined as the first principal component of the standardized expression matrix of the genes within the module, which captures
+
+the majority of the variance within the module. Module eigengenes lead to a natural measure of similarity (membership) of all
+
+individual genes to all modules [38]. A continuous measure of module membership of gene i in module I is defined as
+
+                                  kMEiI             =      (    EI)  ,
+                                                       cor xi,
+
+where xi is the expression measurement of gene i and EI is the eigengene of module I [39].
+   Gene enrichment analysis. We implemented gene ontology (GO) and Kyoto Encyclopedia of Genes and Genomes
+
+(KEGG) pathway enrichment analysis by ClusterProfiler (4.15) [40].
+   Comparison of LSMetacell with other metacell algorithms. To compare LSMetacell with other metacell
+
+construction algorithms, including hdWGCNA, metacell2, metaQ, SEACells and SuperCell. we generated an identical
+number of metacells across the same cell types using each of these methods, all under their respective default
+parameter settings. For primary LSMetacell (LSMetacell without strict library size control), we omitted lines (25­29) in
+LSMetacell (Algorithm 1) and ceased the metacell aggregation process once the required cell number (number of cells/
+number of designed metacells) was achieved. To ensure a fair and biologically relevant comparison of co-expression
+networks across different metacell methods, we applied a unified gene filtering criterion prior to WGCNA analysis:
+only genes expressed in at least 10% of cells within each cell type were retained. This filtering step was consistently
+applied to metacells generated by all methods, including LSMetacell, hdWGCNA, metacell2, metaQ, SEACells, and
+SuperCell. Although the absolute number of retained genes varied slightly across methods due to differences in
+metacell construction, the overlap among gene sets was substantial. To enable a direct and methodologically consistent
+
+PLOS Computational Biology | https://doi.org/10.1371/journal.pcbi.1013697 November 13, 2025                           12 / 16
+comparison of functional modules, all subsequent WGCNA analyses were performed using the intersection of these
+filtered gene sets across methods.
+
+Supporting information
+S1 File. Proof for the main results. Contains the theoretical proof of our main results, where we establish theoretically
+that compositional gene expression data suffers from inflated Type I errors in correlation analyses.
+(PDF)
+
+S1 Table. Variability in library size distribution of metacells generated by different methods across major cell
+types. Values represent the coefficient of variation (standard deviation divided by the mean), indicating the degree of vari-
+ability in library sizes within each metacell type.
+(PDF)
+
+S2 Table. Results of one-sided Wilcoxon rank-sum tests (left>right) comparing Zsummary scores between pairs
+of metacell construction methods presented in Fig 2. Each cell displays the p-value from the statistical test evaluating
+whether the method in the row exhibits significantly higher Zsummary scores than the method in the column. Empty cells
+indicate comparisons that were either not applicable or not performed.
+(PDF)
+
+S3 Table. The table shows the LSMetacell algorithm's runtime on a standard laptop (64 GB RAM, Windows 11
+OS) using datasets of varying sizes. The results demonstrate a near-quadratic scaling of runtime with cell count, which
+aligns with its theoretical O(N2) complexity.
+(PDF)
+
+S1 Fig. Distribution of correlation absolute bias under a specific scaling condition. This histogram illustrates the
+distribution of correlation absolute bias values across all gene pairs for different scale factor. Each scale factor is corre-
+sponding to one representative scaling condition shown in Fig 1b. The x-axis represents the correlation absolute bias,
+while the y-axis shows the frequency of gene pairs at each bias interval. Lower and more concentrated distributions indi-
+cate better control of technical artifacts induced by library size variation.
+(PDF)
+
+S2 Fig. Benchmarking metacell algorithms under a synthetic null-correlation dataset. We generated a syn-
+thetic s ingle-cell dataset in which genes possess no intrinsic pairwise correlation (see Fig 1 Methods) and applied seven
+metacell-building algorithms: hdWGCNA, Metacell2, SEACells, SuperCell, MetaQ, Primary, and LSMetacell. After normaliza-
+tion within each metacell set, all pairwise Pearson correlations between genes were recalculated; their frequency distributions
+are displayed above. To quantify differences in noise suppression, two-sided Wilcoxon signed-rank tests were conducted
+between every distribution and the LSMetacell-derived distribution (our reference). P-values are reported directly on the plots.
+(PDF)
+
+S3 Fig. Microglia gene co-expression modules identified by hdWGCNA employing the same analysis and presen-
+tation panels as in Fig 3 (see this figure for a detailed caption). To ensure comparability across methods, the mod-
+ules identified by each algorithm were aligned with those from LSMetacell using Fisher's exact test to assess significant
+overlaps. Thus, modules labeled as MCgreen, MCred, MCyellow, MCblue, MCturquoise, MCblack, MCbrown, MCpink,
+MCpurple, MCyellow, and MCmagenta in each method correspond significantly to their counterparts in LSMetacell. Any
+additional modules identified by a method that are not listed above do not exhibit consistent correspondence across the
+other algorithms.
+(PDF)
+
+PLOS Computational Biology | https://doi.org/10.1371/journal.pcbi.1013697 November 13, 2025  13 / 16
+S4 Fig. Microglia gene co-expression modules identified by Metacell2 employing the same analysis and presen-
+tation panels as in Fig 3 (see this figure for a detailed caption). To ensure comparability across methods, the mod-
+ules identified by each algorithm were aligned with those from LSMetacell using Fisher's exact test to assess significant
+overlaps. Thus, modules labeled as MCgreen, MCred, MCyellow, MCblue, MCturquoise, MCblack, MCbrown, MCpink,
+MCpurple, MCyellow, and MCmagenta in each method correspond significantly to their counterparts in LSMetacell. Any
+additional modules identified by a method that are not listed above do not exhibit consistent correspondence across the
+other algorithms.
+(PDF)
+
+S5 Fig. Microglia gene co-expression modules identified by MetaQ employing the same analysis and presen-
+tation panels as in Fig 3 (see this figure for a detailed caption). To ensure comparability across methods, the mod-
+ules identified by each algorithm were aligned with those from LSMetacell using Fisher's exact test to assess significant
+overlaps. Thus, modules labeled as MCgreen, MCred, MCyellow, MCblue, MCturquoise, MCblack, MCbrown, MCpink,
+MCpurple, MCyellow, and MCmagenta in each method correspond significantly to their counterparts in LSMetacell. Any
+additional modules identified by a method that are not listed above do not exhibit consistent correspondence across the
+other algorithms.
+(PDF)
+
+S6 Fig. Microglia gene co-expression modules identified by SEACells employing the same analysis and presen-
+tation panels as in Fig 3 (see this figure for a detailed caption). To ensure comparability across methods, the modules
+identified by each algorithm were aligned with those from LSMetacell using Fisher's exact test to assess significant overlaps.
+Thus, modules labeled as MCgreen, MCred, MCyellow, MCblue, MCturquoise, MCblack, MCbrown, MCpink, MCpurple,
+MCyellow, and MCmagenta in each method correspond significantly to their counterparts in LSMetacell. Any additional mod-
+ules identified by a method that are not listed above do not exhibit consistent correspondence across the other algorithms.
+(PDF)
+
+S7 Fig. Microglia gene co-expression modules identified by SuperCell employing the same analysis and presen-
+tation panels as in Fig 3 (see this figure for a detailed caption). To ensure comparability across methods, the mod-
+ules identified by each algorithm were aligned with those from LSMetacell using Fisher's exact test to assess significant
+overlaps. Thus, modules labeled as MCgreen, MCred, MCyellow, MCblue, MCturquoise, MCblack, MCbrown, MCpink,
+MCpurple, MCyellow, and MCmagenta in each method correspond significantly to their counterparts in LSMetacell. Any
+additional modules identified by a method that are not listed above do not exhibit consistent correspondence across the
+other algorithms.
+(PDF)
+
+S8 Fig. Microglia gene co-expression modules identified by Primary employing the same analysis and presentation
+panels as in Fig 3 (see this figure for a detailed caption). To ensure comparability across methods, the modules identified
+by each algorithm were aligned with those from LSMetacell using Fisher's exact test to assess significant overlaps. Thus,
+modules labeled as MCgreen, MCred, MCyellow, MCblue, MCturquoise, MCblack, MCbrown, MCpink, MCpurple, MCyellow,
+and MCmagenta in each method correspond significantly to their counterparts in LSMetacell. Any additional modules identi-
+fied by a method that are not listed above do not exhibit consistent correspondence across the other algorithms.
+(PDF)
+
+Acknowledgments
+
+We express our gratitude to researchers who have shared their data online. This project benefits of the computing
+resources from the High-Performance Computing Center of Wuyi University.
+
+PLOS Computational Biology | https://doi.org/10.1371/journal.pcbi.1013697 November 13, 2025  14 / 16
+Author contributions
+
+Conceptualization: Tianjiao Zhang, Haibin Zhu.
+
+Data curation: Tianjiao Zhang.
+
+Formal analysis: Tianjiao Zhang, Haibin Zhu.
+
+Funding acquisition: Tianjiao Zhang.
+
+Investigation: Tianjiao Zhang, Haibin Zhu.
+
+Methodology: Tianjiao Zhang, Haibin Zhu.
+
+Project administration: Haibin Zhu.
+
+Resources: Tianjiao Zhang, Haibin Zhu.
+
+Software: Tianjiao Zhang, Haibin Zhu.
+
+Supervision: Tianjiao Zhang, Haibin Zhu.
+
+Validation: Tianjiao Zhang.
+
+Visualization: Tianjiao Zhang.
+
+Writing ­ original draft: Tianjiao Zhang, Haibin Zhu.
+
+Writing ­ review & editing: Tianjiao Zhang, Haibin Zhu.
+
+References
+
+ 1. Langfelder P, Horvath S. WGCNA: an R package for weighted correlation network analysis. BMC Bioinform. 2008;9:559. https://doi.
+       org/10.1186/1471-2105-9-559 PMID: 19114008
+
+ 2. Zhang T, Wong G. Gene expression data analysis using Hellinger correlation in weighted gene co-expression networks (WGCNA). Comput Struct
+       Biotechnol J. 2022;20:3851­63. https://doi.org/10.1016/j.csbj.2022.07.018 PMID: 35891798
+
+ 3. Tang F, Barbacioru C, Wang Y, Nordman E, Lee C, Xu N, et al. mRNA-Seq whole-transcriptome analysis of a single cell. Nat Methods.
+       2009;6(5):377­82. https://doi.org/10.1038/nmeth.1315 PMID: 19349980
+
+ 4. Aldridge S, Teichmann SA. Single cell transcriptomics comes of age. Nat Commun. 2020;11(1):4307. https://doi.org/10.1038/s41467-020-18158-5
+       PMID: 32855414
+
+ 5. Bilous M, Hérault L, Gabriel AA, Teleman M, Gfeller D. Building and analyzing metacells in single-cell genomics data. Mol Syst Biol.
+       2024;20(7):744­66. https://doi.org/10.1038/s44320-024-00045-6 PMID: 38811801
+
+ 6. Feregrino C, Tschopp P. Assessing evolutionary and developmental transcriptome dynamics in homologous cell types. Dev Dyn.
+       2022;251(9):1472­89. https://doi.org/10.1002/dvdy.384 PMID: 34114716
+
+ 7. Morabito S, Reese F, Rahimzadeh N, Miyoshi E, Swarup V. hdWGCNA identifies co-expression networks in high-dimensional transcriptomics data.
+       Cell Rep Methods. 2023;3(6):100498. https://doi.org/10.1016/j.crmeth.2023.100498 PMID: 37426759
+
+ 8. Aitchison J. The statistical analysis of compositional data. J R Stat Soc Ser B Stat Methodol. 1982;44(2):139­60. https://doi.
+       org/10.1111/j.2517-6161.1982.tb01195.x
+
+ 9. Skinnider MA, Squair JW, Foster LJ. Evaluating measures of association for single-cell transcriptomics. Nat Methods. 2019;16(5):381­6. https://
+       doi.org/10.1038/s41592-019-0372-4 PMID: 30962620
+
+10. Su C, Xu Z, Shan X, Cai B, Zhao H, Zhang J. Cell-type-specific co-expression inference from single cell RNA-sequencing data. bioRxiv.
+       2022:2022.12.13.520181. https://doi.org/10.1101/2022.12.13.520181 PMID: 36561173
+
+11. Cuevas-Diaz Duran R, Wei H, Wu J. Data normalization for addressing the challenges in the analysis of single-cell transcriptomic datasets. BMC
+       Genomics. 2024;25(1):444. https://doi.org/10.1186/s12864-024-10364-5 PMID: 38711017
+
+12. Butler A, Hoffman P, Smibert P, Papalexi E, Satija R. Integrating single-cell transcriptomic data across different conditions, technologies, and spe-
+       cies. Nat Biotechnol. 2018;36(5):411­20. https://doi.org/10.1038/nbt.4096 PMID: 29608179
+
+13. Wolf FA, Angerer P, Theis FJ. SCANPY: large-scale single-cell gene expression data analysis. Genome Biol. 2018;19(1):15. https://doi.
+       org/10.1186/s13059-017-1382-0 PMID: 29409532
+
+14. Mathys H, Davila-Velderrain J, Peng Z, Gao F, Mohammadi S, Young JZ, et al. Single-cell transcriptomic analysis of Alzheimer's disease. Nature.
+       2019;570(7761):332­7. https://doi.org/10.1038/s41586-019-1195-2 PMID: 31042697
+
+PLOS Computational Biology | https://doi.org/10.1371/journal.pcbi.1013697 November 13, 2025  15 / 16
+15. Ben-Kiki O, Bercovich A, Lifshitz A, Tanay A. Metacell-2: a divide-and-conquer metacell algorithm for scalable scRNA-seq analysis. Genome Biol.
+       2022;23(1):100. https://doi.org/10.1186/s13059-022-02667-1 PMID: 35440087
+
+16. Baran Y, Bercovich A, Sebe-Pedros A, Lubling Y, Giladi A, Chomsky E, et al. MetaCell: analysis of single-cell RNA-seq data using K-nn graph parti-
+       tions. Genome Biol. 2019;20(1):206. https://doi.org/10.1186/s13059-019-1812-2 PMID: 31604482
+
+17. Li Y, Li H, Lin Y, Zhang D, Peng D, Liu X, et al. MetaQ: fast, scalable and accurate metacell inference via single-cell quantization. Nat Commun.
+       2025;16(1):1205. https://doi.org/10.1038/s41467-025-56424-6 PMID: 39885131
+
+18. Persad S, Choo Z-N, Dien C, Sohail N, Masilionis I, Chaligné R, et al. SEACells infers transcriptional and epigenomic cellular states from
+       s ingle-cell genomics data. Nat Biotechnol. 2023;41(12):1746­57. https://doi.org/10.1038/s41587-023-01716-9 PMID: 36973557
+
+19. Bilous M, Tran L, Cianciaruso C, Gabriel A, Michel H, Carmona SJ, et al. Metacells untangle large and complex single-cell transcriptome networks.
+       BMC Bioinform. 2022;23(1):336. https://doi.org/10.1186/s12859-022-04861-1 PMID: 35963997
+
+20. Fan Y, Xie L, Chung CY. Signaling pathways controlling microglia chemotaxis. Mol Cells. 2017;40(3):163­8. https://doi.org/10.14348/mol-
+       cells.2017.0011 PMID: 28301917
+
+21. Aguilar BJ, Zhu Y, Lu Q. Rho GTPases as therapeutic targets in Alzheimer's disease. Alzheimers Res Ther. 2017;9(1):97. https://doi.org/10.1186/
+       s13195-017-0320-4 PMID: 29246246
+
+22. Xu S, Zhu Z, Delafield DG, Rigby MJ, Lu G, Braun M, et al. Spatially and temporally probing distinctive glycerophospholipid alterations in Alzhei-
+       mer's disease mouse brain via high-resolution ion mobility-enabled sn-position resolved lipidomics. Nat Commun. 2024;15(1):6252. https://doi.
+       org/10.1038/s41467-024-50299-9 PMID: 39048572
+
+23. Desale SE, Chinnathambi S. Phosphoinositides signaling modulates microglial actin remodeling and phagocytosis in Alzheimer's disease. Cell
+       Commun Signal. 2021;19(1):28. https://doi.org/10.1186/s12964-021-00715-0 PMID: 33627135
+
+24. Li R-Y, Qin Q, Yang H-C, Wang Y-Y, Mi Y-X, Yin Y-S, et al. TREM2 in the pathogenesis of AD: a lipid metabolism regulator and potential metabolic
+       therapeutic target. Mol Neurodegener. 2022;17(1):40. https://doi.org/10.1186/s13024-022-00542-y PMID: 35658903
+
+25. Hu D, Weiner HL. Unraveling the dual nature of brain CD8+ T cells in Alzheimer's disease. Mol Neurodegener. 2024;19(1):16. https://doi.
+       org/10.1186/s13024-024-00706-y PMID: 38355649
+
+26. Su W, Saravia J, Risch I, Rankin S, Guy C, Chapman NM, et al. CXCR6 orchestrates brain CD8+ T cell residency and limits mouse Alzheimer's
+       disease pathology. Nat Immunol. 2023;24(10):1735­47. https://doi.org/10.1038/s41590-023-01604-z PMID: 37679549
+
+27. Chen X, Firulyova M, Manis M, Herz J, Smirnov I, Aladyeva E, et al. Microglia-mediated T cell infiltration drives neurodegeneration in tauopathy.
+       Nature. 2023;615(7953):668­77. https://doi.org/10.1038/s41586-023-05788-0 PMID: 36890231
+
+28. Grayson JM, Short SM, Lee CJ, Park N, Marsac C, Sette A, et al. T cell exhaustion is associated with cognitive status and amyloid accumulation in
+       Alzheimer's disease. Sci Rep. 2023;13(1):15779. https://doi.org/10.1038/s41598-023-42708-8 PMID: 37737298
+
+29. Serrano-Pozo A, Das S, Hyman BT. APOE and Alzheimer's disease: advances in genetics, pathophysiology, and therapeutic approaches. Lancet
+       Neurol. 2021;20(1):68­80. https://doi.org/10.1016/S1474-4422(20)30412-9 PMID: 33340485
+
+30. Huang C, Liu Y, Wang S, Xia J, Hu D, Xu R. From genes to metabolites: HSP90B1's role in Alzheimer's disease and potential for therapeutic inter-
+       vention. Neuromolecular Med. 2025;27(1):6. https://doi.org/10.1007/s12017-024-08822-0 PMID: 39760808
+
+31. Carmona S, Zahs K, Wu E, Dakin K, Bras J, Guerreiro R. The role of TREM2 in Alzheimer's disease and other neurodegenerative disorders. Lan-
+       cet Neurol. 2018;17(8):721­30. https://doi.org/10.1016/S1474-4422(18)30232-1 PMID: 30033062
+
+32. Li Y, Xia X, Wang Y, Zheng JC. Mitochondrial dysfunction in microglia: a novel perspective for pathogenesis of Alzheimer's disease. J Neuroinflam-
+       mation. 2022;19(1):248. https://doi.org/10.1186/s12974-022-02613-9 PMID: 36203194
+
+33. Lau S-F, Cao H, Fu AKY, Ip NY. Single-nucleus transcriptome analysis reveals dysregulation of angiogenic endothelial cells and neuroprotective
+       glia in Alzheimer's disease. Proc Natl Acad Sci U S A. 2020;117(41):25800­9. https://doi.org/10.1073/pnas.2008762117 PMID: 32989152
+
+34. Ravasz E, Somera AL, Mongru DA, Oltvai ZN, Barabási AL. Hierarchical organization of modularity in metabolic networks. Science.
+       2002;297(5586):1551­5. https://doi.org/10.1126/science.1073374 PMID: 12202830
+
+35. Langfelder P, Zhang B, Horvath S. Defining clusters from a hierarchical cluster tree: the Dynamic Tree Cut package for R. Bioinformatics.
+       2008;24(5):719­20. https://doi.org/10.1093/bioinformatics/btm563 PMID: 18024473
+
+36. von Mering C, Huynen M, Jaeggi D, Schmidt S, Bork P, Snel B. STRING: a database of predicted functional associations between proteins. Nucleic
+       Acids Res. 2003;31(1):258­61. https://doi.org/10.1093/nar/gkg034 PMID: 12519996
+
+37. Langfelder P, Luo R, Oldham MC, Horvath S. Is my network module preserved and reproducible? PLoS Comput Biol. 2011;7(1):e1001057. https://
+       doi.org/10.1371/journal.pcbi.1001057 PMID: 21283776
+
+38. Dong J, Horvath S. Understanding network concepts in modules. BMC Syst Biol. 2007;1:24. https://doi.org/10.1186/1752-0509-1-24 PMID:
+       17547772
+
+39. Wang N, Langfelder P, Stricos M, Ramanathan L, Richman JB, Vaca R, et al. Mapping brain gene coexpression in daytime transcriptomes unveils
+       diurnal molecular networks and deciphers perturbation gene signatures. Neuron. 2022;110(20):3318-3338.e9. https://doi.org/10.1016/j.neu-
+       ron.2022.09.028 PMID: 36265442
+
+40. Yu G, Wang L-G, Han Y, He Q-Y. clusterProfiler: an R package for comparing biological themes among gene clusters. OMICS. 2012;16(5):284­7.
+       https://doi.org/10.1089/omi.2011.0118 PMID: 22455463
+
+PLOS Computational Biology | https://doi.org/10.1371/journal.pcbi.1013697 November 13, 2025  16 / 16
+

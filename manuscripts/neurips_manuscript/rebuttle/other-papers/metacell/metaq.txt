@@ -1,0 +1,1203 @@
+                       Article                                                                    https://doi.org/10.1038/s41467-025-56424-6
+
+                       MetaQ: fast, scalable and accurate metacell
+
+                       inference via single-cell quantization
+
+                       Received: 15 July 2024                 Yunfan Li 1, Hancong Li2,3, Yijie Lin1, Dan Zhang 4, Dezhong Peng 1,
+                       Accepted: 14 January 2025              Xiting Liu 5, Jie Xie 6, Peng Hu1, Lu Chen 4, Han Luo 2,3 & Xi Peng 1,7
+
+                           Check for updates                  To overcome the computational barriers of analyzing large-scale single-cell
+                                                              sequencing data, we introduce MetaQ, a metacell algorithm that scales to
+1234567890():,;                                               arbitrarily large datasets with linear runtime and constant memory usage.
+      1234567890():,;                                         Inspired by cellular development, MetaQ conceptualizes each metacell as a
+                                                              collective ancestor of biologically similar cells. By quantizing cells into a dis-
+                                                              crete codebook, where each entry represents a metacell capable of recon-
+                                                              structing the original cells it quantizes, MetaQ identifies homogeneous cell
+                                                              subsets for efficient and accurate metacell inference. This approach reduces
+                                                              computational complexity from exponential to linear while maintaining or
+                                                              surpassing the performance of existing metacell algorithms. Extensive
+                                                              experiments demonstrate that MetaQ excels in downstream tasks such as cell
+                                                              type annotation, developmental trajectory inference, batch integration, and
+                                                              differential expression analysis. Thanks to its superior efficiency and effec-
+                                                              tiveness, MetaQ makes analyzing datasets with millions of cells practical,
+                                                              offering a powerful solution for single-cell studies in the era of high-
+                                                              throughput profiling.
+
+                       The rapid advancements in single-cell capture and sequencing tech-         cell type annotation15,16. Nonetheless, these methods are commonly
+                       nologies give rise to a continuously increasing number of profiled         tailored for specific tasks and cannot be easily integrated into well-
+                       cells1,2, exhibiting advantages in revealing cell heterogeneity3 and       established frameworks5,17, leading to additional learning and deploy-
+                       reconstructing developmental trajectories4. On the flip side, this surge   ment challenges.
+                       in large-scale sequencing data poses a significant computational hur-
+                       dle for downstream analyses. For instance, a typical single-cell data            Instead of exhaustively scaling up various analysis tools, a more
+                       analysis pipeline5--encompassing data integration, clustering, visuali-    direct and general solution is to compress the sequencing data,
+                       zation, and differential expression analysis--requires about 16 h to       thereby energizing all commonly used methods to handle arbitrarily
+                       process half a million cells on a standard desktop6. When the cell         large datasets once and for all. As a specific implementation, metacell
+                                                                                                  algorithms18 propose merging homogeneous cell subsets into meta-
+                       number slightly increases to 600,000, the above pipeline can crash         cells to reduce redundancy, given that biologically similar cells are
+                                                                                                  often repeatedly sampled during high-throughput profiling. The
+                       due to memory exceeding, even on a professional computing platform         inferred metacells act as proxies of the original cells, which could be
+                       with 512 GB RAM6. To handle large-scale data, several scalable and         analyzed using existing tools without any modification while enjoying
+                       efficient single-cell analysis tools have been developed for down-         the following two merits. On the one hand, metacells decrease the
+                       stream tasks such as imputation7,8, integration9­11, clustering12­14, and
+
+                       1School of Computer Science, Sichuan University, Chengdu, Sichuan, China. 2Department of Thyroid and Parathyroid Surgery, Laboratory of Thyroid and
+
+                       Parathyroid Disease, Frontiers Science Center for Disease Related Molecular Network, West China Hospital, Sichuan University, Chengdu, Sichuan, China.
+                       3Sichuan Clinical Research Center for Laboratory Medicine, Chengdu, Sichuan, China. 4Department of Laboratory Medicine, State Key Laboratory of
+                       Biotherapy, West China Second University Hospital, Sichuan University, Chengdu, Sichuan, China. 5School of Computer Science, Georgia Insitute of
+                       Technology, Atlanta, GA, USA. 6College of Life Science, Sichuan Normal University, Chengdu, Sichuan, China. 7State Key Laboratory of Hydraulics and
+
+                       Mountain River Engineering, Sichuan University, Chengdu, Sichuan, China. e-mail: pengxi@scu.edu.cn
+
+                       Nature Communications | (2025)16:1205                                      1
+Article                                                                    https://doi.org/10.1038/s41467-025-56424-6
+
+computational expense by reducing the cell number. On the other            large datasets, requiring linearly increasing running time and constant
+hand, metacells alleviate data sparsity by aggregating the features of     memory costs relative to the cell number. In summary, the proposed
+similar cells. However, despite the promising application prospect, it     MetaQ simultaneously enjoys efficiency, scalability, and accuracy for
+remains challenging to accurately and efficiently infer metacells. For     metacell inference, which makes it a promising single-cell analysis tool
+example, the state-of-the-art method SEACell19 requires more than one      in the high-throughput single-cell profiling era with a continuously
+day to compute metacells for 100,000 cells, struggling to handle lar-      growing number of cells and omics.
+ger datasets due to significant memory overhead, which makes it less
+practical. Recently, MetaCell V220 improved algorithmic scalability by     Results
+leveraging a divide-and-conquer strategy, albeit at the cost of achiev-
+ing local optima. SuperCell6 employs the efficient Walktrap commu-         MetaQ infers metacells via single-cell quantization
+nity detection algorithm21 to expedite metacell inference. However,        MetaQ is a deep learning-based metacell algorithm that infers meta-
+like SEACell and MetaCell V2, SuperCell still requires exponentially       cells through cell quantization in a generative manner. As depicted in
+increasing running time with respect to cell number, limiting its scal-    Fig. 1, MetaQ builds upon an auto-encoder framework enhanced with a
+ability to larger datasets.                                                cell quantization mechanism. Specifically, given a raw count matrix as
+                                                                           input, MetaQ first learns cell embeddings with the encoder network. In
+      The suboptimal scalability and performance of existing methods       the embedding space, MetaQ quantizes cells into a discrete codebook
+could be attributed to their identical focus on mining local neighbor-     with learnable entries, where the number of entries corresponds to the
+hoods where cells are similar to each other. Consequently, all existing    user-defined metacell number. During quantization, each cell would be
+methods resort to constructing and partitioning pair-wise similarity       assigned to its nearest codebook entry, while each entry is responsible
+graphs, which are computationally expensive and limited by the             for reconstructing all the cells it quantizes via the decoder network.
+reliability of nearest neighbors. In this work, we introduce a perspec-    Such a design is predicated on our perspective of viewing each
+tive on metacells by drawing an analogy to the hierarchical nature of      metacell as a collective ancestor of a subgroup of specialized cells,
+cell differentiation in multicellular organisms. Specifically, cells       allowing similar cells to be effectively derived from a single entry. The
+develop from a single, low-differentiation state, progressing through      embedding, quantization, and reconstruction processes are simulta-
+various stages. For instance, in the hematopoietic system, pluripotent     neously performed in an end-to-end fashion. To improve the recon-
+hematopoietic stem cells differentiate through several stages into         struction performance, the model tends to quantize biologically
+mature B cells, including intermediate forms like pro-B cells, pre-B       similar cells into the same codebook entry, encapsulating compressed
+cells, and immature B cells22. Upon maturation, B cells further diversify  information about those cells. In other words, the cell quantization
+into subtypes with distinct functions in the immune system23. Such         process essentially identifies homogeneous cell subsets. In addition to
+differentiation is driven by characteristic gene expressions that define   the joint optimization with encoder and decoder networks, the code-
+the primary cell type and function, while specific feature expressions     book entries are further adjusted based on their historical usage, to
+further refine these cells into subtypes with distinct roles. Similarly,   stabilize the optimization and prevent cells from collapsing into a few
+metacells can be viewed as representing a common state of speciali-        entries. Notably, MetaQ naturally supports metacell inference for
+zation among closely related cells. Analogous to an ancestor in the        paired multi-omics data. In brief, MetaQ incorporates multi-omics
+developmental pathway, each metacell functions as a collective entity      features in cell embeddings and requires the quantized cell embed-
+that aggregates multiple specialized cells, capturing their shared fea-    dings to reconstruct original count matrices across all modalities.
+tures. In other words, a subset of biologically similar cells can be       When the training converges, MetaQ infers metacells by averaging the
+effectively derived from a single metacell.                                original count values of cells quantized into each codebook entry. The
+                                                                           resulting metacell count matrix provides a condensed representation
+      By conceptualizing metacells in this manner, we present MetaQ, a     of the original cell population, preserving dense features while sig-
+fast, scalable, and accurate metacell algorithm based on single-cell       nificantly reducing the number of cells. These inferred metacells can
+quantization. Unlike existing methods that laboriously mine neigh-         then be directly used for downstream analyses, acting as an efficient
+borhood structures, MetaQ quantizes all cells into a codebook with a       and representative substitute for the original single-cell data.
+limited number of entries, where each entry corresponds to a metacell.
+By viewing each metacell as a collective ancestor of a subgroup of         MetaQ effectively and efficiently infers prototypical metacells
+specialized cells, MetaQ encourages each codebook entry to recon-          for cell type annotation
+struct all the cells it quantizes. To achieve better reconstruction, the   To evaluate the scalability and performance of MetaQ, we first
+model would naturally quantize biologically similar cells into the same    applied it to the human fetal atlas dataset consisting of 433,395 cells
+entry, inherently achieving cell grouping for metacell inference. This     across 54 types. Figures 2a and 2c show UMAP visualizations of the
+simple yet effective design of MetaQ allows it to process various types    original cells and the metacells inferred by four methods, each
+of count data in a fully unsupervised manner. More importantly,            metacell labeled by the majority type of original cells it represents.
+MetaQ exhibits linear time complexity with respect to the number of        The results indicate that MetaQ effectively separates different cell
+cells, while retaining a constant memory consumption. This makes           types while preserving the structure of similar cells. For instance, one
+MetaQ a metacell algorithm that scales to arbitrarily large datasets,      could observe a clear grouping of retina cells, including retinal pro-
+setting it apart from existing methods6,19,20 that suffer from exponen-    genitors and Muller glia, photoreceptor cells, and retinal pigment
+tial time or memory complexity. Furthermore, while existing metacell       cells, mirroring the original cell groupings (highlighted with red
+algorithms are designed for uni-omics data, MetaQ supports metacell        boxes). In contrast, the metacells inferred by the other three meth-
+inference from paired multi-omics data by extending the reconstruc-        ods resulted in a confounded grouping of retina cells with other cell
+tion target, making it versatile for comprehensive single-cell analysis.   types. We visualized the density maps of the original cells and
+Notably, different from previous single-cell clustering and classifica-    metacells inferred by MetaQ in Supplementary Figs. 3a and 3c.
+tion methods12­16, MetaQ pursues homogeneity within fine-grained cell      Overall, the metacell density aligns with that of the original cells,
+subsets in a generative manner instead of mining discriminative het-       namely, they are denser in areas with a high density of single cells and
+erogeneity between different cell types.                                   vice versa. Such a density consistency enables the metacells to reflect
+                                                                           the underlying cell type distributions more accurately. Additionally,
+      Extensive experimental results demonstrate the superiority of        the metacell assignments depicted in Supplementary Fig. 3b show
+MetaQ in various downstream tasks, including cell type annotation,         that the features of original cells, including those rare cell types, are
+developmental trajectory inference, batch integration, clustering, and
+differential expression analysis. Moreover, MetaQ scales to arbitrarily
+
+Nature Communications | (2025)16:1205                                      2
+Article                                                                                                          https://doi.org/10.1038/s41467-025-56424-6
+
+a                   Input               Encoder     b                 Cell Quantization                                       Decoder     c Reconstruction
+
+                                                       over-large
+                                                          entry
+
+Cells               RNA                                                                                                                         RNA         Cells
+
+                                                       adjustment
+
+                                                                      adjustment
+
+                                                                                over-small
+                                                                                   entry
+
+                                                                      Codebook    with Entries
+
+         ADT/ATAC (Optional)                                                                                                  (Optional)        ADT/ATAC
+
+         d                 Output                e                                          Downstream Analysis
+
+         Metacells             RNA                                                             Batch 1                        Factors
+                                                                                                                              Gene 1
+                           ADT/ATAC                    Visualization                       Batch 2      Trajectory Inference  Gene 2
+                            (Optional)                                          Batch Integration                             Gene 3
+                                                                                                                              Gene 4
+                                                                                                                              Gene 5
+
+                                                                                                                                   DE Analysis
+
+Fig. 1 | Overview of the MetaQ algorithm. a MetaQ accepts uni-omics or paired               quantizes with the decoder network. For better reconstruction, the model tends to
+multi-omics raw count matrices as inputs and learns cell embeddings through the             assign biologically similar cells into the same codebook entry, which intrinsically
+encoder network. b In the embedding space, MetaQ introduces a discrete code-                achieves cell grouping for metacell inference. d After training, MetaQ computes
+book with learnable entries, where each entry corresponds to the embedding of a             metacells by averaging the original uni- or multi-omics count data of cells within
+metacell. Cells are then quantized by assigning each to its nearest entry in the            each codebook entry. e The inferred metacells serve as a compressed representa-
+codebook. To prevent degenerated quantization, MetaQ records the entry usage                tion of the original data, which could be seamlessly used for single-cell downstream
+and adjusts the codebook to eliminate over-large or over-small entries. c MetaQ             analysis (DE: Differential Expression).
+encourages each codebook entry to reconstruct the input omics data of all cells it
+
+effectively covered by MetaQ metacells. Beyond intuitive visual                             epithelial cells, leading to the highest balanced classification accuracy
+comparisons, we quantitatively assessed the compactness and                                 (88.04% compared with the second-best 83.63% by SEACell). Besides
+separation of metacell inferred by different algorithms. As shown in                        classifying original cells by training a classifier on metacells, we alter-
+Figs. 2e and 2f, MetaQ consistently achieves the highest median                             natively assigned each original cell the majority cell type of its corre-
+scores of compactness and separation across various metacell                                sponding metacell. The balanced accuracy of this majority-voted
+numbers. Supplementary Fig. 3e also reveals that MetaQ exhibits                             prediction, as shown in Supplementary Fig. 3f, also underscores
+larger differences between within- and between-metacell cell simi-                          MetaQ's superior performance (92.91% compared with the second-
+larities than baseline methods. These results collectively underscore                       best 83.78% by SEACell). Furthermore, we visualized the cell type
+the superior performance of MetaQ in aggregating homogeneous                                purity of metacells in Supplementary Fig. 3g, which shows that MetaQ
+cells and distinguishing between heterogeneous ones.                                        is the only method capable of identifying PAEP_MECOM positive cells
+                                                                                            (with a proportion of 0.0597%) originating from placental tissue2 and
+      In addition to direct comparisons, we further evaluated the                           epithelial cells from the thymus (with a proportion of 0.0662%), the
+metacell quality through a downstream cell type classification task.                        two rarest cell types. These results collectively demonstrate that
+Specifically, we trained a classifier using metacells to categorize the                     MetaQ metacells preserve the information of both common and rare
+original cells, where each metacell is labeled according to the most                        cell types more effectively than baseline methods.
+prevalent cell type among its constituent cells. To accurately classify
+the original cells, the metacells used for training are expected to                               The main purpose of metacell algorithms is to alleviate the
+exhibit both high purity and high prototypicality. High purity ensures                      substantial computational burden in single-cell analyses as pre-
+that each metacell predominantly contains cells of the same type,                           viously discussed. Thus, in addition to the metacell quality, we were
+leading to reliable annotations. High prototypicality guarantees that                       also concerned about the efficiency of metacell algorithms. To this
+the metacells capture representative features, enhancing the gen-                           end, we measured the (logged) running time and memory costs of all
+eralization ability of the classifier to original cells. In other words, the                methods on datasets ranging from 50 thousand to 1 million cells. As
+downstream classification performance reflects the overall quality of                       shown in Fig. 2e, MetaQ exhibits linearly increasing running time and
+metacells. We evaluated MetaQ and three baseline methods with                               constant memory usage relative to the number of cells, theoretically
+varying metacell numbers, presenting the results in Fig. 2b. To                             scaling to arbitrary data sizes (see Supplementary Note 2 for more
+demonstrate the effectiveness of metacells, we also included a naive                        details). Although SuperCell is efficient on relatively small subsets of
+baseline by randomly sampling the same number of cells from the                             less than 200,000 cells, it requires exponentially increasing time and
+original data. From 500 to 4000 metacells, the classification model                         linearly increasing memory, leading to limited scalability for larger
+trained by MetaQ metacells consistently outperforms other baselines                         datasets. Moreover, as shown in Fig. 2b, SuperCell achieves inferior
+in terms of average accuracy, showcasing the superior performance of                        classification performance compared to other methods, even worse
+MetaQ. To further elucidate the performance gap, we illustrated the                         than the naive random sampling baseline with 4,000 metacells. Due
+confusion matrix of the predicted labels in Fig. 2d, with full cell type                    to the exponential memory costs, SEACell and MetaCell V2 exceed
+names provided in Supplementary Fig. 2 due to the space limitation.                         512 GB memory--a common configuration for computational servers
+As shown, the model trained with MetaQ metacells better dis-                                --when processing 200,000 and 433,000 cells, respectively. Notably,
+criminates between cell types, especially rare ones such as thymic                          compared to the most competitive baseline SEACell in metacell
+
+Nature Communications | (2025)16:1205                                                                                                                              3
+Article                                                                                                                                        https://doi.org/10.1038/s41467-025-56424-6
+
+           a                                             b
+
+                                            Retinal Cells                                                                    (p=2.63e-5)        (p=1.60e-4)         (p=4.57e-3)                       (p=2.35e-2)
+                                                                                                                         (p=4.87e-4)         (p=1.82e-3)         (p=6.67e-3)
+                                                                                                                     (p=8.47e-3)          (p=9.60e-3)        (p=4.99e-2)
+
+c             MetaQ          Retinal Cells  SEACell          d Retinal Cells                                         MetaQ (Bal. ACC: 88.04%)                SEACell (Bal. ACC: 83.63%)
+
+              MetaCell V2 Retinal Cells     SuperCell Retinal Cells      Cell Type (with class size small to large)  MetaCell V2 (Bal. ACC: 73.54%)          SuperCell (Bal. ACC: 65.67%)
+
+                                                                                                                                          Classification Prediction (with class size large to small)
+
+e                                                                          f
+
+                (p=1.81e-5)    (p=1.70e-8)     (p=2.12e-15)  (p=2.50e-29)
+              (p=3.12e-6)    (p=7.88e-7)    (p=4.81e-5)      (p=1.46e-14)
+
+g                                                                          h
+
+quality, the proposed MetaQ achieves approximately a 100 times                                                       metacell number. Notably, one could enable SEACell on the full
+speedup when processing 100,000 cells (0.3 hours versus                                                              dataset by inferring metacells in a hierarchical fashion, namely, first
+26.7 hours). We further investigated the influence of the metacell                                                   inferring metacells within each sample and then performing a sec-
+number on computational expenses. As shown in Fig. 2f, MetaQ and                                                     ondary metacell aggregation across samples. Supplementary Fig. 4c
+SuperCell are insensitive to the number of metacells, MetaCell V2                                                    indicates that hierarchical SEACell achieves performance on par with
+favors larger metacell numbers to activate its divide-and-conquer                                                    MetaQ. However, this improvement comes at a significant compu-
+strategy, and SEACell requires linearly increasing time relative to the                                              tational cost. Supplementary Fig. 4d reveals that hierarchical SEACell
+
+Nature Communications | (2025)16:1205                                                                                                                                                                              4
+Article                                                                              https://doi.org/10.1038/s41467-025-56424-6
+
+Fig. 2 | MetaQ effectively and efficiently infers prototypical metacells. a UMAP     better classification performance. e Compactness of [500, 1000, 2000, 4000]
+visualization of the original 433,495 cells from the human fetal atlas. The red box  metacells inferred by different methods on five random experiments. Each boxplot
+highlights retina cells. b Classification accuracy of cell classifiers trained with  ranges from the upper and lower quartiles with the median as the horizontal line
+[500, 1000, 2000, 4000] metacells inferred by MetaQ, SEACell, MetaCell V2,           and whiskers extend to 1.5 times the interquartile range. Two-sided T-test results:
+SuperCell, and random sub-sampling on five random experiments. Each boxplot          ****p  0.0001. f Separation of [500, 1000, 2000, 4000] metacells inferred by dif-
+ranges from the upper and lower quartiles with the median as the horizontal line     ferent methods on five random experiments. Each boxplot ranges from the upper
+and whiskers extend to 1.5 times the interquartile range. Two-sided T-test results:  and lower quartiles with the median as the horizontal line and whiskers extend to
+*0.01 < p  0.05, **0.001 < p  0.01, ***0.0001 < p  0.001, ****p  0.0001. c UMAP      1.5 times the interquartile range. g Running times (logged) and memory cost for
+visualization of 4000 metacells inferred by the four methods, with cell type colors  inferring 1000 metacells from different numbers of original cells. h Running times
+matching those in b. Retina cells are marked with red boxes. d Agreement between     (logged) and memory cost for inferring different numbers of metacells from
+the ground-truth annotations and the labels predicted by classification models       100,000 cells. Source data are provided as a Source Data file.
+trained with 500 metacells. Matrices with a clearer diagonal structure indicate
+
+on full data took over a week to complete, whereas running MetaQ                     trajectories: one leading to plasmacytoid dendritic cells (pDCs) and the
+only requires about an hour. Such a dramatic improvement in com-                     other to classical dendritic cells (cDCs), as shown in Supplementary
+putational efficiency makes MetaQ more favorable in practical use. In                Fig. 5a. Along the pDC developmental path, there is a notable upregu-
+summary, the proposed MetaQ not only infers accurate and proto-                      lation of pDC lineage genes, such as IL3RA30 and IRF731, in a subset of
+typical metacells, but also offers the best computational scalability                Prog_DC, suggesting differentiation towards the pDC phenotype. Simi-
+for large datasets, making it an effective and efficient tool for                    larly, in the cDC2 trajectory, cDC maturation markers CLEC10A and
+metacell analysis.                                                                   CD1C32 exhibit progressive upregulation. Moreover, Supplementary
+                                                                                     Fig. 5b demonstrates that MetaQ effectively captures the erythroid
+MetaQ supports multi-omics analysis and preserves cell devel-                        lineage evolution, from HSCs and progressing to progenitor red blood
+opmental trajectory                                                                  cells (Prog_RBC). Throughout this progression, CD34 expression gra-
+Advances in single-cell technologies have enabled the simultaneous                   dually decreases while the expression of hemoglobin complex genes,
+profiling of cells across multiple layers24­26, taking advantage of the              including human alpha-like (HBA2, HBA1) and delta-like (HBD) globin
+pairing information in multi-omics analyses. However, existing meta-                 genes33, increases. The above results demonstrate that the metacells
+cell methods are all designed for uni-omics data. In this case, com-                 inferred by MetaQ successfully preserve the developmental trajectories.
+puting metacells independently for each modality would result in the
+loss of pairing information between metacells of different modalities.                     To demonstrate the superiority of MetaQ in multi-omics metacell
+In contrast, the proposed MetaQ can directly infer paired metacells                  inference, we quantitatively compared metacell purity across different
+from multi-omics data, by reconstructing inputs across all modalities                cell types. The purity metric is defined as the frequency of the most
+using the quantized cell embeddings. Further details are provided in                 represented cell type within the metacell, with higher values indicating
+the handling multi-omics data subsection and Supplementary Fig. 1.                   better metacell membership. Based on the cell type discriminability of
+                                                                                     the two modalities, we broadly categorized all cell types into two
+      To evaluate the multi-omics metacell inference performance of                  superclasses in Fig. 3d, with the top and bottom panels corresponding
+MetaQ, we applied it to the human bone marrow CITE-seq dataset27                     to RNA- and ADT-informative cells, respectively. According to the
+which includes 30,672 cells with RNA and antibody-derived tag (ADT)                  overall metacell purity for the two superclasses illustrated in Supple-
+data. The original two modalities are visualized in Fig. 3a. As shown, the           mentary Fig. 5c, MetaQ achieves comparable metacell purity to the
+ADT modality excels in identifying subsets of T and natural killer (NK)              best competitor SEACell for RNA-informative cell types (93.5% to 92.5%
+cells, while the RNA modality more effectively distinguishes other                   on average with T-test p-value of 0.325, degrees of freedom = 662, 95%
+marrow cells, including progenitors, myeloid cells, and B cells. For                 confidence interval = [-0.0095, 0.0288]). On ADT-informative cell
+comparisons, since existing methods are not tailored for multi-omics                 types, however, MetaQ significantly outperforms SEACell (93.0% to
+data, we reorganized the inputs based on the API interface of different              90.0% on average with T-test p-value of 0.005, degrees of freedom =
+methods to produce paired metacells. Specifically, we constructed the                560, 95% confidence interval = [0.0092, 0.0518]), particularly on CD8
+kernel on the concatenated PCA-reduced RNA and ADT data for SEA-                     memory and effector T cells. These results indicate that MetaQ better
+Cell. For MetaCell V2 and SuperCell, we normalized the count data in                 integrates information from both modalities during the metacell
+each modality and concatenated them as the input. Given the paired                   inference. Moreover, we evaluated the compactness and separation of
+multi-omics metacells, we then utilized WNN to compute the joint                     metacells in both RNA and ADT modalities. As depicted in Fig. 3c,
+embedding. As depicted in Fig. 3b, MetaQ and SuperCell better pre-                   MetaQ and SEACell outperform MetaCell V2 and SuperCell in average
+serve the original structure than the other two methods, especially for              performance metrics. Additionally, MetaQ and MetaCell V2 demon-
+hematopoietic precursors.                                                            strate superior stability in metacell quality, as evidenced by the more
+                                                                                     concentrated distributions in the boxplot.
+      For further validation, we applied PAGA28 trajectory inference on
+MetaQ metacells. Figs. 3e and 3f depict the developmental trajectory                       In addition to evaluating MetaQ on CITE-seq RNA+ADT data, we fur-
+from hematopoietic stem cells (HSCs) to plasmablasts. The analysis of                ther tested its efficacy using the 10x multiome mouse kidney dataset34,
+gene expression dynamics along this trajectory reveals a decrease in                 encompassing 14,527 cells with paired gene expression and chromatin
+markers associated with immature B cells, such as VPREB1 and MME,                    accessibility profiles. Alongside the three previous baselines, we also
+coupled with an increase in markers associated with mature follicular B              incorporated EpiCarousel35, a recent metacell algorithm specifically
+cells, including MS4A1 and CD19. These mature follicular B cells reside in           designed for scATAC-seq data for comparisons. We first compared the
+the lymphoid follicles of the spleen and lymph nodes, comprising both                performance of MetaQ against baseline methods on the scATAC-seq uni-
+mature-naive (CD27-) and memory (CD27+) B cells29. Upon antigen                      omics peak data. As depicted in Supplementary Fig. 6a, MetaQ and SEACell
+activation, B cells rapidly proliferate, undergo immunoglobulin class-               exhibit superior information retention on rare cell types compared to
+switch recombination (IGHA2, IGHG4), and differentiate into short-lived              MetaCell V2, SuperCell, and EpiCarousel. Such a result is further corrobo-
+plasmablasts. These plasmablasts, characterized by elevated levels of                rated by the cell type classification results in Supplementary Fig. 6b, where
+MZB1 and SDC1, produce antibodies and function as effector cells in the              cells are assigned to the predominant type within each metacell. A higher
+early antibody response. Additionally, we recapitulated the dendritic cell           balanced classification accuracy indicates better metacell purity. Notably,
+(DC) maturation process, identifying two distinct differentiation                    MetaQ with Poisson distribution modeling achieves performance on par
+
+Nature Communications | (2025)16:1205                                                5
+Article                                                                                                            https://doi.org/10.1038/s41467-025-56424-6
+
+a        RNA                           b  WNN                                                     MetaQ + WNN                            SEACell + WNN
+
+         ADT                              MetaCell V2 + WNN                                       SuperCell + WNN  c
+
+                                                                                                                   RNA Compactness       RNA Separation
+
+                                                                                                                   ADT Compactness       ADT Separation
+
+d             RNA-Informative Cell Types                                              e           Embedding                              Pseudotime
+
+                                                                                                  Memory B
+
+                                                                                                                   Plasmablast
+
+                                                                                      FR2  Naive B                                  FR2
+
+                                                                                               Prog_B 2
+                                                                                                Prog_B 1
+                                                                                           HSC
+
+                                                                                                 LMPP
+
+                                                                                      f                   FR1                            FR1
+
+              ADT-Informative Cell Types                                                                           Plasmablast Path
+
+                                                                                         CD34
+
+                                                                                      CYTL1
+
+                                                                                      GATA2
+
+                                                                                      VPREB1
+
+                                                                                         MME
+
+                                                                                      MS4A1
+
+                                                                                         CD19
+
+                                                                                         IGHD
+
+                                                                                         CD27
+
+                                                                                         MZB1
+
+                                                                                         SDC1
+
+                                                                                      IGHA2
+
+                                                                                      IGHG4
+
+                                                                                      Cell Type
+
+                                                                                      Pesudotime
+
+Fig. 3 | MetaQ supports multi-omics metacell inference and preserves devel-           SEACell, MetaCell V2, and SuperCell. c Compactness and separation of 613 meta-
+opmental trajectory. a UMAP visualization of the original 30,672 cells from human     cells inferred by different methods, calculated separately for RNA and ADT mod-
+bone marrow in RNA and ADT modalities (CD4 Memory Memory CD4+ T cell, CD4             alities. Each boxplot ranges from the upper and lower quartiles with the median as
+Naive Naive CD4+ T cell, CD8 Effector Effector CD8+ T cell, CD8 Memory Memory         the horizontal line and whiskers extend to 1.5 times the interquartile range. d Purity
+CD8+ T cell, CD8 Naive Naive CD8+ T cell, CD14 Mono CD14 Monocytes, CD16              of 613 metacells inferred by different methods across RNA-informative (top panel)
+Mono CD16 Monocytes, CD56 bright NK CD56 bright natural killer, GMP                   and ADT-informative (bottom panel) cell types. Each boxplot ranges from the
+Granulocyte-macrophage progenitors, HSC Hematopoietic stem cell, LMPP                 upper and lower quartiles with the median as the horizontal line and whiskers
+Lymphoid-primed multipotent progenitors, MAIT Mucosal-associated invariant T          extend to 1.5 times the interquartile range. Two-sided T-test results:
+cell, NK Natural killer, Prog_B Progenitors of B cell, Prog_DC Progenitors of den-    *0.01 < p  0.05, **0.001 < p  0.01, ***0.0001 < p  0.001, ****p  0.0001. e PAGA cell
+dritic cell lineages, Prog_Mk Progenitor of megakaryocyte, Prog_RBC Progenitors of    embedding of metacells along the plasmablast developmental path inferred by
+erythroid, Treg Regulatory T cell, cDC2 Type 2 conventional dendritic cell, gdT       MetaQ, with metacells colored by type and pseudotime, respectively. f Annotation
+Gamma delta T cell, pDC Plasmacytoid dendritic cell). b UMAP visualization of WNN     and marker gene expression changes along the plasmablast developmental path.
+results on original cells and 613 metacells (a 50-fold reduction) inferred by MetaQ,  Source data are provided as a Source Data file.
+
+with SEACell, while delivering approximately threefold time savings. In               highest Pearson correlation across the two omics, underscoring MetaQ's
+comparison, metacells inferred by the other two methods collapse into a               superior performance in aggregating and collaborating information from
+small number of the most frequent cell types. Subsequently, we applied                both omics. These results collectively highlight MetaQ as a powerful tool for
+MetaQ to the paired RNA+ATAC multi-omics data. As shown in Supple-                    scATAC-seq data analysis.
+mentary Fig. 6c, when modeling peak data with Poisson distribution, MetaQ
+consistently outperforms the baseline methods. Moreover, we investigated              MetaQ facilitates single-cell batch integration
+the correlation between gene expression and chromatin accessibility within            In addition to handling paired multi-omics data, we demonstrated that
+each metacell, leveraging peak-to-gene correspondences identified by                  MetaQ is also effective in processing multi-batch data. Specifically, we
+Signac36. Supplementary Fig. 6d shows that MetaQ metacells achieve the                evaluated MetaQ on the human pancreas dataset37­41, which consists of
+
+Nature Communications | (2025)16:1205                                                                                                                    6
+Article                                                                                                 https://doi.org/10.1038/s41467-025-56424-6
+      a
+         Cell Type                                      Batch                       b        Cell Type                                Batch
+
+                                                                                    Harmony
+
+c                                      MetaQ + Harmony
+
+                                                                                    d
+
+e        Harmony    Harmony+SuperCell              Recover Original Data            f        TM4SF4 (Harmony + MetaQ)  TM4SF4 (Harmony)
+                                                            Harmony+MetaQ
+
+                                                                                             In Baron
+
+g        Clustering Performance on Recovered Data                                   h        Clustering Performance on Metacell Data
+
+Fig. 4 | MetaQ facilitates batch integration. a UMAP visualization of the original  TM4SF4 projected on the UMAP plot of alpha cell embeddings by MetaQ and
+14,767 cells from the human pancreas dataset, with cells colored by types and       Harmony, respectively. The subplot in the left plot shows the results for the Baron
+batches, respectively. b UMAP visualization of integrated cell embeddings obtained  batch. g AMI, ARI, and Homogeneity scores of Louvain clustering with three dif-
+by performing Harmony on the original data (MHC class II: Major histocompat-        ferent resolutions of [0.5, 1.0, 2.0] on cell embeddings obtained by Harmony and
+ibility complex Class II). c UMAP visualization of 590 MetaQ metacells (a 25-fold   recovered by MetaQ, SEACell, MetaCell V2, and SuperCell. h AMI, ARI, and
+reduction) integrated by Harmony. d UMAP visualization of the integrated            Homogeneity scores of Louvain clustering with three different resolutions of [1.0,
+embeddings of original cells recovered by MetaQ. e Sankey plots showing Louvain     2.0, 5.0] on 590 metacells inferred by different metacell algorithms. Source data are
+cluster assignments on cell embeddings integrated by Harmony, recovered by          provided as a Source Data file.
+SuperCell, and recovered by MetaQ. f Normalized expression of the marker gene
+
+14,767 cells from five different sources using four scRNA-seq protocols             integrated metacells and mapped the cluster assignment of each
+as visualized in Fig. 4a. Following the standard metacell inference and             metacell to the original cells it aggregates. The clustering AMI, ARI, and
+data integration pipeline, we first computed metacells using MetaQ                  Homogeneity Score are illustrated in Fig. 4h, which shows that MetaQ
+and then applied the Harmony integration algorithm42 to the inferred                and the best competitor SEACell outperform the other two baseline
+metacells. Fig. 4c shows promising batch mixing and cell type group-                methods.
+ing, suggesting that single-cell-oriented batch integration methods are
+also suitable for metacells inferred by MetaQ. To provide a quantitative                  Beyond integrating metacells themselves, we further explored
+evaluation, we adopted the Louvain algorithm43 to cluster batch-                    recovering the integrated embedding of original cells using metacell
+                                                                                    integration results. Specifically, we trained a simple neural network to
+
+Nature Communications | (2025)16:1205                                                                                                        7
+Article                                                                    https://doi.org/10.1038/s41467-025-56424-6
+
+map from raw data space to Harmony-integrated space, leveraging the        Supplementary Fig. 9. Inspired by the pseudo-bulk operation, we
+original and integrated metacells. More details are provided in the        inferred metacells within cells of the same type, donor, and pertur-
+data integration and clustering subsection. The trained network was        bation, with a reduction rate of 10. These metacells were then con-
+then used to map the original cells to the integrated space, thereby       catenated across different groups to compute differential expression
+recovering the integration results for single cells. To better integrate   (DE) values concerning cell types and perturbations, respectively.
+original cells via the mapping, the metacells should be highly proto-
+typical of the corresponding cell populations, ensuring the mapping              For the cell type DE analysis, we utilized metacells from different
+generalizes well from metacells to original cells. Additionally, the       cell types within the negative control group. To evaluate how well
+integrated metacells should contain batch effects as little as possible,   MetaQ preserves feature-level characteristics, we compared the DE
+ensuring the mapping can effectively correct the batch effects. In this    ranks of the most differential genes between the original cells and
+context, the batch correction performance of the mapped original           MetaQ metacells. As shown in Fig. 5b, MetaQ maintains high con-
+cells reflects not only the prototypicality of metacells, but also how     sistency with the original data in identifying top expressed genes. To
+metacell algorithms collaborate with batch integration methods.            quantitatively compare different metacell methods, we calculated
+Thanks to the small number of metacells, such a mapping process only       Kendall's tau correlation to measure rank consistency between the
+requires a few seconds. The integration results of original cells          original and metacell DE results. Fig. 5c demonstrates that MetaQ and
+recovered by MetaQ are illustrated in Fig. 4d. Compared with the           SuperCell preserve gene expression patterns more effectively than the
+baseline result of directly performing Harmony on the original data        other two baselines.
+(Fig. 4b), one could observe two apparent advantages of the MetaQ-
+recovered results highlighted by red circles in the figure. First, MetaQ         In the perturbation DE analysis, we used metacells from the same
+alleviates the over-integration problem of Harmony, leading to better      cell type, including two positive controls, one negative control, and all
+separation between cells of rare types. Second, MetaQ corrects a           144 perturbations. The DE analysis was conducted independently for
+subset of beta cells that were falsely integrated with the alpha cells by  each cell type. We compared the Pearson correlation of DE values
+Harmony. Intriguingly, we observed that the cell embeddings recov-         between the original data and metacells inferred by different methods.
+ered by MetaQ form two sub-clusters within the alpha cells, both           Fig. 5e reveals that MetaQ achieves the highest or second-highest
+characterized by the canonical marker glucagon (GCG)44 as shown in         correlation in five of six cell types, underscoring its superiority in
+Supplementary Fig. 7a. To further investigate this phenomenon, Fig. 4f     preserving biological features. For a more intuitive understanding, we
+illustrates distinct expression patterns of TM4SF445--a tetraspanin        visualized the DE values for CD8+ T cells computed on original cells
+family member associated with pancreatic development--across these         and metacells in Fig. 5d. Red rectangles highlight two instances where
+two subpopulations. Additionally, Supplementary Figs. 7b­7d                MetaQ outperforms baseline methods. On the one hand, SEACell
+demonstrate that the right subpopulation of alpha cells shows ele-         incorrectly identifies a strong influence of the compound ABT-737, a
+vated expression of NLRP1, which nucleates inflammasomes46, and            Bcl-2 family inhibitor51, on genes NKG7, GZMA, and CCL5. On the other
+TNFRSF12A47,48, a member of the tumor necrosis factor receptor             hand, SuperCell underestimates the impact of Raloxifene on gene
+superfamily. Both genes are pivotal in mediating inflammatory              POU2F2, while overestimating its effect on gene AC022706.1. Overall,
+responses. This observation also aligns with the elevated expression of    as depicted in Supplementary Figs. 10 and 11, the DE values of MetaQ
+chronic pancreatitis risk genes such as PRSS149. These findings may        metacells exhibit a high consistency with those of the original data,
+suggest a potential involvement of this alpha cell subpopulation in the    emphasizing MetaQ's promising ability to accurately summarize bio-
+immune and inflammatory responses of the pancreas, indicating a            logical features.
+broader functional spectrum beyond the traditional role in glucagon
+secretion regulation. Importantly, these results are not attributable to   MetaQ is a stable and robust algorithm for metacell inference
+batch effects, as the distinct expression patterns between the two sub-    We performed a series of experiments on the human thyroid cancer
+clusters also exist within the Baron batch of data. In contrast, the       dataset to evaluate the stability and robustness of the proposed MetaQ
+Harmony integration results roughly aggregate all alpha cells together,    algorithm. To begin, we assessed the consistency of metacell assign-
+thereby overlooking cell heterogeneity.                                    ments by testing MetaQ across varying numbers of metacells, corre-
+                                                                           sponding to reduction rates ranging from 25 to 150. The agreement in
+      Finally, we compared the Louvain clustering results on cell          metacell assignments across different reduction rates is depicted in
+embeddings computed by Harmony and those recovered by MetaQ                Fig. 6b. Notably, in most instances, cells assigned to the same metacell
+and other baseline methods. As depicted in Fig. 4e, MetaQ achieves a       at a lower reduction rate remain grouped together at a higher reduc-
+generally consistent cluster partition with Harmony, while correcting      tion rate. This indicates that metacells formed at higher reduction
+the grouping of a subset of beta cells. Fig. 4g demonstrates that MetaQ    rates represent further aggregations of those formed at lower reduc-
+outperforms other metacell algorithms, as well as Harmony on original      tion rates. As shown in Fig. 6c, the homogeneity scores between
+cells, in all three clustering metrics. To evaluate the batch integration  metacell assignments consistently exceed 0.5 across all tested reduc-
+performance, we further computed the cLISI and iLISI metrics on the        tion rates, demonstrating the robustness of MetaQ against varying
+recovered cells in Supplementary Fig. 8a. As shown, cells recovered by     target metacell numbers.
+MetaQ achieve the best or second-best performance in terms of the
+two metrics, outperforming harmony-integrated single cells in cell               Next, to examine the capacity of MetaQ in identifying rare cell
+type grouping. These results demonstrate that MetaQ not only               types, we assigned each original cell the majority cell type of its cor-
+enhances batch integration at the metacell level, but can also be          responding metacell. The accuracy of such a majority-voted prediction
+effectively incorporated with batch correction methods to improve          reflects how well metacells cover different cell types. As shown in
+performance on original single-cell data.                                  Fig. 6d, MetaQ achieves the highest balanced accuracy, outperforming
+                                                                           existing metacell methods in rare cell type identification. Furthermore,
+MetaQ is consistent with differential expression analysis                  we conducted subsampling experiments on the two rarest cell types,
+The above downstream tasks primarily assess the cell-level perfor-         tumor-associated myeloid cell (TAMC) and parafollicular cell, to
+mance of metacell algorithms. Here, we extend our evaluation to the        explore the minimum cell type frequency that could be captured
+feature level. Specifically, we applied MetaQ to the human PBMC            under different reduction rates. As illustrated in Fig. 6e and Supple-
+perturbation dataset50, which comprises 240,090 immune cells of six        mentary Fig. 12a, under the reduction rate of 50, MetaQ is the only
+types, three donors, and 144 perturbations, as depicted in Fig. 5a and     method capable of accurately identifying cell types present at fre-
+                                                                           quencies as low as 0.01%. Even when reducing the data size by 100,
+                                                                           MetaQ still effectively captures cell types with frequencies above
+
+Nature Communications | (2025)16:1205                                      8
+Article  Cell Type                                               Donor                      https://doi.org/10.1038/s41467-025-56424-6
+      a
+                                                                                                      Perturbation
+
+                                                                                                                                ...
+
+                                                                                                                                 and 144 more
+                                                                                                                                small molecules
+
+b                                      Full data differential expression w.r.t. cell types                           Rank c     Rank Consistency
+
+                                                                                                                     High       (p=4.46e-2)
+
+                                       MetaQ differential expression w.r.t. cell types                                    Low
+                                                                                                                     Rank
+
+                                                                                                                          High
+
+                                                                                                                     Low
+
+d        Full data differential expression w.r.t. perturbations  MetaQ differential expression w.r.t. perturbations  Value e    Value Consistency
+
+         SEACell differential expression w.r.t. perturbations    SuperCell differential expression w.r.t. perturbations Value
+
+Fig. 5 | MetaQ preserves differential expressions with respect to cell types and       perturbations on CD8+ T cells, calculated on original cells and 24,009 metacells
+perturbations. a UMAP visualization of the original 240,090 cells from human           inferred by MetaQ, SEACell, and SuperCell. Perturbations and genes that differ the
+PBMC perturbation data, with cells colored by types, donors, and perturbations,        most between different methods are shown for clearer comparisons. e Pearson
+respectively. b Rank of top differentially expressed genes concerning cell types,      correlation between perturbation differential expression values computed on ori-
+computed on the original cells (Top) and MetaQ metacells (Bottom) with a               ginal cells and 24,009 metacells using different methods. Each boxplot ranges from
+reduction rate of 10. c Consistency between the ranking of top 2000 differentially     the upper and lower quartiles with the median as the horizontal line and whiskers
+expressed genes computed on original cells and 24,009 metacells using different        extend to 1.5 times the interquartile range. Two-sided T-test results:
+methods. Each boxplot ranges from the upper and lower quartiles with the median        *0.01 < p  0.05, **0.001 < p  0.01, ***0.0001 < p  0.001, ****p  0.0001. Source
+as the horizontal line and whiskers extend to 1.5 times the interquartile range. Two-  data are provided as a Source Data file.
+sided T-test results: *0.01 < p  0.05. d Differential expression values relative to
+
+0.07%. These results demonstrate that MetaQ is a reliable tool for                     Additionally, we conducted a parameter analysis on the momentum
+identifying rare cell types in metacell analysis.                                      used in updating the historical codebook entry usage in Eq. (11). Fig. 6g
+                                                                                       illustrates that MetaQ is stable across momentum values ranging from
+      Then, to evaluate the robustness of MetaQ against algorithmic                    0.85 to 0.95 (with 0.9 as the default setting). However, when the
+configurations, we performed ablation studies on the discrete code-                    momentum deviates significantly from this range, either toward lower
+book, the core design in MetaQ for metacell assignments. Specifically,                 or higher values, the entry usage update becomes too frequent or
+in addition to randomly initializing codebook entries by default, we                   infrequent, hindering proper adjustment of over-large and over-small
+experimented with two alternative initialization strategies, namely,                   entries and ultimately resulting in degraded performance.
+Kmeans52 and geometric sketching53. As shown in Fig. 6f, MetaQ
+maintains stable performance across different initialization strategies                      Lastly, as MetaQ requires manually setting the target metacell
+and random seeds. Supplementary Figs. 12b and 12c demonstrate that                     number, we provide a practical guideline for selecting an appropriate
+MetaQ performs consistently under both cosine and Euclidean dis-                       metacell number. Since MetaQ makes consistent metacell assignments
+tance measures between cell embeddings and codebook entries.                           across different reduction rates, we recommend simply setting the
+
+Nature Communications | (2025)16:1205                                                                                                              9
+Article                                                                                                                                         https://doi.org/10.1038/s41467-025-56424-6
+
+a                                                                    b                                                                                        c  Homogeneity
+
+                                                                        25-fold to 50-fold (Top 10) 50-fold to 75-fold (Top 10) 75-fold to 100-fold (Top 10)
+
+d                                           MetaQ (Bal. ACC=88.19%)  SEACell (Bal. ACC=81.91%)  MetaCell V2 (Bal. ACC=60.56%)                      SuperCell (Bal. ACC=69.02%)
+
+Cell Type (with class size small to large)
+
+e                                                                                   Majority-Voted Prediction (with class size large to small)
+
+                                            MetaQ - Parafollicular   SEACell - Parafollicular   MetaCell V2 - Parafollicular                                     SuperCell - Parafollicular
+
+                                                                                                                                                g                Compactness
+
+f                                                                       Separation              Purity
+                        Compactness
+
+                                                                                                                                                                 Separation
+
+                                                                                                                                                                 Purity
+
+Fig. 6 | MetaQ is a stable and robust metacell algorithm. a UMAP visualization of               Matrices with a clearer diagonal structure indicate higher metacell purity.
+the 46,205 cells from the human thyroid cancer dataset with cells colored by types              e Accuracy on the rarest cell type, Parafollicular, of various metacell algorithms
+(ATC Anaplastic thyroid cancer, NK cell Natural killer cell, PTC Papillary thyroid              across different reduction and subsampling rates. f Compactness, separation, and
+cancer, TAMC Tumor-associated myeloid cell). b Sankey plots showing the agree-                  purity of 462 MetaQ metacells under different codebook initialization strategies
+ment of metacell assignments across different reduction rates. For clarity, only cells          and random seeds. Each boxplot ranges from the upper and lower quartiles with
+from the ten largest metacells at each reduction rate are visualized. c Homogeneity             the median as the horizontal line and whiskers extend to 1.5 times the interquartile
+of metacell assignments across different reduction rates. d Agreement between                   range. g Compactness, separation, and purity of 462 MetaQ metacells across var-
+ground-truth annotations and majority-voted labels within each of 462 metacells.                ious momentum parameters. Source data are provided as a Source Data file.
+
+metacell number to achieve a common 50-fold or 100-fold reduction                               recorded two metacell quality metrics, including metacell purity and
+when using MetaQ in practice. To find a more precise estimation of the                          balanced accuracy, by assigning each original cell the majority cell type
+metacell number that balances data compression and information                                  of its corresponding metacell. In addition to the discrete thyroid
+preservation, we tested metacell numbers ranging from 50 to 1000                                cancer data, we applied the same evaluation to the continuous bone
+and tracked three algorithmic metrics, namely, the proportion of the                            marrow data. Subsampling was applied to the thyroid data to keep the
+original (LNB/LPois) to the quantized (LN^B/LPo^is) reconstruction loss                         original cell number consistent between the two datasets. As depicted
+(referred to as reconstruction proportion), the difference in similarity                        in Supplementary Fig. 12d, the metacell quality improves progressively
+between cells' closest and second-closest codebook entries (referred                            with the metacell number on both datasets. Notably, the thyroid can-
+to as similarity difference), and the codebook loss (LC). In parallel, we                       cer data, being more discrete, requires fewer metacells (~400) to reach
+
+Nature Communications | (2025)16:1205                                                                                                                                                        10
+Article                                                                                            https://doi.org/10.1038/s41467-025-56424-6
+
+the balanced accuracy plateau compared to the bone marrow data             worth exploring its application in other omics, such as DNA methyla-
+(~600), likely due to the greater diversity of cells along the continuous  tion, by designing more appropriate modeling strategies. Third, while
+developmental path in the latter. Supplementary Fig. 12e indicates that    this paper demonstrates the effectiveness of MetaQ in inferring meta-
+compared to the codebook loss, the reconstruction proportion and           cells on the continuous developmental data, it remains unexplored how
+similarity difference exhibit stronger correlations with metacell purity   MetaQ behaves on actual time-series sequencing data. Understanding
+and balanced accuracy. Given that the reconstruction proportion            how metacell algorithms could facilitate links between snapshots
+tends to increase continuously with the number of metacells, we            sampled at different time points presents an intriguing opportunity for
+recommend first plotting the trend of similarity difference against the    future research. We anticipate that future developments could further
+metacell number, and then selecting the point at which the decline in      enhance the performance, generalization capabilities, and applications
+similarity difference plateaus as a more precise estimation.               of MetaQ, establishing it as a handy and powerful tool for metacell
+                                                                           inference in the era of high-throughput profiling.
+Discussion
+                                                                                 In conclusion, MetaQ is an efficient, scalable, and effective metacell
+Towards the rapidly increasing volume of sequencing data, metacell         algorithm that could be seamlessly incorporated into existing single-cell
+methods provide a promising solution to reduce the computational           analysis pipelines. By reducing the number of cells while preserving
+burden by aggregating biologically similar cells. However, existing        biological characteristics, MetaQ enables existing single-cell analysis
+metacell algorithms, despite their intended purpose of alleviating         tools to handle arbitrarily large datasets, breaking the computational
+computational complexity, are themselves computationally demand-           bottleneck. With the growing volume of cells and omics in high-
+ing and struggle to handle large-scale data. Essentially, these methods    throughput profiling data, we believe MetaQ will become a pivotal tool
+shift the computational bottleneck from downstream analysis to the         with broad applications across various downstream analyses.
+metacell inference stage, sidestepping rather than ultimately solving
+the core issue.                                                            Methods
+
+      MetaQ is a metacell algorithm that scales to arbitrarily large       The MetaQ algorithm
+datasets, with linear time and constant memory costs relative to the       The inputs to MetaQ include the number of metacells N^ and the raw
+cell number. Such superior efficiency and scalability set MetaQ apart      count matrix X 2 RN × M , where N and M denote the number of cells
+from existing methods that suffer from exponential time or memory          and features (e.g., genes, proteins, peaks), respectively. MetaQ views
+complexity. For instance, MetaQ achieves about 100 times speedup           each metacell as a collective ancestor of a subgroup of specialized
+and 50 times memory savings when processing 100,000 cells, com-            cells, which could effectively derive these homogeneous cells. To
+pared to the most competitive baseline SEACell.                            implement the idea, MetaQ quantizes all cells into a D-dimensional
+                                                                           codebook C 2 RN^ × DðN^ <NÞ consists of limited entries, aiming to
+      The design of MetaQ is motivated by the cell differentiation         reconstruct each cell using its most similar entry. For better recon-
+process in multicellular organisms. Specifically, we conceptualize         struction, cells with similar biological states would be quantized into
+each metacell as a collective ancestor of a subgroup of specialized        the same entry. Consequently, each codebook entry intrinsically cor-
+cells, which can thus effectively derive the latter. Following this idea,  responds to a metacell, representing all cells it quantizes. MetaQ
+MetaQ employs a generative single-cell quantization approach to            employs deep neural networks to perform the above cell quantization
+identify homogeneous cell subsets for metacell inference. Powered          and reconstruction process, with further details provided below.
+by the feature extraction capabilities of deep neural networks, MetaQ
+could precisely capture biological states, resulting in accurate and       Count data modeling with the negative binomial and Poisson dis-
+prototypical metacell construction. Extensive experiments demon-           tribution. To endow deep neural networks with feature extraction
+strate that even with significantly reduced computational complex-         capabilities, MetaQ first models the raw count matrix X using the
+ity, MetaQ still achieves comparable, and in most cases slightly           negative binomial (NB) distribution54­56 for gene expression and pro-
+better, performance than existing metacell algorithms across various       tein data (detailed derivations are provided in Supplementary Note 1),
+downstream tasks, including cell type annotation, developmental            and Poisson distribution57,58 for chromatin accessibility data. The count
+trajectory inference, batch integration, clustering, and differential      matrix is modeled by the two distributions using an auto-encoder.
+expression analysis.                                                       Specifically, for the i-th cell xi 2 RM , an encoder f(  ) is first employed
+                                                                           to learn the cell embedding ei, followed by a decoder g(  ) to estimate
+      While current metacell algorithms are all designed for uni-omics     the mean i 2 RM and dispersion ri 2 RM of the NB distribution, or the
+data, MetaQ could easily extend to paired multi-omics analysis thanks      mean i 2 RM of the Poisson distribution. The learning objective is to
+to its simple yet effective design. By requiring the quantized cell        maximize the following distribution log-likelihoods:
+embeddings to reconstruct all modalities, MetaQ is able to infer
+metacells for each modality while preserving pairing information. Such                  1 XN       ÀÀ                ÁÁ
+native support for multi-omics analysis aligns with the evolving cap-      LNB = N À log NB xiji, ri
+abilities of sequencing technologies, which increasingly enable simul-                     i=1
+taneous profiling of single cells across multiple layers.                                              "À         Á         ri           xi #       ð1Þ
+                                                                                           XN      log  xi      rÁi                           ,
+      Regarding the stability and generalizability of MetaQ, we simpli-              =  1       À           À+          ri       i
+fied its hyper-parameters to avoid laborious tuning across different
+datasets. In this study, we fixed parameter configurations in all                       N i=1      xi! ri ri + i                 ri + i
+experiments and found that MetaQ consistently achieves promising
+results. In other words, users only need to specify the target number of                ÀÁ                                  ÀÁ
+metacells. Additionally, guidance on estimating the appropriate
+number of metacells is provided to facilitate practical application.       i = diag si × exp W di , ri = exp W r di , di = gðeiÞ,                   ð2Þ
+
+      To further improve metacell analysis in future research, several     LPois  =  1  XN          À À ÁÁ           =  1   XN À log ixi expÀi   ,  ð3Þ
+promising avenues could be explored. First, while MetaQ currently                    N      À   log Pois xiji           N                xi!
+learns cell embeddings using an autoencoder network, leveraging more
+advanced large-scale pre-trained models for single-cell data may                        i=1                                 i=1
+improve feature extraction ability and, accordingly, the metacell qual-
+ity. Second, MetaQ could currently handle various omics data, includ-                              ÀÁ           ÀÁ
+ing gene expression, protein, and chromatin accessibility data. It is                      i = diag si × exp W ei , ei = f ðxiÞ,                    ð4Þ
+
+Nature Communications | (2025)16:1205                                                                                                               11
+Article                                                                                                          https://doi.org/10.1038/s41467-025-56424-6
+
+where si represents the size factor each cell scaled to meet 10,000              embeddings might be disturbed when approximating randomly
+counts during data preprocessing, W, Wr, and W are independent                   initialized codebook entries during the early stages of training.
+fully connected layers. Notably, rather than modeling the entire data-           Aligning codebook entries with corresponding cell embeddings
+set with a single NB or Poisson distribution, MetaQ assigns distinct             provides two primary benefits. First, it accelerates the convergence
+distribution parameters to each cell. While the decoder network g(  ) is         of the quantized cell reconstruction losses in Eqs. (1) or (3), by reducing
+shared across all cells, their distribution parameters differ due to the         the gap between the quantized and original data distributions. Second,
+unique embeddings ei associated with each cell. Supplementary                    it helps metacells identify more biologically similar cells, by guiding
+Figs. 6c and 6d demonstrate that modeling chromatin accessibility                codebook entries toward biologically meaningful regions in the
+data with the Poisson distribution outperforms that with the negative            embedding space.
+binomial distribution, in both uni- and multi-omics scenarios.
+                                                                                 Codebook entry adjustment with usage recording. The above cell
+Cell quantization with a discrete codebook. To discover biologically             quantization strategy could discover metacells by learning a dis-
+                                                                                 crete codebook. However, it might encounter the error accumu-
+similar cells, MetaQ quantizes all cells into a discrete codebook C with         lation problem. Specifically, active entries frequently used to
+N^ learnable entries. Specifically, given a cell embedding ei, MetaQ             quantize cells would be optimized more often, increasing their
+employs the quantizer q(  ) to assign it to the closest entry in the             likelihood of being selected for quantizing more cells. Con-
+                                                                                 versely, inactive entries that are rarely used would be less or even
+codebook, namely,                                                                never optimized, making them unlikely to represent other cells.
+                                                                                 As a result, only a portion of the discrete codebook would be
+         ^ei = qðeiÞ = ck , k = argmax cosðei, ck Þ,                       ð5Þ   effectively leveraged and optimized, leading to highly unbalanced
+                                     ck 2C                                       metacell groupings. Biologically, when a metacell aggregates too
+                                                                                 few cells, it becomes more susceptible to technical noise and
+where ck denotes the k-th entry in the codebook, which has the same              random fluctuations. Conversely, when a metacell represents too
+dimensionality as ei, and cosðÁ, ÁÞ refers to the cosine similarity.             many cells, it may encompass diverse cell types or states, diluting
+                                                                                 the unique characteristics of a particular population.
+      The codebook entries are randomly initialized by default, given its
+simplicity and efficiency. Notably, MetaQ also supports alternative                    To prevent such a degenerated solution, MetaQ records the usage
+initialization strategies such as Kmeans52 and geometric sketching53.            of each codebook entry and adjusts those excessively large or small
+Fig. 6f demonstrates that MetaQ performs consistently under different            ones during the training process. Formally, the historical usage of
+initialization strategies. After initialization, the codebook entries will       entries is recorded with the exponential moving average as follows:
+be optimized through quantized cell reconstruction and adjusted with
+usage recording, as elaborated below.
+
+Codebook optimization with quantized cell reconstruction. As                                    U kt        =    Á  U tkÀ1  +  ð1  À  Þ  Á  N  t  ,  U  0  =   0,                     ð11Þ
+compact proxies of the original cells, metacells ought to retain as                                                                            k        k
+much information from the original data as possible. In other words, a
+prototypical metacell is expected to effectively reconstruct a sub-                                                                         N
+group of homogeneous cells. To achieve this, MetaQ aims at recon-
+structing each original cell using its quantized cell embedding ^ei, with        where  U  tÀ1  refers  to  the     historical     usage       of    entry       ck,   N  t  denotes  the
+the following losses:                                                                      k                                                                              k
+
+                                                                                 number of cells it quantizes in the t-th iteration, and  is the momen-
+
+                                                                                 tum parameter. Based on the recorded codebook usage, MetaQ first
+
+                                                                                 addresses the over-small entries by relocating them to the most distant
+
+         LN^B   =      1  XN   À  logÀNBÀxij^i,  r^i  ÁÁ                   ð6Þ   cells, whose information is least captured by the current metacells.
+                       N                                ,
+                                                                                 Specifically, the distance between the i-th cell and the codebook is
+                          i=1
+                                                                                 defined by
+
+           ÀÁ                        ^ri =                  d^i = g^ð^eiÞ  ð7Þ                                                                          
+^i = diag si ×  exp W^ d^i ,                exp W^ r d^i ,
+                                                                                                                    exp 1 À cosðei, cjÞ
+                                                                                                dis     =   max                                                     :                 ð12Þ
+                                                                                                                    PN^             À                           Á
+                                                                                                               j            1  exp 1     À  cosðei,        ck  Þ
+                                  log Pois xi          ,                                                                k=
+                       1  XN
+         LPo^is     =  N       À               j^i                         ð8Þ
+                                                                                       MetaQ randomly selects N^ cells as the target with the probability
+                          i=1                                                    of ½d1s, Á Á Á , dNs , so that distant cells are more likely to be selected. After
+
+                ^i  =       ÀÁ    ×                                        ð9Þ   that, MetaQ updates the codebook entries by pushing them to the
+                       diag si       exp W^  ^ei ,                               selected distant cells Es = ½e1s, Á Á Á , eN^s , namely,
+
+where W^ , W^ r, W^  and g^ refer to a copy of the decoder parameters for        ctk = ð1 À  sÞ Á cktÀ1 +  s        Á eks,     s =    expðÀ100             Á  U  t  Á N^ À Þ,         ð13Þ
+the quantized cell reconstruction. The premise behind cell quantiza-                                                                                             k
+tion is that biologically similar cells could be effectively reconstructed
+by the same entry in the codebook. In other words, the quantization              where  is a small constant to stabilize the momentum update, and s
+operation naturally and intrinsically achieves the metacell assignment.          ensures that over-small entries are updated more frequently to
+                                                                                 quantize more cells.
+      In addition to reconstructing original cell counts in the raw space,
+MetaQ further aligns codebook entries with their corresponding cell                    In addition to the over-small entries, some entries might be overly
+embeddings in the embedding space, namely,                                       used during the quantization process. However, a single metacell
+                                                                                 cannot fully describe the biological states of all the corresponding
+         LC         =  1  XN   qðeiÞ  À     sg½ei22,                       ð10Þ  cells, leading to inferior prototypicality of metacells. Therefore, we
+                       N                                                         propose to disturb those over-large codebook entries, allowing a
+                          i=1                                                    subset of cells they quantize to be taken over by other metacells. In
+                                                                                 practice, we found that reallocating codebook entries to the median-
+where sg[  ] denotes the stop-gradient operator59, which prevents the            distance cells serves as a moderate and effective disturbance.
+loss from influencing original cell embeddings. Otherwise, the cell
+
+Nature Communications | (2025)16:1205                                                                                                                                                 12
+Article                                                                                                                                  https://doi.org/10.1038/s41467-025-56424-6
+
+      Specifically, MetaQ randomly selects one median-distance cell for                              parameter  = 0.9 and small constant  = 1e - 3 for all datasets. To
+each entry following the probability:                                                                expedite training, we early stopped the optimization when the changes
+
+d  l   =  PjNe=x1peðxÀpjðÀcojscðoesi,ðcekj,ÞcÀkÞmÀkmjÞ kjÞ ,  mk =  median      cosðei, ck Þ,  ð14Þ  in losses LN^B (for RNA and ADT data), LPo^is (for ATAC data), and LC were
+   ik                                                                                                less than 1e - 5 for ten consecutive epochs. All experiments were
+                                                                          i                          conducted on an NVIDIA RTX 3090 GPU with CUDA 12.2 on the Ubuntu
+
+                                                                                                     20.04 OS.
+
+where dilk denotes the probability of the i-th cell being selected by the                            Handling multi-omics data. In the preceding sections, we introduced
+k-th entry, and mk represents the median distance between the k-th                                   MetaQ on uni-omics data for clarity. The design of MetaQ naturally
+entry and cell embeddings. Let El = ½e1l , Á Á Á , elN^ , ekl $ ½dl1k , Á Á Á , dlNk  be             supports metacell inference for paired multi-omics data. As illustrated
+the selected median-distance cells, MetaQ disturbs the codebook                                      in Supplementary Fig. 1, MetaQ makes two primary adjustments to
+                                                                                                     accommodate multi-omics data. First, MetaQ concatenates the multi-
+entries by:                                                                                          omics information when computing the cell embeddings. Second,
+                                                                                                     MetaQ requires the quantized cell embeddings to reconstruct the
+          ckt = ð1 À l Þ Á cktÀ1 + l  Á ekl ,  l =            expðÀ10  Á  N^ 1Á       À Þ,     ð15Þ  original count matrices across all modalities. Specifically, let
+                                                                                                     X 1, X 2, . . . , X T ðX j 2 RN × M j Þ be the paired multi-omics data of T mod-
+                                                                          N     U  t                 alities, MetaQ first extracts the feature of each modality and then
+                                                                                   k                 concatenate them to form the cell embedding, namely,
+
+where  is the same small constant as in Eq. (13), and l strengthens the                                                    e0i = concatðei1, ei2,    . . . , eTi Þ,  eij  =  f  j  ðx   j  Þ,  ð18Þ
+disturbance on large codebook entries. By adjusting excessively large                                                                                                                  i
+and small codebook entries, MetaQ is able to produce more balanced
+metacell assignments, ensuring that each metacell captures the bio-                                  where ei0 2 RN × TÁD is the multi-omics embedding of the i-th cell, xij and
+logical states for a moderate number of cells.                                                       eij denote its raw count and embedding in the j-th modality,
+                                                                                                     respectively. Moreover, f j() refers to the encoder for modality j
+      By combining Eqs. (1), (3), (6), (8), and (10), the overall objective                          trained with LNj B or LPj ois consistent with Eqs. (1) and (3). The quantized
+function of MetaQ lies in the form of                                                                cell embedding ^ei = qðei0Þ is expected to reconstruct all modalities by
+                                                                                                     minimizing LjN^B or LPj o^is, j  [1, T] consistent with Eqs. (6) and (8). The
+          (   LNB + LN^B + LC,        for gene expression and protein data,                          codebook entry adjustment strategy in Eqs. (13) and (15) remains the
+             LPois + LPo^is + LC,         for chromatin accessibility data:                          same as for uni-omics data, with the codebook size extending to N^ × T Á
+LMetaQ =                                                                              ð16Þ
+                                                                                                     D catering to the multi-omics cell embeddings.
+      The above objective simultaneously optimizes the parameters of
+the encoder f(), the decoders gðÁÞ, g^ðÁÞ, W ðW^ Þ, W r ðW^ rÞ, W ðW^ Þ, and                               In summary, the overall objective function of MetaQ for multi-
+the codebook C via gradient descent. Furthermore, the codebook
+                                                                                                     omics data lies in the form of
+would be adjusted via Eq. (13) and (15) in every iteration.
+
+Metacell inference with cell quantization results. After training, each                                                 8
+                                                                                                                        XT < LNj B       + LNj ^B,
+cell would be quantized into one of the codebook entries. To derive                                  LM0 etaQ  = LC  +  j = 1 : LPj ois  + LjPo^is,  if the jÀth omics is gene expression or protein ,
+the metacell count matrix X^ 2 RN^ × M , MetaQ simply averages the raw                                                                                 if the jÀth omics is chromatin accessibility:
+count value of cells quantized into the same entry, as these cells are
+likely to have similar features. Formally, the i-th metacell x^i is com-                                                                                                                               ð19Þ
+puted as
+                                                                                                           After training, MetaQ averages the raw counts of cells from the
+             x^i =  1 XN                       s:t: qðejÞ = ci,                                ð17Þ  same codebook entry in each modality according to Eq. (17), resulting
+                    N^i j = 1 xj ,                                                                   in the paired multi-omics metacells for downstream analyses.
+
+where N^i denotes the number of cells quantized into the i-th                                        Data preprocessing
+codebook entry.                                                                                      To preprocess the input raw count matrix, we first normalized each cell
+                                                                                                     by dividing each count against its total number of counts, then mul-
+Implementation details. MetaQ is implemented in Python using the                                     tiplied the counts by 10,000 to standardize total counts across cells.
+PyTorch60 framework, v.2.1.1. The encoder network f() is a fully con-                                After that, we log normalized the counts and scaled the data to have
+nected network (FCN) consisting of three layers--an input layer, a                                   unit variance and zero mean. The detailed preprocessing steps for
+                                                                                                     each dataset are elaborated below:
+hidden layer, and an output layer with 512, 128, and 32 neurons,
+                                                                                                        · Human fetal atlas data. The human fetal atlas data was down-
+respectively. Each of the input M features is connected to all neurons in                                  loaded from NCBI GEO accession number GSE1567932, including
+                                                                                                           the raw gene expression and cell-type information. We prepro-
+the input layer, and each subsequent neuron is fully connected to the                                      cessed the data following the previous work scJoint9. To construct
+neurons in the next layer. The decoder networks g() and g^ðÁÞ are                                          relatively balanced data, for cell type k with number of cells
+similarly structured FCNs with two layers of 128 and 512 neurons,                                          nk > 10,000, we subsampled maxf0:05 Á nk, 10, 000g cells. All cells
+                                                                                                           were kept for cell types with less than 10,000 cells, resulting in
+respectively. The 32-dimensional cell embedding connects to all neu-                                       433,695 cells of 54 cell types. Data upsampling was performed
+                                                                                                           when evaluating the running time and memory costs of metacell
+rons in the first layer, and each neuron is further connected to all the                                   algorithms.
+
+neurons in the second layer. To estimate the NB distribution, two                                       · Human bone marrow data. The human bone marrow data
+subsequent one-layer FCNs W ðW^ Þ and W rðW^ rÞ project the 512-                                           (GSE12863927) was downloaded with the SeuratData package27,
+dimensional feature to M-dimensional mean  and dispersion r para-                                          v.0.2.2.9001. We used the InstallData function to download the
+meters. For the Poisson distribution, a one-layer FCN W ðW^ Þ projects                                     bmcite dataset, which includes 30,672 scRNA-seq profiles and a
+cell embeddings to the M-dimensional mean parameter . In all                                               panel of 25 antibodies. The cell type information was obtained
+experiments, we trained MetaQ for 300 epochs using the Adam61                                              from the meta.data$celltype.l2 field of the Seurat object.
+
+optimizer with a learning rate of 1e - 3 and a weight decay of 1e - 2. In
+
+addition to the joint optimization with network parameters through
+standard gradient descent62, the codebook C is further updated via
+
+Eqs. (13) and (15) at each mini-batch. We fixed the momentum
+
+Nature Communications | (2025)16:1205                                                                                                                                                          13
+Article                                                                                          https://doi.org/10.1038/s41467-025-56424-6
+
+   · Mouse kidney data. The gene expression and peak-by-cell matrix          constructed a k-nearest neighbor single-cell network and then merged
+      were downloaded from https://www.10xgenomics.com/resources/            densely connected cells to infer metacell membership, using the
+      datasets/mouse-kidney-nuclei-isolated-with-chromium-nuclei-            SCimplify function. All parameters were set as default except for
+      isolation-kit-saltyez-protocol-and-10x-complex-tissue-dp-ct-sorted-    gamma, which was tuned to adjust the number of metacells.
+      and-ct-unsorted-1-standard34, which includes 14,527 cells with
+      20,105 genes and 32,285 peaks. The cell types were manually                  For EpiCarousel, we used its Python package (https://github.com/
+      annotated according to the reported cell-type markers1.                BioX-NKU/EpiCarousel/tree/main), v.0.0.8. Notably, as EpiCarousel is
+                                                                             designed for scATAC-seq data, we evaluated it on the mouse kidney
+   · Human pancreas data. The human pancreas dataset was down-               dataset. Following its official tutorial, we first used the data_split
+      loaded from https://hemberg-lab.github.io/scRNA.seq.datasets/          function to partition data into chunks, and then used the identify_me-
+      human/pancreas. The data was generated using four different            tacells and merge_metacells functions to compute metacells. We kept
+      scRNA-seq protocols from five different sources, including inDrop      the default parameters except for carousel_resolution, which was tuned
+      (GSE84133, 8569 cells)37, CEL-Seq2 (GSE85241, 2122 cells)38, Smart-    to adjust the metacell number.
+      Seq2 (E-MTAB-5061, 2127 cells)39, and SMARTer (GSE83139, 457
+      cells and GSE81608, 1492 cells)40,41. The sequencing data from five    Cell type classification. To classify Human fetal atlas cells, we used
+      experiments was concatenated by keeping commonly detected              the inferred metacells to train a classification network. The network is
+      genes. Cells annotated as "unclear", "co-expression", "not applic-     an FCN with the dimension of M-512-128-K, where M and K denote the
+      able", "unclassified", "unclassified endocrine", "dropped", "alpha.-   number of input features and cell types, respectively. We adopted the
+      contaminated", "beta.contaminated", "delta.contaminated", or           following cross-entropy loss to train the network:
+      "gamma.contaminated" were removed. Cell type annotations
+      "activated_stellate", "PSC (Pancreatic Stellate Cell)", and "quies-    LCE       =     1   XN^    log  PKke=x1peÀxppi ÂÀy^pi Ãi ½Ák    !                 ð20Þ
+      cent_stellate" were renamed to "Stellate", while "mesenchyme"                          N^      À                                     Á,
+      cells were renamed to "Mesenchymal". The above preprocessing                                                                         
+      results in 14,767 cells of 15 different cell types.                                        i=1
+
+   · Human PBMC perturbation data. The human PBMC perturbation               where pi denotes the predicted soft label of the i-th metacell whose
+      data50 was downloaded from https://www.kaggle.com/                     label y^i is given by the majority of original cells it represents. The
+      competitions/open-problems-single-cell-perturbations/data. The         network was trained for 50 epochs with a batch size of 512, by the
+      publicly accessible training split was used, including 240,090 cells
+      of six cell types, 144 compounds as perturbations, two positive        Adam optimizer with default parameters.
+      controls Dabrfenib and Belinostat, and one negative control
+      DMSO. More specially, B and Myeloid cells include 15 compounds,              We used the network trained on the metacells to classify all ori-
+      while T cells (CD4+, CD8+, regulatory) and NK cells include all 144
+      compounds.                                                             ginal cells. To evaluate the performance, we computed the classifica-
+                                                                             tion accuracy and balanced accuracy score64,65 defined as
+   · Human thyroid cancer data. The human thyroid cancer data63 was
+      downloaded from https://ngdc.cncb.ac.cn/gsa-human/browse/              ACC =  1  XN     À        Á              &1               if a = b,               ð21Þ
+      HRA000686. This dataset comprises single-cell sequencing of                   N         ~yi,   yi ,  ða, bÞ =                  otherwise,
+      thyroid cancer samples from one normal thyroid tissue, three
+      anaplastic thyroid cancer (ATC), and three papillary thyroid                     i=1                               0
+      cancer (PTC) cases, encompassing a total of 46,205 cells of 16
+      different cell types.                                                  Balanced ACC =  P1      XN   À~yi  ,  yi  Á    ,  wi =  P        1    ,  yi Þ  ,  ð22Þ
+                                                                                                iwi                     wi                  ð yj
+Performance and benchmarking                                                                         i=1                                 j
+Baseline methods. Four existing metacell algorithms were bench-
+marked for comparisons, including SEACell19, MetaCell V220, SuperCell6,      where y~i and yi denote the predicted and ground-truth annotation of
+and EpiCarousel35.                                                           the i-th cell. The balanced accuracy score accounts for the cell type
+
+      For SEACell, we used its Python package (https://github.com/           distribution, highlighting the classification performance on rare types.
+dpeerlab/SEACells), v.0.3.3. Following its official tutorial, we used the
+SEACells, construct_kernel_matrix, initialize_archetypes, and fit functions  Metacell compactness and separation. To evaluate the homogeneity
+to build and fit the model. After training, we inferred the metacell         of cells within each metacell and the heterogeneity of cells across
+assignments through thesummarize_by_SEACell function. We kept the            different metacells, we introduced the following compactness and
+default parameters except for n_SEACells, which was tuned to adjust          separation metrics:
+the number of metacells.
+                                                                                                           N^ X 1 X
+      For MetaCell V2, we used its Python package (https://github.com/       Compactness = N i2M M j2M sðxi, xjÞ,                                              ð23Þ
+tanaylab/metacells), v.0.9.4. Notably, the algorithm itself does not
+directly support specifying the number of metacells. Thus, for fair                                  N^ X              h                    i
+comparisons, we searched for the target_metacell_umis parameter as
+suggested in its tutorial to approximate the expected metacell number,       Separation =                   argmin          1 À sðxi, xjÞ       ,              ð24Þ
+with other parameters set as the default. The divide_and_conquer_pipeline                            N i2M j2=M
+and collect_metacells functions were utilized to infer the metacell
+grouping. In practice, we also found that in some cases MetaCell V2 fails    where N, N^ are the numbers of original cells and metacells, M denotes
+with the default parameters. As a solution, among its hundreds of tunable    the index set of cells grouped into the same metacell, and s(  ,  ) refers to
+parameters, we manually tuned the min_metacell_size, qual-                   the Pearson correlation coefficient ranging from [ - 1, 1]. Here, we chose
+ity_min_gene_total, target_metacell_size, and project_min_significant_gen-   Pearson correlation in the raw space as the cell similarity measure, to
+e_umis values until the algorithm gives proper outputs.                      avoid the influence of different dimensional reduction techniques
+                                                                             employed by various methods. Additionally, we accounted for metacell
+      For SuperCell, we used its official R package (https://github.com/     sizes by keeping the magnitude M in the outer summation, thereby
+GfellerLab/SuperCell), v.1.0. Following its default pipeline, we first       mitigating the potential bias arising from extremely imbalanced metacell
+                                                                             assignments. For example, assigning M À 1 cells into M À 1 metacells
+                                                                             in a one-to-one fashion, while grouping all remaining cells into a single
+                                                                             metacell would artificially inflate metric scores without truly improving
+
+Nature Communications | (2025)16:1205                                                                                                                          14
+Article                                                                                                                   https://doi.org/10.1038/s41467-025-56424-6
+
+metacell grouping. Lastly, the factor of N^ =N was included to account for                                      where H(VU) is the conditional entropy of the ground-truth labels
+the magnitude differences across varying numbers of metacells. Higher                                           given the cluster assignments, and the entropy H(V) is defined the
+values of both metrics indicate a more effective metacell grouping.                                             same as in Eq. (27). A larger value of the three metrics indicates better
+                                                                                                                agreements between the cluster assignments and ground truth labels,
+Multi-omics analysis and trajectory inference. For paired multi-omics                                           namely, a better clustering result.
+analysis on human bone marrow data, we applied the WNN integration
+algorithm27 implemented by the muon66 Python package, v.0.1.5, to the                                                 Moreover, we employed the cLISI and iLISI metrics introduced in
+inferred metacells. The neighboring information was then passed to the                                          Harmony42 to evaluate the batch integration performance. For each
+PAGA algorithm28 provided in the scanpy17 Python package, v.1.9.6, for                                          cell, the two metrics were computed by:
+trajectory inference. A random hematopoietic stem cell was set as the
+root for the developmental trajectory. The peak-to-gene correspondence                                          cLISI  =  PK        1        ,  iLISI  =  PB        1        ,  ð31Þ
+on the mouse kidney data was obtained by Signac36, v1.8.0.
+                                                                                                                              q  =  1  pðqÞ                   b  =  1  pðbÞ
+
+Data integration and clustering. To integrate human pancreas data,                                              where B denotes the number of batches, and p(q), p(b) refer to the cell
+we adopted the official harmonypy42 Python package, v.0.0.6. After                                              type and batch probabilities in the Gaussian kernel-based neighborhood
+correcting batch effects in metacells, we built a neural network to learn                                       distributions with a perplexity of 30. To balance the significance of major
+the mapping from the raw space to the batch-corrected PCA space.                                                and rare cell types, we averaged the two metrics within each cell type. The
+The mapping network m(  ) is of the dimension of M-256-50, where M                                              original cLISI and iLISI range in [1, K] and [1, B], respectively. For clarity, we
+refers to the number of input features and 50 is the default PCA                                                normalized them to [0, 1] and reported the 1 - cLISI and iLISI values. In
+dimension suggested by Harmony. We trained the network by mini-                                                 other words, a higher 1 - cLISI value indicates more accurate cell type
+mizing the following mean squared error:                                                                        grouping, while a higher iLISI value indicates better batch mixing.
+
+                                      LMSE   =  1   XN^  k  mðx^iÞ    À  z^i k22 ,                      ð25Þ    Differential expression analysis. To compute the differential
+                                                N^                                                              expression (DE) for the human PBMC perturbation data, we used the
+                                                    i=1                                                         rank_genes_groups function with Wilcoxon rank-sum test70, provided in
+                                                                                                                the scanpy17 package, v.1.9.6. We conducted DE analyses with respect
+where ^zi denotes the Harmony integrated PCA embedding of the i-th                                              to cell types and compound perturbations respectively, with the log-
+metacell. The network was trained for 1000 epochs with a batch size of                                          foldchanges values reported. The cell type DE was computed on cells
+512 by the Adam optimizer. After that, we mapped original cells via                                             from the negative control, while the perturbation DE was calculated on
+zi = m(xi), where zi corresponds to the batch-corrected embedding of                                            each cell type independently.
+the i-th cell.
+                                                                                                                Visualization. We used the umap function provided in the scanpy17
+      To cluster batch-corrected data, we adopted the Louvain clus-                                             Python package, v.1.9.6, to reduce the dimension to two for cell and
+tering algorithm43 provided in the scanpy python package, v.1.9.6. The                                          metacell visualization. Boxplots, heatmaps, lineplots, and barplots
+following AMI67, ARI68, and Homogeneity Score69 metrics were used to                                            were illustrated using the seaborn71 Python package, v.0.12.2.
+evaluate the clustering performance:
+
+                          AMI      =       MIðU, V Þ À EfMIðU, V Þg                 V  Þg  ,            ð26Þ    Statistics & reproducibility. Statistical analyses were performed by the
+                                      maxfHðUÞ, HðV Þg À EfMIðU,                                                SciPy Python package72, v1.11.3. The p-value was determined by the two-
+                                                                                                                sided T-test, and the p-value < 0.05 is considered statistically significant.
+              MIðU,       V  Þ  =  X K 0  XK        \  Vq   log    NUp \ V q        ,                           Experiments are conducted under five randomizations with different
+                                              Up                   Up × V q                                     random seeds. No statistical method was used to predetermine the
+                                   p=1                                                                  ð27Þ    sample size. We subsampled over-large cell types to construct relatively
+                                          q=1                                                                   balanced data for the human fetal atlas and kept commonly detected
+                                                                                                                genes across different batches for the human pancreas data. No other
+              HðU Þ = À X K0 Up log Up , HðV Þ = À XK V q log V q                                               data were excluded from the analyses. The investigators were not
+                                          N         N                               N         N                 blinded to allocation during experiments and outcome assessment.
+                                p=1                                         q=1
+
+where MI(U, V) is the mutual information between the cluster assign-                                            Reporting summary
+                                                                                                                Further information on research design is available in the Nature
+ments U and ground-truth labels V, H(U ), H(V ) are the entropies, and                                          Portfolio Reporting Summary linked to this article.
+K0, K refers to the number of clusters and cell types, respectively.
+                                                                                                                Data availability
+                PK 0      PK  Up \ V q              À    PK     0  Up     PK  V q             !0 N 
+                                                                                              V q !02           All datasets used in this work are publicly available. The human fetal
+                     p=1      q=1         2                  p  =1    2          q=1   2                        atlas data2 used in this study are available in the GEO database under
+                                      PK                                                       2                accession code GSE156793. The human bone marrow data27 used in
+ARI =         PK0         Up  +               V q    !          PK 0     Up  PK                         N    :  this study are available in the GEO database under accession code
+                           2                             À                                              2       GSE128639, which could be downloaded with the SeuratData package
+           1      p=1                     q=1 2                 p=1      2          q=1                         from https://github.com/satijalab/seurat-data. The mouse kidney
+           2                                                                                                    data34 are available at https://www.10xgenomics.com/resources/
+                                                                                                                datasets/mouse-kidney-nuclei-isolated-with-chromium-nuclei-
+                                                                                                        ð28Þ    isolation-kit-saltyez-protocol-and-10x-complex-tissue-dp-ct-sorted-
+                                                                                                                and-ct-unsorted-1-standard. The human pancreas data used in this
+                                                                                                                study are available in the GEO database under accession codes
+              n                                                                                                 GSE8413337 [https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=
+where         2  = nðn À 1Þ=2 refers to the number of pairs in n samples.                                       GSE84133], GSE8524138 [https://www.ncbi.nlm.nih.gov/geo/query/acc.
+
+                                Homogeneity         Score       =  1  À  HðV jUÞ    ,                   ð29Þ
+                                                                          HðV Þ
+
+                 HðV jUÞ = À X K0 Up XK Up \ V q log Up \ V q ,                                         ð30Þ
+                                                N               Up                  U p 
+                                          p=1       q=1
+
+Nature Communications | (2025)16:1205                                                                                                                                           15
+Article                                                                          https://doi.org/10.1038/s41467-025-56424-6
+
+cgi?acc=GSE85241, E-MTAB-506139 [https://www.ebi.ac.uk/biostudies/               16. Yang, F. et al. scbert as a large-scale pretrained deep language
+arrayexpress/studies/E-MTAB-5061], GSE8313940 [https://www.ncbi.                       model for cell type annotation of single-cell rna-seq data. Nat.
+nlm.nih.gov/geo/query/acc.cgi?acc=GSE83139], and GSE8160841                            Mach. Intell. 4, 852­866 (2022).
+[https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=
+GSE81608], which are also accessible on https://hemberg-lab.                     17. Wolf, F. A., Angerer, P. & Theis, F. J. Scanpy: large-scale single-cell
+github.io/scRNA.seq.datasets/human/pancreas. The human PBMC                            gene expression data analysis. Genome Biol. 19, 1­5 (2018).
+perturbation data50 are available at the Kaggle competition site
+https://www.kaggle.com/competitions/open-problems-single-cell-                   18. Baran, Y. et al. Metacell: analysis of single-cell rna-seq data using
+perturbations/data. The human thyroid cancer data63 are available                      k-nn graph partitions. Genome Biol. 20, 1­19 (2019).
+under restricted access due to sharing principles in the Genome
+Sequence Archive under accession code HRA000686. The access                      19. Persad, S. et al. Seacells infers transcriptional and epigenomic
+can be obtained following the official data application guideline at                   cellular states from single-cell genomics data. Nat. Biotechnol. 41,
+https://ngdc.cncb.ac.cn/gsa-human/document/GSA-Human_                                  1746­1757 (2023).
+Request_Guide_for_Users_us.pdf, which provides detailed instruc-
+tions on how to submit a data access request, along with the cri-                20. Ben-Kiki, O., Bercovich, A., Lifshitz, A. & Tanay, A. Metacell-2: a
+teria for approval. The expected timeframe for response to access                      divide-and-conquer metacell algorithm for scalable scrna-seq
+requests is typically within four weeks. Source data are provided                      analysis. Genome Biol. 23, 100 (2022).
+with this paper.
+                                                                                 21. Pons, P. & Latapy, M. Computing communities in large networks
+Code availability                                                                      using random walks. In Computer and Information Sciences-ISCIS
+                                                                                       2005: 20th International Symposium, Istanbul, Turkey, October
+The code used to develop the model and generate results in this                        26-28, 2005. Proceedings 20, 284­293 (Springer, 2005).
+study is publicly available and has been deposited in GitHub at
+https://github.com/XLearning-SCU/MetaQ, under MIT license. The                   22. Matthias, P. & Rolink, A. G. Transcriptional networks in developing
+specific version of the code associated with this publication is                       and mature b cells. Nat. Rev. Immunol. 5, 497­508 (2005).
+archived in Zenodo and is accessible via https://doi.org/10.5281/
+zenodo.1427148073.                                                               23. Wang, Y., Liu, J., Burrows, P. D. & Wang, J.-Y. in B Cells in Immunity
+                                                                                       and Tolerance (ed. Wang, J.-Y.) 1­22 (Springer, 2020).
+References
+                                                                                 24. Stoeckius, M. et al. Simultaneous epitope and transcriptome mea-
+1. Consortium, T. M. et al. Single-cell transcriptomics of 20 mouse                    surement in single cells. Nat. methods 14, 865­868 (2017).
+      organs creates a tabula muris. Nature 562, 367­372 (2018).
+                                                                                 25. Chen, S., Lake, B. B. & Zhang, K. High-throughput sequencing of the
+2. Cao, J. et al. A human cell atlas of fetal gene expression. Science                 transcriptome and chromatin accessibility in the same cell. Nat.
+      370, eaba7721 (2020).                                                            Biotechnol. 37, 1452­1457 (2019).
+
+3. Azizi, E. et al. Single-cell map of diverse immune phenotypes in the          26. Mimitou, E. P. et al. Scalable, multimodal profiling of chromatin
+      breast tumor microenvironment. Cell 174, 1293­1308 (2018).                       accessibility, gene expression and protein levels in single cells. Nat.
+                                                                                       Biotechnol. 39, 1246­1258 (2021).
+4. La Manno, G. et al. Rna velocity of single cells. Nature 560,
+      494­498 (2018).                                                            27. Hao, Y. et al. Integrated analysis of multimodal single-cell data. Cell
+                                                                                       184, 3573­3587 (2021).
+5. Stuart, T. et al. Comprehensive integration of single-cell data. Cell
+      177, 1888­1902 (2019).                                                     28. Wolf, F. A. et al. Paga: graph abstraction reconciles clustering with
+                                                                                       trajectory inference through a topology preserving map of single
+6. Bilous, M. et al. Metacells untangle large and complex single-cell                  cells. Genome Biol. 20, 1­9 (2019).
+      transcriptome networks. BMC Bioinforma. 23, 336 (2022).
+                                                                                 29. Kurosaki, T., Kometani, K. & Ise, W. Memory b cells. Nat. Rev.
+7. Arisdakessian, C., Poirion, O., Yunits, B., Zhu, X. & Garmire, L. X. Dee-           Immunol. 15, 149­159 (2015).
+      pimpute: an accurate, fast, and scalable deep neural network method
+      to impute single-cell rna-seq data. Genome Biol. 20, 1­14 (2019).          30. Olweus, J. et al. Dendritic cell ontogeny: a human dendritic cell
+                                                                                       lineage of myeloid origin. Proc. Natl Acad. Sci. 94, 12551­12556 (1997).
+8. Eraslan, G., Simon, L. M., Mircea, M., Mueller, N. S. & Theis, F. J.
+      Single-cell rna-seq denoising using a deep count autoencoder. Nat.         31. Qian, J. et al. A pan-cancer blueprint of the heterogeneous tumor
+      Commun. 10, 390 (2019).                                                          microenvironment revealed by single-cell profiling. Cell Res. 30,
+                                                                                       745­762 (2020).
+9. Lin, Y. et al. scjoint integrates atlas-scale single-cell rna-seq and atac-
+      seq data with transfer learning. Nat. Biotechnol. 40, 703­710 (2022).      32. Shin, J.-Y., Wang, C.-Y., Lin, C.-C. & Chu, C.-L. A recently described
+                                                                                       type 2 conventional dendritic cell (cdc2) subset mediates inflam-
+10. Zhao, J. et al. Adversarial domain translation networks for inte-                  mation. Cell. Mol. Immunol. 17, 1215­1217 (2020).
+      grating large-scale atlas-level single-cell datasets. Nat. Computa-
+      tional Sci. 2, 317­330 (2022).                                             33. Cromer, M. K. et al. Gene replacement of -globin with -globin
+                                                                                       restores hemoglobin balance in -thalassemia-derived hemato-
+11. Li, Y. et al. scbridge embraces cell heterogeneity in single-cell rna-             poietic stem and progenitor cells. Nat. Med. 27, 677­687 (2021).
+      seq and atac-seq data integration. Nat. Commun. 14, 6045 (2023).
+                                                                                 34. Zheng, G. X. Y. et al. Massively parallel digital transcriptional pro-
+12. Tian, T., Wan, J., Song, Q. & Wei, Z. Clustering single-cell rna-seq               filing of single cells. Nat. Commun. 8, 14049 (2023).
+      data with a model-based deep learning approach. Nat. Mach. Intell.
+      1, 191­198 (2019).                                                         35. Li, S. et al. Epicarousel: memory-and time-efficient identification of
+                                                                                       metacells for atlas-level single-cell chromatin accessibility data.
+13. Tian, T., Zhang, J., Lin, X., Wei, Z. & Hakonarson, H. Model-based                 Bioinformatics 40, btae191 (2024).
+      deep embedding for constrained clustering analysis of single cell
+      rna-seq data. Nat. Commun. 12, 1­12 (2021).                                36. Stuart, T., Srivastava, A., Madad, S., Lareau, C. A. & Satija, R. Single-
+                                                                                       cell chromatin state analysis with signac. Nat. methods 18,
+14. Liu, Q., Chen, S., Jiang, R. & Wong, W. H. Simultaneous deep gen-                  1333­1341 (2021).
+      erative modelling and clustering of single-cell genomic data. Nat.
+      Mach. Intell. 3, 536­544 (2021).                                           37. Baron, M. et al. A single-cell transcriptomic map of the human and
+                                                                                       mouse pancreas reveals inter-and intra-cell population structure.
+15. Hu, J. et al. Iterative transfer learning with neural network for clus-            Cell Syst. 3, 346­360 (2016).
+      tering and cell type classification in single-cell rna-seq analysis. Nat.
+      Mach. Intell. 2, 607­618 (2020).                                           38. Muraro, M. J. et al. A single-cell transcriptome atlas of the human
+                                                                                       pancreas. Cell Syst. 3, 385­394 (2016).
+
+                                                                                 39. Segerstolpe,  et al. Single-cell transcriptome profiling of human
+                                                                                       pancreatic islets in health and type 2 diabetes. Cell Metab. 24,
+                                                                                       593­607 (2016).
+
+                                                                                 40. Wang, Y. J. et al. Single-cell transcriptomics of the human endo-
+                                                                                       crine pancreas. Diabetes 65, 3028­3038 (2016).
+
+Nature Communications | (2025)16:1205                                            16
+Article                                                                        https://doi.org/10.1038/s41467-025-56424-6
+
+41. Xin, Y. et al. Rna sequencing of single human islet cells reveals type     65. Kelleher, J. D., Mac Namee, B. & D'arcy, A.Fundamentals of machine
+      2 diabetes genes. Cell Metab. 24, 608­615 (2016).                              learning for predictive data analytics: algorithms, worked examples,
+                                                                                     and case studies (MIT press, 2020).
+42. Korsunsky, I. et al. Fast, sensitive and accurate integration of single-
+      cell data with harmony. Nat. methods 16, 1289­1296 (2019).               66. Bredikhin, D., Kats, I. & Stegle, O. Muon: multimodal omics analysis
+                                                                                     framework. Genome Biol. 23, 42 (2022).
+43. Blondel, V. D., Guillaume, J.-L., Lambiotte, R. & Lefebvre, E. Fast
+      unfolding of communities in large networks. J. Stat. Mech. Theory        67. Vinh, N. X., Epps, J. & Bailey, J. Information theoretic measures for
+      Exp. 2008, P10008 (2008).                                                      clusterings comparison: Variants, properties, normalization and
+                                                                                     correction for chance. J. Mach. Learn. Res. 11, 2837­2854 (2010).
+44. Olaniru, O. E. et al. Single-cell transcriptomic and spatial landscapes
+      of the developing human pancreas. Cell Metab. 35, 184­199 (2023).        68. Rand, W. M. Objective criteria for the evaluation of clustering
+                                                                                     methods. J. Am. Stat. Assoc. 66, 846­850 (1971).
+45. Anderson, K. R. et al. The l6 domain tetraspanin tm4sf4 regulates
+      endocrine pancreas differentiation and directed cell migration.          69. Rosenberg, A. & Hirschberg, J. V-measure: A conditional entropy-
+      Development 138, 3213­3224 (2011).                                             based external cluster evaluation measure. In Proceedings of the
+                                                                                     2007 joint conference on empirical methods in natural language
+46. Barnett, K. C., Li, S., Liang, K. & Ting, J. P.-Y. A 360 view of the             processing and computational natural language learning (EMNLP-
+      inflammasome: Mechanisms of activation, cell death, and diseases.              CoNLL), 410­420 (Association for Computational Linguis-
+      Cell 186, 2288­2312 (2023).                                                    tics, 2007).
+
+47. Liao, M. et al. Hepatic tnfrsf12a promotes bile acid-induced hepa-         70. Soneson, C. & Robinson, M. D. Bias, robustness and scalability in
+      tocyte pyroptosis through nfb/caspase-1/gsdmd signaling in                     single-cell differential expression analysis. Nat. Methods 15,
+      cholestasis. Cell Death Discov. 9, 26 (2023).                                  255­261 (2018).
+
+48. Li, X. et al. Combined plasma olink proteomics and transcriptomics         71. Waskom, M. L. seaborn: statistical data visualization. J. Open Source
+      identifies cxcl1 and tnfrsf12a as potential predictive and diagnostic          Softw. 6, 3021 (2021).
+      inflammatory markers for acute kidney injury. Inflammation 47,
+      1547­1563 (2024).                                                        72. Virtanen, P. et al. SciPy 1.0: Fundamental Algorithms for Scientific
+                                                                                     Computing in Python. Nat. Methods 17, 261­272 (2020).
+49. Singh, V. K., Yadav, D. & Garg, P. K. Diagnosis and management of
+      chronic pancreatitis: a review. Jama 322, 2422­2434 (2019).              73. Li, Y. et al. Metaq: fast, scalable and accurate metacell inference via
+                                                                                     single-cell quantization, https://doi.org/10.5281/zenodo.
+50. Artur, S. et al. A benchmark for prediction of transcriptomic                    14271480 (2024).
+      responses to chemical perturbations across cell types. In The Thirty-
+      eight Conference on Neural Information Processing Systems Data-          Acknowledgements
+      sets and Benchmarks Track (openreview.net, 2024).
+                                                                               This work was supported in part by the following grants: National Natural
+51. Kline, M. et al. Abt-737, an inhibitor of bcl-2 family proteins, is a      Science Foundation of China under Grant 62176171 (P), U21B2040 (P),
+      potent inducer of apoptosis in multiple myeloma cells. Leukemia 21,      623B2075 (L), 82103031 (L), and 82272933 (L); Fundamental Research
+      1549­1560 (2007).                                                        Funds for the Central Universities under Grant CJ202303 (P); Sichuan
+                                                                               Science and Technology Planning Project under Grant 24NSFTD0130
+52. MacQueen, J. et al. Some methods for classification and analysis of        (P); Sichuan Science and Technology Program 2023YFS0098 (L) and
+      multivariate observations. In Proceedings of the fifth Berkeley sym-     2023YFG0278 (L); Clinical Research Incubation Project, West China
+      posium on mathematical statistics and probability, vol. 1, 281­297       Hospital, Sichuan University under Grant 22HXFH019 (L).
+      (Oakland, CA, USA, 1967).
+                                                                               Author contributions
+53. Hie, B., Cho, H., DeMeo, B., Bryson, B. & Berger, B. Geometric
+      sketching compactly summarizes the single-cell transcriptomic            X.P. and Yunfan L. conceived the study and designed the MetaQ algorithm.
+      landscape. Cell Syst. 8, 483­493 (2019).                                 Yunfan L. implemented the MetaQ algorithm. Yunfan L., Yijie L., D.P., and
+                                                                               P.H. evaluated the baseline methods. Hancong L., D.Z., L.C., and Han L.
+54. Lopez, R., Regier, J., Cole, M. B., Jordan, M. I. & Yosef, N. Deep         preprocessed the data and analyzed the results. X.L. and J.X. participated
+      generative modeling for single-cell transcriptomics. Nat. Methods        in the paper revision. All authors participated in writing the manuscript.
+      15, 1053­1058 (2018).
+                                                                               Competing interests
+55. Gayoso, A. et al. Joint probabilistic modeling of single-cell multi-
+      omic data with totalvi. Nat. Methods 18, 272­282 (2021).                 The authors declare no competing interests.
+
+56. Lin, X., Tian, T., Wei, Z. & Hakonarson, H. Clustering of single-cell      Additional information
+      multi-omics data with a multimodal deep learning method. Nat.
+      Commun. 13, 7705 (2022).                                                 Supplementary information The online version contains
+                                                                               supplementary material available at
+57. Li, G. et al. A deep generative model for multi-view profiling of          https://doi.org/10.1038/s41467-025-56424-6.
+      single-cell rna-seq and atac-seq data. Genome Biol. 23, 20 (2022).
+                                                                               Correspondence and requests for materials should be addressed to
+58. Martens, L. D., Fischer, D. S., Yépez, V. A., Theis, F. J. & Gagneur, J.   Xi Peng.
+      Modeling fragment counts improves single-cell atac-seq analysis.
+      Nat. Methods 21, 28­31 (2024).                                           Peer review information Nature Communications thanks Shengquan
+                                                                               Chen, and the other, anonymous, reviewer(s) for their contribution to the
+59. Paszke, A. et al. Automatic differentiation in pytorch. In NIPS 2017       peer review of this work. A peer review file is available.
+      Workshop on Autodiff (NIPS, 2017).
+                                                                               Reprints and permissions information is available at
+60. Paszke, A. et al. Pytorch: An imperative style, high-performance deep      http://www.nature.com/reprints
+      learning library. Adv. neural Inf. Process. Syst. 32, 8026­8037 (2019).
+                                                                               Publisher's note Springer Nature remains neutral with regard to jur-
+61. Kingma, D. P. & Ba, J. Adam: a method for stochastic optimization. In      isdictional claims in published maps and institutional affiliations.
+      International Conference on Learning Representations (ICLR, 2015).
+
+62. Ruder, S. An overview of gradient descent optimization algorithms.
+      Preprint at https://arxiv.org/abs/1609.04747 (2016).
+
+63. Luo, H. et al. Characterizing dedifferentiation of thyroid cancer by
+      integrated analysis. Sci. Adv. 7, eabf3657 (2021).
+
+64. Brodersen, K. H., Ong, C. S., Stephan, K. E. & Buhmann, J. M. The
+      balanced accuracy and its posterior distribution. In 2010 20th inter-
+      national conference on pattern recognition, 3121­3124 (IEEE, 2010).
+
+Nature Communications | (2025)16:1205                                          17
+Article                                                                       https://doi.org/10.1038/s41467-025-56424-6
+
+Open Access This article is licensed under a Creative Commons
+Attribution-NonCommercial-NoDerivatives 4.0 International License,
+which permits any non-commercial use, sharing, distribution and
+reproduction in any medium or format, as long as you give appropriate
+credit to the original author(s) and the source, provide a link to the
+Creative Commons licence, and indicate if you modified the licensed
+material. You do not have permission under this licence to share adapted
+material derived from this article or parts of it. The images or other third
+party material in this article are included in the article's Creative
+Commons licence, unless indicated otherwise in a credit line to the
+material. If material is not included in the article's Creative Commons
+licence and your intended use is not permitted by statutory regulation or
+exceeds the permitted use, you will need to obtain permission directly
+from the copyright holder. To view a copy of this licence, visit http://
+creativecommons.org/licenses/by-nc-nd/4.0/.
+
+© The Author(s) 2025
+
+Nature Communications | (2025)16:1205                                         18
+

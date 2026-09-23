@@ -1,0 +1,1309 @@
+                 Review Article
+
+                 Building and analyzing metacells in single-cell
+                 genomics data
+
+                 Mariia Bilous , 1,2,3,4,5 Léonard Hérault , 1,2,3,4,5 Aurélie AG Gabriel , 1,2,3,4,5 Matei Teleman1,2,3,4 &
+                 David Gfeller  1,2,3,4
+
+1234567890();,:  Abstract                                                                    Oelen et al, 2022). Along with the development of integration
+                                                                                             algorithms, even larger atlases have been built, reaching tens of
+                 The advent of high-throughput single-cell genomics technologies has         millions of cells (Qiu et al, 2023). Historically, most of the single-
+                 fundamentally transformed biological sciences. Currently, millions of       cell genomics studies have focused on transcriptomic profiling
+                 cells from complex biological tissues can be phenotypically profiled        (scRNA-seq). More recently, to expand our understanding of
+                 across multiple modalities. The scaling of computational methods to         cellular complexity, other modalities have been integrated in single-
+                 analyze and visualize such data is a constant challenge, and tools need     cell genomics technologies, including epigenomics (e.g., single-cell
+                 to be regularly updated, if not redesigned, to cope with ever-growing       assay for transposase-accessible chromatin using sequencing (scA-
+                 numbers of cells. Over the last few years, metacells have been intro-       TAC-seq)) (Baek and Lee, 2020), surface proteins (e.g., cellular
+                 duced to reduce the size and complexity of single-cell genomics data        indexing of transcriptomes and epitopes by sequencing (CITE-seq))
+                 while preserving biologically relevant information and improving inter-     (Stoeckius et al, 2017), and adaptive immune receptor (AIR) in B
+                 pretability. Here, we review recent studies that capitalize on the concept  cells (i.e., BCR sequences) or T cells (i.e., TCR sequences) (Singh
+                 of metacells--and the many variants in nomenclature that have been          et al, 2019; Tu et al, 2019). Moreover, simultaneous profiling of
+                 used. We further outline how and when metacells should (or should           multiple modalities at single-cell resolution can be performed
+                 not) be used to analyze single-cell genomics data and what should be        nowadays to discover novel cell types (Kotliarov et al, 2020), better
+                 considered when analyzing such data at the metacell level. To facilitate    characterize known cell types (Ackermann et al, 2016), identify
+                 the exploration of metacells, we provide a comprehensive tutorial on the    gene regulatory interactions (Bravo González-Blas et al, 2023) and
+                 construction and analysis of metacells from single-cell RNA-seq data        biomarkers (Wu et al, 2020; Ackermann et al, 2016), and recover
+                 (https://github.com/GfellerLab/MetacellAnalysisTutorial) as well as a       comprehensive immune repertoires (Park et al, 2020).
+                 fully integrated pipeline to rapidly build, visualize and evaluate meta-
+                 cells with different methods (https://github.com/GfellerLab/                   The majority of single-cell genomics datasets are generated
+                 MetacellAnalysisToolkit).                                                   using droplet-based sequencing technologies (Svensson et al, 2020;
+                                                                                             Zheng et al, 2017; Macosko et al, 2015; Klein et al, 2015; Zilionis
+                 Keywords Coarse-graining; Metacells; Single-cell Data Analysis; Single-     et al, 2017). Advances in combinatorial barcoding further increased
+                 cell Genomics; Tutorial                                                     the throughput of single-cell sequencing by uniquely labeling a
+                 Subject Categories Chromatin, Transcription & Genomics; Computational       larger number of cells and sequencing them collectively in pools
+                 Biology; Methods & Resources                                                (Cao et al, 2017; Rosenberg et al, 2018; Datlinger et al, 2021). These
+                 https://doi.org/10.1038/s44320-024-00045-6                                  techniques have very high throughput, allowing researchers to
+                 Received 4 February 2024; Revised 3 May 2024;                               profile millions of cells, but relatively low sensitivity due to low-
+                 Accepted 8 May 2024                                                         depth sequencing and limited efficiency of the retro-transcription/
+                 Published online: 29 May 2024                                               amplification procedure. As a result, many transcripts are missed,
+                                                                                             something referred to as dropout or non-biological zeros in the
+                 Introduction                                                                single-cell profile matrices.
+
+                 As single-cell sequencing becomes more affordable and widely                   Simultaneous profiling of millions of cells across multiple
+                 used, both the number and the size of single-cell genomics datasets         modalities provides unprecedented opportunities to map the full
+                 are growing exponentially (Svensson et al, 2018, 2020) with no              heterogeneity of whole organs in health and disease but generates
+                 signs of slowing down. Current single-cell sequencing studies from          computational challenges to analyze and visualize such large-scale
+                 tissues, organs and whole organisms can profile millions of cells           data. Several approaches have been designed to cope with the size
+                 (Zhang et al, 2023; McFaline-Figueroa et al, 2024; Langlieb et al,          and inherent noise of single-cell data. Both hardware and software
+                 2023; Saunders et al, 2022; Reichart et al, 2022; Replogle et al, 2022;     developments enable users to analyze very large datasets, although
+                                                                                             this often comes with a price in terms of speed and practicality (e.g.,
+                                                                                             the need to use dedicated machines with very high memory).
+                                                                                             Different downsampling and sketching scenarios have been
+
+                 1Department of Oncology, Ludwig Institute for Cancer Research Lausanne, University of Lausanne, 1011 Lausanne, Switzerland. 2Agora Cancer Research Centre, 1011 Lausanne,
+
+                 Switzerland. 3Swiss Cancer Center Leman (SCCL), Lausanne, Switzerland. 4Swiss Institute of Bioinformatics (SIB), 1015 Lausanne, Switzerland. 5These authors contributed
+                 equally: Mariia Bilous, Léonard Hérault, Aurélie AG Gabriel. E-mail: david.gfeller@unil.ch
+
+                 744 Molecular Systems Biology Volume 20 | Issue 7 | July 2024 | 744 ­ 766   © The Author(s)
+Mariia Bilous et al                                                                                                 Molecular Systems Biology
+
+Glossary         Adjusted rand index                                     lncRNA-seq Long non-coding RNA sequencing
+                 Assay for transposase-accessible chromatin
+ARI              Adjusted mutual information                             LSI   Latent semantic indexing
+ATAC-seq         Adaptive immune receptor
+AMI              Area under the receiver operating characteristic curve  PBMC  Peripheral Blood Mononuclear Cell
+AIR              B-cell receptor
+AUC              Cellular indexing of transcriptomes and epitopes by     PCA   Principal component analysis
+BCR              sequencing
+CITE-seq         Cord Blood Mononuclear Cell                             RNA   Ribonucleic acid
+                 Cytometry by time of flight
+CBMC             Fluorescence-activated cell sorting                     scATAC-seq Single-cell assay for transposase-accessible chromatin
+CyTOF            Gene regulatory network
+FACS             Inner normalized variance                                     using sequencing
+GRN              k-Nearest neighbor
+INV                                                                      scRNA-seq Single-cell RNA sequencing
+kNN
+                                                                         TCR   T-cell receptor
+
+                                                                         TF    Transcription factor
+
+                                                                         TPR   True positive rate
+
+                                                                         tSNE  t-distributed stochastic neighbor embedding
+
+                                                                         UMAP  Uniform manifold approximation and projection
+
+                                                                         UMI   Unique molecular identifier
+
+designed to reduce the size of the data (Hie et al, 2019; Ren et al,     main aspects of the usage of metacells: (i) enhancing signal in
+2019; DeMeo and Berger, 2020; Song et al, 2022; Hao et al, 2024).        sparse scRNA-seq data and (ii) lowering computational burden due
+In parallel, multiple approaches have been introduced to address         to the large size of single-cell genomics data. Since then, several
+the dropout issue, including imputation (Wagner et al, 2017; Hou         other studies have built upon the metacell concept (Ben-Kiki et al,
+et al, 2020; Li and Li, 2018; van Dijk et al, 2018; Huang et al, 2018;   2022; Bilous et al, 2022; Persad et al, 2023), extending its
+Wang et al, 2019; Amodio et al, 2019) or customizing algorithms to       application to other single-cell modalities, including scATAC-seq
+zero-inflated data (Kharchenko et al, 2014; Pierson and Yau, 2015;       (Persad et al, 2023), flow cytometry (Putri et al, 2024), AIR
+Finak et al, 2015; Van den Berge et al, 2018). More recently,            (Kuchroo et al, 2022), as well as multimodal single-cell data (Mao
+metacells--defined as disjoint groups of highly similar cells which      et al, 2022).
+are aggregated together--have been proposed as a way to
+simultaneously reduce the size and improve the signal-to-noise           Building metacells
+ratio in single-cell genomics data (Baran et al, 2019; Ben-Kiki et al,
+2022; Bilous et al, 2022; Persad et al, 2023).                           Different tools have been developed and are currently available to
+                                                                         build metacells (see Box 1). The first version of the MetaCell
+   Here, we review studies which have introduced the metacell            algorithm by Baran and colleagues used multiple resampling of the
+concept, have developed metacell construction tools and quality          k-nearest neighbor (kNN) graph to identify robust groups of highly
+metrics, and have used metacells for single-cell sequencing data         similar cells (Baran et al, 2019). This approach was poorly scalable
+analysis. We discuss the advantages and disadvantages of using           for large datasets and a new version of the original MetaCell tool
+metacells and provide recommendations for building metacells and         (referred to as MC2 (Ben-Kiki et al, 2022)) was introduced based
+analyzing single-cell data at the metacell level. These recommenda-      on a divide-and-conquer approach. In parallel, an alternative
+tions are accompanied by a comprehensive tutorial (https://              method for metacell construction and analysis, named SuperCell
+github.com/GfellerLab/MetacellAnalysisTutorial) as well as an            (Bilous et al, 2022), was developed based on a graph-based
+integrated pipeline allowing users to build and analyze metacells        clustering approach. Later on, a metacell tool specifically developed
+with different tools (https://github.com/GfellerLab/                     for both scRNA-seq and scATAC-seq data named SEACells
+MetacellAnalysisToolkit).                                                (Persad et al, 2023), was proposed based on the concept of
+                                                                         archetypes (Cutler and Breiman, 1994). These methods follow the
+The metacell concept                                                     original idea of metacells and use the same nomenclature.
+                                                                         Technical details on how groups of highly similar cells are
+Metacells are defined as a partition of single-cell data into disjoint   identified and aggregated in these different metacell construction
+homogeneous groups of highly similar cells followed by aggregation       tools are available in Box 1.
+of their profiles (Fig. 1). This concept relies on the assumption that
+most of the variability within metacells corresponds to technical           Other tools use metacells as part of a broader pipeline or method
+noise and not to biologically relevant heterogeneity. As such,           designed for different purposes (see Dataset EV1). Some of them,
+metacells aim at removing some of the noise while preserving the         including iCells (Iacono et al, 2018), msPHATE (Kuchroo et al,
+biological information of the single-cell data and improving             2022), scCorr (Xu et al, 2022), scWGCNA (Feregrino and Tschopp,
+interpretability. The metacell concept was introduced in 2019 by         2022), popInfer (Rommelfanger et al, 2023), and CELLSTATES
+Baran and colleagues (Baran et al, 2019) with the motivation to          (Grobecker and Van Nimwegen, 2023), developed a dedicated
+obtain robust profiles in sparse scRNA-seq data. Roughly at the          method for metacell identification. Others use existing tools or
+same time, Iacono and colleagues proposed to aggregate similar           compute metacells by excessive clustering of the data (Zheng et al,
+cells into metacells (named `iCells' in the original study) as a way to  2021b; Cuomo et al, 2022; DeTomaso et al, 2019; Zhou et al, 2021;
+overcome the computational burden associated with the analysis of        Li and Korkut, 2023; Zhang and Zhang, 2021; Putri et al, 2024). Of
+large scRNA-seq data within the bigSCale computational frame-            special interest is the msPHATE (Kuchroo et al, 2022) approach for
+work (Iacono et al, 2018). These two pioneering studies reflect two      data representation at multiple resolutions, which can be
+                                                                         considered as a tool for metacell construction, whereby highly
+
+© The Author(s)                                                                Molecular Systems Biology Volume 20 | Issue 7 | July 2024 | 744 ­ 766 745
+Molecular Systems Biology                                                                                                               Mariia Bilous et al
+
+                    Single-cell profiles                                                                            Metacell profiles
+
+          Cells                                                                                                          Metacells
+
+Features                                                                                                            Features
+   (e.g., genes)                                                                                                       (e.g., genes)
+
+                                    1 Define space and metrics to                                 Aggregate profiles                  3
+
+                                              identify highly similar cells                       within metacells
+
+                  Component 2                                                                     Component 2
+
+                                                                             Group similar cells
+                                                                                into metacells
+
+                                                                                     2
+
+                  ComCopmNponent 3  Component 1                                                   ComCopmNponent 3                       Component 1
+
+Figure 1. Main conceptual steps in the metacell construction workflow.
+
+Starting from a single-cell profile matrix, space and metrics are first defined for identifying cells displaying high similarity in their profiles (e.g., high transcriptomic
+similarity in scRNA-seq data). Second, highly similar cells are grouped into metacells. Third, single-cell profiles within each metacell are aggregated to create a metacell
+profile matrix. Dots represent single cells colored by cell type.
+
+similar cells are aggregated into metacells (named `groups' in the           MetaCell, walktrap for SuperCell), other methods use the concept
+original study) using the approach of diffusion condensation                 of archetypes (SEACells), model-based clustering (CELLSTATES)
+(Brugnone et al, 2019). This study was among the first to                    or diffusion condensation (msPHATE). Most tools use the entire
+demonstrate that the concept of metacells, initially proposed for            dataset given in input to build metacells, except for MetaCell which
+scRNA-seq data, can be applied to scATAC-seq, flow cytometry,                includes a step to identify outliers.
+CyTOF, AIR and even clinical data. Many of these studies utilize
+alternative nomenclature for metacells, including iCells (Iacono                Once metacells are identified, their profiles are computed by
+et al, 2018), supercells (Putri et al, 2024), clusters (Xu et al, 2022),     aggregating the profiles of the single cells belonging to each
+pseudocells (Cuomo et al, 2022; Rommelfanger et al, 2023;                    metacell. The aggregation is usually done by either summing raw
+Feregrino and Tschopp, 2022; Li and Korkut, 2023), mini-clusters             counts (Baran et al, 2019; Iacono et al, 2018; Persad et al, 2023) or
+(Zheng et al, 2021b), micro-clusters (DeTomaso et al, 2019), micro-          by averaging normalized counts (Kuchroo et al, 2022; Bilous et al,
+states (Zhou et al, 2021), groups (Kuchroo et al, 2022) or cellstates        2022; Xu et al, 2022). The first approach is recommended if
+(Grobecker and Van Nimwegen, 2023). To avoid ambiguities, we                 metacells are to be used for comprehensive downstream analyses,
+encourage future studies to use the well-established term `metacell'         while the second approach is more suitable when metacells are used
+originally coined in (Baran et al, 2019).                                    for some specific analyses (see `Workflow recommendations'
+                                                                             section).
+   Most of the existing methods for metacell construction rely on
+single-cell similarity/affinity graph partitioning (Baran et al, 2019;       Graining level
+Ben-Kiki et al, 2022; Bilous et al, 2022; Persad et al, 2023; Kuchroo
+et al, 2022) and further aggregation of nodes grouped together. This         A key element in metacell construction is the choice of the number
+makes metacell construction related to the concept of graph coarse-          of metacells. The ratio between the number of single cells and the
+graining (Gfeller and De Los Rios 2007; Brugnone et al, 2019).               number of metacells determines the level of size reduction between
+Some methods adapt standard clustering algorithms (k-means for               the single-cell and the metacell data. This ratio is referred to as the
+
+746 Molecular Systems Biology Volume 20 | Issue 7 | July 2024 | 744 ­ 766                                                                © The Author(s)
+Mariia Bilous et al                                                                    Molecular Systems Biology
+
+Box 1. Overview of several tools providing standalone metacell construction pipelines
+
+MetaCell (implemented in R). A single-cell kNN graph is built from the                SuperCell (implemented in R). A single-cell kNN graph is built from
+correlation of log-normalized counts based on a set of highly variable           the Euclidean distances between cells in the principal component space.
+genes. Edges of the graph are further re-weighted followed by graph re-          Metacells are computed by applying the walktrap community detection
+balancing (in terms of in- and outcoming edges). The balanced graph is           algorithm (Pons and Latapy, 2006). Given its hierarchical structure, this
+resampled multiple times and clustered with a graph adaptation of                approach allows users to probe at once all possible numbers of metacells
+k-means. Then, it is re-weighted based on resampling co-occurrence               (i.e., graining levels). By default, the normalized counts are averaged within
+results. The final metacell partition along with a list of outliers is obtained  metacells. Alternatively, raw counts can be summed. The downstream
+via a graph adaptation of k-means. Expression profiles of metacells are          analysis can be performed using the SuperCell framework, which accounts
+computed as a mean of counts within metacells normalized by a median             for metacell size (i.e., number of single cells in a metacell), or using con-
+averaged gene count across metacells followed by logarithmic scaling. The        ventional Seurat (Hao et al, 2021, 2024) or SCE (Amezquita et al, 2020)
+downstream analysis is performed with a MetaCell framework and the               pipelines (not accounting for metacell size). To scale the method for larger
+metacell object can be converted to a single-cell-experiment (SCE)               datasets, an approximate solution has been proposed where metacells are
+(Amezquita et al, 2020) object.                                                  identified on a subset of cells and the rest of the cells are mapped to the
+                                                                                 closest metacells.
+    MetaCell2 (MC2, implemented in Python). To accelerate the original
+MetaCell algorithm, MC2 applies a two-phase divide-and-conquer                        An extension of the SuperCell tool, referred to as SuperCellCyto, was
+approach. Firstly, cells are randomly divided into piles of ~10k cells and       recently developed for cytometry data (Putri et al, 2024).
+initial metacells are built applying a MetaCell (Baran et al, 2019)-like
+approach per pile. Then, transcriptionally similar metacells are grouped              SEACells (implemented in Python). A single-cell kNN graph is built
+into metagroup piles for the identification of final metacells and outliers.     from the Euclidean distance in the principal component (or singular value
+The profiles of metacells are computed by summing up counts within               decomposition for scATAC-seq) space. Distances in the graph are trans-
+metacells followed by normalization by the total number of counts in a           formed to affinity by applying an adaptive Gaussian kernel. The affinity
+metacell. The downstream analysis is performed with Scanpy (Wolf et al,          matrix is then decomposed into archetype and membership matrices. The
+2018) or Seurat (Hao et al, 2021, 2024) frameworks.                              archetype matrix represents archetypes as a linear combination of cells and
+                                                                                 the membership matrix represents cells as a linear combination of arche-
+    To recover very rare cell types, MC2 has two approaches. In the first        types. To fit decomposition, the archetype matrix is initialized with way-
+approach, outlier cells are allocated into a separate pile and metacells are     points using a maximum minimum sampling approach (Setty et al, 2019),
+re-computed under the assumption that rare cells could be scattered              ensuring more representative initialization. Single cells are assigned to a
+among different piles and could not form their own metacell. In the second       given metacell based on the maximum membership value of the corre-
+approach, very rare gene modules are identified from the entire dataset.         sponding archetype. Raw counts are summed up. The downstream analysis
+Then, a separate pile of cells with high expression of rare gene modules is      is performed with a standard Scanpy framework (Wolf et al, 2018).
+generated and analyzed for metacell partition.
+                                                                                      SEACells was specifically developed for both scRNA-seq and scATAC-
+    An interactive tool for metacell downstream analyses with MC2,               seq data.
+referred to as MCView, has been recently developed (Lifshitz, 2024)
+(https://github.com/tanaylab/MCView).
+
+graining level (Bilous et al, 2022). A graining level of 1 corresponds           (Fig. 2B, Dataset EV2). Graining levels ranged from very small
+to a single-cell resolution and a graining level of 50 corresponds to            (~5) to very large (>1000), with a median of around 80. The
+a 50-fold reduction in the number of metacells compared to single                MetaCell algorithm resulted in larger graining levels (median at 90)
+cells in the initial dataset (Fig. 2A, see Appendix for the description          compared to other methods (median at 55). There was no
+of the datasets used throughout this review). Given that metacells               correlation between dataset size and the graining level used for
+are defined as a disjoint partition of data, the graining level                  building metacells (Fig. 2C), suggesting that an appropriate
+corresponds to the average size of metacells (i.e., the average                  graining level also depends on dataset complexity.
+number of single cells in metacells).
+                                                                                    When selecting a graining level for a particular dataset, we
+   Metacell construction tools have used different approaches to                 suggest considering both the complexity and the size of the data.
+address the choice of graining levels. In MetaCell and the original              Complexity relates to the diversity and heterogeneity of cell types
+version of MC2 (v 0.8.0), the user specifies a minimum or targeted               present. For instance, a dataset consisting of a single cell type (e.g.,
+metacell size. Accounting for this constraint, a resulting metacell              obtained after sorting cells with specific markers) has lower
+partition is obtained by iteratively optimizing internal metrics that            complexity compared to one encompassing an entire organ or
+evaluate both the stability of the resulting partition in terms of               system (see examples in Fig. 2D). Figure 2E illustrates how cell
+balanced connectivity and the homogeneity of metacell sizes. In                  types can be accurately recovered at relatively large graining levels
+SuperCell, SEACells and the latest version of MC2 (v 0.9.4), the                 for datasets of low complexity, whereas the same graining level
+user specifies the graining level, or equivalently the number of                 applied to more complex datasets results in missing rare cell
+metacells. As such, all these metacell construction methods require              populations as they are merged with other populations (see
+users to specify either the actual graining level or parameters that             Appendix). Figures 2F,G illustrate the impact of the size of the
+will implicitly determine the graining level.                                    data on the choice of the graining level. As expected, higher
+                                                                                 graining levels can be applied to larger datasets (compared to
+   There is currently no consensus on the definition of an optimal               smaller datasets of similar complexity) without affecting cell-type
+graining level and its estimation. Some approaches suggest that                  recovery at the metacell level (Fig. 2G). Overall, these observations
+there is a range of acceptable graining levels that effectively                  suggest that the choice of graining levels depends on both the
+represent the initial data by preserving the overall and cell-state-             complexity and size of the data. For large and low-complexity data,
+specific heterogeneity (Bilous et al, 2022; Persad et al, 2023). To get          a relatively high graining level may be used. For datasets with
+an overview of the range of graining levels that have been used, we              higher complexity or lower size, it is recommended to use lower
+performed a meta-analysis of several studies using metacells
+
+© The Author(s)                                                                  Molecular Systems Biology Volume 20 | Issue 7 | July 2024 | 744 ­ 766 747
+Molecular Systems Biology                                                  Mariia Bilous et al
+
+748 Molecular Systems Biology Volume 20 | Issue 7 | July 2024 | 744 ­ 766  © The Author(s)
+Mariia Bilous et al                                                         Molecular Systems Biology
+
+Figure 2. Graining level of metacell partition.
+
+(A) tSNE representation of a peripheral blood mononuclear cells (PBMCs) scRNA-seq dataset (see Appendix) at different graining levels. Each dot represents a single cell,
+a metacell or a cluster, depending on the graining level. Colors represent cell types. (B) Distribution of graining levels in different studies using metacells (see
+Dataset EV2). Colors represent different metacell construction tools. (C) Graining levels used for datasets of different sizes. Colors represent different metacell
+construction tools. (D) Example of single-cell RNA-seq datasets with different levels of complexity (T cells, cord blood mononuclear cells (CBMCs) and bone marrow
+datasets). (E) Number of cell types recovered at different graining levels in the three examples of panel (D). (F) Example of single-cell RNA-seq datasets with different
+sizes. (G) Number of cell types recovered at different graining levels in the three examples of panel (F).
+
+Table 1. Analytical formulas of metacells quality metrics.
+
+purityðmÞ  ¼  maxj  jM\Cj j                  M--set of cells belonging to metacell m, Cj--set of cells belonging to cell type j.
+                      jMj
+                                             x!km --vector of k-th diffusion component embedding of cells belonging to metacell m, N--number of dimensions.
+compactnessðmÞ   ¼   1  PN       varðx!mk Þ
+                     N                       m,l--metacells, distance computed between centroids of metacells in diffusion space.
+                            k¼1              x!mg --vector of genomic feature (e.g., gene expression) g in single cells belonging to metacell m. P95--corresponds to
+                                             95th percentile over all genes.
+separationðmÞ ¼ minl;lmdistðm; lÞ
+INVðmÞ ¼ P950@mveaarnx!xgm!mg A1
+
+graining levels to preserve the underlying heterogeneity and ensure         especially when employing kernel normalization techniques
+that distinct cell populations remain distinguishable.                      (Persad et al, 2023).
+
+   Practically, it is recommended to choose graining levels such            Metacell quality metrics
+that the resulting number of metacells is at least ten times larger
+than the expected number of cell subtypes to ensure statistical             An ideal metacell should contain highly similar cells so that the
+power in downstream analyses at the metacell level and lower the            heterogeneity within a metacell is only originating from technical
+risk of having cells of different cell subtypes aggregated in the same      aspects (e.g., transcript sampling error) and no biologically relevant
+metacell. In most cases, a graining level somewhere between 10 and          information is lost between the single-cell and the metacell level.
+50 satisfies these requirements, and our recent work indicates that         Several approaches have been developed for quantifying the quality
+many downstream analyses give consistent results across this range          of a metacell partition (see Table 1 for analytical formulas).
+of graining levels (Bilous et al, 2022).
+                                                                            Purity
+   A graining level can be considered as reasonable if it preserves         The metacell purity represents the fraction of cells from the most
+all the cell states present in the single-cell data and the biological      abundant cell type in a metacell (Fig. 3A). In the context of
+heterogeneity within them while reducing technical noise. We also           metacells, this measure was introduced in Bilous et al (2022). Purity
+note that an `optimal' graining level--if it exists--is difficult to infer  is a useful measure to check that metacells do not mix cells from
+with scores developed for the estimation of an optimal number of            different cell types. Purity requires prior knowledge of cell-type
+clusters (e.g., modularity (Newman and Girvan, 2004), silhouette            annotation, which is not necessarily available for newly generated
+coefficient (Rousseeuw, 1987) or other approaches developed                 datasets. To evaluate metacell purity in a non-annotated dataset,
+specifically for scRNA-seq data (Liu et al, 2021c; Chen et al,              cell-type annotation (Clarke et al, 2021; Pasquini et al, 2021)
+2019b; Kiselev et al, 2017; Grabski et al, 2023)) due to the differing      leveraged from well-annotated reference atlases (Regev et al, 2017;
+objectives of clustering and metacells.                                     Han et al, 2018; The Tabula Muris Consortium et al, 2018; Domcke
+                                                                            et al, 2020; Cao et al, 2020; Han et al, 2023) can be applied to the
+Number of nearest neighbors in kNN graphs                                   single-cell data.
+
+As most of the existing methods for metacell construction use               Compactness
+k-nearest neighbor approach to identify metacells, another                  The metacell compactness corresponds to its homogeneity and is
+important hyperparameter to discuss is the number of nearest                defined as the average diffusion component variance of single cells
+neighbors, k. Some methods, like MC2, determine k as a function of          within a metacell (Fig. 3B). In the context of metacells, this measure
+a target metacell size (i.e., graining level). SuperCell and SEACells       was introduced by Persad et al (2023). In contrast to purity,
+offer the flexibility to adjust this value, with default settings           compactness does not require prior knowledge of cell-type
+typically being relatively small (5 and 15, respectively). In our           annotation, making it valuable for assessing metacell quality within
+previous work (Bilous et al, 2022), we investigated this hyperpara-         a given construction tool. This is particularly useful for marking
+meter and found that increasing k results in a more uniform                 potentially low-quality metacells or metacells that need further
+distribution of metacell sizes (see also Appendix Fig. S1). However,        inspection before any downstream analyses. However, compactness
+excessively large values of k (e.g., ~100) may lead to the merging of       is latent-space dependent, resulting in different values according to
+rare cell types with others (Appendix Fig. S1). Overall, within a           the space used to compute it (Appendix Fig. S2A). For this reason,
+reasonable range of values (e.g., 5­30), the choice of the number of
+nearest neighbors has only a moderate impact on metacell results,
+
+© The Author(s)                                                             Molecular Systems Biology Volume 20 | Issue 7 | July 2024 | 744 ­ 766 749
+Molecular Systems Biology                                                  Mariia Bilous et al
+
+Figure 3. Metacell quality metrics.
+
+(A) Purity is defined as the proportion of cells from the most abundant cell type in a metacell. Higher purity corresponds to higher proportion of cells of the same cell type
+within a metacell. Purity can also be defined based on other annotations/categories than cell types. (B) Compactness is defined as the average variance of latent space
+component within a metacell. Better compactness corresponds to lower variance in the latent space components within cells grouped into a metacell. (C) Separation is
+defined as the distance to the closest metacell. Better separation corresponds to more distant metacells in the latent space. (D) Inner normalized variance is defined as the
+mean normalized gene variance within a metacell. Better inner normalized variance corresponds to lower variance of the single-cell profiles within a metacell. (E) Metacell
+size distribution is defined as the distribution of the number of cells in each metacell. Better metacell size distribution corresponds to more homogeneous metacell sizes.
+(F) Representativeness corresponds to the ability of metacells to faithfully represent the global structure of the single-cell dataset. Better representation corresponds to
+more uniform coverage of the dataset (black stars represent the centroid of each metacell). (G) Conservation of the downstream analyses at the metacell level is defined
+as the ability of metacells to preserve the results of the single-cell analysis.
+
+compactness values are not straightforward to interpret when               (Appendix Fig. S2C) and vice versa. Metacells from dense regions
+comparing tools that use different latent spaces to identify               will have better compactness but worse separation, while metacells
+metacells. For instance, MetaCell and MC2 use normalized gene              from sparse regions will have better separation but worse
+space, while SEACells and SuperCell use the principal component            compactness.
+analysis (PCA) space. Therefore, by construction, the latter two will
+tend to perform better in the metrics computed in the PCA (or a            Inner normalized variance (INV)
+derivative from PCA, such as diffusion components (Haghverdi               INV corresponds to the mean normalized variance of features (e.g.,
+et al, 2015)).                                                             genes) within a metacell (Fig. 3D). In the context of metacells, this
+                                                                           quality measure was introduced in Ben-Kiki et al (2022). Following
+Separation                                                                 the idea that the profile of an ideal metacell originates from the
+The metacell separation represents the distance from each metacell         same multinomial distribution and therefore should have intrinsic
+to the closest other metacell. It is defined as the Euclidean distance     gene variance proportional to its mean. As such, metacells with
+between centroids of the single-cell coordinates forming the               minimal INV should contain cells that differ mainly due to
+metacells (Fig. 3C). In the context of metacells, this measure was         technical reasons. It is the only metric that does not require prior
+introduced in (Persad et al, 2023). Similar to compactness, it does        knowledge and is latent-space independent.
+not require prior knowledge on cell-type annotation but is also
+latent-space dependent (Appendix Fig. S2B). For those reasons, it          Metacell size distribution
+can be used for metacell quality assessment within a given metacell        The size of a metacell is defined as the number of single cells it
+construction tool and identification of potentially low-quality            contains (or, in rare cases, the total number of UMIs (Ben-Kiki
+metacells, but is less recommended for comparing metacell                  et al, 2022)). Due to the naturally non-uniform distribution of cell-
+construction tools that use different latent space for metacell            type density, larger metacells naturally emerge in denser regions,
+identification.                                                            while smaller ones form in sparser regions (e.g., rare cell types).
+                                                                           Although metacells are expected to vary in size, extremely large
+   There is also a clear relationship between separation and               metacells are not recommended for the downstream analyses at the
+compactness: better compactness results in worse separation
+
+750 Molecular Systems Biology Volume 20 | Issue 7 | July 2024 | 744 ­ 766  © The Author(s)
+Mariia Bilous et al                                                      Molecular Systems Biology
+
+metacell level. Firstly, such metacell partitions may inadequately       construction or analysis methods, to make sure that their results
+represent the original single-cell dataset, especially in tools          preserve the biologically relevant information in the single-
+where metacell size is disregarded in visualization and analysis.        cell data.
+Secondly, on average, more genes tend to be detected in larger
+metacells, potentially confounding downstream analyses. To                  To summarize, high-quality metacells should contain cells of the
+ensure balanced downstream analyses, it is better to have a more         same cell type, be compact and well separated from other metacells,
+homogeneous metacell size distribution and avoid significant             as well as have low normalized variance. Globally, metacells should
+outliers (Fig. 3E).                                                      faithfully represent the entire manifold of the single-cell data, and
+                                                                         have relatively homogeneous size distribution. Several of these
+Representativeness                                                       quantitative measures for the quality of metacells can be computed
+A good metacell partition should reproduce the overall structure         with the metacell quality module provided as an R package in our
+(i.e., manifold) of the single-cell data by uniformly representing its   metacell toolkit repository (https://github.com/GfellerLab/
+latent space (Fig. 3F). This idea has been used to visually compare      MetacellAnalysisToolkit). Beyond these quantitative quality mea-
+different metacell construction approaches (Persad et al, 2023).         sures, it is essential that metacells preserve the information present
+When building metacells, it can be useful to verify their presence       at the single-cell level and do not create artifacts (see section about
+across all regions of the single-cell data manifold, including sparse    "Limitations of metacells") (Bilous et al, 2022).
+areas. To achieve uniform space coverage, SEACells employs a
+maximum-minimum approach to determine initial centroids for              Applications of metacells
+the future metacells (Persad et al, 2023; Setty et al, 2019).
+                                                                         Metacells have been extensively applied to downstream analyses of
+   Akin to a trade-off between compactness and separation, a more        single-cell genomics data. Such analyses have been performed for
+uniform representativeness of the manifold leads to increased            various types of genomics data from diverse biological contexts,
+variation in metacell sizes to compensate for inherent over- and         including hematopoiesis (Giladi et al, 2018), tumorogenesis
+under-representation of different cell types. Abundant cell states       (Burdziak et al, 2023), cancer immunology (Zheng et al, 2021b;
+can accommodate larger metacells to account for their density,           Li et al, 2019; Cohen et al, 2022), host-viral interaction (Bost et al,
+while rare cell types are typically represented by smaller metacells.    2020) organ development (Cohen et al, 2018) and whole-organism
+Therefore, a desirable metacell partition requires to balance those      profiling (Sebé-Pedrós et al, 2018). Below we describe some of the
+two characteristics.                                                     standard analyses that can be performed with metacells.
+
+Conservation of the downstream analyses                                  Data normalization
+The metacell concept has been introduced as an alternative
+representation of single-cell data, offering utility in downstream       The sparsity of single-cell data poses challenges to every step of the
+analyses (Fig. 3G). Preserving the results obtained at the single-cell   downstream analyses. This also applies to the data pre-processing,
+level and avoiding artifacts is key for the effective use of metacells.  where normalization is used to counter cell-specific biases. To
+This point was one of the main focuses of our own work on                address this, the idea of pooling similar cells for size factor
+metacells (Bilous et al, 2022). To this end, we and others have          estimation (L. Lun et al, 2016) was proposed even before the
+proposed several metrics to assess the compatibility of metacells        metacell concept was introduced.
+with downstream analysis tools and the conservation of the
+biologically relevant results obtained at the single-cell level.         Visualization
+
+   To evaluate the conservation of clustering results, clustering        Metacells have been used for more compact data visualization in
+assignment obtained at the metacell and single-cell levels can be        multiple studies (Zheng et al, 2021b; Li et al, 2019; Bost et al, 2020;
+compared using adjusted rand index (ARI) (Hubert and Arabie,             Cohen et al, 2018; Sebé-Pedrós et al, 2018; Pfister et al, 2021; Chan
+1985) or adjusted mutual information (AMI) (Vinh et al, 2009).           et al, 2022). Different approaches for displaying metacells in a
+Preservation of the differential expression analysis can be evaluated    reduced space have been proposed. When complementing single-
+by comparing the overlapping significant genes obtained at single-       cell visualization, metacells have been overlaid onto the low-
+cell and metacell levels. This can be done employing AUC score or        dimensional representation of single cells by positioning each
+true positive rate (TPR), ranking genes by statistical significance      metacell at the centroid of the single cells it comprises (Baran et al,
+(i.e., p-value) and relative deviation in expression (i.e., log fold     2019; Persad et al, 2023). Alternatively, metacells can be visualized
+change). In addition, the differential expression concordance can be     independently by applying dimensionality reduction tools (e.g.,
+evaluated by comparing functional enrichment of identified               PCA, tSNE (Maaten and Hinton, 2008), UMAP (McInnes et al,
+signatures (Squair et al, 2021), for instance, by comparing the          2018)) on the metacell profile matrix (Ben-Kiki et al, 2022; Bilous
+results of gene set enrichment analysis (Subramanian et al, 2005).       et al, 2022; Persad et al, 2023). Although most of the studies
+Pseudotime ordering preservation can be assessed using correlation       display metacells as entities of equal size, the variability of metacell
+analysis. For RNA velocity (La Manno et al, 2018), comparison of         sizes can be visualized using shapes of proportional sizes. We and
+angles between the inferred velocity vectors in a joint embedding of     others have observed that in general, the visualization performed
+the metacells and single-cells has been proposed to quantify the         directly on metacell profiles preserves most of the patterns
+agreement between single-cell and metacells RNA velocity (Bilous         observed in the single-cell data (Bilous et al, 2022; Ben-Kiki
+et al, 2022).                                                            et al, 2022).
+
+   Assessing the conservation of the downstream analysis results is
+especially important for validating newly developed metacells
+
+© The Author(s)                                                          Molecular Systems Biology Volume 20 | Issue 7 | July 2024 | 744 ­ 766 751
+Molecular Systems Biology                                                  Mariia Bilous et al
+
+Clustering                                                                 metacell concept (Pliner et al, 2018). Currently, the metacell
+                                                                           concept is used to enhance signal for GRN construction for scRNA-
+Unsupervised clustering is commonly applied to single-cell data to         seq (Liu et al, 2021b; Nguyen et al, 2020; Magaletta et al, 2022;
+identify cell types and cell states. Similarly, clustering was applied     Wang et al, 2023) and for sparser single-cell lncRNA-seq data (Luo
+to metacells when performing downstream analysis at the metacell           et al, 2021, 2023).
+level (Zheng et al, 2021b; Chan et al, 2022). In our work, we
+observed that most clusters identified at the metacell level                  Given the computational cost of GRN analysis (Bravo González-
+recapitulate those observed at the single-cell level, and differences      Blas et al, 2023), metacells facilitate scaling of GRN construction tools,
+fall within the range of fluctuation observed by using different           particularly those initially developed for bulk RNA-seq (Feregrino and
+clustering algorithms (Bilous et al, 2022). It has been also               Tschopp, 2022), to handle larger datasets (Liu et al, 2021b).
+demonstrated that metacells provide more interpretable data
+patterns in very sparce scATAC-seq data, enabling more reliable            Applications to single-cell epigenomic data
+data partitioning (Persad et al, 2023).
+                                                                           Single-cell epigenomic such as scATAC-seq is particularly useful
+Differential expression                                                    for GRN analysis by enabling the prediction of enhancer (Bravo
+                                                                           González-Blas et al, 2019) and transcription factor (TF) activity
+Differential expression in scRNA-seq data aims at identifying              (Fleck et al, 2023). However, such predictions remain highly
+signature genes by comparing the level of expression of a gene             challenging at the single cell level as scATAC data is noisier and
+between two groups of cells. When performing downstream                    sparser than scRNA-seq data with only 1­10% accessible regions
+analyses at the metacell level, differential expression was performed      detected per cell (Chen et al, 2019a). Thus, many scATAC-seq
+between groups of metacells (Zheng et al, 2021b; Chan et al, 2022).        analyses, from peak calling (Cusanovich et al, 2018; Satpathy et al,
+Another advantage of metacells for differential expression analyses        2019; Granja et al, 2021) to more complex TF footprint analyses
+is that methods developed for bulk RNA-seq data such as edgeR              (Granja et al, 2021; Li et al, 2021) aggregate the data at the cluster
+(Robinson et al, 2009), DESeq2 (Love et al, 2014) and limma                level which is the main resolution of analysis of scATAC-seq data.
+(Ritchie et al, 2015) have been shown to perform well when applied
+to metacells (Hafemeister and Halbritter, 2023). Differential                 The concept of a metacell, without being named as such, has
+expression analysis at the metacell level, either between conditions       been used in scATAC-seq at about the same time as it was
+or between clusters, has been shown to recapitulate most results           introduced in scRNA-seq with the Cicero tool that groups ATAC
+observed in single-cell data (Bilous et al, 2022).                         single cells to predict cis-regulatory DNA interactions (Pliner et al,
+                                                                           2018). This idea has been later adopted in the ArchR framework
+Cell-type annotation                                                       (Granja et al, 2021) for co-accessibility analyses. More recently, the
+                                                                           application of SEACells to scATAC-seq showed that the mean
+Metacells can be annotated to a particular cell type in different          coverage of an ATAC metacell is 50 times bigger than an ATAC
+ways, using: (i) clustering-based, (ii) metacell-based or, (iii) single-   single-cell which leads to a significant improvement of scATAC-seq
+cell-based approaches. The first approach relies on metacell               downstream analyses such as gene and transcription factor motif
+clustering and differential expression, followed by analysis of the        accessibility analysis (Persad et al, 2023). Furthermore, correlation
+differentially expressed gene in each metacell cluster. This approach      between gene expression and linked peaks accessibility becomes
+integrates the overall structure of the data in the annotation but         much clearer at the metacell resolution compared to single cells in
+depends on the accuracy of the clustering algorithm. The second            multiomics data for which both modalities are measured in the
+approach annotates each metacell to a specific cell type based on          same cells (Persad et al, 2023). Subsequently, the increase in intra
+known marker genes, similar to many single-cell annotation                 and inter-modality feature correlations using metacells motivated
+pipelines (Clarke et al, 2021; Pasquini et al, 2021). The third            the development of new enhancer-driven GRN inference
+approach (single-cell-based) assumes that a single-cell annotation is      approaches leveraging single-cell mutiomics data aggregated at a
+available and annotates a given metacell to the most abundant cell         metacell level (Persad et al, 2023; Yuan and Duren, 2024). This
+type within this metacell.                                                 includes in silico ChIP-seq that exploits the correlation between TF
+                                                                           RNA expression and the chromatin accessibility of the TF motif at
+Gene co-expression analyses and gene regulatory                            the metacell level to predict TF binding sites (Argelaguet et al,
+network inference                                                          2022). The metacell concept has also been used to construct
+                                                                           pseudo-multiome metacells from unpaired scATAC-seq and
+Since metacells have less sparse profiles, they have been used for         scRNA-seq within the Canonical Correlation Analysis (CCA) space
+signature enrichment and gene co-expression analysis (Liu et al,           to ultimately infer a gene regulatory network describing neural
+2021a; Qi et al, 2023; Chan et al, 2022; Giladi et al, 2018;               organoid development (Fleck et al, 2023).
+Mittnenzweig et al, 2021). Metacells also enhance interpretability of
+gene co-expression (Persad et al, 2023; Baran et al, 2019; Ben-Kiki        Trajectory analyses
+et al, 2022; Bilous et al, 2022).
+                                                                           Metacells have the potential to facilitate more advanced steps of
+   Gene co-expression, which is used for gene regulatory network           single-cell analysis such as inferring developmental trajectories
+(GRN) analysis, often suffers from the high dropout in single-cell         (Persad et al, 2023; Bilous et al, 2022; Zhang and Zhang, 2021). In
+data. For this reason, an aggregation of profiles of highly similar        our own work, we observed that RNA velocity (La Manno et al,
+cells for GRN analysis was used even before the introduction of the        2018) inferred at the metacell level provides highly similar results as
+                                                                           those observed in single-cell data (Bilous et al, 2022). It has been
+
+752 Molecular Systems Biology Volume 20 | Issue 7 | July 2024 | 744 ­ 766  © The Author(s)
+Mariia Bilous et al                                                      Molecular Systems Biology
+
+also demonstrated that pseudotime analysis at the metacell level         datasets and scaling tools initially designed for bulk RNA-seq. For
+recapitulates known developmental dynamics (Persad et al, 2023),         this reason, many single-cell analysis tools adopt metacell-like
+although the conservation of pseudotime between single cells and         approaches to handle large datasets.
+metacells has not yet been formally demonstrated.
+                                                                            Some studies, including ours, not only reported conservation of
+Data integration and atlas construction                                  the results of analyses performed at the single-cell level, but also
+                                                                         improvements based on metacells (i.e., biological signals that are
+Data integration represents a computationally demanding yet              difficult to capture in single-cell data are more visible in metacells)
+indispensable step in single-cell data analysis, considering the         (Zheng et al, 2021b; Persad et al, 2023; Bilous et al, 2022). While
+abundance of datasets produced from various technologies (Picelli        this is true in some cases, it is still important to realize that, by
+et al, 2014; Macosko et al, 2015; Zheng et al, 2017; Klein et al, 2015;  construction, metacells are a direct aggregation of single cells.
+Jaitin et al, 2014; Svensson et al, 2020) and the high interest in       Therefore, any biological information observed in metacells is likely
+constructing single-cell atlases of organs or even organisms (Regev      to be present, though possibly more noisy and less visible, in the
+et al, 2017; Han et al, 2018; The Tabula Muris Consortium et al,         single-cell data. Cases where metacells would reveal patterns that
+2018; Domcke et al, 2020; Cao et al, 2020; Han et al, 2023). The use     are totally absent or invisible in the single-cell data, should
+of metacells prior to data integration has demonstrated several          therefore be treated with care (see also discussion in the
+benefits. First, it streamlines the integration process, enabling the    `Limitations of metacells' section).
+integration of millions of cells on a standard laptop (Bilous et al,
+2022). Second, it has been shown to enhance integration results by       Metacells as a trade-off between sketching
+revealing hidden cell populations that may remain undetected             and imputation
+when directly integrating single-cell data (Zheng et al, 2021b;
+Persad et al, 2023). This improvement is attributed to the fact that     By aggregating information from several highly similar cells,
+integration tools often overcorrect for variability within and across    metacells reduce the size of the dataset while preserving, and
+samples. By reducing excessive within-sample variability, metacells      possibly even enhancing, the biological signal. This simultaneously
+have been shown to help integration algorithms to avoid                  addresses two main challenges of single-cell genomics data analysis:
+overcorrection (Persad et al, 2023). Metacells have also been            the large size of the single-cell data (Svensson et al, 2018) and its
+successfully used for label transfer from a metacell RNA reference       excessive sparsity (Kharchenko et al, 2014). Individually, these
+dataset to a metacell RNA query dataset with MCproj (Ben-Kiki            challenges have been addressed by sketching (i.e., topology-
+et al, 2023) and from a single-cell multimodal CITE-seq reference        preserving downsampling) (Hie et al, 2019; DeMeo and Berger,
+dataset to a metacell flow cytometry query dataset (Putri et al,         2020; Song et al, 2022; Hao et al, 2024) and data imputation
+2024).                                                                   (Wagner et al, 2017; Hou et al, 2020; Li and Li, 2018; van Dijk et al,
+                                                                         2018; Huang et al, 2018; Wang et al, 2019; Amodio et al, 2019).
+   Improved integration results, along with reduced computational
+burden and enhanced biological signal, strongly support the use of          Sketching consists of downsampling cells while preserving cell-
+metacells for the construction, analysis, and storage of single-cell     type diversity. Sketching is a powerful way to reduce the size of
+atlases (Ben-Kiki et al, 2023). For instance, Tumor Immune Single-       large datasets. Optimized approaches have been developed to
+cell Hub 2 (TISCH2) (Han et al, 2023) utilizes metacells (referred to    handle rare cell types or sparsely sampled regions of the single-cell
+as mini-clusters in the original study) to perform computationally       landscape (Hie et al, 2019; DeMeo and Berger, 2020; Song et al,
+expensive gene-gene correlation analysis in a single-cell atlas          2022; Hao et al, 2024). A major advantage of sketching is the
+comprising over 6 million cells.                                         limited risk of creating artifacts due to the aggregation of cells that
+                                                                         are biologically distinct (e.g., impure metacells). However, by
+Accelerating downstream analyses                                         overlooking a large fraction of the cells, one cannot exclude that the
+                                                                         reduced data will lose some of the information present in the initial
+Many computational tools for single-cell analysis are not scalable to    data. Moreover, the reduced data suffer from similar sparsity as the
+current large-scale datasets, particularly those that were initially     original data.
+developed for the analysis of bulk RNA-seq data. One of the main
+purposes of using metacells is to decrease the computational                Imputation aims at inferring missing or unobserved values in a
+burden associated with the large size of single-cell genomics            dataset to compensate for dropout events or technical noise.
+datasets, both in terms of time and memory usage. Given that each        Imputation approaches capitalize on cells that share some
+step of the downstream analyses is computationally demanding,            transcriptomic similarity to refine the profile of each cell based
+metacells significantly accelerate each of them and the overall          on the ones of its neighbors. As such, the imputed data become
+analysis (Bilous et al, 2022). For this reason, many tools use           much less sparse and can reveal biological patterns difficult to
+(Hristov et al, 2022) or suggest to use (Wagner et al, 2021; Qian        capture at the single-cell level (Li and Li, 2018; van Dijk et al, 2018;
+et al, 2022) metacell approaches to scale their proposed methods to      Huang et al, 2018). Unfortunately, the imputed data are even larger
+large datasets. These include also methods for cross-modality cell       than the initial one, and imputation has been shown to introduce
+matching (Hristov et al, 2022), metabolic state inference (Wagner        false signals in data (Andrews and Hemberg, 2019).
+et al, 2021), and data integration (Qian et al, 2022).
+                                                                            Thus, metacells emerge as a trade-off between sketching and
+   Overall, metacells have been frequently applied for conventional      imputation by simultaneously addressing the challenges posed
+single-cell downstream analyses, enabling efficient handling of large    by the large-scale nature and high sparsity of single-cell data
+                                                                         (Fig. 4).
+
+© The Author(s)                                                          Molecular Systems Biology Volume 20 | Issue 7 | July 2024 | 744 ­ 766 753
+Molecular Systems Biology                                                                                                Mariia Bilous et al
+
+Figure 4. Relationships between metacells and sketching or imputation.
+Metacells combine the reduction in size of sketching approaches and the reduction in sparsity of imputation strategies.
+
+Limitations of metacells                                                   completely missed if entirely aggregated with a more abundant
+                                                                           cell type into a single metacell.
+Metacells have been successfully used in several studies, ranging
+from data visualization to downstream analysis and method scaling             A first approach to tackle this issue involves constructing
+(Sebé-Pedrós et al, 2018; Giladi et al, 2018; Cohen et al, 2018; Bost      metacells at a lower graining level, thereby achieving a higher
+et al, 2020; Zheng et al, 2021b; Li et al, 2019). Provided a reasonable    resolution. An alternative way to prevent aggregation of cells from
+graining level is used, we and others have observed that metacells         different cell types is to build metacells in a supervised manner by
+capture most of the biological information present in the single-cell      constructing metacells for each cell type separately (Burdziak et al,
+data and preserve the results of downstream analyses. Still, as with       2023) or by splitting impure metacells (Bilous et al, 2022) when an
+all data transformation approaches, artifacts can appear with              annotation of the single cells is available.
+metacells. Below, we highlight some of these issues and recommend
+strategies for mitigating them.                                               An additional limitation associated with some metacell con-
+                                                                           struction tools is instability in the underlying clustering. This
+   The metacell partition may be considered a very high-resolution         phenomenon arises from methods reliant on stochastic processes,
+clustering. As with any unsupervised clustering applied to large           leading to varying metacell outcomes based on different initializa-
+data, metacells do not guarantee a global convergence. Therefore, it       tions or random seeds. Despite this instability, the global
+can potentially group cells of distinct types within a single metacell     representation of single-cell data is in general robust to small
+(Fig. 5A), resulting in the formation of impure metacells. The             variations in metacell definitions, ensuring consistency in down-
+aggregated profile of such metacells may represent an artifact. Such       stream analysis results. The main metacell construction tools
+artifacts can lead to misleading interpretations, including the            internally fix random seeds, ensuring reproducibility in metacell
+presence of non-existing intermediate states or spurious gene co-          partitioning.
+expression (Fig. 5A). In addition, rare cell types could be
+                                                                              Another limitation specific to metacell analysis is the skewness
+                                                                           in the distribution of metacell sizes, which arises from the uneven
+
+754 Molecular Systems Biology Volume 20 | Issue 7 | July 2024 | 744 ­ 766                                                © The Author(s)
+Mariia Bilous et al  Molecular Systems Biology
+
+Figure 5. Limitations of metacells.
+
+(A) Example of limitations in metacells when aggregating cells of different cell types (i.e., impure metacell_3 in the example). Such impure metacells can lead to mixed
+profiles and artifacts in gene co-expression analyses. (B) Correlation between the size of metacells and the number of detected genes. (C) Computational cost of metacell
+construction (using MC2, SuperCell, and SEACells at a graining level of 75). Time (CPU time) is represented in minutes and memory (max RSS) in GB as a function of the
+cell numbers contained in the dataset being analyzed. Colors and shapes highlight the tool used for metacells construction. The y-axis is displayed on a log10 scale. All
+tasks were run on a machine with 500 GB and a time limit of 20 h with 1 CPU except for the run of MC2 with multithreading (10 CPUs). (D) Schematic representation of
+the integration strategy recommended to analyze large datasets with multiple samples using metacells: (i) constructing the metacells for each sample, (ii) integrating the
+samples at the metacell level, (iii) performing downstream analyses on the integrated metacell atlas. (E) Computational cost of metacell construction (using MC2,
+SuperCell, and SEACells at a graining level of 75), metacell construction + downstream analysis, and single-cell analysis (with and without using BPCells in Seurat). Time
+(CPU time) is represented in minutes and memory (max RSS) in GB as a function of the cell numbers contained in the dataset being analyzed. Following the approach
+described in panel (D), metacells were built on a per embryo basis and in parallel using 15 CPUs. After samples integration, downstream analyses included dimensionality
+reduction, clustering, and differential analysis. Colors and shapes highlight the tool used for metacells construction. The y-axis is displayed on a log10 scale.
+
+© The Author(s)      Molecular Systems Biology Volume 20 | Issue 7 | July 2024 | 744 ­ 766 755
+Molecular Systems Biology                                                         Mariia Bilous et al
+
+    Box 2. Concepts that share similarities with metacells                        decreases the computational burden of the metacells construction
+                                                                                  on a large number of cells (Fig. 5C). To further decrease the
+    Nested communities or pan-resolution representation--representation           required computational resources, a fourth approach involves in
+    of data in a hierarchical manner (Schwartz et al, 2020; Kuchroo et al,        constructing metacells per sample or other identities with a
+    2022; Zheng et al, 2021a), wherein high resolution can be seen as a           consecutive integration of the resulting metacells (Fig. 5D, see
+    metacell partition.                                                           `Workflow recommendations' section). In general and especially for
+                                                                                  large datasets, the downstream analysis at the metacell level shows a
+         Graph abstraction (Wolf et al, 2019)--representation of single-cell      significant acceleration (Fig. 5E), effectively compensating for the
+    data as a graph of clusters at different resolutions (cell types or sub-      metacell construction time (Bilous et al, 2022; Persad et al, 2023),
+    types) for further investigation of cell-type relationships.                  especially for exploratory analyses where many tools or choices of
+                                                                                  parameters are tested on the same data.
+         Neighborhood--partition of the single-cell data into partially over-
+    lapping clusters of transcriptionally highly similar cells. Neighborhoods     Concepts that share similarities
+    can be seen as partially overlapping metacells. Neighborhood can be           with metacells
+    defined for all single cells (Wagner et al, 2017; Reshef et al, 2021) or for
+    a set of anchoring cells (Morabito et al, 2023; Dann et al, 2022).            Some of the ideas underlying the metacell concept, such as
+                                                                                  aggregation of profiles and/or representation of data at different
+         Pseudobulk--partition of cells based on metadata (e.g., samples,         resolution(s), have been used in other approaches. These include
+    conditions) and/or broad transcriptomic similarity (i.e., cell types),        nested communities, graph abstraction, neighborhoods, pseudo-
+    followed by the aggregation of their profiles.                                bulks, pseudocells, and pseudoreplicates (see Box 2).
+
+         Pseudocell--aggregation of profiles of randomly sampled cells               Nested communities--represented by tools such as TooMany-
+    (potentially with replacement) to increase sample size (Imbach et al,         Cells (Schwartz et al, 2020), multiscale PHATE (Kuchroo et al,
+    2023).                                                                        2022), and HiDeF (Zheng et al, 2021a)--enable exploration of
+                                                                                  single-cell data at multiple resolutions by providing its hierarchical
+         Pseudobulk of pseudoreplicate--random assignment of cells of one         structure (Fig. 6A). Usually, the root corresponds to the entire
+    replicate to several artificial replicates followed by aggregation of their   dataset branching into types and sub-types. A representation at a
+    profiles (Hafemeister and Halbritter, 2023).                                  high resolution may be considered as a partition of single-cell data
+                                                                                  into metacells.
+density and heterogeneity of phenotypes. While it is expected that
+larger metacells span denser phenotypic regions and smaller                          Graph abstraction (Wolf et al, 2019) is a representation of
+metacells emerge in rarer cell types, the discrepancy in metacell                 single-cell data as a graph of cell types (Fig. 6B) to study
+sizes leads to differences in profile coverage, with larger metacells             relationships among them, including putative trajectories. It also
+having more detected genes (Fig. 5B). Consequently, some                          allows users to investigate data at different resolutions by providing
+observations at the metacell level may be driven by the metacell                  graph abstraction at multiple graining levels. In contrast to
+size. To address this issue, strategies such as balancing metacell size           metacells, graph nodes represent cell types or clusters, rather than
+distribution and considering metacell size information in down-                   groups of highly similar and ideally redundant cells.
+stream analyses can be employed. For instance, to avoid very large
+outliers, the MetaCell approach dissolves metacells exciding a                       Neighborhood is a partition of data into partially overlapping
+particular size (Baran et al, 2019; Ben-Kiki et al, 2022).                        groups of highly similar cells (Fig. 6C). The concept of neighbor-
+Alternatively, the SuperCell tool provides the analytical framework               hood is very similar to the one of metacell, except that the
+that accounts for metacell size in downstream analyses. Our                       neighborhoods partially overlap, and cell profiles are not necessa-
+benchmarking (Bilous et al, 2022) suggests that considering                       rily aggregated (Dann et al, 2022).
+metacell sizes in metacell analyses is especially important for
+higher graining levels (50­100).                                                     Pseudobulks represent an aggregation of cells based on metadata,
+                                                                                  cell-type annotation or clusters. Specifically, aggregations of cells
+   Finally, metacells construction can be computationally demand-                 based on sample identity correspond to the sample-specific
+ing since many existing tools require computing PCA and/or                        pseudobulks (Fig. 6D), and aggregations of cells based on both
+building a similarity network between cells. Figure 5C represents                 samples and cell types correspond to cell-type-/sample-specific
+the time and memory required to build metacells on datasets                       pseudobulks (Fig. 6E).
+composed of different number of cells (from 10,000 to 900,000
+cells) from the mouse organogenesis atlas (MOCA) (Cao et al,                         Pseudocells are constructed by aggregating randomly sampled
+2019) and shows that, except for MC2, it can be time and memory                   cells from the same cell states, potentially with overlaps (Fig. 6F).
+consuming to build metacells on large datasets. Several approaches                This allows to compensate for low number of cells and high sparsity
+have been developed to accelerate the metacell construction                       (Candia et al, 2013; Imbach et al, 2023). Pseudoreplicates are
+procedure. One approach, used in the MC2 algorithm, adopts a                      generated by randomly assigning cells from one replicate to several
+divide-and-conquer methodology (Ben-Kiki et al, 2022) by                          artificial replicates. Pseudobulk of pseudoreplicates (Hafemeister
+randomly splitting large datasets into piles and performing metacell              and Halbritter, 2023) are obtained upon aggregating pseudorepli-
+construction within them. Another approach, used in the SuperCell                 cates (Fig. 6G).
+method, constructs metacells for a subset of cells and projects the
+remaining cells onto the constructed metacells (Bilous et al, 2022).                 These different approaches share similarities with metacells but
+Topology-preserving downsampling (i.e., sketching) (Hie et al,                    correspond to different concepts. In rare cases, the term `metacell'
+2019; Hao et al, 2024) should improve the representativeness of                   was used when referring to some of these approaches, like
+such an approach. SEACells also offers the option to use GPUs to                  neighborhood (Morabito et al, 2023), pseudocell (Bravo
+construct the metacells and accelerate the construction process.
+These three options applied on the MOCA datasets significantly
+
+756 Molecular Systems Biology Volume 20 | Issue 7 | July 2024 | 744 ­ 766         © The Author(s)
+Mariia Bilous et al                                                                                          Molecular Systems Biology
+
+                              A  Nested communities                       B  Graph abstraction
+
+                                                                             Coarse abstraction  Fine abstraction
+
+                 C Neighborhoods                     D Pseudobulks           E Cell-type-/sample-specific
+                                                                                                pseudobulks
+
+                 F                                   Pseudocells
+
+                 G                Pseudobulks of pseudoreplicates                                Cell type
+
+                                                                                                 Sample or
+                                                                                                  replicate
+
+Figure 6. Concepts that share similarities with metacells.
+
+(A) Example of nested communities. (B) Example of graph abstraction. (C) Example of neighborhoods. (D) Example of sample-specific pseudobulks. (E) Example of cell-
+type-/sample-specific pseudobulks. (F) Example of pseudocells. (G) Example of pseudobulks of pseudoreplicates.
+
+González-Blas et al, 2023) or pseudobulk (Parker et al, 2020; Liu            (https://github.com/GfellerLab/MetacellAnalysisToolkit), where code
+et al, 2022). To avoid ambiguities, we recommend using the term              is provided for most of these steps.
+`metacell' only for disjoint sets of highly similar cells whose profiles
+are aggregated.                                                              Metacell construction
+
+Workflow recommendations                                                     As with any single-cell genomics analysis, the metacell construction
+                                                                             starts with a single-cell profile matrix. Since the metacell concept
+Metacell construction and analysis involve several steps that have been      was initially introduced for single-cell transcriptomics data, here we
+discussed before. To guide users interested in building and analyzing        assume that the single-cell profile matrix is a cell-by-gene matrix.
+metacells from their own data, we provide recommendations for all            Extrapolating to other modalities can be achieved by employing
+essential steps of the process. We further refer users to our tutorial       suitable data pre-processing techniques, followed by an appropriate
+(https://github.com/GfellerLab/MetacellAnalysisTutorial) and toolkit         dimensionality reduction approach (see (Heumos et al, 2023) for
+                                                                             recommendations). Metacells for these modalities can be
+
+© The Author(s)                                                              Molecular Systems Biology Volume 20 | Issue 7 | July 2024 | 744 ­ 766 757
+Molecular Systems Biology                                                  Mariia Bilous et al
+
+constructed by supplying an appropriate embedding (usually used            remove outliers and build metacells at an algorithm-estimated
+for data clustering) to a chosen metacell construction tool, with the      graining level (usually >40).
+exception of MetaCell and MC2, which are specifically designed for
+scRNA-seq data and require a gene count matrix as input. We also              MC2: Suitable for Python users analyzing large scRNA-seq data,
+assume that the low-quality cells and genes are filtered out and           permitting the algorithm to remove outliers and build metacells at
+profiles are library size-normalized and transformed (see (Luecken         an algorithm-estimated graining level (usually >40).
+and Theis, 2019; Amezquita et al, 2020; Andrews et al, 2021;
+Heumos et al, 2023) for recommendations). To build metacells, the             SuperCell: Suitable for R users analyzing large scRNA-seq or
+following steps should be performed on the normalized counts               other modality data, who prefer to build metacells at user-defined
+matrix:                                                                    graining level and/or explore different graining levels. For users
+                                                                           analyzing large cytometry data, there is SuperCellCyto.
+Removing outliers
+Most metacell construction tools allocate all cells to metacells,             SEACells: Suitable for Python users analyzing large scRNA-seq,
+except for MetaCell and MC2, which incorporate modules for                 scATAC-seq, or other modality data, who prefer to build metacells
+outlier detection--identifying cells that deviate significantly from       at user-defined but relatively high (>50) graining level.
+others within the metacell. While this feature can enhance metacell
+quality, the excessive and uncontrolled removal of cells as outliers       Partitioning data into metacells
+during metacell construction may eliminate biologically relevant           For metacell construction with Metacell and MC2, raw counts
+cells (Persad et al, 2023), including rare cell types. Consequently,       should be used. For metacell construction with SuperCell, either
+MC2 includes an option to force the assignment of all cells to             normalized counts or low-dimensionality representation should be
+metacells.                                                                 used. For metacell construction with SEACells, low-dimensional
+                                                                           representation should be used. As an alternative to these three
+                                                                           methods, metacells can be computed as an excessive clustering of
+                                                                           data with a user-defined similarity metric.
+
+Feature (or highly variable genes) selection                               Choice of the graining level
+Given the high dimensionality of single-cell genomics data (e.g.,          When using tools that allow to pre-decide the graining level (i.e.,
+~20,000 genes), it is recommended to first select the most                 level of size reduction between the single-cell and the metacell data)
+informative genes (typically the top 2000 most variable genes).            we recommend selecting graining levels between 10 and 75. This
+Certain types of genes, like mitochondrial, ribosomal, and stress-         can be done easily in SuperCell, SEACells, and in the latest version
+related genes, can also be left out from the analysis as their             of MC2 (v 0.9.3). In MetaCell and the original version of MC2, the
+expression is often influenced more by technical factors than actual       final graining level is determined by the choice of the minimum or
+biological distinctions (Andreatta and Carmona, 2021). All the             target size of metacells (measured in number of single cells or total
+available single-cell analysis frameworks provide implementations          number of UMIs, respectively). Therefore, it may happen that the
+of several common approaches for feature selection, and the                final graining level is far from the expected one or that the resulting
+construction of metacell is not restricted to a specific one (except       metacell partition is too coarse or too fine. To obtain a finer
+for the MetaCell and MC2 tools, which relies on an in-built                resolution, the minimum or target size of metacells has to be
+approach for the selection of informative genes and thus does not          decreased. Most methods require re-running the metacell partition
+require this step).                                                        for each choice of the graining level. Exceptions include tools that
+                                                                           provide a hierarchical structure of the metacell partitions (Super-
+Dimensionality reduction                                                   Cell or other hierarchical clustering algorithms), allowing for fast
+To quantify distances or similarities between cells, we recommend          scanning across multiple graining levels.
+using dimensionality reduction approaches suitable for a particular
+modality (e.g., PCA for transcriptomics or latent semantic indexing           To choose an appropriate graining level for a particular dataset,
+(LSI) for chromatin accessibility). The number of principal                we recommend considering both the size and the complexity of the
+components can be chosen the same way as for most other                    dataset (see Fig. 2D,F). To preserve the statistical power of the
+scRNA-seq data analyses (typically between 10 and 50). For                 metacell downstream analyses, we suggest using graining levels
+scATAC-seq analysis, the first axis obtained after LSI is usually          such that the resulting number of metacells is at least ten times
+highly correlated with the number of fragments per cell and should         larger than the expected number of fine-resolution cell types. We
+be excluded for metacells construction. Note that the dimension-           do not recommend using metrics developed to find the optimal
+ality reduction step for scRNA-seq is not necessary for the metacell       number of clusters, such as modularity (Newman and Girvan,
+construction with the MetaCell and MC2, as these tools build               2004), silhouette coefficient (Rousseeuw, 1987) or other metrics
+metacells from gene counts space relying on in-built data                  developed for scRNA-seq data (Liu et al, 2021c; Chen et al, 2019b;
+transformations.                                                           Kiselev et al, 2017) to determine the number of metacells.
+
+Choosing metacell construction tool                                        Note on metacell construction for multi-sample datasets
+The selection of an appropriate metacell construction tool is              If a dataset contains several samples and/or conditions, the metacell
+contingent upon various factors, including the programming                 partition of such data can be done in two ways. The first one is to
+language utilized, data modality and size as well as desired level         construct metacells across all samples and conditions, allowing to
+of granularity. Here, we present a specific use case for each method:      mix samples and conditions within one metacell (Li et al, 2019;
+                                                                           Giladi et al, 2018; Bost et al, 2020; Giladi et al, 2020; Geirsdottir
+   MetaCell: MetaCell: Suitable for R users analyzing relatively           et al, 2019; Friedman et al, 2020; García-Castro et al, 2021;
+small (<50,000 cells) scRNA-seq data, permitting the algorithm to          Mittnenzweig et al, 2021). The second one is to construct metacells
+
+758 Molecular Systems Biology Volume 20 | Issue 7 | July 2024 | 744 ­ 766  © The Author(s)
+Mariia Bilous et al                                                     Molecular Systems Biology
+
+per sample and/or per condition, obtaining sample- and/or                  To facilitate the exploration of these different steps in metacell
+condition-specific metacells (Fig. 5D) (Zheng et al, 2021b; Chan        construction, a practical guide comprising the MC2, SuperCell, and
+et al, 2022; Han et al, 2023; Osorio et al, 2024; Imaz-Rosshandler      SEACells methodologies can be found in the tutorial accompanying
+et al, 2024; Cuomo et al, 2022; Burdziak et al, 2023; Parker et al,     this review (https://github.com/GfellerLab/MetacellAnalysisTutorial).
+2020). The choice of the method depends on the specific objectives
+of the downstream analysis and size of samples/conditions. The          Downstream analyses of metacells
+first approach--cross-samples and conditions--is suitable for
+analyzing global heterogeneity in the dataset and enrichment of         Metacells are meant to streamline the analysis of single-cell
+conditions within specific cell states (i.e., metacells). In this       genomics data. Most of the studies analyze metacells the same
+approach, the batch effect must be corrected before the metacell        way as single-cell data (Li et al, 2019; Cohen et al, 2021, 2022;
+construction. Considering that metacells are computed from the          Giladi et al, 2018; Mittnenzweig et al, 2021; Zheng et al, 2021b; Qi
+entire dataset, the first approach is more compatible with smaller      et al, 2023; Bornstein et al, 2018; Cohen et al, 2018; Bost et al, 2020)
+samples. The second approach--per-sample and/or condition--             or suggest doing so (Ben-Kiki et al, 2022; Persad et al, 2023;
+prevents metacells consisting of cells from multiple origins and is     Kuchroo et al, 2022). However, metacells have different sizes and
+more appropriate for conducting differential expression and             thus carry different amounts of information. Therefore, we suggest
+differential abundance analysis among conditions, as well as for        considering tools that account for sample weight (i.e., metacell
+data integration. Samples have to be large enough to have sufficient    size), in particular for analyses that are based on comparing relative
+redundancy to build pure metacells.                                     values (e.g., differential expression and differential abundance
+                                                                        analyses (Fig. 7A,B)). Below, we discuss some of the most common
+Note on metacell construction for annotated datasets                    analyses performed on metacells.
+In the presence of reliable annotation of the single-cell data, it can
+be useful to integrate this information in the construction of          Pre-processing
+metacells. This can be done in two ways. The first one involves         Before running downstream analyses, we encourage users to verify
+creating metacells per cell type, akin to per-sample metacell           that metacells are of good quality. In addition, the metacell profiles
+construction in multi-sample datasets. The second approach is to        have to be scaled and normalized, especially if the metacell profile
+split metacells containing mixed cell types after metacell partition-   corresponds to a sum of counts.
+ing. We recommend the first approach, as it enables the formation
+of more specific metacells through the use of cell-type-specific        Feature selection and dimensionality reduction
+informative features. In addition, the second approach may lead to      In general, and especially for unsupervised analyses, we recom-
+lower graining levels and more heterogeneous distribution of            mend using the same set of features (i.e., informative genes) as the
+metacell sizes due to an increased number of singletons.                one used for metacell construction. In situations involving multiple
+                                                                        feature sets (e.g., per-sample metacell construction (Fig. 5D)) and
+Metacell profile aggregation strategy                                   therefore requiring data integration, we recommend re-computing
+When obtaining metacell profiles, single-cell profiles are aggregated   common features at the metacell level.
+using different methods: MC2 computes gene fractions, SuperCell
+averages normalized counts by default (with an option to sum raw           Low-dimensional embedding (e.g., PCA and further UMAP) can
+counts), and SEACells sums raw counts. We recommend summing             be performed at the metacell level using a set of features
+raw counts for comprehensive downstream analyses, as many               defined above.
+downstream analysis methods operate on raw counts or require
+particular normalization (Ritchie et al, 2015; Robinson et al, 2009;    Clustering
+Love et al, 2014). The averaging of normalized counts approach is       Any clustering algorithm can be applied on metacells. However, we
+suitable when metacells serve a specific task like visualization,       recommend using clustering approaches that consider sample
+annotation, co-expression analysis, gene regulatory network             weight (i.e., metacell size), such as hierarchical clustering or
+inference, or trajectory analysis as it does not require re-            partitioning around medoids (Ward Jr., 1963; Studer, 2013),
+computing all the upstream steps starting from scaling and              especially for large graining levels or for metacells with very
+normalization.                                                          heterogeneous size distribution.
+
+Visualization                                                           Differential expression
+To visualize metacells, we recommend two approaches. The first          Metacells are compatible with most differential expression
+one involves overlaying metacells with single-cell data by placing      methods, including tools developed for bulk RNA-seq. However,
+each metacell at the centroid of its constituent cells in a low-        we recommend using methods that account for weights (e.g.,
+dimensional space, which is useful for comparing metacells with         weighted t-test), since neglecting metacell size can lead to
+single-cell data. It is also possible to combine metacells and single   erroneous group average gene expression estimates, impacting
+cells to create a joint low-dimensional space. The second approach      differential expression analysis results (Fig. 7B).
+visualizes only metacells, deriving a low-dimensional representa-
+tion directly from the metacell profiles. This approach is              Metacell annotation
+recommended for exploring the structure of single-cell data at          When a reliable annotation of the single-cell data is available, we
+the metacell level for very large datasets (e.g., >1 M cells) where     recommend using it for metacell annotation. This further allows
+visualizing single cells can become computationally heavy.              users to check the purity of metacells. In the absence of single-cell
+                                                                        annotation, we advise metacell annotation based on markers,
+
+© The Author(s)                                                         Molecular Systems Biology Volume 20 | Issue 7 | July 2024 | 744 ­ 766 759
+Molecular Systems Biology                                                  Mariia Bilous et al
+
+Figure 7. Impact of metacell sizes on the results of the downstream analyses.
+
+(A) Comparison of the results of weighted versus non-weighted differential abundance analysis at the metacell level. Each dot is a metacell colored by cell type. Bars
+correspond to the estimated proportions of each cell type in a condition with and without considering the size of each metacell. (B) Comparison of the results of weighted
+versus non-weighted differential expression analysis. Each dot is a metacell colored by cell type. Solid and dashed lines correspond to weighed and non-weighted
+estimation of mean expression. (C) Results of weighted and non-weighted principal component analysis for the same dataset. Each dot is a metacell colored by cell type.
+Better separation of cell types is observed in the weighted PCA. (D) Results of weighted and non-weighted Louvain clustering, with dots representing metacells colored by
+cluster annotation. Size of dots correspond to the size of metacells.
+
+similar to single-cell data. In our experience, improved gene              constructing metacells or lower neighborhood size parameter when
+coverage in metacells leads to their better annotation compared to         running RNA velocity on metacells.
+single-cell data (Bilous et al, 2022). We also recommend comparing
+this metacell-based annotations with metacell clustering/visualiza-        Transcription factor motif analysis
+tion results, akin to single-cell data annotation practices.               Metacells are compatible with ATAC analysis tools exploring TF
+                                                                           motif activities. These tools include chromVAR, which computes
+Correlation analyses: gene co-expression and regions co-accessibility      deviation scores measuring gain or loss of accessibility in a set of
+Metacells, by aggregating information from multiple cells, offer a         peaks containing a specific TF binding motif (Schep et al, 2017). In
+more comprehensive profile with reduced dropout rates, making              the context of metacells, chromVAR will compute a deviation score
+them more suitable for feature correlation analysis. To enhance the        per metacell for each TF using the aggregated fragment counts
+accuracy of these analyses, we recommend using weighted                    across all cells within the metacell (Persad et al, 2023; Argelaguet
+correlation methods that consider the metacell sizes, ensuring a           et al, 2022).
+more precise assessment of the correlation patterns. In drawing
+scientific conclusions, it is essential to verify that reported            Note on the use of metacell weights in downstream analyses
+correlations are consistently present at the single-cell level             An important aspect to consider when analyzing data at the
+(although at lower significance) to make sure it does not come             metacell level is the size of each metacell. For instance, when
+from potential metacell artifacts (Fig. 5A). Same guidelines apply to      computing cell-type abundance between two conditions, just
+the analysis of inter modality feature correlations (e.g., peak-genes)     counting metacells can lead to inaccurate estimations (Fig. 7A).
+from single-cell multiomics data.                                          Disregarding the size of metacells when comparing the mean
+                                                                           expression of a gene between conditions can create similar artifacts
+Velocity                                                                   (Fig. 7B), which may lead to type I (Fig. 7B, Gene B) or type II
+Metacells are compatible with RNA velocity (La Manno et al, 2018)          (Fig. 7B, Gene C) errors. In general, it is therefore advised to
+analysis for inferring potential developmental trajectories. Meta-         consider the size of metacells and use downstream analysis tools
+cells can be computed from all counts or spliced counts only. The          which are compatible with sample-weighted data. Although weights
+standard RNA velocity algorithms use a neighborhood approach to            do not necessarily result in dramatic changes in all analyses (see
+impute data for estimating an equilibrium parameter. To prevent            examples in Fig. 7C,D), our recent work suggests that weights do
+over-smoothing, we recommend using lower graining levels when              improve most results for larger graining levels (Bilous et al, 2022),
+
+760 Molecular Systems Biology Volume 20 | Issue 7 | July 2024 | 744 ­ 766  © The Author(s)
+Mariia Bilous et al                                                               Molecular Systems Biology
+
+  Figure 8. Metacells increase profile coverage and save computational               As with any data transformation approach, metacell can
+  resources, while preserving biologically relevant heterogeneity in single-cell  introduce artifacts, especially at large graining levels. In our
+  genomics data.                                                                  experience, most of these artifacts arise when grouping transcrip-
+                                                                                  tionally similar cells from different cell types (e.g., mixing CD8 and
+particularly in light of the accumulation of discrepancies during                 CD4 T cells within the same metacell), or when disregarding the
+downstream analysis steps.                                                        fact that metacells can have different sizes. Being aware of such
+                                                                                  potential artifacts is therefore important when using and analyzing
+   More examples of the usage of metacells in the downstream                      metacells. To this end, we recommend always evaluating the purity
+analyses are available in our tutorial (https://github.com/                       of metacells based on some cell type annotations (either
+GfellerLab/MetacellAnalysisTutorial).                                             experimentally available or based on prediction tools) and check
+                                                                                  their compactness and separation to mark potential artifacts. We
+Conclusion and outlook                                                            also recommend using downstream analysis pipelines that can
+                                                                                  account for metacell sizes (i.e., weights).
+Metacells aim at preserving and possibly improving biological
+signals in single-cell genomics datasets while reducing their size to                As of today, metacells have been mainly applied in single-cell
+facilitate downstream analyses. Many tools, such as MetaCell                      transcriptomics, but this concept can be extended to other
+(Baran et al, 2019), MC2 (Ben-Kiki et al, 2022), SuperCell (Bilous                modalities (Persad et al, 2023; Kuchroo et al, 2022) and to
+et al, 2022) and SEACells (Persad et al, 2023), are available to build            multimodal data (Mao et al, 2022). Considering that such data are
+metacells. Metacells have been effectively employed in various                    increasingly being generated at large scales, we anticipate that
+studies for multiple types of downstream analyses (Li et al, 2019;                metacell construction pipelines will be used and tailored for them.
+Giladi et al, 2018; Cohen et al, 2018; Bornstein et al, 2018; Zheng
+et al, 2021b; Cohen et al, 2022; Liu et al, 2021b; Nguyen et al, 2020;               In summary, metacells significantly increase profile coverage
+Magaletta et al, 2022; Wang et al, 2023; Luo et al, 2021, 2023), and              (i.e., decrease sparsity due to transcript dropout in scRNA-seq
+have demonstrated utility in the analysis and representation of                   data), improve interpretability and reduce computational resources
+single-cell atlases (Zheng et al, 2021b; Han et al, 2023; Imaz-                   needed for downstream analyses while preserving the biologically
+Rosshandler et al, 2024). Moreover, metacells have been used to                   relevant heterogeneity (Fig. 8). As such, metacells can be seen as an
+scale existing computational methods to larger datasets (Wagner                   optimized structure between the sparse and partially redundant
+et al, 2021; Qian et al, 2022; Hristov et al, 2022) and to enhance                level of single cells and the over-simplified level of clusters.
+their robustness and interpretability (Liu et al, 2021b; Nguyen et al,            Provided that limitations are well understood and reasonable
+2020; Magaletta et al, 2022; Wang et al, 2023; Persad et al, 2023;                graining levels are used, metacells offer us a powerful framework
+Argelaguet et al, 2022; Luo et al, 2021, 2023). Performing data                   for visualizing, analyzing, storing and sharing large-scale single-cell
+integration at the metacell level has been shown to not only                      genomics data.
+facilitate the process (Bilous et al, 2022) but also enhance the results
+by diminishing within-sample noise (Zheng et al, 2021b; Persad                    Data availability
+et al, 2023). In the future, we anticipate that metacells will be
+especially useful for the construction, analysis and storage of very              The code to reproduce Figs. 2, 6B,C,E, 7C,D, and Appendix
+large single-cell atlases (Ben-Kiki et al, 2023). In addition, a synergy          Figs. S1 and S2 are available at https://github.com/mariiabilous/
+between sketching (Hie et al, 2019; DeMeo and Berger, 2020; Song                  Metacell_review_analysis. The code of the tutorial on constructing
+et al, 2022; Hao et al, 2024) and metacell is expected, where                     and analyzing metacells is available at https://github.com/
+sketching provides a comprehensive low-scale representation                       GfellerLab/MetacellAnalysisTutorial. The code of the metacell
+complemented by enhanced profiles obtained through metacells.                     toolkit for construction and exploration of metacells is available
+                                                                                  at https://github.com/GfellerLab/MetacellAnalysisToolkit.
+
+                                                                                  Expanded view data, supplementary information, appendices are
+                                                                                  available for this paper at https://doi.org/10.1038/s44320-024-00045-6.
+
+                                                                                  References
+
+                                                                                  Ackermann AM, Wang Z, Schug J, Naji A, Kaestner KH (2016) Integration of
+                                                                                      ATAC-seq and RNA-seq identifies human alpha cell and beta cell signature
+                                                                                      genes. Mol Metab 5:233­244
+
+                                                                                  Amezquita RA, Lun ATL, Becht E, Carey VJ, Carpp LN, Geistlinger L, Marini F,
+                                                                                      Rue-Albrecht K, Risso D, Soneson C et al (2020) Orchestrating single-cell
+                                                                                      analysis with Bioconductor. Nat Methods 17:137­145
+
+                                                                                  Amodio M, Van Dijk D, Srinivasan K, Chen WS, Mohsen H, Moon KR, Campbell
+                                                                                      A, Zhao Y, Wang X, Venkataswamy M et al (2019) Exploring single-cell data
+                                                                                      with deep multitasking neural networks. Nat Methods 16:1139­1145
+
+                                                                                  Andreatta M, Carmona SJ (2021) STACAS: Sub-Type Anchor Correction for
+                                                                                      Alignment in Seurat to integrate single-cell RNA-seq data. Bioinformatics
+                                                                                      37:882­884
+
+© The Author(s)                                                                   Molecular Systems Biology Volume 20 | Issue 7 | July 2024 | 744 ­ 766 761
+Molecular Systems Biology                                                           Mariia Bilous et al
+
+Andrews TS, Hemberg M (2019) False signals induced by single-cell imputation.       Chen H, Lareau C, Andreani T, Vinyard ME, Garcia SP, Clement K, Andrade-
+    F1000Res 7:1740                                                                     Navarro MA, Buenrostro JD, Pinello L (2019a) Assessment of computational
+                                                                                        methods for the analysis of single-cell ATAC-seq data. Genome Biol 20:241
+Andrews TS, Kiselev VY, McCarthy D, Hemberg M (2021) Tutorial: guidelines for
+    the computational analysis of single-cell RNA sequencing data. Nat Protoc       Chen Y-C, Suresh A, Underbayev C, Sun C, Singh K, Seifuddin F, Wiestner A,
+    16:1­9                                                                              Pirooznia M (2019b) IKAP--Identifying K mAjor cell Population groups in
+                                                                                        single-cell RNA-sequencing analysis. GigaScience 8:giz121
+Argelaguet R, Lohoff T, Li JG, Nakhuda A, Drage D, Krueger F, Velten L, Clark SJ,
+    Reik W (2022) Decoding gene regulation in the mouse embryo using single-        Clarke ZA, Andrews TS, Atif J, Pouyabahar D, Innes BT, MacParland SA, Bader
+    cell multi-omics. Preprint at https://doi.org/10.1101/2022.06.15.496239             GD (2021) Tutorial: guidelines for annotating single-cell transcriptomic maps
+                                                                                        using automated and manual methods. Nat Protoc 16:2749­2764
+Baek S, Lee I (2020) Single-cell ATAC sequencing analysis: from data
+    preprocessing to hypothesis generation. Comput Struct Biotechnol J              Cohen M, Giladi A, Barboy O, Hamon P, Li B, Zada M, Gurevich-Shapiro A,
+    18:1429­1439                                                                        Beccaria CG, David E, Maier BB et al (2022) The interaction of CD4+ helper
+                                                                                        T cells with dendritic cells shapes the tumor microenvironment and immune
+Baran Y, Bercovich A, Sebe-Pedros A, Lubling Y, Giladi A, Chomsky E, Meir Z,            checkpoint blockade response. Nat Cancer 3:303­317
+    Hoichman M, Lifshitz A, Tanay A (2019) MetaCell: analysis of single-cell
+    RNA-seq data using K-nn graph partitions. Genome Biol 20:206                    Cohen M, Giladi A, Gorki A-D, Solodkin DG, Zada M, Hladik A, Miklosi A, Salame
+                                                                                        T-M, Halpern KB, David E et al (2018) Lung single-cell signaling interaction
+Ben-Kiki O, Bercovich A, Lifshitz A, Raz O, Brook D, Tanay A (2023) MCProj:             map reveals basophil role in macrophage imprinting. Cell 175:1031­1044.e18
+    metacell projection for interpretable and quantitative use of transcriptional
+    atlases. Genome Biol 24:220                                                     Cohen YC, Zada M, Wang S-Y, Bornstein C, David E, Moshe A, Li B, Shlomi-
+                                                                                        Loubaton S, Gatt ME, Gur C et al (2021) Identification of resistance pathways
+Ben-Kiki O, Bercovich A, Lifshitz A, Tanay A (2022) Metacell-2: a divide-and-           and therapeutic targets in relapsed multiple myeloma patients through single-
+    conquer metacell algorithm for scalable scRNA-seq analysis. Genome Biol             cell sequencing. Nat Med 27:491­503
+    23:100
+                                                                                    Cuomo ASE, Heinen T, Vagiaki D, Horta D, Marioni JC, Stegle O (2022)
+Bilous M, Tran L, Cianciaruso C, Gabriel A, Michel H, Carmona SJ, Pittet MJ,            CELLREGMAP: a statistical framework for mapping context-specific regulatory
+    Gfeller D (2022) Metacells untangle large and complex single-cell                   variants using SCRNA-seq. Mol Syst Biol 18:e10663
+    transcriptome networks. BMC Bioinforma 23:336
+                                                                                    Cusanovich DA, Hill AJ, Aghamirzaie D, Daza RM, Pliner HA, Berletch JB,
+Bornstein C, Nevo S, Giladi A, Kadouri N, Pouzolles M, Gerbe F, David E, Machado        Filippova GN, Huang X, Christiansen L, DeWitt WS et al (2018) A single-cell
+    A, Chuprin A, Tóth B et al (2018) Single-cell mapping of the thymic stroma          atlas of in vivo mammalian chromatin accessibility. Cell 174:1309­1324.e18
+    identifies IL-25-producing tuft epithelial cells. Nature 559:622­626
+                                                                                    Cutler A, Breiman L (1994) Archetypal analysis. Technometrics 36:338­347
+Bost P, Giladi A, Liu Y, Bendjelal Y, Xu G, David E, Blecher-Gonen R, Cohen M,      Dann E, Henderson NC, Teichmann SA, Morgan MD, Marioni JC (2022)
+    Medaglia C, Li H et al (2020) Host-viral infection maps reveal signatures of
+    severe COVID-19 patients. Cell 181:1475­1488.e12                                    Differential abundance testing on single-cell data using k-nearest neighbor
+                                                                                        graphs. Nat Biotechnol 40:245­253
+Bravo González-Blas C, De Winter S, Hulselmans G, Hecker N, Matetovici I,           Datlinger P, Rendeiro AF, Boenke T, Senekowitsch M, Krausgruber T, Barreca D,
+    Christiaens V, Poovathingal S, Wouters J, Aibar S, Aerts S (2023) SCENIC+:          Bock C (2021) Ultra-high-throughput single-cell RNA sequencing and
+    single-cell multiomic inference of enhancers and gene regulatory networks.          perturbation screening with combinatorial fluidic indexing. Nat Methods
+    Nat Methods 20:1355­1367                                                            18:635­642
+                                                                                    DeMeo B, Berger B (2020) Hopper: a mathematically optimal algorithm for
+Bravo González-Blas C, Minnoye L, Papasokrati D, Aibar S, Hulselmans G,                 sketching biological data. Bioinformatics 36:i236­i241
+    Christiaens V, Davie K, Wouters J, Aerts S (2019) cisTopic: cis-regulatory      DeTomaso D, Jones MG, Subramaniam M, Ashuach T, Ye CJ, Yosef N (2019)
+    topic modeling on single-cell ATAC-seq data. Nat Methods 16:397­400                 Functional interpretation of single cell similarity maps. Nat Commun 10:4376
+                                                                                    Domcke S, Hill AJ, Daza RM, Cao J, O'Day DR, Pliner HA, Aldinger KA, Pokholok
+Brugnone N, Gonopolskiy A, Moyle MW, Kuchroo M, Dijk D van, Moon KR,                    D, Zhang F, Milbank JH et al (2020) A human cell atlas of fetal chromatin
+    Colon-Ramos D, Wolf G, Hirn MJ, Krishnaswamy S (2019) Coarse graining of            accessibility. Science 370:eaba7612
+    data via inhomogeneous diffusion condensation. In: 2019 IEEE international      Feregrino C, Tschopp P (2022) Assessing evolutionary and developmental
+    conference on big data (big data), IEEE, Los Angeles, pp 2624­2633                  transcriptome dynamics in homologous cell types. Dev Dyn 251:1472­1489
+                                                                                    Finak G, McDavid A, Yajima M, Deng J, Gersuk V, Shalek AK, Slichter CK, Miller
+Burdziak C, Alonso-Curbelo D, Walle T, Reyes J, Barriga FM, Haviv D, Xie Y, Zhao        HW, McElrath MJ, Prlic M et al (2015) MAST: a flexible statistical framework
+    Z, Zhao CJ, Chen H-A et al (2023) Epigenetic plasticity cooperates with cell-       for assessing transcriptional changes and characterizing heterogeneity in
+    cell interactions to direct pancreatic tumorigenesis. Science 380:eadd5327          single-cell RNA sequencing data. Genome Biol 16:278
+                                                                                    Fleck JS, Jansen SMJ, Wollny D, Zenk F, Seimiya M, Jain A, Okamoto R, Santel M,
+Candia J, Maunu R, Driscoll M, Biancotto A, Dagur P, McCoy JP, Sen HN, Wei L,           He Z, Camp JG et al (2023) Inferring and perturbing cell fate regulomes in
+    Maritan A, Cao K et al (2013) From cellular characteristics to disease              human brain organoids. Nature 621:365­372
+    diagnosis: uncovering phenotypes with supercells. PLoS Comput Biol              Friedman G, Levi-Galibov O, David E, Bornstein C, Giladi A, Dadiani M, Mayo A,
+    9:e1003215                                                                          Halperin C, Pevsner-Fischer M, Lavon H et al (2020) Cancer-associated
+                                                                                        fibroblast compositions change with breast cancer progression linking the
+Cao J, O'Day DR, Pliner HA, Kingsley PD, Deng M, Daza RM, Zager MA, Aldinger            ratio of S100A4+ and PDPN+ CAFs to clinical outcome. Nat Cancer
+    KA, Blecher-Gonen R, Zhang F et al (2020) A human cell atlas of fetal gene          1:692­708
+    expression. Science 370:eaba7721                                                García-Castro H, Kenny NJ, Iglesias M, Álvarez-Campos P, Mason V, Elek A,
+                                                                                        Schönauer A, Sleight VA, Neiro J, Aboobaker A et al (2021) ACME
+Cao J, Packer JS, Ramani V, Cusanovich DA, Huynh C, Daza R, Qiu X, Lee C,               dissociation: a versatile cell fixation-dissociation method for single-cell
+    Furlan SN, Steemers FJ et al (2017) Comprehensive single-cell transcriptional       transcriptomics. Genome Biol 22:89
+    profiling of a multicellular organism. Science 357:661­667
+
+Cao J, Spielmann M, Qiu X, Huang X, Ibrahim DM, Hill AJ, Zhang F, Mundlos S,
+    Christiansen L, Steemers FJ et al (2019) The single-cell transcriptional
+    landscape of mammalian organogenesis. Nature 566:496­502
+
+Chan JM, Zaidi S, Love JR, Zhao JL, Setty M, Wadosky KM, Gopalan A, Choo Z-N,
+    Persad S, Choi J et al (2022) Lineage plasticity in prostate cancer depends on
+    JAK/STAT inflammatory signaling. Science 377:1180­1191
+
+762 Molecular Systems Biology Volume 20 | Issue 7 | July 2024 | 744 ­ 766           © The Author(s)
+Mariia Bilous et al                                                                    Molecular Systems Biology
+
+Geirsdottir L, David E, Keren-Shaul H, Weiner A, Bohlen SC, Neuber J, Balic A,             mammalian organogenesis ­ prediction and validation of differentiation
+    Giladi A, Sheban F, Dutertre C-A et al (2019) Cross-species single-cell                trajectories at whole organism scale. Development 151:dev201867
+    analysis reveals divergence of the primate microglia program. Cell                 Imbach KJ, Treadway NJ, Prahalad V, Kosters A, Arafat D, Duan M, Gergely T,
+    179:1609­1622.e16                                                                      Ponder LA, Chandrakasan S, Ghosn EEB et al (2023) Profiling the peripheral
+                                                                                           immune response to ex vivo TNF stimulation in untreated juvenile idiopathic
+Gfeller D, De Los Rios P (2007) Spectral coarse-graining of complex networks.              arthritis using single cell RNA sequencing. Pediatr Rheumatol 21:17
+    Phys Rev Lett 99:038701                                                            Jaitin DA, Kenigsberg E, Keren-Shaul H, Elefant N, Paul F, Zaretsky I, Mildner A,
+                                                                                           Cohen N, Jung S, Tanay A et al (2014) Massively parallel single-cell RNA-Seq
+Giladi A, Cohen M, Medaglia C, Baran Y, Li B, Zada M, Bost P, Blecher-Gonen R,             for marker-free decomposition of tissues into cell types. Science 343:776­779
+    Salame T-M, Mayer JU et al (2020) Dissecting cellular crosstalk by                 Kharchenko PV, Silberstein L, Scadden DT (2014) Bayesian approach to single-
+    sequencing physically interacting cells. Nat Biotechnol 38:629­637                     cell differential expression analysis. Nat Methods 11:740­742
+                                                                                       Kiselev VY, Kirschner K, Schaub MT, Andrews T, Yiu A, Chandra T, Natarajan KN,
+Giladi A, Paul F, Herzog Y, Lubling Y, Weiner A, Yofe I, Jaitin D, Cabezas-                Reik W, Barahona M, Green AR et al (2017) SC3: consensus clustering of
+    Wallscheid N, Dress R, Ginhoux F et al (2018) Single-cell characterization of          single-cell RNA-seq data. Nat Methods 14:483­486
+    haematopoietic progenitors and their trajectories in homeostasis and               Klein AM, Mazutis L, Akartuna I, Tallapragada N, Veres A, Li V, Peshkin L, Weitz
+    perturbed haematopoiesis. Nat Cell Biol 20:836­846                                     DA, Kirschner MW (2015) Droplet barcoding for single-cell transcriptomics
+                                                                                           applied to embryonic stem cells. Cell 161:1187­1201
+Grabski IN, Street K, Irizarry RA (2023) Significance analysis for clustering with     Kotliarov Y, Sparks R, Martins AJ, Mulè MP, Lu Y, Goswami M, Kardava L,
+    single-cell RNA-sequencing data. Nat Methods 20:1196­1202                              Banchereau R, Pascual V, Biancotto A et al (2020) Broad immune activation
+                                                                                           underlies shared set point signatures for vaccine responsiveness in healthy
+Granja JM, Corces MR, Pierce SE, Bagdatli ST, Choudhry H, Chang HY, Greenleaf              individuals and disease activity in patients with lupus. Nat Med 26:618­629
+    WJ (2021) ArchR is a scalable software package for integrative single-cell         Kuchroo M, Huang J, Wong P, Grenier J-C, Shung D, Tong A, Lucas C, Klein J,
+    chromatin accessibility analysis. Nat Genet 53:403­411                                 Burkhardt DB, Gigante S et al (2022) Multiscale PHATE identifies multimodal
+                                                                                           signatures of COVID-19. Nat Biotechnol 40:681­691
+Grobecker P, Van Nimwegen E (2023) Identifying cell states in single-cell RNA-         La Manno G, Soldatov R, Zeisel A, Braun E, Hochgerner H, Petukhov V,
+    seq data at statistically maximal resolution. Preprint at https://doi.org/             Lidschreiber K, Kastriti ME, Lönnerberg P, Furlan A et al (2018) RNA velocity
+    10.1101/2023.10.31.564980                                                              of single cells. Nature 560:494­498
+                                                                                       Langlieb J, Sachdev N, Balderrama K, Nadaf N, Raj M, Murray E, Webber J,
+Hafemeister C, Halbritter F (2023) Single-cell RNA-seq differential expression             Vanderburg C, Gazestani V, Tward D et al (2023) The cell type composition
+    tests within a sample should use pseudo-bulk data of pseudo-replicates.                of the adult mouse brain revealed by single cell and spatial genomics. Preprint
+    Preprint at https://doi.org/10.1101/2023.03.28.534443                                  at https://doi.org/10.1101/2023.03.06.531307
+                                                                                       Li H, van der Leun AM, Yofe I, Lubling Y, Gelbard-Solodkin D, van Akkooi ACJ,
+Haghverdi L, Buettner F, Theis FJ (2015) Diffusion maps for high-dimensional               van den Braber M, Rozeman EA, Haanen JBAG, Blank CU et al (2019)
+    single-cell analysis of differentiation data. Bioinformatics 31:2989­2998              Dysfunctional CD8 T cells form a proliferative, dynamically regulated
+                                                                                           compartment within human melanoma. Cell 176:775­789.e18
+Han X, Wang R, Zhou Y, Fei L, Sun H, Lai S, Saadatpour A, Zhou Z, Chen H, Ye F         Li WV, Li JJ (2018) An accurate and robust imputation method scImpute for
+    et al (2018) Mapping the mouse cell atlas by microwell-Seq. Cell                       single-cell RNA-seq data. Nat Commun 9:997
+    172:1091­1107.e17                                                                  Li X, Korkut A (2023) Recurrent composite markers of cell types and states.
+                                                                                           Preprint at https://doi.org/10.1101/2023.07.17.549344
+Han Y, Wang Y, Dong X, Sun D, Liu Z, Yue J, Wang H, Li T, Wang C (2023)                Li Z, Kuppe C, Ziegler S, Cheng M, Kabgani N, Menzel S, Zenke M, Kramann R,
+    TISCH2: expanded datasets and new tools for single-cell transcriptome                  Costa IG (2021) Chromatin-accessibility estimation from single-cell ATAC-
+    analyses of the tumor microenvironment. Nucleic Acids Res 51:D1425­D1431               seq data with scOpen. Nat Commun 12:6386
+                                                                                       Lifshitz A (2024) MCView: A Shiny App for Metacell Analysis. R package version
+Hao Y, Hao S, Andersen-Nissen E, Mauck WM, Zheng S, Butler A, Lee MJ, Wilk                 0.2.28. Available at: https://github.com/tanaylab/MCView
+    AJ, Darby C, Zager M et al (2021) Integrated analysis of multimodal single-cell    Liu B, Hu X, Feng K, Gao R, Xue Z, Zhang S, Zhang Y, Corse E, Hu Y, Han W et al
+    data. Cell 184:3573­3587.e29                                                           (2021a) Temporal single-cell tracing reveals clonal revival and expansion of
+                                                                                           precursor exhausted T cells during anti-PD-1 therapy in lung cancer. Nat
+Hao Y, Stuart T, Kowalski MH, Choudhary S, Hoffman P, Hartman A, Srivastava                Cancer 3:108­121
+    A, Molla G, Madad S, Fernandez-Granda C et al (2024) Dictionary learning for       Liu J, Wang J, Xu J, Xia H, Wang Y, Zhang C, Chen W, Zhang H, Liu Q, Zhu R et al
+    integrative, multimodal and scalable single-cell analysis. Nat Biotechnol              (2021b) Comprehensive investigations revealed consistent pathophysiological
+    42:293­304                                                                             alterations after vaccination with COVID-19 vaccines. Cell Discov 7:99
+                                                                                       Liu S, Thennavan A, Garay JP, Marron JS, Perou CM (2021c) MultiK: an
+Heumos L, Schaar AC, Lance C, Litinetskaya A, Drost F, Zappia L, Lücken MD,                automated tool to determine optimal cluster numbers in single-cell RNA
+    Strobl DC, Henao J, Curion F et al (2023) Best practices for single-cell analysis      sequencing data. Genome Biol 22:232
+    across modalities. Nat Rev Genet 24:550­572                                        Liu Y, Zhang J, Wang S, Zeng X, Zhang W (2022) Are dropout imputation
+                                                                                           methods for scRNA-seq effective for scATAC-seq data? Brief Bioinforma
+Hie B, Cho H, DeMeo B, Bryson B, Berger B (2019) Geometric sketching                       23:bbab442
+    compactly summarizes the single-cell transcriptomic landscape. Cell Syst           L Lun AT, Bach K, Marioni JC (2016) Pooling across cells to normalize single-cell
+    8:483­493.e7                                                                           RNA sequencing data with many zero counts. Genome Biol 17:75
+
+Hou W, Ji Z, Ji H, Hicks SC (2020) A systematic evaluation of single-cell RNA-
+    sequencing imputation methods. Genome Biol 21:218
+
+Hristov BH, Bilmes JA, Noble WS (2022) Linking cells across single-cell
+    modalities by synergistic matching of neighborhood structure. Bioinformatics
+    38:ii148­ii154
+
+Huang M, Wang J, Torre E, Dueck H, Shaffer S, Bonasio R, Murray JI, Raj A, Li M,
+    Zhang NR (2018) SAVER: gene expression recovery for single-cell RNA
+    sequencing. Nat Methods 15:539­542
+
+Hubert L, Arabie P (1985) Comparing partitions. J Classif 2:193­218
+Iacono G, Mereu E, Guillaumet-Adkins A, Corominas R, Cuscó I, Rodríguez-
+
+    Esteban G, Gut M, Pérez-Jurado LA, Gut I, Heyn H (2018) bigSCale: an
+    analytical framework for big-scale single-cell data. Genome Res 28:878­890
+Imaz-Rosshandler I, Rode C, Guibentif C, Harland LTG, Ton M-LN, Dhapola P,
+    Keitley D, Argelaguet R, Calero-Nieto FJ, Nichols J, et al (2024) Tracking early
+
+© The Author(s)                                                                        Molecular Systems Biology Volume 20 | Issue 7 | July 2024 | 744 ­ 766 763
+Molecular Systems Biology                                                              Mariia Bilous et al
+
+Love MI, Huber W, Anders S (2014) Moderated estimation of fold change and              Pasquini G, Rojo Arias JE, Schäfer P, Busskamp V (2021) Automated methods for
+    dispersion for RNA-seq data with DESeq2. Genome Biol 15:550                            cell type annotation on scRNA-seq data. Comput Struct Biotechnol J
+                                                                                           19:961­969
+Luecken MD, Theis FJ (2019) Current best practices in single-cell RNA-seq
+    analysis: a tutorial. Mol Syst Biol 15:e8746                                       Persad S, Choo Z-N, Dien C, Sohail N, Masilionis I, Chaligné R, Nawy T,
+                                                                                           Brown CC, Sharma R, Pe'er I et al (2023) SEACells infers transcriptional
+Luo H, Bu D, Shao L, Li Y, Sun L, Wang C, Wang J, Yang W, Yang X, Dong J et al             and epigenomic cellular states from single-cell genomics data. Nat
+    (2021) Single-cell long non-coding RNA landscape of T cells in human cancer            Biotechnol 41:1746­1757
+    immunity. Genom Proteom Bioinf 19:377­393
+                                                                                       Pfister D, Núñez NG, Pinyol R, Govaere O, Pinter M, Szydlowska M, Gupta R, Qiu
+Luo H-T, He Q, Yang W, He F, Dong J, Hu C-F, Yang X-F, Li N, Li F-R (2023)                 M, Deczkowska A, Weiner A et al (2021) NASH limits anti-tumour
+    Single-cell analyses reveal distinct expression patterns and roles of long non-        surveillance in immunotherapy-treated HCC. Nature 592:450­456
+    coding RNAs during hESC differentiation into pancreatic progenitors. Stem
+    Cell Res Ther 14:38                                                                Picelli S, Faridani OR, Björklund ÅK, Winberg G, Sagasser S, Sandberg R (2014)
+                                                                                           Full-length RNA-seq from single cells using Smart-seq2. Nat Protoc 9:171­181
+Maaten Lvander, Hinton G (2008) Visualizing data using t-SNE. J Mach Learn Res
+    9:2579­2605                                                                        Pierson E, Yau C (2015) ZIFA: Dimensionality reduction for zero-inflated single-
+                                                                                           cell gene expression analysis. Genome Biol 16:241
+Macosko EZ, Basu A, Satija R, Nemesh J, Shekhar K, Goldman M, Tirosh I, Bialas
+    AR, Kamitaki N, Martersteck EM et al (2015) Highly parallel genome-wide            Pliner HA, Packer JS, McFaline-Figueroa JL, Cusanovich DA, Daza RM,
+    expression profiling of individual cells using nanoliter droplets. Cell                Aghamirzaie D, Srivatsan S, Qiu X, Jackson D, Minkina A et al (2018) Cicero
+    161:1202­1214                                                                          predicts cis-regulatory DNA interactions from single-cell chromatin
+                                                                                           accessibility data. Mol Cell 71:858­871.e8
+Magaletta ME, Lobo M, Kernfeld EM, Aliee H, Huey JD, Parsons TJ, Theis FJ,
+    Maehr R (2022) Integration of single-cell transcriptomes and chromatin             Pons P, Latapy M (2006) Computing communities in large networks using
+    landscapes reveals regulatory programs driving pharyngeal organ                        random walks. J Graph Algorithms Appl 10:191­218
+    development. Nat Commun 13:457
+                                                                                       Putri GH, Howitt G, Marsh-Wakefield F, Ashhurst TM, Phipson B (2024)
+Mao H, Jia M, Dou JX, Zhang H, Benos PV (2022) COEM: cross-modal                           SuperCellCyto: enabling efficient analysis of large scale cytometry datasets.
+    embedding for MetaCell identification. Preprint at https://doi.org/10.48550/           Genome Biol 25:89
+    ARXIV.2207.07734
+                                                                                       Qi L, Li Y, Zhang L, Zhang X, Li W, Qin J, Ji Y, Xue Z, Lv B (2023) Single-cell RNA
+McFaline-Figueroa JL, Srivatsan S, Hill AJ, Gasperini M, Jackson DL, Saunders L,           sequencing reveals transcriptional alterations and immune disorder in the
+    Domcke S, Regalado SG, Lazarchuck P, Alvarez S, et al (2024) Multiplex                 anovulatory women. SSRN Preprint. Available at: https://ssrn.com/
+    single-cell chemical genomics reveals the kinase dependence of the response            abstract=4344672
+    to targeted therapy. Cell Genomics 4:100487
+                                                                                       Qian K, Fu S, Li H, Li WV (2022) scINSIGHT for interpreting single-cell gene
+McInnes L, Healy J, Melville J (2018) Umap: Uniform manifold approximation and             expression from biologically heterogeneous data. Genome Biol 23:82
+    projection for dimension reduction. Preprint at https://arxiv.org/abs/
+    1802.03426                                                                         Qiu C, Martin BK, Welsh IC, Daza RM, Le T-M, Huang X, Nichols EK, Taylor ML,
+                                                                                           Fulton O, O'Day DR et al (2023) A single-cell transcriptional timelapse of
+Mittnenzweig M, Mayshar Y, Cheng S, Ben-Yair R, Hadas R, Rais Y, Chomsky E,                mouse embryonic development, from gastrula to pup. Preprint at https://
+    Reines N, Uzonyi A, Lumerman L et al (2021) A single-embryo, single-cell               doi.org/10.1101/2023.04.05.535726
+    time-resolved model for mouse gastrulation. Cell 184:2825­2842.e22
+                                                                                       Regev A, Teichmann SA, Lander ES, Amit I, Benoist C, Birney E, Bodenmiller B,
+Morabito S, Reese F, Rahimzadeh N, Miyoshi E, Swarup V (2023) hdWGCNA                      Campbell P, Carninci P, Clatworthy M et al (2017) The Human Cell Atlas. eLife
+    identifies co-expression networks in high-dimensional transcriptomics data.            6:e27041
+    Cell Rep Methods 3:100498
+                                                                                       Reichart, Lindberg D, Maatz EL, Miranda AMA H, Viveiros A, Shvetsov N, Gärtner
+Newman MEJ, Girvan M (2004) Finding and evaluating community structure in                  A, Nadelmann ER, Lee M, Kanemaru K et al (2022) Pathogenic variants
+    networks. Phys Rev E 69:026113                                                         damage cell composition and single cell transcription in cardiomyopathies.
+                                                                                           Science 377:eabo1984
+Nguyen AT, Wang K, Hu G, Wang X, Miao Z, Azevedo JA, Suh E, Van Deerlin
+    VM, Choi D, Roeder K et al (2020) APOE and TREM2 regulate amyloid-                 Ren X, Zheng L, Zhang Z (2019) SSCC: a novel computational framework for
+    responsive microglia in Alzheimer's disease. Acta Neuropathol 140:477­493              rapid and accurate clustering large-scale single cell RNA-seq data. Genom
+                                                                                           Proteom Bioinf17:201­210
+Oelen R, De Vries DH, Brugge H, Gordon MG, Vochteloo M, single-cell eQTLGen
+    consortium, BIOS Consortium, Ye CJ, Westra H-J, Franke L et al (2022)              Replogle JM, Saunders RA, Pogson AN, Hussmann JA, Lenail A, Guna A,
+    Single-cell RNA-sequencing of peripheral blood mononuclear cells reveals               Mascibroda L, Wagner EJ, Adelman K, Lithwick-Yanai G et al (2022) Mapping
+    widespread, context-specific gene expression regulation upon pathogenic                information-rich genotype-phenotype landscapes with genome-scale Perturb-
+    exposure. Nat Commun 13:3267                                                           seq. Cell 185:2559­2575.e28
+
+Osorio D, Capasso A, Eckhardt SG, Giri U, Somma A, Pitts TM, Lieu CH,                  Reshef YA, Rumker L, Kang JB, Nathan A, Korsunsky I, Asgari S, Murray MB,
+    Messersmith WA, Bagby SM, Singh H, et al (2024) Population-level                       Moody DB, Raychaudhuri S (2021) Co-varying neighborhood analysis
+    comparisons of gene regulatory networks modeled on high-throughput single-             identifies cell populations associated with phenotypes of interest from single-
+    cell transcriptomics data. Nat Comput Sci 4:237­250                                    cell transcriptomics. Nat Biotechnol 40:355­363
+
+Park J-E, Botting RA, Domínguez Conde C, Popescu D-M, Lavaert M, Kunz DJ,              Ritchie ME, Phipson B, Wu D, Hu Y, Law CW, Shi W, Smyth GK (2015) Limma
+    Goh I, Stephenson E, Ragazzini R, Tuck E et al (2020) A cell atlas of human            powers differential expression analyses for RNA-sequencing and microarray
+    thymic development defines T cell repertoire formation. Science                        studies. Nucleic Acids Res 43:e47
+    367:eaay3224
+                                                                                       Robinson MD, McCarthy DJ, Smyth GK (2009) edgeR: a bioconductor package
+Parker KR, Migliorini D, Perkey E, Yost KE, Bhaduri A, Bagga P, Haris M, Wilson            for differential expression analysis of digital gene expression data.
+    NE, Liu F, Gabunia K et al (2020) Single-cell analyses identify brain mural cells      Bioinformatics 25:1754­1760
+    expressing CD19 as potential off-tumor targets for CAR-T immunotherapies.
+    Cell 183:126­142.e17                                                               Rommelfanger MK, Behrends M, Chen Y, Martinez J, Bens M, Xiong L, Rudolph
+                                                                                           KL, MacLean AL (2023) Gene regulatory network inference with popInfer
+
+764 Molecular Systems Biology Volume 20 | Issue 7 | July 2024 | 744 ­ 766              © The Author(s)
+Mariia Bilous et al                                                                      Molecular Systems Biology
+
+    reveals dynamic regulation of hematopoietic stem cell quiescence upon diet           Van den Berge K, Perraudeau F, Soneson C, Love MI, Risso D, Vert J-P,
+    restriction and aging. Preprint at https://doi.org/10.1101/2023.04.18.537360             Robinson MD, Dudoit S, Clement L (2018) Observation weights unlock
+Rosenberg AB, Roco CM, Muscat RA, Kuchina A, Sample P, Yao Z, Graybuck LT,                   bulk RNA-seq tools for zero inflation and single-cell applications. Genome
+    Peeler DJ, Mukherjee S, Chen W et al (2018) Single-cell profiling of the developing      Biol 19:24
+    mouse brain and spinal cord with split-pool barcoding. Science 360:176­182
+Rousseeuw PJ (1987) Silhouettes: a graphical aid to the interpretation and               van Dijk D, Sharma R, Nainys J, Yim K, Kathail P, Carr AJ, Burdziak C, Moon KR,
+    validation of cluster analysis. J Comput Appl Math 20:53­65                              Chaffer CL, Pattabiraman D et al (2018) Recovering Gene Interactions from
+Satpathy AT, Granja JM, Yost KE, Qi Y, Meschi F, McDermott GP, Olsen BN,                     Single-Cell Data Using Data Diffusion. Cell 174:716­729.e27
+    Mumbach MR, Pierce SE, Corces MR et al (2019) Massively parallel single-cell
+    chromatin landscapes of human immune cell development and intratumoral T             Vinh NX, Epps J, Bailey J (2009) Information theoretic measures for clusterings
+    cell exhaustion. Nat Biotechnol 37:925­936                                               comparison: is a correction for chance necessary? In: Proceedings of the 26th
+Saunders LM, Srivatsan SR, Duran M, Dorrity MW, Ewing B, Linbo T, Shendure J,                annual international conference on machine learning, ACM, Montreal, pp
+    Raible DW, Moens CB, Kimelman D et al (2022) Deep molecular, cellular and                1073­1080
+    temporal phenotyping of developmental perturbations at whole organism
+    scale. Preprint at https://doi.org/10.1101/2022.08.04.502764                         Wagner A, Wang C, Fessler J, DeTomaso D, Avila-Pacheco J, Kaminski J,
+Schep AN, Wu B, Buenrostro JD, Greenleaf WJ (2017) chromVAR: inferring                       Zaghouani S, Christian E, Thakore P, Schellhaass B et al (2021) Metabolic
+    transcription-factor-associated accessibility from single-cell epigenomic data.          modeling of single Th17 cells reveals regulators of autoimmunity. Cell
+    Nat Methods 14:975­978                                                                   184:4168­4185.e21
+Schwartz GW, Zhou Y, Petrovic J, Fasolino M, Xu L, Shaffer SM, Pear WS, Vahedi
+    G, Faryabi RB (2020) TooManyCells identifies and visualizes relationships of         Wagner F, Yan Y, Yanai I (2017) K-nearest neighbor smoothing for high-
+    single-cell clades. Nat Methods 17:405­413                                               throughput single-cell RNA-Seq data. Preprint at https://doi.org/10.1101/
+Sebé-Pedrós A, Saudemont B, Chomsky E, Plessier F, Mailhé M-P, Renno J, Loe-                 217737
+    Mie Y, Lifshitz A, Mukamel Z, Schmutz S et al (2018) Cnidarian cell type
+    diversity and regulation revealed by whole-organism single-cell RNA-Seq. Cell        Wang J, Agarwal D, Huang M, Hu G, Zhou Z, Ye C, Zhang NR (2019) Data
+    173:1520­1534.e20                                                                        denoising with transfer learning in single-cell transcriptomics. Nat Methods
+Setty M, Kiseliovas V, Levine J, Gayoso A, Mazutis L, Pe'er D (2019)                         16:875­878
+    Characterization of cell fate probabilities in single-cell data with Palantir. Nat
+    Biotechnol 37:451­460                                                                Wang Y, Xuan C, Wu H, Zhang B, Ding T, Gao J (2023) P-CSN: single-cell RNA
+Singh M, Al-Eryani G, Carswell S, Ferguson JM, Blackburn J, Barton K, Roden D,               sequencing data analysis by partial cell-specific network. Brief Bioinforma
+    Luciani F, Giang Phan T, Junankar S et al (2019) High-throughput targeted                24:bbad180
+    long-read single cell sequencing reveals the clonal and transcriptional
+    landscape of lymphocytes. Nat Commun 10:3120                                         Ward Jr JH (1963) Hierarchical grouping to optimize an objective function. J Am
+Song D, Xi NM, Li JJ, Wang L (2022) scSampler: fast diversity-preserving                     Stat Assoc 58:236­244
+    subsampling of large-scale single-cell transcriptomic data. Bioinformatics
+    38:3126­3127                                                                         Wolf FA, Angerer P, Theis FJ (2018) SCANPY: large-scale single-cell gene
+Squair JW, Gautier M, Kathe C, Anderson MA, James ND, Hutson TH, Hudelle R,                  expression data analysis. Genome Biol 19:15
+    Qaiser T, Matson KJE, Barraud Q et al (2021) Confronting false discoveries in
+    single-cell differential expression. Nat Commun 12:5692                              Wolf FA, Hamey FK, Plass M, Solana J, Dahlin JS, Göttgens B, Rajewsky N, Simon
+Stoeckius M, Hafemeister C, Stephenson W, Houck-Loomis B, Chattopadhyay PK,                  L, Theis FJ (2019) PAGA: graph abstraction reconciles clustering with
+    Swerdlow H, Satija R, Smibert P (2017) Simultaneous epitope and                          trajectory inference through a topology preserving map of single cells.
+    transcriptome measurement in single cells. Nat Methods 14:865­868                        Genome Biol 20:59
+Studer M (2013) WeightedCluster library manual. Cran
+Subramanian A, Tamayo P, Mootha VK, Mukherjee S, Ebert BL, Gillette MA,                  Wu TD, Madireddi S, De Almeida PE, Banchereau R, Chen Y-JJ, Chitre AS, Chiang
+    Paulovich A, Pomeroy SL, Golub TR, Lander ES et al (2005) Gene set                       EY, Iftikhar H, O'Gorman WE, Au-Yeung A et al (2020) Peripheral T cell
+    enrichment analysis: a knowledge-based approach for interpreting genome-                 expansion predicts tumour infiltration and clinical response. Nature
+    wide expression profiles. Proc Natl Acad Sci USA 102:15545­15550                         579:274­278
+Svensson V, da Veiga Beltrame E, Pachter L (2020) A curated database reveals
+    trends in single-cell transcriptomics. Database 2020:baaa073                         Xu H, Hu Y, Zhang X, Aouizerat BE, Yan C, Xu K (2022) A novel graph-based k-
+Svensson V, Vento-Tormo R, Teichmann SA (2018) Exponential scaling of single-                partitioning approach improves the detection of gene-gene correlations by
+    cell RNA-seq in the past decade. Nat Protoc 13:599                                       single-cell RNA sequencing. BMC Genomics 23:35
+The Tabula Muris Consortium, Overall coordination, Logistical coordination, Organ
+    collection and processing, Library preparation and sequencing, Computational         Yuan Q, Duren Z (2024) Inferring gene regulatory networks from single-cell
+    data analysis, Cell type annotation, Writing group, Supplemental text writing group      multiome data using atlas-scale external data. Nat Biotechnol. https://
+    & Principal investigators (2018) Single-cell transcriptomics of 20 mouse organs          doi.org/10.1038/s41587-024-02182-7
+    creates a Tabula Muris. Nature 562:367­372
+Tu AA, Gierahn TM, Monian B, Morgan DM, Mehta NK, Ruiter B, Shreffler WG,                Zhang M, Pan X, Jung W, Halpern AR, Eichhorn SW, Lei Z, Cohen L, Smith KA,
+    Shalek AK, Love JC (2019) TCR sequencing paired with massively parallel 3'               Tasic B, Yao Z, et al (2023) Molecularly defined and spatially resolved cell
+    RNA-seq reveals clonotypic T cell signatures. Nat Immunol 20:1692­1699                   atlas of the whole mouse brain. Nature 624:343­354
+
+                                                                                         Zhang Z, Zhang X (2021) Inference of high-resolution trajectories in single-cell
+                                                                                             RNA-seq data by using RNA velocity. Cell Rep. Methods 1:100095
+
+                                                                                         Zheng F, Zhang S, Churas C, Pratt D, Bahar I, Ideker T (2021a) HiDeF: identifying
+                                                                                             persistent structures in multiscale `omics data. Genome Biol 22:21
+
+                                                                                         Zheng GXY, Terry JM, Belgrader P, Ryvkin P, Bent ZW, Wilson R, Ziraldo SB,
+                                                                                             Wheeler TD, McDermott GP, Zhu J et al (2017) Massively parallel digital
+                                                                                             transcriptional profiling of single cells. Nat Commun 8:14049
+
+                                                                                         Zheng L, Qin S, Si W, Wang A, Xing B, Gao R, Ren X, Wang L, Wu X, Zhang J et al
+                                                                                             (2021b) Pan-cancer single-cell landscape of tumor-infiltrating T cells. Science
+                                                                                             374:abe6474
+
+                                                                                         Zhou P, Wang S, Li T, Nie Q (2021) Dissecting transition cells from single-cell
+                                                                                             transcriptome data through multiscale stochastic dynamics. Nat Commun
+                                                                                             12:5609
+
+© The Author(s)                                                                          Molecular Systems Biology Volume 20 | Issue 7 | July 2024 | 744 ­ 766 765
+Molecular Systems Biology                                                         Mariia Bilous et al
+
+Zilionis R, Nainys J, Veres A, Savova V, Zemmour D, Klein AM, Mazutis L (2017)    Open AccessThis article is licensed under a Creative Commons Attribution 4.0
+    Single-cell barcoding and sequencing using droplet microfluidics. Nat Protoc  International License, which permits use, sharing, adaptation, distribution and
+    12:44­73                                                                      reproduction in any medium or format, as long as you give appropriate credit to
+                                                                                  the original author(s) and the source, provide a link to the Creative Commons
+Acknowledgements                                                                  licence, and indicate if changes were made. The images or other third party
+                                                                                  material in this article are included in the article's Creative Commons licence,
+We acknowledge the Swiss National Science Foundation Project Grant                unless indicated otherwise in a credit line to the material. If material is not
+(310030_197514). We thank Santiago J. Carmona for providing useful feedback       included in the article's Creative Commons licence and your intended use is not
+to the manuscript.                                                                permitted by statutory regulation or exceeds the permitted use, you will need to
+                                                                                  obtain permission directly from the copyright holder. To view a copy of this
+Author contributions                                                              licence, visit http://creativecommons.org/licenses/by/4.0/. Creative Com-
+                                                                                  mons Public Domain Dedication waiver http://creativecommons.org/public-
+Mariia Bilous: Conceptualization; Formal analysis; Investigation; Visualization;  domain/zero/1.0/ applies to the data associated with this article, unless
+Writing--original draft; Writing--review and editing. Léonard Hérault:            otherwise stated in a credit line to the data, but does not extend to the graphical
+Software; Formal analysis; Investigation; Visualization; Writing--review and      or creative elements of illustrations, charts, or figures. This waiver removes legal
+editing. Aurélie AG Gabriel: Software; Formal analysis; Investigation;            barriers to the re-use and mining of research data. According to standard
+Visualization; Writing--review and editing. Matei Teleman: Software;              scholarly practice, it is recommended to provide appropriate citation and
+Validation. David Gfeller: Conceptualization; Resources; Supervision; Funding     attribution whenever technically possible.
+acquisition; Methodology; Writing--original draft; Writing--review and editing.
+                                                                                  © The Author(s) 2024
+Disclosure and competing interests statement
+
+The authors declare no competing interests.
+
+766 Molecular Systems Biology Volume 20 | Issue 7 | July 2024 | 744 ­ 766         © The Author(s)
+

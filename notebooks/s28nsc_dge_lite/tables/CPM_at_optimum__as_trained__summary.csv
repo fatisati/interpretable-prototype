@@ -1,0 +1,2 @@
+,pearson_r,kendall_tau,pearson_r_std,kendall_tau_std,tpr,tpr_std,n_pairs,n_metacells,median_mc_size
+CPM at optimum (as trained),0.6045318826094253,0.39544435646746157,0.18644995821631016,0.14663684420676823,0.966316182919871,0.0365796937341259,15.0,195.0,42.0

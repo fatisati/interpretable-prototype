@@ -1,0 +1,25 @@
+my main goal is to prepare a better version of my paper for iclr - it may not be perfect 
+i just want a better version of neurips submission be ready for iclr - thats it
+and it can be done in 2 way
+1. adding ablations from neurips rebuttle
+2. solving the loss problem with spatial
+
+some important things: 
+1. its important not to look for a perfect thing - something almost fine is good
+2. find it sooner - you shoud have strong analysis over what you have aleady tried - and you shoudl be able to say which one working / not working for what reason
+
+i feel the trap i am in in these days:
+i do many experiments - i try to analyze the results - middle of analyzing i go to another experiemtns
+and at the end of the day i am just super confused - with no clear undertanding in mind - lots of ambigous unsure facts
+what shoud i do? how should i modify my strategy?
+
+---
+i feel i should analyze all i tried during these days then either chose the best config / or new ides [just few] and go into the direction i know would work with high probablity - and then include in the ablations
+the thing is that in the rebuttle i cannot change the loss - so choosign correct loss function i feel is important now
+but i feel i am not goign in correct direction now - my strategy need modification - it should be modified so end up in the best possible version of paper considering the time limit we have
+i should have the best possible complete version of the paper in deadline - even if not perfect - but best possible considering what i have and the timing
+
+--notes--
+each run should have a decision before running - what do you expect? how would effect your decision
+every run should end with verdict [works / fails / inconclusive-because- / abandoned, not worth the time.] - and incoclusive should be changed to some final state
+freeze scoreboard [metrics / baselines]

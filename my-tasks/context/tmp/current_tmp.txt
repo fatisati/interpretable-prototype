@@ -464,3 +464,73 @@ for diagnoal: although it can be a nice global term - it has merge bias so we wo
 
 and we go for cohesion
 what cohesion says: 
+===
+===state===
+yesterday i tried leiden with both cpm and modualirty
+modualirty was beter on s28nsc
+i tried to imeplemtn modulairty in the loss - but turn out to be both cpm and modualirty - they just try to make the cluster size uniform - that was what their charge term doing
+nothing to do with the asisgemnts
+so i decided to go with another term - and i 
+
+
+====
+(b) just make its assignments more confident, and keep     <- cheap; requires learning NOTHING,
+    more slots nominally occupied: what can we do for this?
+
+what is signal only version?
+=====
+the neurips loss works well on arbf on pca [seacell aff] - but not good on spatial [s28nsc] - we have severe collapse
+the reason is that the diagonal term has real merge bias - combining with hierarchical property of spatial aff - we had a very bad collapse
+[possible simple solutions - correct off diagonal - correct the diagonal]
+we then tried cpm loss - it seems collapse problem somhow solved but the coverage and compactness of scproto cpm was not as good as seacell
+[for cpm i am not sure if the normalization term and the impleented cpm formula is correct or not]
+then we tried leiden with both cpm and modualirty - and interestnly modualirty had better results 
+so we tried modulairty - and then we realized that although high lambda of madualirty again prevent collapse - but the quality of foudned clusters were not good enough comapring to seacell
+[yet not good enough coverag - not good enough within cluster edge fraction - density - and thus for sure dge]
+then we realized that both cpm and modualirty anti collapse machanisms - they are somehow just trying to make the size distribution close to uniform
+i think cpm wsa trying to make the size distribution uniform - but modualryt trying to make volume distribtion uniform
+non is what i want
+the only help cpm / modualirty had was some global view of attraction while communtiy loss is foing local attraction
+[which i think we need this as well - i can say it becasue i rememebr the results specialy for rar ct changed when i added nassoc diagonal [in pca arbf] -
+ that was same family of global [although batch global] attraction]
+
+then i also realized that the off diagonal term of nassoc - it seems it was perventing the the diagonla term to cause collapse
+but its averaging was wrong for sure - so i decided to correct it but i am not sure if i found the real correct formula or not - and if test this or not?
+
+so i decided to go with another term - i wanted cells within each commutiy be very simialr - and i wanted precise communities
+i was able to define simiary between cells in 2 way - exact cell cell simialrty [aff[i][j]] - then we woudl have very simialr formula to nassoc diagonal [published neruips]
+but it seems this this does not have the merge bias - but i am not surre on this - need verification
+also i was able to define sim[i, j] cos/dot(aff[i], aff[j]) then doing this we will pass new seconf order info to the model 
+which i dont know what was the effect
+====
+
+the best old working loss was nassoc - but was not working well on spatial
+we also tried mdualirty and cpm - not good [coverage and qulity]
+then we moved to new kind of loss
+cohesion - cohesion says in avg how simialr each cells to its assigend proto cells
+doing this we expect the model to find clusters of highly simialr cells
+and the cohesion is designed so using more proto is better than making them die - so it shoud work as anti collapse as well
+
+what is the effect of cohesion term:
+
+what i want: get the best clusters where in avg each cell is in a cluster were it is most simialr to its cells
+
+
+====
+what worked best in submitted neruips: nassoc + usage + community
+problem: nassoc has merge bias - the only thing prevent it is when we merge - some prototype vol get 0 and make their values high
+but i am not sure if this is good enough
+
+what alters i tried: modualirty - cpm
+i think we had some good results on these - for exmaple i rememebr sweap banksy param we had some good results 
+but i dont knwo what was the config? what was it?
+
+then but we felt that both cpm and modualirty they try to push to unifrom size
+which wasnt what we want
+so i moved to cohesion - then i realized we are caluting on 1 batch 
+and its not good enough - for exmaple calls of a cbatch may think a proto is empty while its not
+so we decided to save a profile [weighted moving avg of affinity of assigend cells to each proto] among with size of each proto
+and consider those values
+but i dont know how it effected the results
+
+i need to fix the metrics i want - and baselines i care to beat

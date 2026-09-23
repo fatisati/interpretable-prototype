@@ -1,12 +1,9 @@
---to clear up---
-what is correct off diagonal [nassoc loss] 
-what is correct diagonal [which has no collapse - still has good performance on arbf pca]
-the cpm loss normalization is correct?
-in s28nsc - how do we compare leiden with cpm vs seacell [archetypal i mean] - bk02?
-does really nassoc diag has merge bias - but cohesion formual if we define sim[i, j] = aff[i, j] has no mereg bias? why?
-the community loss with weighted sampling is correct? what can we do?
+---published neurips on s28nsc - off diag min(vol)---
+the off diag should prevent merge - althogh diag would prefer merge
+[when good]: no dead proto - highe coverage - high joint purity
+[worth try?]: 
+ass diag and off diag would fight for merge - i feel it shoud not solve the problem 
+but as its the most simialr version to neruips may worth try
 
----todo---
-try published neurips loss - but with corrected off diagonal
-try published neruips - but with corrcted diagonal term with no merge bias - the cohesion formula but with sim[i, j] = aff[i, j]
-turn usage loss off - insted turn re init on
+
+

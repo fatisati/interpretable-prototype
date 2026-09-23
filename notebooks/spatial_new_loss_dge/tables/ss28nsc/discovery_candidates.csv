@@ -1,0 +1,31 @@
+cell_type,niche,n_niche_genes,n_hidden_from_pooled,frac_hidden,"pearson_r_scProto (new loss, pair)",hidden_genes
+Fibroblasts,Vascular stroma,34,1,0.029411764705882353,0.7817094262764719,GDF15
+Fibroblasts,Tumor surface,90,3,0.03333333333333333,0.7706036120195674,"CD276, TPM2, VIM"
+Fibroblasts,Desmoplastic stroma,56,1,0.017857142857142856,0.6693167737424187,VIM
+Macrophages,Macrophage islands,90,10,0.1111111111111111,0.456719861108905,"CD9, MMP19, INHBA, RGCC, ANXA2, CSF1, CD63, G6PD, NR1H2, IGF2R"
+Tumor cells,Tumor core,100,5,0.05,0.38357702954952594,"IGKC, CALD1, FOS, FCGR3A, CD68"
+Tumor cells,Tumor surface,97,1,0.010309278350515464,0.1222796975865237,CALD1
+Cytotoxic T cells,Desmoplastic stroma,32,3,0.09375,0.07854295657592174,"CXCL10, IGHG1, MT2A"
+Macrophages,Desmoplastic stroma,100,8,0.08,-0.10907468074139023,"CD9, TAP1, ANXA2, IGF2R, CSF1, ITGA5, MX1, ICAM1"
+Cytotoxic T cells,T cell aggregates,34,8,0.23529411764705882,,"CXCL10, LAMP3, STAT1, DUSP5, PTGDS, MALAT1, MT2A, RPL22"
+Regulatory T cells,Desmoplastic stroma,18,8,0.4444444444444444,,"C1QB, PTGES3, HLA.DQA1, PTGDS, HLA.DRB5, HLA.DRA, HLA.DQB1, HLA.DRB1"
+Macrophages,Tumor core,100,7,0.07,,"PPARD, ANXA2, ICAM1, MX1, CD9, JUNB, CSK"
+Macrophages,Tumor surface,100,7,0.07,,"ITGA5, ICAM1, PPARD, JUNB, ANXA2, ENG, BCL2"
+Regulatory T cells,Macrophage islands,11,7,0.6363636363636364,,"C1QB, HLA.DRA, LYZ, CD68, HLA.DQA1, HLA.DQB1, HLA.DRB1"
+Vascular endothelium,Alveolar spaces,48,7,0.14583333333333334,,"SAT1, RPL37, NEAT1, AZU1, TYK2, HLA.B, HLA.A"
+Macrophages,T cell aggregates,72,6,0.08333333333333333,,"CD9, IDO1, FOS, ANXA2, CD63, DUSP1"
+Macrophages,Vascular stroma,63,5,0.07936507936507936,,"CD9, ANXA2, MAF, JUNB, FOS"
+Macrophages,Airways,42,4,0.09523809523809523,,"ANXA2, CD9, CD63, JUNB"
+Cytotoxic T cells,Tumor surface,28,3,0.10714285714285714,,"PTGDS, IGKC, CRIP1"
+Respiratory epithelium,Airways,45,3,0.06666666666666667,,"HLA.DRA, HLA.DRB1, MIF"
+Tumor cells,Macrophage islands,41,3,0.07317073170731707,,"CD68, FCGR3A, COL1A1"
+Vascular endothelium,Vascular stroma,51,3,0.058823529411764705,,"CLU, SAT1, HLA.A"
+Cycling immune cells,T cell aggregates,7,2,0.2857142857142857,,"CCL19, IL32"
+Fibroblasts,Tumor core,45,2,0.044444444444444446,,"SQSTM1, VIM"
+Macrophages,Smooth muscle structures,22,2,0.09090909090909091,,"ANXA2, CD63"
+Tumor cells,Desmoplastic stroma,100,2,0.02,,"IGKC, COL8A1"
+Vascular endothelium,T cell aggregates,21,2,0.09523809523809523,,"CLU, RPL37"
+Fibroblasts,Airways,33,1,0.030303030303030304,,APOD
+Monocytes,Tumor surface,12,1,0.08333333333333333,,FN1
+Smooth muscle cells,Smooth muscle structures,15,1,0.06666666666666667,,TIMP1
+Smooth muscle cells,Vascular stroma,5,1,0.2,,TIMP1

@@ -1,0 +1,2 @@
+,pearson_r,kendall_tau,pearson_r_std,kendall_tau_std,tpr,tpr_std,n_pairs,n_metacells,median_mc_size
+"scProto (old loss, volume)",0.28618141961212284,0.19272540933341809,0.15263837398747873,0.13638804342805716,0.5339631523266892,0.22236844101378517,25.0,285.0,2.0

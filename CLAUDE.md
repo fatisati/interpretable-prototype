@@ -481,3 +481,10 @@ so i have to prepare new version of my paper - include new experiments - apply e
 and prepare paper for iclr submission so in case i got rejetced by neurips i will submit for iclr 
 
 please dont make up hallucinated things from yourself - make sure whatever reasoning you do for me is real and solid - not hallusicianted - this is important
+
+nassoc off diagonal correct dominator is min (voli, volj)
+===
+remind me these - if you thaught i am forgeting:
+each run should have a decision before running - what do you expect? how would effect your decision
+every run should end with verdict [works / fails / inconclusive-because- / abandoned, not worth the time.] - and incoclusive should be changed to some final state
+freeze scoreboard [metrics / baselines]

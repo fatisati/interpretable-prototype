@@ -1,0 +1,883 @@
+Baran et al. Genome Biology (2019) 20:206
+https://doi.org/10.1186/s13059-019-1812-2
+
+METHOD                                                                  Open Access
+
+MetaCell: analysis of single-cell RNA-seq
+data using K-nn graph partitions
+
+Yael Baran1, Akhiad Bercovich1, Arnau Sebe-Pedros1, Yaniv Lubling1, Amir Giladi2, Elad Chomsky1, Zohar Meir1,
+Michael Hoichman1, Aviezer Lifshitz1 and Amos Tanay1*
+
+Abstract
+
+scRNA-seq profiles each represent a highly partial sample of mRNA molecules from a unique cell that can never be
+resampled, and robust analysis must separate the sampling effect from biological variance. We describe a
+methodology for partitioning scRNA-seq datasets into metacells: disjoint and homogenous groups of profiles that
+could have been resampled from the same cell. Unlike clustering analysis, our algorithm specializes at obtaining
+granular as opposed to maximal groups. We show how to use metacells as building blocks for complex
+quantitative transcriptional maps while avoiding data smoothing. Our algorithms are implemented in the MetaCell
+R/C++ software package.
+
+Keywords: RNA-seq, scRNA-seq, Graph partition, Multinomial distribution, Sampling variance, Clustering, Smoothing
+
+Background                                                              microscopic sensor can reduce noise by resampling the
+Single-cell RNA-seq (scRNA-seq) is used extensively for                 same pixel or voxel, trading instrument time with preci-
+discovery and identification of cell types, for characteriz-            sion and resolution. In scRNA-seq, the major source of
+ing transcriptional states within them, and for inference               technical noise (not to be confused with various system-
+of continuous gene expression gradients linking these                   atic biases) is introduced through partial sampling of
+states. These phenomenological observations are used                    some 1000­10,000 RNA-molecules from the pool of
+for creating cell type atlases and as a starting point for              RNA within a cell, generating a highly discrete and noisy
+analysis of different cellular processes, including differ-             estimation for the concentration of any RNA species in
+entiation, cell cycle, and response to stimuli [1­9]                    this cell except very few super-high abundance genes. In
+(reviewed in [10]). The advent of scRNA-seq increased                   contrast to the microscopy analogy, the same cell cannot
+the resolution of models for transcriptional regulation by              be revisited and resampled to decrease sampling noise,
+orders of magnitude compared to prior bulk methods,                     since scRNA-seq technology involves lysing the cell. In-
+allowing precise and unbiased analysis of small cell pop-               stead, integration of data from different cells must be
+ulations as well as opening the way to quantitative mod-                used to simultaneously capture the true biological vari-
+eling of subtle within-population effects.                              ance among cells and the purely technical sampling vari-
+                                                                        ance of the experiment.
+  As technology matures, the analytical basis for inter-
+preting scRNA-seq experiments must become more                            When scRNA analysis is tuned toward cell type detec-
+principled. In a way similar to other experimental strat-               tion [6, 11], the implicit model assumption is that single
+egies aiming at improved resolution, scRNA-seq relies                   cells derived from the same transcriptional cluster are
+on the ability to integrate a large number of highly noisy              approximately identical. In this case, sampling noise can
+measurements for inferring a high-resolution model of                   be overcome by pooling the molecules from a suffi-
+some target sample. In analogy, when performing opti-                   ciently large number of cells, such that the expected
+mal reconstruction of a microscopic sample, a typical                   number of sampled transcripts (or unique molecular
+                                                                        identifiers (UMIs)) from each significantly expressed
+* Correspondence: amos.tanay@weizmann.ac.il                             gene allows precise inference of the concentration of this
+1Department of Computer Science and Applied Mathematics, Weizmann       RNA species in the idealized cell state that the cluster
+Institute of Science, Rehovot, Israel                                   represents. When aiming at modeling more subtle
+Full list of author information is available at the end of the article
+
+        © The Author(s). 2019 Open Access This article is distributed under the terms of the Creative Commons Attribution 4.0
+        International License (http://creativecommons.org/licenses/by/4.0/), which permits unrestricted use, distribution, and
+        reproduction in any medium, provided you give appropriate credit to the original author(s) and the source, provide a link to
+        the Creative Commons license, and indicate if changes were made. The Creative Commons Public Domain Dedication waiver
+        (http://creativecommons.org/publicdomain/zero/1.0/) applies to the data made available in this article, unless otherwise stated.
+Baran et al. Genome Biology (2019) 20:206                    Page 2 of 19
+
+molecular states, in particular those involving dynamics     scRNA-seq [34, 35]. Here we perform in-depth analysis
+of cellular differentiation or response to stimuli, the      of the model and its performance through re-analysis of
+clustering state homogeneity assumption can no longer        datasets including 8000 and 160,000 peripheral blood
+hold. In these scenarios, current techniques combine         mononuclear cells (PBMC), and by dissecting two
+handling of sparse data with modeling (implicitly or ex-     whole-organism single-cell RNA-seq maps from two
+plicitly) of cellular dynamics [3, 12­24]. Inference of ro-  worm species. The data show that metacells approxi-
+bust cell-to-cell similarity metrics from sparse data is     mate the expression distribution in a surprisingly accur-
+commonly used for construction of K-nn graphs over           ate fashion, dissecting the dataset into truly homogenous
+which dynamics are inferred. Smoothing sparse data           local neighborhoods and providing quantitative building
+[25­27] or imputation of transcriptional states [25, 28­     blocks for exploring the global expression manifold. We
+30] was proposed as a possible pre-process for modeling      suggest that MetaCell provides, especially as the size of
+similarity in the data. Model-based inference of tran-       single-cell atlases increases, an attractive universal first
+scriptional states from sparse data is on the other hand     layer of analysis on top of which quantitative and dy-
+still difficult to derive, since parametric models for       namic analysis can be developed further.
+single-cell RNA-seq data are lacking. Even though a
+basic parametric model for the sampling noise in             Results
+scRNA-seq profiles can be easily assumed, it is not rou-
+tinely explicitly integrated within a broader context of     Overview of the MetaCell method
+model inference from scRNA-seq data.                         The MetaCell construction pipeline partitions an
+                                                             scRNA-seq dataset into disjoint cell groups using a non-
+  In this paper, we introduce the notion of metacells and    parametric graph algorithm (Fig. 1a). This partition pro-
+develop a methodology for inferring and using them. A        vides initial metacells that can later be pruned and fil-
+metacell (abbreviated MC) is in theory a group of            tered for homogeneity. First, feature genes are selected
+scRNA-seq cell profiles that are statistically equivalent    and used to compute a raw cell-to-cell similarity matrix
+to samples derived from the same RNA pool. Such pro-         S. Second, a balanced K-nn similarity graph G is con-
+files should therefore be distributed multinomially with     structed, connecting pairs of cells that represent recipro-
+predictable variance per gene (approximately propor-         cally high-ranking neighbors. In contrast to a K-nn
+tional to the mean) and near zero gene-gene covariance.      graph built directly from S, which can be highly non-
+Moreover, given a set of scRNA-seq profiles that are de-     symmetric, the graph G has more balanced ingoing and
+rived from the same multinomial distribution, it is trivial  outgoing degrees. Third, G is subsampled multiple times,
+to infer the model parameters and establish their statis-    and each time the graph is partitioned into dense sub-
+tical confidence. If an entire scRNA-seq dataset could be    graphs using an efficient algorithm. The number of
+decomposed into disjoint metacells with sufficient cover-    times each pair of cells co-occurred in the same sub-
+age per metacell, many difficulties that follow from the     graph is used to define the resampled graph Gboot. After
+sparsity of the data would be circumvented. In practice,     these three layers of cell-to-cell similarity matrix
+one cannot assume a perfect metacell cover of the            normalization, the metacell solution is derived using a
+scRNA-seq dataset a priori, and we found that directly       graph partitioning algorithm applied to Gboot.
+searching for metacells using a parametric approach is
+highly sensitive to the many intricacies and biases of the     After the initial construction of a graph partition, we
+data. Instead, we propose to use non-parametric cell-to-     perform pruning and filtering of metacells to increase
+cell similarities and partition the resulting K-nn similar-  their homogeneity. We do not enforce a strict multi-
+ity graphs into densely connected subgraphs, which are       nomial model as empirical data only approximately sup-
+filtered to derive approximately multinomial metacells.      ports it (see in-depth analysis below), and instead ensure
+Metacells can then serve as building blocks for describ-     that clear violations of homogeneity are filtered. First,
+ing complex gene expression distributions with minimal       outliers are detected and filtered using a simple para-
+parametric assumptions, scaling well with the number of      metric test for gene overexpression compared to their
+cells and providing a more accurate approximation when       metacell. Second, the metacells' homogeneity is verified,
+increasing the number of sampled cells.                      and metacells showing strong sub-cluster structure are
+                                                             split. In practice, splitting is rarely necessary, but outlier
+  We implemented tools for deriving metacells and ana-       detection may require parameter tuning (see Add-
+lyzing scRNA-seq data using them in the new R/C++            itional file 1: Table S1). Third, metacells representing
+package MetaCell. The utility of the approach was re-        doublets (composed of groups of profiles that share a
+cently demonstrated in scenarios involving analysis of       similar doublet mixture) are searched for and filtered in
+mammalian hematopoiesis differentiation [31], immuno-        a supervised manner. Most of the doublets, however, are
+therapy [32], blood cancer [33], and inference of cell       identified as such during the outlier filtering stage.
+type decompositions in comparative whole organism
+Baran et al. Genome Biology (2019) 20:206  Page 3 of 19
+
+Fig. 1 (See legend on next page.)
+Baran et al. Genome Biology (2019) 20:206                   Page 4 of 19
+
+(See figure on previous page.)
+Fig. 1 Metacell analysis of the PBMC 8K dataset. a Schematics of the MC algorithmic pipeline. b Outlier/rare cells matrix showing color-coded
+number of UMIs per cells (columns) for which at least one gene (rows) was shown to be expressed significantly beyond its MC expected number
+of UMIs. Outlier/rare cells are ordered according to the annotation of the MC containing them (bottom color-coded bars). c Shown are log-fold-
+enrichment (lfp, methods) values for metacells, color-coded according to initial cell type annotation, comparing the T cell marker (CD3D) to a B
+cell (CD79A) and myeloid (LYZ) markers. d Heat map shows enrichment values for metacells (columns) and their maximally enriched gene
+markers. e Shown is the MC adjacency graph (numbered nodes connected by edges), color-coded according to their cell type and transcriptional
+state annotation. Cells are shown as small color-coded points localized according to the coordinates of MCs adjacent to them. Additional file 2:
+Figure S3 shows the adjacency matrix that was used to generate the projection
+
+  Figure 1a illustrates different types of metacells that   K = 100. The MC outlier/rare cell detection screen then
+are obtained in different experimental scenarios. When a    identified 182 cells with at least one outlier gene (8-fold
+limited number of single cells are sampled from a highly    or more enrichment over the respective MC model) (Fig.
+distinct transcriptional behavior, a metacell may define a  1b, Additional file 2: Figure S2). Most outlier cells
+completely isolated cluster (type I MCs). When a larger     showed potential doublet profiles, co-expressing genes
+number of cells are sampled from a cell state, several      associated with two different cell types. For example, this
+metacells may cover it, defining variation in secondary     effect was notable in the association of a coherent mega-
+biological behaviors (e.g., cell cycle) or even equivalent  karyocytic gene module (including PF4, PPBP and more
+transcriptional distributions (type II MCs). More inform-   genes) with signatures linked to other cell types. In fact,
+atively, when sampling a dynamic process that induces a     pure megakaryocyte expression profiles are very rare in
+transcriptional gradient across single cells, metacells     the data, and the MC outlier analysis highlights their
+may create a piecewise approximation of the process         identification (Additional file 2: Figure S2). In addition
+(type III MCs). We note that in the latter cases, the MC    to potential doublets, outlier cells also included repre-
+cover need not be uniquely defined.                         sentatives of rare cell types, including cells expressing
+                                                            progenitor markers (SOX4 [36]) or eosinophilic markers
+  Based on a filtered set of metacells, we can robustly     (MS4A2, MS4A3 [37]).
+explore the scRNA-seq transcription manifold, perform-
+ing marker-based annotation of the metacells, grouping        Doublet outlier cells are observed when two cell types
+of metacells into higher-order clusters, and visualizing    are mixed rarely in the data, thereby contaminating a
+the data by projecting metacells onto a 2D space. In es-    metacell associated with one cell type with a few mixed
+sence, the analysis downstream the identification of        signatures. More frequent doublet scenarios can give rise
+metacells is similar to common scRNA-seq strategies,        to homogeneous doublet MCs, as we observed for two
+but replacing sparse single cells, or smoothed single       cases combining expression of T cell marker genes (e.g.,
+cells, with fewer but more robust metacell profiles.        CD3D) with either B cell (CD79A) or monocyte (LYZ)
+                                                            markers (Fig. 1c). Following the removal of these two
+  MetaCell is readily applicable as an R/C++ package        doublet MCs, we ended up with a model organizing
+and is scalable to large datasets. The full method and      7901 cells in 80 MCs (45­176 cells per MC, median size
+implementation details are given in the "Methods" sec-      95 cells) and marking 375 cells as outliers or doublets.
+tion. Information on feature selection is provided in       This model was annotated using enriched gene markers
+Additional file 3.                                          (Additional file 2: Figure S3) and visualized using a
+                                                            marker heat map (Fig. 1d) and a 2D layout computed
+Metacells eliminate outliers and reconstruct cell type      from the MC adjacency matrix (Fig. 1e). This
+structure in PBMC data                                      visualization organizes transcriptional states in the blood
+We first illustrate the use of the MetaCell algorithm and   into clear cell type groups representing T, NK, and B
+pipeline through re-analysis of a small (n = 8276) dataset  cells; monocytes/macrophages; and DC populations.
+of PBMC scRNA-seq profiles sampled from a healthy           Within these cell types, the maps show additional struc-
+donor and downloaded from the 10x website. In a pre-        ture. For example, T cells were organized into CD8+ ef-
+processing step (see Additional file 2: Figure S1), we re-  fector states (marked by GZMH and additional genes),
+moved cells with less than 800 UMIs (Additional file 2:     CD8+ pre-effector states (marked by GZMK+), CCR7+
+Figure S1A) and several non-coding RNAs linked with         CD8+ cells with variable degree of cathepsin-W (CTSW)
+stress or apoptotic signatures ("blacklisted genes") (Add-  expression, naïve CD8+ cells (IL7R+), and CD4+ cells
+itional file 2: Figure S1B). We then applied the metacell   showing some activation of Treg genes (FOXP3+). Over-
+construction pipeline as outlined above, using 816 high     all, when sampling at a depth of 8000 cells, the metacell
+variance genes as features (Additional file 2: Figure S1C,  analysis allowed for robust identification of cell types
+excluding ribosomal proteins) and deriving an initial set   and initial modeling of gene expression distribution
+of 82 MCs following 1000 resampling iterations using
+Baran et al. Genome Biology (2019) 20:206  Page 5 of 19
+
+Fig. 2 (See legend on next page.)
+Baran et al. Genome Biology (2019) 20:206                    Page 6 of 19
+
+(See figure on previous page.)
+Fig. 2 Evaluation of within-MC transcriptional homogeneity. a Shown are the number of incoming and outgoing neighbors (or degree) per cell,
+averaged over metacells that are color-coded by cell type annotation as in Fig. 1. The data represent the raw K-nn similarity graph (left), balanced
+MC graph (center), and resampled co-occurrence graph (right). b Heat map summarizing the number of edges in the balanced MC graph that
+link two cells associated with different MCs. Similar matrices generated based on the raw and co-occurrence graphs are shown in Additional file
+2: Figure S4. c Bar graph shows the closure per MC (fraction of intra-MC edges out of all edges linking cells in the MC). d Observed (blue) vs
+predicted (red, based on binomial model) distributions of down-sampled UMI count per gene within MCs. For each of the 5 MCs depicted, the
+plots show binomial fit for the top 8 enriched genes. Intervals give 10th and 90th percentiles over multiple down-samples of the cells within
+each metacell to uniform total counts. e Over-dispersion of genes relative to a binomial model across genes and MCs. Colors encode ratio of
+observed to expected variance across genes (rows) and MCs (columns). Only genes and MCs manifesting high over-dispersion are shown. f
+Residual within-MC correlation patterns compared with global correlation patterns. Within-MC correlation matrix (left) was computed by
+averaging gene-gene correlation matrices across MCs, where each matrix was computed using log-transformed UMIs over down-sampled cells.
+Global correlation matrix (right) was computed in the same manner, but following permutation of the MC assignment labels. For both matrices,
+only genes manifesting strong correlations are shown. g Examples of residual intra-MC correlated genes, showing observed correlations (Pearson
+on log-transformed down-sampled UMIs) compared to correlations expected by sampling from a multinomial. MC #66 show weak residual
+correlations reflecting mostly stress genes. MC #70 shows stronger residual correlations, reflecting residual intra-MC variation
+
+within them. Additional coverage can lead to refined         MetaCell graph balancing procedure alleviates such ef-
+modeling of transcriptional distributions within cell        fects. The approach is somewhat similar to methods
+types as we shall demonstrate below, but first, we will      using mutual K-nn analysis to normalize batch effects
+use this basic model to evaluate the similarity structure    [38, 39], or more generally to approaches using symme-
+and homogeneity of metacells.                                trization of the K-nn graph to facilitate dimensionality
+                                                             reduction [40].
+MetaCell graphs define a symmetrized and modular
+adjacency structure between MCs                              Comparing metacells' graph closure with their
+The impact of the procedures transforming raw cell-to-       transcriptional homogeneity
+cell similarities to the MetaCell graph are illustrated for  To quantify the accuracy of the MC approximation to
+the PBMC data in Fig. 2a. The initial distribution of in-    the similarity graph, we computed the fraction of K-nn
+degree in the K-nn graph (Y axis, left panel) shows sig-     similarities captured within each MC, which we refer to
+nificant variation, which is corrected by a graph balan-     here as the MC's closure. As shown in Fig. 2c, the level
+cing procedure (middle panel). The resampled co-             of closure varies considerably between cell types. Dis-
+occurrence graph maintains the linkage between in and        tinct and low abundance cell types (type I MCs) can
+out degrees, but decreases the connectivity of the graph     show very high closure (up to 100%), while multiple
+for specific cell types that are under-sampled (right        MCs that cover abundant cell types (type II or III MCs)
+panel). This actual effect of these transformations on cell  show overall low closure (as low as 10% within-MC adja-
+type modularity is analyzed through the MC adjacency         cencies, 20­30% within the three most linked MCs). Im-
+matrices that summarize connectivity between cells           perfect closure may suggest that the MC partition is
+within each pair of MCs. Comparing raw K-nn, bal-            suboptimal or, alternatively, that the K-nn local similar-
+anced, and resampled MC similarities (Fig. 2b and com-       ity structure in large and diffused cell types is covered by
+pare Additional file 2: Figure S4) shows for example         multiple, non-maximal but still homogeneous MCs
+initial spurious connectivity from NK cells (MC #56) to-     (Type II MCs in Fig. 1a). To test this, we compared the
+ward T cells and from pDCs (MC #70) toward multiple          intra-MC UMI distribution to the distribution predicted
+cell types in the raw matrix, which are eliminated in the    by a simple multinomial model for specific genes and
+balanced and resampled matrices. This comparison also        MCs (Fig. 2d). We found that low closure MCs show
+highlights cases of myeloid MCs connecting a large           high degree of consistency with the multinomial model,
+group of monocyte MCs and cDCs (#15) or monocytes            confirming their homogeneity. Interestingly, MCs with
+and macrophages (#17), that provide better separation        very high closure may show a reciprocal behavior, where
+with the more differentiated MCs in the balanced and         additional high variance is present within K-nn consist-
+resampled matrices. The resampled matrix in particular       ent clusters (e.g., MC #70; note the bimodal distributions
+provides improved modularity within the large group of       observed for most genes). This analysis highlights a key
+T cell MCs, for example, grouping of CCR7+ T cell            property of the MC partition: MCs are not maximal, and
+MCs into distinctive clusters. In summary, in a typical      multiple highly similar MCs which are only weakly sepa-
+scRNA-seq dataset, the combination of abundant and           rated in the similarity graph can together approximate a
+rare states leads to an asymmetric K-nn structure linking    larger cluster.
+rare cells with hubs within large clusters, and the
+Baran et al. Genome Biology (2019) 20:206  Page 7 of 19
+
+Fig. 3 (See legend on next page.)
+Baran et al. Genome Biology (2019) 20:206                   Page 8 of 19
+
+(See figure on previous page.)
+Fig. 3 MCs robustly approximate the expression manifold. a Boxplots show the distribution of predicted (using MC pool frequencies) UMI
+fraction per cell stratified according to observed number of UMIs in down-sampled single cells. b Shown are per-gene Pearson correlations
+between predicted and observed gene frequencies for genes, color coded according to the gene's frequency across all cells. In all cases,
+predictions are generated using a 100-fold cross-validation scheme (see the "Methods" section for exact description of the procedure and the
+strategies compared). Predictions using K-nns over raw MC similarities (a different neighborhood per cell consisting of its k most similar
+neighbors) are used as reference. It is compared to strategies defining cell neighborhoods using MCs (fixed disjoint grouping of cells), K-nn over
+Seurat distances, and MAGIC distances (weighted neighborhood according to diffusion distances). c Similar to panels in b but comparing
+accuracy with and without applying cross validation. Points with high value along the y axis represent potential over-fitting. d, e Per-MC (left
+most column) or smoothed per-cell (all other columns) expression values for pairs of genes, portraying putative transcriptional gradients
+
+Multinomial sampling explains most of the intra-MC UMI      intra-MC correlations of cytotoxic and many other func-
+                                                            tional genes. The scarcity of strong intra-MC gene-gene
+variance                                                    correlations (see for example Fig. 2g, MC #66) suggests
+Systematic screening for genes showing intra-MC over-       that little residual structure remains within the MCs,
+dispersion (Fig. 2e) provides a global view on the          and that the dataset is well summarized by the MC pro-
+consistency of the PBMC MC cover with simple multi-         files. In the few cases where intra-MC correlations are
+nomial sampling. In this screening, MCs containing re-      observed (Fig. 2g, MC #70), they indicate the need for a
+sidual, non-homogeneous structure will be associated        more flexible intra-MC modeling, or alternatively call
+with many over-dispersed genes. For example, this ana-      for deepening the dataset with more cells defining the
+lysis associates the dendritic cells MC #70 with over-      transcriptional states underlying the MC.
+dispersion of multiple megakaryocyte-associated and
+other genes. This suggests that these poorly sampled cell   Metacells are accurate local approximations of the
+types show additional hidden structure and potential        expression manifold
+remaining outlier cells. The screening also reveals spe-    All approaches for analysis of scRNA attempt to describe
+cific genes that are consistently over-dispersed across     aspects of the expression manifold, each relying on different
+many MCs, such as the early-immediate response gene         assumptions. MetaCell generates a high-resolution partition
+module (including the transcription factors JUN, JUNB,      of the data, thereby focusing on approximating it locally.
+FOS). This over-dispersion is consistent with variable      We tested the quality of this approximation using a cross-
+levels of activity of this pathway in multiple cell types,  validation scheme, in which we predict the expression of
+perhaps representing technical experimental stress.         each gene using a MetaCell model trained on data from
+Other genes are over-dispersed in a cell-type specific      which the gene was left out. Figure 3a illustrates the out-
+fashion, for example cytotoxic (GNLY, CCL5) genes in        come of such prediction, showing accurate prediction for
+NK and T subtypes, and MHC-II and LYZ in myeloid            highly expressed genes and lower accuracy for low-UMI
+cell types. These highly expressed genes may be incom-      counts, for which sampling variance is high. We wanted to
+patible with a simple multinomial sampling model, and       compare these predictions to those obtained using the
+their analysis may necessitate assuming prior biological    models that underlie commonly used approaches for
+variance to allow for over-dispersion. Beyond these spe-    scRNA-seq analysis. To this end, we computed the cell-to-
+cific examples, however, intra-MC distributions for the     cell similarity matrices inferred by Seurat's [12] PCA-based
+entire gene set (including genes that were not used as      approach and by a diffusion strategy as implemented in
+features for defining similarities) are generally well ap-  MAGIC [25]. We also included in the comparison the simi-
+proximated by Poisson sampling with no zero inflation       larity matrix S initiating the MetaCell balancing process.
+(Additional file 2: Figure S5). Together, the data shows    For all similarities, we employed the same cross-validation
+that the degree of residual, intra-MC over-dispersion is    scheme that was applied to the MetaCell model, and com-
+relatively low in the PBMC MC cover, so that the vari-      puted local predictions by averaging 50 nearest neighbors
+ance of most genes is accounted for by a model assum-       for Seurat and S, and weighting all cells by their similarities
+ing partition of cells into MCs from which UMIs are         for MAGIC (see the "Methods" section for a complete
+multinomially sampled.                                      description).
+
+  Analysis of intra- and inter-MC gene-gene covariance        Differences in prediction accuracy should reflect the
+(Fig. 2f) provided an additional avenue for diagnosing      different similarity measures employed by each method
+structure within and between MCs. We observed persist-      as well as the effect of disjoint partitioning applied in
+ent intra-MC correlations between a limited set of genes,   MetaCell. In theory, the partitioning strategy should pro-
+including the over-dispersed modules of early-immediate     vide less modeling flexibility compared to approaches
+genes, MHC class II genes, and S100 genes as well as a      that compute cell-specific neighborhoods. The latter ef-
+correlated gene set including actin-related genes (ACTB,    fect should be particularly noticeable when several MCs
+ACTG1, COTL1, PFN1). We did not observe strong
+Baran et al. Genome Biology (2019) 20:206                   Page 9 of 19
+
+Fig. 4 MC analysis of a whole-organism single-cell dataset. a 2D projection of C. elegans metacells and single cells, color-coded according to the
+most frequent cell type based on the classification from Cao et al. b Top--normalized expression of 1380 highly variable genes across 38,159 C.
+elegans single cells (columns), sorted by metacell. Bottom--bar plot showing for each metacell the single-cell composition of the different
+originally classified cell types. c Relationship between the metacell median cell size (UMIs/cell) and the fraction of cells originally labeled as
+"unclassified" in Cao et al. d Comparison of the median sizes (UMIs/cell) of originally unclassified cells versus classified cells in each metacell. e
+Expression (molecules/10,000 UMIs) of selected marker transcription factors (top row) and effector genes (bottom row) across all metacells,
+supporting high transcriptional specificity for four examples of metacells containing a high fraction (> 80%) of originally unclassified cells
+
+discretize a continuum, such as differentiation trajectory  the biological variation in the data, while eliminating
+(type III MCs, Fig. 1a). In practice, we observed rela-     most of the sampling noise.
+tively mild differences between the different approxi-
+mations (Fig. 3b), with very few genes losing accuracy      Metacells avoid artefactual gradient effects
+when MCs are used. Moreover, analysis of the gain in        We showed that the cell partitioning induced by MetaCell
+accuracy when including all genes in the models (Fig.       does not decrease local approximation accuracy and that,
+3c) suggested that MetaCell is significantly less ex-       in fact, it even reduces the model's tendency to over-fit
+posed to over-fitting than the K-nn approaches. The         the data. We speculated that another advantage of parti-
+diffusion-based smoothing approach showed minimal           tioning would be robustness to over-smoothing. The dis-
+overfitting, but also loss of accuracy (Fig. 3c). Overall,  cussion about over-smoothing recently arose in the
+the nearly multinomial intra-MC UMI distribution            context of evaluating scRNA-seq imputation methods, i.e.,
+observed above and the minimal loss of predictive           methods that use the covariance patterns measured across
+power entailed by the MetaCell disjoint partition, to-      multiple cells and genes to refine per-gene, per-cell mea-
+gether suggest that MCs succeed in capturing most of        surements (reviewed here [41]). Most imputation methods
+Baran et al. Genome Biology (2019) 20:206  Page 10 of 19
+Baran et al. Genome Biology (2019) 20:206                      Page 11 of 19
+
+(See figure on previous page.)
+Fig. 5 MC analysis of a 160K PBMC multi-batch dataset. a, b Matrix (a) and graph (b) visualization for the similarity structure associating MCs in a
+model characterizing 162,000 PBMCs. Clusters in the MC matrix are used for linking specific groups of MCs with specific annotation and for color
+coding. c Shown are the fraction of cells from different sorting batches per MC, color coded white to red to black and visualized using the MC
+2D projection as shown in Fig. 4B. d Shown are lfp values for MCs in the PBMC 160K model, comparing intensity of Perforin expression (X axis) to
+several genes correlated with the CD8+ effector program. e Similar to d for genes showing transient activation during the effector program
+build-up. f Similar to d for CD8 genes, LAG3 (a T cell exhaustion marker) and a representative ribosomal protein gene
+
+are local in the sense that they impute gene expression for    Additional file 2: Figure S7) to the published model
+a cell using its inferred neighborhood. It has been ob-        grouping cells into 27 major cell types (Fig. 4b). We ob-
+served [27, 28] that in some cases imputation tends to en-     served a high degree of consistency between the two
+force spurious proximities between cells, which in turn        models in classifying the major cell types, with higher
+manifest as artefactual gradients, i.e., discrete states per-  resolution in dissecting cell types into subtypes using
+taining to be a series of cells gradually modulating expres-   MCs (e.g., for body wall muscles, seam cells and more).
+sion of certain genes along a temporal process or a spatial    Importantly, we observed a large number of cells labeled
+axis. While over-smoothing is detected directly when           originally as "unclassified" or "unclassified neurons/glia"
+evaluating imputation methods, it is in fact a potential       that were organized within coherent MCs. Some of these
+concern with any model regardless of its downstream ap-        MCs were dominated completely or almost completely
+plication, and stems from the manner in which cell-cell        by unclassified cells. Moreover, we observed a negative
+similarities are defined.                                      correlation between the median number of UMIs per
+                                                               cell in a metacell and the fraction of unclassified cells
+  We evaluated the susceptibility of the MetaCell model        within it (Fig. 4c). Comparing the number of UMIs per
+to over-smoothing using the expression predictions ob-         cell within MCs showed consistently lower UMI counts
+tained in the previous section (the version without            for unclassified cells (Fig. 4d). The transcriptional speci-
+cross-validation), comparing the different similarity          ficity of MCs containing large fractions of unclassified
+structures included in that experiment. Our results sup-       cells was uniformly high, as confirmed by observation of
+port the robustness of MetaCell to artefactual gradients       co-expression of specific transcription factors and genes
+(Fig. 3d). For example, NK cells are known to be charac-       within such MCs (Fig. 4e). Similarly, MetaCell analysis
+terized by high levels of KLRF1, but do not express the        of the rich whole-organism cell type map of Planaria
+T cell classical marker CD3 (Fig. 3d, top). Smoothing          showed extensive consistency between the MC partition
+based on K-nn similarity structures (MetaCell's K-nn or        (564 MCs) and the iterative and highly supervised clus-
+Seurat's) or on diffusion similarities (MAGIC's) gives rise    tering analysis (512 clusters) used to annotate the ori-
+to phantom gradients that can be interpreted errone-           ginal map (Additional file 2: Figure S8). In summary,
+ously, for example, as supporting differentiation of NK        while MetaCell is not designed to perform clustering in
+to T cells or vice versa. The MC statistics generate a         its classical sense, a metacell partition facilitates robust
+much less detailed, but likely more realistic map of joint     and sensitive cell type mapping of scRNA-seq data, in
+CD3D/KLRF1 expression. Similar phantom gradients are           particular when gene expression and cell type sizes are
+observed when analyzing CCR7+ CD8+ and CCR7+                   extremely heterogeneous.
+CD8- cells (Fig. 3d, bottom). On the other hand, the
+MC model does reveal expression gradients in cases             High-resolution analysis of inter- and intra-cell type states
+where sampling adequately supports them, such as in            in the blood
+the trade-off expression of GZMK+ and GZMH+ in T               We next tested the scaling of the MetaCell algorithmic
+cells (Fig. 3e). These quantitative gradients are refined in   pipeline when applied to datasets sampling deeply a rela-
+the denser dataset we analyze below. Robust modeling of        tively small number of cell types by analyzing RNA from
+transcriptional gradients by MCs is also demonstrated          160K single blood cells, including 68K unsorted PMBCs
+on simulated data (Additional file 2: Figure S6).              and 94K cells from ten different bead-enriched popula-
+                                                               tions [44]. We hypothesized that, with increased number
+Dissecting complex cell type hierarchies with MetaCell         of cells, we could derive MCs with enhanced quantitative
+We tested the scaling of MetaCell to datasets consisting       resolution and increased homogeneity, thereby allowing a
+of a large number of cell types and high variability in the    more accurate identification of regulatory states and dif-
+total number of UMIs per single cell. To this end, we          ferentiation gradients in the blood. We derived a model
+revisited two whole-organism scRNA-seq studies dis-            organizing 157,701 cells in 1906 metacells, identifying
+secting C. elegans (Caenorhabditis elegans) [42] and Pla-      4475 cells as outliers. Figure 5a summarizes the similarity
+naria (Schmidtea mediterranea) [43]. For C. elegans, we        structure over the inferred MCs, indicating partitioning of
+compared the derived MC partition (349 MCs) (Fig. 4a,
+Baran et al. Genome Biology (2019) 20:206                       Page 12 of 19
+
+the dataset into T cells, NK cells, B cells, myeloid cells,     through analysis of the transcriptional signatures in ef-
+megakaryocytes, and progenitor cells. In-depth analysis of      fector CD8+ T cells. Activation of the T cell effector
+the emerging cluster and sub-cluster structure in this          program ultimately depends on expression of units of
+matrix allowed us to identify groups of related MCs for         the cytotoxic granule (granzymes, cathepsins, granulysin)
+further analysis, in many cases providing us with the abil-     and of the machinery required for perforating target
+ity to zoom into transcriptional programs (cell groups          cells (e.g., perforin) [45]. Elevated expression of Perforin
+numbered 1­13 on Fig. 5a) within large-scale clusters that      1 (PRF1) is indeed observed in a subset of the CD8+
+were identified in the global metacell 2D projection graph      MCs, spanning a spectrum of intensity from background
+(Fig. 5b). Visualization of genes that were specifically        level to 10-fold enrichment over it. We observed PRF1
+enriched in such programs demonstrates both bimodal             enrichment to correlate strongly with multiple additional
+markers and putative quantitative gradients organizing          effector genes, for example granzyme H and B, FCGR3A,
+MCs within and between types (Additional file 2: Figure         and KLRD1 (Fig. 5d), consistent with the idea of a
+S9). For example, we observed the correlated (and bifur-        spectrum of transcriptional states with variable effector
+cated) intensity of CD8A and CD8B expression in cyto-           gene toolkit expression in the blood. Remarkably, we
+toxic and memory T cells, the variable MHC-I expression         identified a second set of genes showing elevated expres-
+(HLA-A,HLA-C) in different cell sub-types (group [6]),          sion in MCs with low-to-intermediate effector program
+variable levels of granzyme K and granzyme H expression         expression (Fig. 5e), including most notably granzyme K
+along a putative cytotoxic gradient of CD8+ cells (groups       (GZMK) and the phosphatase DUSP2, but possibly also
+[1], [3]), and a group of MCs expressing cathepsin W and        the chemokine receptor CXCR4 and the adhesion/motil-
+CCR7+ but without the cytotoxic gene module (group              ity molecule AMICA1/JAML. The effector program ex-
+[5]). The analysis of specific gene families (see Additional    pression gradient was also associated with decrease in
+file 2: Figure S10) illustrates how multiple effector genes     relative housekeeping gene expression (e.g., ribosomal
+are activated in different cell types in a convergent fashion   proteins, Fig. 5f). We note that the association between
+(Additional file 2: Figure S10A). Analysis of transcription     the transcriptional gradient of effector genes and tem-
+factor expression across the different subtypes (Additional     poral or differentiation processes cannot be assumed im-
+file 2: Figure S10B) provided an initial blueprint for the      mediately. It is nevertheless tempting to suggest that
+regulatory mechanisms defining the observed transcrip-          effector program activation involves transient expression
+tional states. Importantly, the integration of different sort-  of the GZMK-linked genes observed here, suggesting
+ing batches allowed for enhanced resolution in several          several experimental directions for follow-up toward a
+hematopoietic lineages, in particular CD34+ progenitor          better understanding of T cell commitment and regula-
+cells (Fig. 5a, group [11]). Nevertheless, all MCs within the   tion in the blood and other organs, and in particular
+non-progenitor cell types represented a balanced mixture        within tumors [29, 46].
+of sorted and non-sorted batches (Fig. 5c). We note that
+the metacells produced by MetaCell's specialized partition      Discussion and conclusions
+algorithm cannot be reproduced by conventional cluster-         We introduce here the use of metacells for analyzing
+ing, at least when used naively. We demonstrate this by         scRNA-seq data. Metacells are defined as groups of
+clustering the PBMCs with Seurat using parameters that          single-cell profiles that ideally represent re-sampling
+force fine clustering, generating 817 clusters (Additional      from the same cellular state. In practice, we compute
+file 2: Figure S11). As shown in Additional file 2: Figure      MCs as a graph partition using adequately processed
+S11A, the MC partition is consistent with these fine clus-      similarities between single-cell profiles. We demonstrate
+ters at the level of the coarse-grained cell types, but not at  that in real data, we can construct partitions such that
+higher resolutions. The fine clustering solution generates      the intra-MC UMI distribution can be approximated as
+clusters that are likely to be overfitting specific genes       sparse multinomial sample, representing sampling from
+(Additional file 2: Figure S11B). In summary, for the           a highly specific transcriptional state with no significant
+densely covered, multi-batch 160,000 PBMC datasets,             additional variance. We show how to screen for MCs
+MetaCell provides analysts with a platform for distinguish-     with over-dispersion or residual pairwise gene correla-
+ing cell types and their internal hierarchies, and a robust     tions, reflecting deviation from this model and residual
+scheme for characterizing quantitative expression gradi-        intra-MC biological variation. We then demonstrate
+ents with guarantees against spurious smoothing effects.        how the MCs can be used for in-depth exploration of
+                                                                large data sets involving either a rich set of cell types
+Using MCs to define gradients of CD8+ effector T cell           (whole organism) or a limited and over-sampled set
+activation                                                      (PBMCs). The analysis methodology we advocate in-
+Finally, we demonstrate the potential of applying Meta-         volves direct inspection of the MC adjacency matrix,
+Cell for in-depth analysis of differentiation gradients         which provides analysts with complete information
+Baran et al. Genome Biology (2019) 20:206                    Page 13 of 19
+
+about cell type hierarchy and supports clustering at ap-     denoted by a set of cell subsets Mk and a set of outliers
+propriate resolution. Combined with visual examination       O such that ð MkÞO ¼ I.
+of correlation patterns between MC-enriched genes, the
+result is a detailed and unbiased characterization of cell                           k
+types and expression gradients that we have already used
+in several challenging analysis scenarios [31­35].             We assume a set of gene features F  G is specified
+                                                             and focus our analysis on a similarity graph between
+  The main property that makes metacells a powerful          cells derived using data from these features (see below).
+analysis tool is their ability to increase the signal-to-    We discuss several strategies for selecting genes in Add-
+noise ratio in the data without introducing biases stem-     itional file 3. We note that our features represent indi-
+ming from mistaken modeling assumptions or over-             vidual genes rather than principle components or other
+smoothing of the data. The only manipulation per-            forms of reduced dimensions. This enables some direct
+formed by MetaCell on the data is the pooling of highly      approaches to testing and correcting the gene expression
+similar cells, thereby forming a partition of the data. The  distributions within metacells. It also forces the model-
+analyses we present show that, despite enforcing this        ing of similarities and derivation of metacells to work
+partitioning, a metacell cover provides accurate local ap-   over high-dimensional spaces and to account for noise
+proximations of the expression manifold. At the same         and sparse data directly. Applying the metacell algorith-
+time, partitioning entails multiple advantages. Statisti-    mic pipeline to similarity structures derived using popu-
+cally, it greatly reduces the effective number of parame-    lar dimensionality reduction techniques is easily
+ters of the model, making it less prone to over-fitting      applicable as well, as we demonstrate in the results
+and to over-smoothing compared with naïve smoothing          section.
+approaches. For the analyst, it allows for the
+characterization of well-defined, discrete and highly        The metacell balanced K-nn cell similarity graph
+granular states in a conservative and easy-to-interpret      A well-founded parametric generative model for scRNA-
+framework.                                                   seq data is currently missing, mainly due to the limited
+                                                             understanding of the biological variation in transcrip-
+  In cases where residual intra-MC structure is detected     tional states within different cell populations, and the re-
+in the cover, additional cells can be sampled to refine      markable diversity of coupled (e.g., developmental) and
+the MC cover and tighten the approximation. Funda-           uncoupled (e.g., cell cycle, stress) biological processes
+mentally however, in any realistic data set, there will al-  that are captured in typical single-cell RNA-seq maps.
+ways remain some under-sampled behaviors regardless          We therefore use a simple non-parametric approach for
+of sampling depth, and our current model will not pro-       modeling raw pairwise local similarities, which is then
+vide a constructive approach for understanding such be-      refined by additional analysis of the derived cell K-nn
+haviors beyond signaling them out as non-                    similarity structure. We transform the raw UMI count U
+homogeneous. Fitting more flexible intra-MC models,          on the gene features F as U  = [ugi] = [log2( + ugi)]g  F
+capable of accounting for not only sampling noise but        and compute the raw similarity matrix using the Pearson
+also convergent processes such as cell cycle or stress [47,  correlations on the transformed features R = [r(ugi, u
+48], or embedding the metacells in hierarchical or multi-    gj)]ij. A simple variation on this procedure may include
+resolution structures [49, 50] should allow for more effi-   prior normalization of the U matrix by down-sampling
+cient extraction of the signals of interest. We view the     (sampling min(ui) UMIs from each cell without replace-
+integration of such models as an important future exten-     ment) so as to avoid biases associated with improved ac-
+sion of this work.                                           curacy (and thereby higher similarity) between deeper
+                                                             UMI profiles. We however avoid down-sampling when
+Methods                                                      the distribution of the number of UMIs per cell is highly
+                                                             variable and correct for the sampling bias when manipu-
+Notation and definitions                                     lating the similarity graph as described below.
+We assume raw scRNA-seq reads are mapped to gen-
+ome sequences and assigned to cell barcodes and unique         Next, we use the raw similarity matrix R to generate a
+molecular identifiers (UMI) using pipelines that elimin-     weighted adjacency matrix for a directed cell graph, in
+ate most of the UMI duplications induced by PCR and          which a heavy edge from cell i to cell j indicates strong
+sequencing errors. We summarize all UMIs in the mol-         attraction of the former to the latter. We first perform a
+ecule count matrix U = [ugi] on genes g  G and cells i       non-parametric transformation by computing S = [sij] = [
+I. We define ug as the total molecule count for gene g       rankj(rij)]. Here rank is the ranking function, and each
+on the raw count matrix, and ui as the total number of       row represents the order of similarity between all cells j
+molecules for a cell (sometime referred to as the cell's     and a specific cell i. The S matrix is highly non-
+depth). The procedures below are designed to robustly        symmetric, for example when the similarities going from
+define a metacell partition over the cells, which is         an outlier cell are linking it to members of a large,
+Baran et al. Genome Biology (2019) 20:206                       Page 14 of 19
+
+homogeneous, and highly connected cell group. To bet-             The seeding step produces an initial set of subgraphs
+                                                                Mk = {i | mc(i) = k} that forms a basis for further
+ter control for such effects, we perform the following          optimization. Define the outgPoing association of each
+                                                                cell to a subgraph as woik ¼ f jNoutðiÞMkgaij (recall a
+balancing operation. We first symmetrize S by multiply-         are the graph weights), and analogously the incoming
+ing ranks sij  sji, followed by initial regularization of       P subgraph association for each cell as wiik ¼
+edges using a threshold K2 (setting  = 10 by default)
+                                                                   f jNinðiÞMkgaji . The combined cell-to-subgraph associ-
+on the rank product:                                            ation is computed by multiplying the outgoing and in-
+                                                                coming weights and normalizing by the respective
+hi     ¼    Â       À     2  -sij  Ãsji;   ÁÃ                   subgraph size: wik = wiik woik/|Mk|2. We use this scoring
+ si1j          max K                      0                     scheme to iteratively optimize the initial graph cover,
+                                                                and ensure that it includes all cells:
+  We then perform two rounds of additional
+regularization, first keeping maximum scoring K in-               Until convergence:
+coming edges for each node ( = 3 by default):                       Select a cell i
+                                                                    Reassign mc(i) = argmaxk wik
+hi h                                 i                              Update weights
+si2j ¼ max K - ranki si1j ; 0
+                                                                  Convergence is defined by deriving a partition in
+and then further filtering to keep maximum K outgoing           which all cells are associated with their highest scoring
+                                                                subgraph. To enforce convergence (which is not guaran-
+edges  for  eahch  node:                        i               teed to occur in general), we slowly increase the score
+    Â  Ã                           j si2j ;    0                association between cells and their current subgraph
+aij ¼ max K -                rank                               after each reassignment. This is especially useful when a
+                                                                large subset of cells (i.e., larger than K) are very homoge-
+  A weighted directed graph G is then constructed using         neous, which may result in unstable exchange of nodes
+[aij] as the weighted adjacency matrix. Note that nodes         between several modules covering this subset.
+with degrees lower than K are possible following this
+procedure, since outlier cells may become disconnected            After convergence, there are no formal guarantees on
+or poorly connected during the balancing operations.            size distribution of the subgraphs produced by the algo-
+                                                                rithm. Empirically, however, the connectivity of the
+Seeding and optimizing graph partitions                         graph (maximum K outgoing edges) and the seeding
+We partition the balanced similarity graph G into dense         process promote a relatively uniform cover partition
+subgraphs using an adaptation of k-means to graphs. Let         and prevent convergence toward solutions with very
+the parameter K define the typical desired size of sub-         large subgraphs. Rare cases of cells that reside in con-
+graphs in the partition (which is also the maximum out-         nected components whose size is smaller than size _ min
+degree of the graph G as constructed). Denote by Nout(i)        and were left uncovered during seeding are defined as
+the set of graphic outgoing neighbors of i. We initialize       outliers.
+an empty assignment of cells to subgraphs mc(i) = - 1,
+define the set of covered nodes as C = {i | mc(i) > - 1}          Importantly, the complexity of the entire procedure
+and the cover-free score for each node as f(i) = |Nout(i) ­     (seeding and optimization) is linear in the number of
+C|. We then sample subgraph seeds using an iterative            cells and the maximum degree K (or alternatively, linear
+procedure:                                                      in the number of edges in the graph). An efficient imple-
+                                                                mentation of the algorithm therefore scales well to large
+  Initialize k = 0                                              datasets, as does its integration within an extensive re-
+  While max f ðiÞ > size min do:                                sampling strategy, as we discuss next.
+
+    sampleia new seed cell j by drawing a sample from           Resampling graph partitions and computing metacells
+    cells in I - C with weights proportional to f(i)3           We improve the robustness of the above randomized
+    update mc(u) = k for u = j, u  Nout(j) - C                  graph partition algorithm using a resampling approach.
+    Increment k and update C, f.                                Given the balanced graph G, we generate a series of sub-
+                                                                graphs b = 1. . NB (typically NB = 500) by sampling cells
+  We terminate seeding using a minimum subgraph size            independently without replacement with probability 
+parameter size _ min < K. When we meet the stop cri-            (typically  = 0.75) and adding all edges connecting
+terion, cells that are not associated with a seed (i.e., cells  them, forming Gb = (Vb, Eb), Vb  V, Eb  E. For each
+for which mc(i) = - 1) have at most size _ min uncovered
+neighbors and in particular will almost always have at
+least one covered neighbor (since the degree in the bal-
+anced graph is typically K).
+Baran et al. Genome Biology (2019) 20:206                                                                           Page 15 of 19
+
+resampled Gb, we apply the partition algorithm, thereby                                       !
+generating a set of partial graph partitions mcb(i) for
+each i  Vb. We summarize all partitions using the               f gi ¼ log2         1 þ ugi      ; iMk
+                                                                                   1 þ uipgk
+matrices O = [oij] and C = [cij], specifying how many
+times the pair of cells i, j were resampled together,             Note that the regularization (adding 1 to observed and
+                                                                expected count) implies that high fold change values
+and how many times they were both assigned to the               (e.g., > 2) cannot be attained for genes with very low
+                                                                overall UMI counts. However, this regularization is suffi-
+same subgraph in the resampled partition, respect-              cient to ensure robust detection of clear outliers. Cells
+                                                                with one or more genes showing high fgi values are la-
+ively. We then define the resampled co-occurrence               beled as potential outliers and removed from their meta-
+matrix as Sboot ¼ ½sibjoot ¼ ½cij=oij.                          cell cover prior to in-depth quantitative analysis of the
+                                                                model.
+  The values in Sboot are now used to compute a
+                                                                Verifying metacells homogeneity
+weighted, non-directed graph, discarding the original           Outlier filtering does not guarantee metacell homogen-
+                                                                eity in cases where two distinct and significantly sepa-
+correlation distances. We compute for each cell i the           rated transcriptional states are grouped together. To
+value of the Kcore (typically 30) highest frequency neigh-      screen for such scenarios, we attempt to cluster cells
+                                                                within each metacell Mk de novo. Clustering is per-
+bors (denoted Ti) and then define a co-occurrence               formed by applying the DBSCAN density-based cluster-
+threshold for each pair of cells using the maximal of the       ing algorithm to the intra-metacell similarity matrix,
+                                                                computed as the correlation distances described above
+two critical values multiplied by a factor Tij = max (Ti,       but restricted to genes exhibiting mildly high intra-
+Tj)  0.5. Pairs with Sbijoot > T ij are used as the edges in a  metacell variance (normalized variance/mean > 1.2). If
+new graph denoted as Gboot on all cells. Note that Gboot        more than one cluster is detected, we split the metacell
+                                                                accordingly. In practice, metacells almost never include
+is still of non homogeneous degrees, as setting fixed           hidden sub-clusters and testing for splits is used mostly
+                                                                for validation purposes.
+thresholds on edges implies that nodes in large and dif-
+
+fused clusters will have a lower Ti values and thereby
+higher degree than nodes in tight and robust clusters
+
+that always cluster in the same subgraphs. The param-
+eter Kcore provides users of the algorithm with flexible
+
+control over the degrees in the derived graph. The final
+
+partition solution is obtained by re-applying the same
+partition algorithm on the graph Gboot, resulting in a
+
+new set of subgraphs Mi and a potential list of outliers.
+This solution is subject to further filtering and verifica-
+
+tion, as described next.
+
+Filtering clear parametric outliers from a metacell cover       Defining the metacell gene expression profile
+As commented above, even though we lack a proper                We approximate the gene expression intensity within
+parametric model for single-cell RNA-seq, our idealized         each metacell by a regularized geometric mean:
+metacell cover is expected to group together single-cell
+profiles that are approximately consistent with multi-                             X         À           Á-1!=jM1k     X                  
+nomial sampling. Testing a given metacell cover for                             1         log 1
+gross inconsistencies with this assumption can help de-         pgk ¼  exp                       þ  ugi                      fiMk     ui
+tecting outlier cells emerging from experimental errors                     jMk j fiMk g                            j              g
+(such as doublets), as well as diagnose rare states that
+are not sufficiently abundant to define a separate meta-          We then quantify relative expression as the log fold
+cell. We currently approach this detection problem              enrichment over the median metacell value:
+heuristically, by summarizing the metacell's pool
+frequencies:                                                        l fpgk ¼ log2ððpgk þ Þ=mediankðpgk þ ÞÞ
+
+       X                                                          Note that the lfp values are affected by the compos-
+uk ¼ ui                                                         ition of metacells in the dataset up to a constant and
+                                                                that  (typically set to 10-4) should be adapted to the
+         iMk                                                    typical total molecule count within a metacell.
+
+pgk  ¼  1   X                                                   Metacell regularized force directed 2D projection
+        uk      fiMk gugi                                       We use the MetaCell cover to regularize the similarity
+                                                                graph among single cells and therefore simplify their 2D
+and computing an approximate, regularized observed/             projection as follows. We start by projecting edges in the
+expected value for each gene and cell:                          graph G over metacells:
+Baran et al. Genome Biology (2019) 20:206                                                                                 Page 16 of 19
+
+B  ¼  ½bml   ¼      K2           XÆ Ç                         average these statistics over multiple down-samples and
+                jMm jÃjMl j                aij=C              repeat the whole procedure over 999 fake count matrices
+                                                              drawn from the per-MC multinomial model. Per gene
+                             fiMm; jMlg                       and per MC, we compute the empirical p value of its
+                                                              likelihood with respect to the binomial null. We output
+  (here C = mediank(| Mk| ) is a scaling constant). We        the p values and the over-dispersion values and visualize
+symmetrize B by replacing it with B, the sum of its row       a summarizing heatmap of the latter. Note that when
+                                                              computing binomial statistics, we down-sample with re-
+and column-normalized forms, and retain as candidate          spect to feature and enriched genes only, and that the
+edges only pairs for which bml > Tedge. We then con-          expected distributions are derived from the pool fre-
+struct a graph over the metacells GM = (M, EM), by add-       quencies constrained to these genes.
+
+ing the D highest scoring candidate edges (if they exist)     Comparing local approximation accuracy using
+
+for each metacell. This results in a graph with maximum       expression prediction
+
+degree D and any number of connected components.              We designed a cross-validation experiment to quantify
+                                                              how well the MetaCell partition captures local cell-to-
+We compute coordinates (xmk, ymk) for each metacell by        cell similarities. We divided the gene set into 100 folds,
+applying a standard force-directed layout algorithm to        and leaving out each fold at a time computed cell-to-cell
+the graph GM. We then position cells by averaging the         similarities on the remaining genes using four different
+                                                              strategies. We next used these similarities to predict, per
+metacell coordinates of their neighbor cells in the ori-      cell, the expression level of the left-out genes. Finally, we
+                                                              compared the quality of predictions across all genes. A
+ginal balanced graph G, but filter neighbors that define a    model that captures accurately local similarities in the
+metacell pair that is not connected in the graph GM.          expression manifold is expected to produce accurate
+                                                              predictions.
+Averaging allows for layout flexibility along one or few
+                                                                The compared approaches are as follows: (1) predict-
+edges in the metacell graph when positioning large cell       ing using the per-metacell pool frequencies, (2) predict-
+                                                              ing using the pool frequencies among the top 50
+clusters that are dissected by several metacells.             neighbors according to the raw MC similarity matrix R,
+                                                              (3) predicting using the pool frequencies of the top 50
+Implementation                                                neighbors according to Euclidean distances in Seurat's
+We implemented MetaCell using a combination of C++            PCA space, and (4) predicting using the weighted pool
+and R code. We used parallelization over multi-core ma-       frequencies of all cells, where the weights are set as
+chines. On a strong Xeon-E5-2660 dual-CPU machine,            MAGIC's diffusion similarities (more specifically,
+the entire analysis pipeline for a small 8200 cells dataset,  MAGIC's powered Markov affinity matrix). Pool fre-
+including bootstrap iterations and computing 2D visuali-      quencies were computed as regularized geometric
+zations, required 2 min and 20 cores, and a maximum of        means, denoting by wi the weight of cell i in the pool
+4.8 GB of RAM. The entire analysis pipeline for a 160K        (for strategies 1­3 all weights are 1):
+cells' dataset required 112 min and a maximum of 79-
+GB RAM on the same machine.
+
+Evaluating within-MC homogeneity                                                    X                À     7ugiÁ-1!=i1wi  X                  
+Following the computation of the MetaCell partition,                             1              log2 1                        fiPoolgwi
+our pipeline produces diagnostic statistics and plots to      pg;pool ¼ exp         fiPoolg wi          þ                                ui
+evaluate the level of adherence of the metacells to a                        iwi
+multinomial sampling model. To visualize large-scale ad-
+herence across all genes, we produce per MC plots com-          The extent of over-fitting was tested by avoiding the
+paring the coefficient of variation and the fraction of       cross-validation design and computing a single similarity
+zero counts to the expected under a Poisson model (see        matrix using all genes per modeling approach. Regard-
+examples in Additional file 2: Figure S5). In addition, we    less of whether cross-validation was used, a cell was
+visualize adherence to binomial sampling of the top           never a part of its own prediction pool when comparing
+enriched genes per MC by plotting the observed distri-        prediction accuracy (Fig. 3b, c). In contrast, for plotting
+bution of UMI count and the same distribution sampled         the gradients (Fig. 3d, e), the predicted values were gen-
+from a binomial model (see examples in Fig. 2d). For          erated using all genes and all cells, as in a typical
+both observed and expected, counting is done after            analysis.
+down-sampling all cells within a metacell to uniform
+total counts. Finally, global diagnostic matrices over all      Combining Seurat and MetaCell's filtering criteria,
+MCs and marker genes (see example in Fig. 2e) are com-        only cells with at least 800 UMIs, number of expressed
+puted as follows: We down-sample the UMIs to uniform          genes between 800 and 4000, and mitochondrial gene
+total counts per MC and compute the binomial likeli-          fraction below 0.1 are included. We omitted from the
+hood of the observed counts, as well as their over-
+dispersion (observed divided by expected variance). We
+Baran et al. Genome Biology (2019) 20:206                      Page 17 of 19
+
+modeling and the evaluation mitochondrial genes and            variable genes, these genes were rescaled by regressing
+immunoglobulin genes. For MetaCell, we used MC size            on per-cell number of UMIs, and PCA reduction to 45
+parameter K = 100 and 500 down-samples of 0.75 of the          dimensions was applied to the rescaled variable genes. In
+data during the graph resampling stage. For Seurat             order to generate a fine clustering solution, we set Seur-
+(package downloaded on 18/3/26), we used gene selec-           at's resolution parameter to 100, using the approxima-
+tion parameters x.low.cutoff = 0, y.cutoff = 0.8, negative     tion parameters nn.eps = 0.5 and n.start = 10, which
+binomial scaling over mitochondrial fraction and num-          yielded 817 clusters. We note that Seurat is typically ex-
+ber of UMIs, and 40 PCs. For MAGIC (code down-                 ecuted with much lower resolution values (0.6­3).
+loaded on 18/3/19), we used 30 PCs, k = 5, ka = 4,
+epsilon = 1, and t = 6.                                        Supplementary information
+
+Whole organism scRNA-seq analysis                              Supplementary information accompanies this paper at https://doi.org/10.
+For the Caenorhabditis elegans map, we analyzed the            1186/s13059-019-1812-2.
+whole-organism single-cell dataset published by Cao
+et al. [42] and generated using methanol-fixed larval L2         Additional file 1: Table S1. Describing key parameters in the MetaCell
+stage cells and a split&pool scRNA-seq strategy. We              pipeline and how to tune them. (DOCX 15 kb)
+started from a UMI matrix containing 41,449 single               Additional file 2: Supplementary figures (Figures S1-S11). (DOCX
+cells. We filtered out cells with less than 100 and more         9191 kb)
+than 8000 total UMIs. We used MetaCell to select                 Additional file 3. Two strategies for selection of feature genes used in
+marker genes with the following criteria: (1) a normal-          the MetaCell package. (DOCX 14 kb)
+ized size correlation below - 0.1 and/or a niche score
+over 0.1, (2) a minimum of 300 total UMIs observed,            Acknowledgements
+and (3) a minimum of 3 UMIs observed in at least three         We are grateful to all members of the Tanay group for discussion.
+single cells. For MetaCell, we used MC size parameter
+K = 150 and 1000 down-samples of 0.75 of the data dur-         Authors' contributions
+ing the graph resampling stage. We computed the final          YB and AT designed the study. YB, ASP, YL, and AT developed the MC
+partition from the co-occurrence matrix using a size           algorithm with input from AG, EC, and ZM. YB performed the computational
+parameter K = 30, a minimum MC size parameter of 30            experiments with help from AB and YL. AT, YB, YL, AL, EC and MH
+and alpha = 2. We filtered outlier cells using a filtering     implemented the algorithms. YB and AT wrote the manuscript with input
+parameter T_lfc = 4, resulting in a final filtered set of 38,  from all authors. AT supervised the study. All authors read and approved the
+149 cells.                                                     final manuscript.
+
+  For Schmidtea mediterranea, we analyzed the whole-           Funding
+adult single-cell dataset published by Fincher et al. [43]     Work in AT group was supported in part by an ERC grant 724824, the Chan
+and generated using fresh cells from whole-adult and           Zuckerberg Association, the Wolfson foundation, and FAMRI.
+head area planarian samples and the Drop-seq scRNA-
+seq technology. We started from a UMI matrix contain-          Availability of data and materials
+ing 58,328 single cells. We filtered out cells with less       MetaCell's open-source code is maintained and documented on GitHub [51]
+than 500 and more than 18,000 total UMIs. We used              and is publicly available under the MIT license from the following Zenodo re-
+MetaCell to select marker genes with the following cri-        pository (DOI: https://doi.org/10.5281/zenodo.3334525) [52].
+teria: (1) a normalized size correlation below - 0.1 and/      The PBMC data sets were downloaded from the 10x Genomics website [53].
+or a niche score over 0.05, (2) a minimum of 300 total         C. elegans L2 larva stage dataset was obtained from the Cell Atlas of Worm
+UMIs observed, and (3) a minimum of 3 UMIs observed            website [54].
+in at least three single cells. In the graph partitioning      Planaria whole-organism dataset was obtained from NCBI's GEO [55].
+stage, we used the same parameters as in the C. elegans
+analysis. We filtered outlier cells using a filtering param-   Ethics approval and consent to participate
+eter T_lfc = 4.5, resulting in a final filtered set of 56,627  Not applicable
+cells.
+                                                               Consent for publication
+Fine clustering using Seurat                                   Not applicable
+Seurat's clustering algorithm was used for producing a
+high-resolution clustering of the 160K PBMCs dataset           Competing interests
+by applying the following procedure: Data was log-             The authors declare that they have no competing interests.
+normalized and scaled to 10,000 UMIs per cell, 1000
+genes with top variance/mean ratio were used as highly         Author details
+                                                               1Department of Computer Science and Applied Mathematics, Weizmann
+                                                               Institute of Science, Rehovot, Israel. 2Department of Immunology, Weizmann
+                                                               Institute of Science, Rehovot, Israel.
+
+                                                               Received: 18 April 2019 Accepted: 3 September 2019
+
+                                                               References
+                                                               1. Kumar RM, Cahan P, Shalek AK, Satija R, DaleyKeyser AJ, Li H, et al.
+
+                                                                     Deconstructing transcriptional heterogeneity in pluripotent stem cells.
+                                                                     Nature. 2014;516(7529):56.
+Baran et al. Genome Biology (2019) 20:206                                             Page 18 of 19
+
+2. Macosko EZ, Basu A, Satija R, Nemesh J, Shekhar K, Goldman M, et al. Highly        28. Huang M, Wang J, Torre E, Dueck H, Shaffer S, Bonasio R, et al. SAVER: gene
+      parallel genome-wide expression profiling of individual cells using nanoliter         expression recovery for single-cell RNA sequencing . Nat Methods. 2018;
+      droplets. Cell. 2015;161(5):1202­14.                                                  15(7):539-42.
+
+3. Jaitin DA, Kenigsberg E, Keren-Shaul H, Elefant N, Paul F, Zaretsky I, et al.      29. Azizi E, Carr AJ, Plitas G, Cornish AE, Konopacki C, Prabhakaran S, et al.
+      Massively parallel single-cell RNA-seq for marker-free decomposition of               Single-cell map of diverse immune phenotypes in the breast tumor
+      tissues into cell types. Science. 2014;343(6172):776­9.                               microenvironment . Cell. 2018;174(5):1293-308.
+
+4. Zeisel A, Muñoz-Manchado AB, Codeluppi S, Lönnerberg P, La Manno G,                30. Li WV, Li JJ. An accurate and robust imputation method scImpute for
+      Juréus A, et al. Cell types in the mouse cortex and hippocampus revealed              single-cell RNA-seq data. Nat Commun. 2018;9(1):997.
+      by single-cell RNA-seq. Science. 2015;347(6226):1138­42.
+                                                                                      31. Giladi A, Paul F, Herzog Y, Lubling Y, Weiner A, Yofe I, et al. Single-cell
+5. Reinius B, Mold JE, Ramsköld D, Deng Q, Johnsson P, Michaëlsson J, et al.                characterization of haematopoietic procgenitors and their trajectories in
+      Analysis of allelic expression patterns in clonal somatic cells by single-cell        homeostasis and perturbed haematopoiesis. Nat Cell Biol. 2018;20(7):836-46.
+      RNA­seq. Nat Genet. 2016;48(11):1430.
+                                                                                      32. Li H, van der Leun AM, Yofe I, Lubling Y, Gelbard-Solodkin D, van Akkooi
+6. Grün D, Lyubimova A, Kester L, Wiebrands K, Basak O, Sasaki N, et al. Single-            AC, et al. Dysfunctional CD8 T cells form a proliferative, dynamically
+      cell messenger RNA sequencing reveals rare intestinal cell types. Nature.             regulated compartment within human melanoma. Cell. 2019;176(4):775­89.
+      2015;525(7568):251.
+                                                                                      33. Ledergor G, Weiner A, Zada M, Wang S-Y, Cohen YC, Gatt ME, et al. Single
+7. Levin M, Anavy L, Cole AG, Winter E, Mostov N, Khair S, et al. The mid-                  cell dissection of plasma cell heterogeneity in symptomatic and
+      developmental transition and the evolution of animal body plans. Nature.              asymptomatic myeloma. Nat Med. 2018;24(12):1867.
+      2016;531(7596):637.
+                                                                                      34. Sebé-Pedrós A, Saudemont B, Chomsky E, Plessier F, Mailhé M-P, Renno J,
+8. Buettner F, Natarajan KN, Casale FP, Proserpio V, Scialdone A, Theis FJ, et al.          et al. Cnidarian cell type diversity and regulation revealed by whole-
+      Computational analysis of cell-to-cell heterogeneity in single-cell RNA-              organism single-cell RNA-Seq. Cell. 2018;173(6):1520­34.
+      sequencing data reveals hidden subpopulations of cells. Nat Biotechnol.
+      2015;33(2):155.                                                                 35. Sebé-Pedrós A, Chomsky E, Pang K, Lara-Astiaso D, Gaiti F, Mukamel Z, et al.
+                                                                                            Early metazoan cell type diversity and the evolution of multicellular gene
+9. Plass M, Solana J, Wolf FA, Ayoub S, Misios A, Glazar P, et al. Cell type atlas          regulation. Nat Ecol Evol. 2018;2(7):1176.
+      and lineage tree of a whole complex animal by single-cell transcriptomics.
+      Science. 2018;360(6391):eaaq1723.                                               36. Laurenti E, Doulatov S, Zandi S, Plumb I, Chen J, April C, et al. The
+                                                                                            transcriptional architecture of early human hematopoiesis identifies
+10. Tanay A, Regev A. Scaling single-cell genomics from phenomenology to                    multilevel control of lymphoid commitment. Nat Immunol. 2013;14(7):756.
+      mechanism. Nature. 2017;541(7637):331.
+                                                                                      37. Donnadieu E, Jouvin M-H, Rana S, Moffatt MF, Mockford EH, Cookson WO,
+11. Grün D, Muraro MJ, Boisset J-C, Wiebrands K, Lyubimova A, Dharmadhikari                 et al. Competing functions encoded in the allergy-associated Fc RI gene.
+      G, et al. De novo prediction of stem cell identity using single-cell                  Immunity. 2003;18(5):665­74.
+      transcriptome data. Cell Stem Cell. 2016;19(2):266­77.
+                                                                                      38. Haghverdi L, Lun AT, Morgan MD, Marioni JC. Batch effects in single-cell
+12. Satija R, Farrell JA, Gennert D, Schier AF, Regev A. Spatial reconstruction of          RNA-sequencing data are corrected by matching mutual nearest neighbors.
+      single-cell gene expression data. Nat Biotechnol. 2015;33(5):495.                     Nat Biotechnol. 2018;36(5):421.
+
+13. Kiselev VY, Kirschner K, Schaub MT, Andrews T, Yiu A, Chandra T, et al. SC3:      39. Butler A, Hoffman P, Smibert P, Papalexi E, Satija R. Integrating single-cell
+      consensus clustering of single-cell RNA-seq data. Nat Methods. 2017;14(5):483.        transcriptomic data across different conditions, technologies, and species.
+                                                                                            Nat Biotechnol. 2018;36(5):411.
+14. Li H, Courtois ET, Sengupta D, Tan Y, Chen KH, Goh JJL, et al. Reference
+      component analysis of single-cell transcriptomes elucidates cellular            40. McInnes L, Healy J, Melville J. Umap: Uniform manifold approximation and
+      heterogeneity in human colorectal tumors. Nat Genet. 2017;49(5):708.                  projection for dimension reduction. rXiv:1802.03426v2. 2018.
+
+15. Lin P, Troup M, Ho JW. CIDR: ultrafast and accurate clustering through            41. Zhang L, Zhang S. Comparison of computational methods for imputing
+      imputation for single-cell RNA-seq data. Genome Biol. 2017;18(1):59.                  single-cell RNA-sequencing data. IEEE/ACM Trans Comput Biol Bioinform.
+                                                                                            2018;1. https://doi.org/10.1109/TCBB.2018.2848633.
+16. Bendall SC, Davis KL, Amir ED, Tadmor MD, Simonds EF, Chen TJ, et al.
+      Single-cell trajectory detection uncovers progression and regulatory            42. Cao J, Packer JS, Ramani V, Cusanovich DA, Huynh C, Daza R, et al.
+      coordination in human B cell development. Cell. 2014;157(3):714­25.                   Comprehensive single-cell transcriptional profiling of a multicellular
+                                                                                            organism. Science. 2017;357(6352):661­7.
+17. Trapnell C, Cacchiarelli D, Grimsby J, Pokharel P, Li S, Morse M, et al. The
+      dynamics and regulators of cell fate decisions are revealed by                  43. Fincher CT, Wurtzel O, de Hoog T, Kravarik KM, Reddien PW. Cell type
+      pseudotemporal ordering of single cells. Nat Biotechnol. 2014;32(4):381.              transcriptome atlas for the planarian Schmidtea mediterranea. Science.
+                                                                                            2018;360(6391):eaaq1736.
+18. Haghverdi L, Buettner F, Theis FJ. Diffusion maps for high-dimensional single-
+      cell analysis of differentiation data. Bioinformatics. 2015;31(18):2989­98.     44. Zheng GX, Terry JM, Belgrader P, Ryvkin P, Bent ZW, Wilson R, et al.
+                                                                                            Massively parallel digital transcriptional profiling of single cells. Nat
+19. Ocone A, Haghverdi L, Mueller NS, Theis FJ. Reconstructing gene regulatory              Commun. 2017;8:14049.
+      dynamics from high-dimensional single-cell snapshot data. Bioinformatics.
+      2015;31(12):i89­96.                                                             45. Voskoboinik I, Whisstock JC, Trapani JA. Perforin and granzymes: function,
+                                                                                            dysfunction and human pathology. Nat Rev Immunol. 2015;15(6):388.
+20. Shin J, Berg DA, Zhu Y, Shin JY, Song J, Bonaguidi MA, et al. Single-cell
+      RNA-seq with waterfall reveals molecular cascades underlying adult              46. Schelker M, Feau S, Du J, Ranu N, Klipp E, MacBeath G, et al. Estimation of
+      neurogenesis. Cell Stem Cell. 2015;17(3):360­72.                                      immune cell content in tumour tissue using single-cell RNA-seq data. Nat
+                                                                                            Commun. 2017;8(1):2032.
+21. Ji Z, Ji H. TSCAN: pseudo-time reconstruction and evaluation in single-cell
+      RNA-seq analysis. Nucleic Acids Res. 2016;44(13):e117.                          47. Fan J, Salathia N, Liu R, Kaeser GE, Yung YC, Herman JL, et al. Characterizing
+                                                                                            transcriptional heterogeneity through pathway and gene set overdispersion
+22. Welch JD, Hartemink AJ, Prins JF. SLICER: inferring branched, nonlinear cellular        analysis. Nat Methods. 2016;13(3):241.
+      trajectories from single cell RNA-seq data. Genome Biol. 2016;17(1):106.
+                                                                                      48. Buettner F, Pratanwanich N, McCarthy DJ, Marioni JC, Stegle O. f-scLVM:
+23. Street K, Risso D, Fletcher RB, Das D, Ngai J, Yosef N, et al. Slingshot: cell          scalable and versatile factor analysis for single-cell RNA-seq. Genome Biol.
+      lineage and pseudotime inference for single-cell transcriptomics. BMC                 2017;18(1):212.
+      Genomics. 2018;19(1):477.
+                                                                                      49. Peixoto TP. Hierarchical block structures and high-resolution model
+24. Zheng S, Papalexi E, Butler A, Stephenson W, Satija R. Molecular transitions            selection in large networks. Phys Rev X. 2014;4(1):011047.
+      in early progenitors during human cord blood hematopoiesis. Mol Syst Biol.
+      2018;14(3):e8041.                                                               50. Wolf FA, Hamey F, Plass M, Solana J, Dahlin JS, Gottgens B, et al. Graph
+                                                                                            abstraction reconciles clustering with trajectory inference through a
+25. Van Dijk D, Sharma R, Nainys J, Yim K, Kathail P, Carr A, et al. Recovering             topology preserving map of single cells. bioRxiv [Internet]. 2017; Available
+      gene interactions from single-cell data using data diffusion. Cell. 2018;             from: https://www.biorxiv.org/content/early/2017/10/25/208819
+      174(3):716­29.
+                                                                                      51. MetaCell: analysis of single cell RNA-seq data using k-NN graph partitions
+26. Ronen J, Akalin A. netSmooth: Network-smoothing based imputation for single             [Internet]. [cited 2019 Sep 1]. Available from: https://tanaylab.github.io/
+      cell RNA-seq [version 3; peer review: 2 approved]. F1000Research. 2018;7:8.           metacell/
+
+27. Wagner F, Yan Y, Yanai I. K-nearest neighbor smoothing for high-                  52. Yael Baran, Akhiad Bercovich, Arnau Sebe-Pedros, Yaniv Lubling, Amir Giladi,
+      throughput single-cell RNA-Seq data. bioRxiv. 2018; Available from: https://          Elad Chomsky, et al. MetaCell: analysis of single cell RNA-seq data using k-
+      www.biorxiv.org/content/early/2018/04/09/217737
+Baran et al. Genome Biology (2019) 20:206                                             Page 19 of 19
+
+      NN graph partitions [Internet]. Zenodo; 2019 [cited 2019 Jul 14]. Available
+      from: https://doi.org/10.5281/zenodo.3334525.
+53. Datasets - Single Cell Gene Expression - Official 10x Genomics Support
+      [Internet]. [cited 2019 Jul 13]. Available from: https://support.10xgenomics.
+      com/single-cell-gene-expression/datasets
+54. Cell Atlas of Worm [Internet]. [cited 2017 Jun 27]. Available from: http://
+      atlas.gs.washington.edu/worm-rna/data/
+55. Cell type transcriptome atlas for the planarian Schmidtea mediterranea
+      [Internet]. [cited 2018 Apr 17]. Available from: https://www.ncbi.nlm.nih.gov/
+      geo/query/acc.cgi?acc=GSE111764
+
+Publisher's Note
+
+Springer Nature remains neutral with regard to jurisdictional claims in
+published maps and institutional affiliations.
+
