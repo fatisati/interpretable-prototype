@@ -1335,6 +1335,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         lambda_cohesion_aff = float(getattr(self, 'lambda_cohesion_aff', 0.0))  # [D26]
         cohesion_global = int(getattr(self, 'cohesion_global', 0))       # [D28]
         coh_mem_hlife = float(getattr(self, 'coh_mem_hlife', 0.0) or 0.0)  # [D31]
+        coh_batch = str(getattr(self, 'coh_batch', 'off'))               # [D41]
         modularity_res = float(getattr(self, 'modularity_res', 1.0))
         modularity_agg = str(getattr(self, 'modularity_agg', 'glob'))
         modularity_res_pbch = float(getattr(self, 'modularity_res_pbch', 0.0) or 0.0)
@@ -2422,6 +2423,114 @@ class SCProtoTrainer(AdoptiveTrainer):
                     _cA = _csp.csr_matrix(_src, copy=True).astype(np.float32)
                     _cA.setdiag(0); _cA.eliminate_zeros()
 
+                    # === [D41] MULTI-BATCH: cross-batch similarity is ZERO ==========
+                    # Premise: an affinity between two cells measured in DIFFERENT
+                    # biological batches is not a similarity, it is a batch effect. So
+                    # for a cell c we score cohesion only against c's own bio-batch
+                    # graph -- the subgraph of edges with an endpoint in c's batch.
+                    # Once cross-batch weights are 0 that subgraph's node set IS the
+                    # batch (verified on pancreas/arbf: ">=1 endpoint in b" and "both
+                    # endpoints in b" select an identical node set), so the definition
+                    # is unambiguous and the whole change reduces to two things:
+                    #   (1) mask the similarity here, ONCE, at cache time -- zero
+                    #       per-step cost, and because the gram is B @ B.T of this same
+                    #       masked B, the 2-hop similarity is block-diagonal for free;
+                    #   (2) divide by the per-batch size, below.
+                    #
+                    # (2) is the load-bearing half. Masking the numerator while keeping
+                    # a GLOBAL size denominator would leave a cell able to see only the
+                    # share of its prototype living in its own batch while the divisor
+                    # counts every batch -- measured on pancreas, a batch-MIXED
+                    # prototype is then scored at 0.169x an otherwise identical
+                    # batch-PURE one, i.e. a standing ~5.9x reward for batch-pure
+                    # prototypes produced purely by a numerator/denominator scale
+                    # mismatch. Same class as the possible_pairs and nassoc_size_scale
+                    # bugs in CLAUDE.md 9b, with "batch" in place of "minibatch".
+                    # Restricting BOTH sides to the same population (the both-sides
+                    # rule) makes the score a proper weighted mean, so a batch-pure and
+                    # a batch-spread prototype score identically -- batch-NEUTRAL.
+                    #
+                    # Measured on pancreas/arbf (merge test, % change in the objective):
+                    #   merge type                          global   [D41]    want
+                    #   same celltype, different tech        -1.42    0.00     ~0
+                    #   diff celltype, SAME tech (bad)       -1.71   -1.71   very neg
+                    # i.e. [D41] stops penalising the correct cross-batch merge while
+                    # keeping the full penalty on a genuinely bad one.
+                    #
+                    # KNOWN, ACCEPTED CONSEQUENCE: a per-batch denominator makes the
+                    # objective SEPARABLE across batches, so relabelling cells in other
+                    # batches is a zero-gradient direction -- the term cannot penalise a
+                    # bad CROSS-batch merge either (measured: 0.00%). That is the price
+                    # of the premise, not a defect. The cross-batch tie comes from the
+                    # encoder (shared prototype vectors + CVAE batch covariate) and must
+                    # therefore be MEASURED, not assumed: report batch entropy and
+                    # per-prototype cross-batch cell-type consistency alongside purity.
+                    #
+                    # COST, measured on pancreas: rare types lose most of their edges
+                    # (t_cell keeps 28% of its neighbours, macrophage 26%) while
+                    # abundant ones lose ~5% -- but only 1 cell of 16382 is left
+                    # isolated, so every cell type still has a well-estimated mean.
+                    #
+                    # One bio batch => nothing is masked and the per-batch size IS the
+                    # global size, so this is bit-identical to the [D29] path. Asserted
+                    # in tests/test_cohesion_memory.py, not merely intended.
+                    self._coh_bcode = None
+                    if coh_batch != 'off':
+                        assert cohesion_global == 2, (
+                            "coh_batch requires cohesion_global=2 ([D29] memory): the "
+                            "per-batch size is taken from the remembered full-graph "
+                            "membership, which only mode 2 maintains.")
+                        _bk = getattr(self.train_ds, 'batch_key', None)
+                        _obs = self.train_ds.adata.obs
+                        if _bk is None or _bk not in _obs:
+                            raise ValueError(
+                                f"coh_batch={coh_batch!r} needs a batch key; "
+                                f"train_ds.batch_key={_bk!r} not in adata.obs")
+                        # str() first: the column is usually categorical, and
+                        # np.unique on the raw dtype is not reliable there.
+                        _, _bcode = np.unique(np.asarray(_obs[_bk].astype(str)),
+                                              return_inverse=True)
+                        _bcode = _bcode.astype(np.int64)
+                        _nb_bio = int(_bcode.max()) + 1
+                        _coo = _cA.tocoo()
+                        _keep = _bcode[_coo.row] == _bcode[_coo.col]
+                        _nnz_before = _cA.nnz
+                        _cA = _csp.csr_matrix(
+                            (_coo.data[_keep], (_coo.row[_keep], _coo.col[_keep])),
+                            shape=_cA.shape)
+                        self._coh_bcode = torch.as_tensor(
+                            _bcode, dtype=torch.long, device=self.device)
+                        self._coh_nbio = _nb_bio
+                        print(f"   [D41] coh_batch={coh_batch}: {_nb_bio} bio batches "
+                              f"('{_bk}'); cross-batch edges dropped "
+                              f"{_nnz_before - _cA.nnz:,}/{_nnz_before:,} "
+                              f"({100.0*(_nnz_before-_cA.nnz)/max(_nnz_before,1):.1f}%)")
+                        if _nb_bio > 1 and cohesion_self != 0.0:
+                            # [D41] The self-pair contributes 1/size_in_batch per
+                            # cell. Under the GLOBAL denominator that is 1/size --
+                            # identical for a batch-pure and a batch-spread
+                            # prototype, so it carries no batch preference. Under
+                            # the PER-BATCH denominator a batch-spread prototype has
+                            # size_in_batch = size/n_bio, so its self part is n_bio
+                            # times LARGER: the term then pays the model to smear
+                            # every prototype thinly across batches.
+                            # Measured on pancreas/arbf at K=220 (the decomposition
+                            # is in modal_scripts/measure_cohesion_spans_pancreas.py):
+                            #   partition   median size_b   self part   PAIR part
+                            #   leiden          191.0        0.01343     0.11691
+                            #   random-220       10.0        0.12007     0.00962
+                            # The pair part discriminates 12x; the self bonus hands
+                            # random 0.107 back and collapses the span from 0.107 to
+                            # 0.0006 -- the objective is erased. Loud, not silent.
+                            print(f"   [D41] *** WARNING: cohesion_self="
+                                  f"{cohesion_self} with {_nb_bio} bio batches. The "
+                                  f"self-pair is 1/size_in_batch, which a "
+                                  f"batch-SPREAD prototype maximises, so this "
+                                  f"REWARDS smearing prototypes across batches and "
+                                  f"can cancel the objective entirely (measured on "
+                                  f"pancreas: span 0.107 -> 0.0006). Use "
+                                  f"cohesion_self=0.0 with coh_batch. ***")
+
                     # --- 1-hop matrix, for lambda_cohesion_aff and for the redundancy
                     # diagnostic. RAW affinity, deliberately NOT row-normalised: the
                     # term slices this as _Ab[:, _cidx], and row-normalising first would
@@ -2556,6 +2665,9 @@ class SCProtoTrainer(AdoptiveTrainer):
                     _size_g = self._coh_size_ema.clamp(min=1.0)
                 else:
                     _size_g = None
+                # [D41] per-cell (n_batch, K) denominator; stays None unless
+                # coh_batch is on, so every other mode keeps the (K,) path exactly.
+                _size_cell = None
 
                 # === [D26] NEVER FORM THE GRAM =================================
                 # The Gram is fixed by the input, so nothing about it belongs in a
@@ -2697,6 +2809,26 @@ class SCProtoTrainer(AdoptiveTrainer):
                         half_life=coh_mem_hlife)
                     _size_g = _size_raw.clamp(min=1.0)      # EXACT global size ([D29]),
                                                             # age-weighted when [D31] on
+                    # [D41] PER-BATCH size, from the same age-weighted membership the
+                    # numerator uses, so numerator and denominator run over exactly the
+                    # same population (both-sides rule, CLAUDE.md 9b):
+                    #     size_in_batch[b][p] = sum over j with bio(j)==b of
+                    #                           assign[j][p] * w[j]
+                    # then gathered to one row per batch cell, giving an (n_batch, K)
+                    # denominator instead of a single (K,) one. index_add_ over the
+                    # bio-batch code is the scatter-sum; B is tiny (9 on pancreas) so
+                    # this is one small matmul-equivalent per step.
+                    # (set below when coh_batch is on)
+                    if coh_batch != 'off':
+                        from interpretable_ssl.cohesion_memory import batch_sizes
+                        _size_bp = batch_sizes(_S_eff, self._coh_bcode,
+                                               self._coh_nbio)
+                        # clamp at one whole cell: "I need at least one cell of
+                        # evidence in my OWN batch before I score you". This is the
+                        # [D30] founder gate reappearing per batch -- without it a
+                        # prototype holding 0.3 cells of mass in batch b hands every
+                        # cell there an enormous ratio.
+                        _size_cell = _size_bp[self._coh_bcode[unique_idx]].clamp(min=1.0)
                     with torch.no_grad():                   # remember for later steps
                         self._coh_Sfull[unique_idx] = _Sc.detach()
                         self._coh_seen[unique_idx] = self._coh_mem_step
@@ -2789,6 +2921,18 @@ class SCProtoTrainer(AdoptiveTrainer):
                         # matching N/n_batch = 58423/6758 = 8.6. Dividing by n_batch
                         # makes this an unbiased estimate of the full-graph average,
                         # with no rescaling constant needed anywhere.
+                        if _size_cell is not None:
+                            # [D41] Per-cell denominator => the division MUST happen
+                            # before the sum over cells. Collapsing with
+                            # _cpair = (GS*_Sc).sum(0) first is only valid while every
+                            # cell shares one denominator, which is exactly what the
+                            # per-batch size stops being true. Same shape as the
+                            # cohesion_form='pcex' branch below.
+                            _num_c = GS * _Sc                          # (n_batch, K)
+                            if cohesion_self != 1.0:
+                                _num_c = _num_c - (1.0 - cohesion_self) * (
+                                    _Sc.pow(2) * dg.unsqueeze(1))
+                            return (_num_c / _size_cell).sum() / float(_Sc.shape[0])
                         return (_cpair / _size_g).sum() / float(_Sc.shape[0])
                     if cohesion_global:
                         # [D28] rescale each part to its FULL-GRAPH rate, then divide by

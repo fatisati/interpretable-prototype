@@ -93,3 +93,37 @@ def batch_drift(S_mem, S_live_det, batch_idx, last_seen, step):
     drift = (S_live_det[seen] - S_mem[idx]).abs().sum(dim=1).mean().item()
     age = (float(step) - last_seen[idx].to(torch.float32)).mean().item()
     return drift, age
+
+
+def batch_sizes(S_eff, batch_code, n_bio):
+    """[D41] Per-bio-batch prototype size, for multi-batch cohesion.
+
+        size_in_batch[b][p] = sum over cells j with batch_code[j] == b
+                              of  S_eff[j][p]
+
+    S_eff already carries the [D31] age weight w[j], so this is the
+    age-weighted size and numerator/denominator stay on the same footing
+    (both-sides rule, CLAUDE.md 9b).
+
+    Why this exists: with cross-batch similarity masked to zero, a cell can only
+    ever accumulate numerator from members of its OWN batch. Dividing that by a
+    GLOBAL size would score a batch-mixed prototype far below an identical
+    batch-pure one (measured 0.169x on pancreas -- a ~5.9x standing reward for
+    batch purity, produced purely by the scale mismatch). Restricting the
+    denominator to the same population removes it.
+
+    With one bio batch this returns a single row equal to S_eff.sum(0), so the
+    caller's per-cell gather reproduces the global path exactly.
+
+    Args:
+        S_eff:      (N, K) effective membership from assemble_membership.
+        batch_code: (N,) long -- bio-batch index of every cell, in [0, n_bio).
+        n_bio:      int -- number of bio batches.
+
+    Returns:
+        (n_bio, K) tensor. UNCLAMPED -- the caller applies the founder-gate
+        clamp after gathering, so the gate is applied once, per cell.
+    """
+    out = torch.zeros(n_bio, S_eff.shape[1],
+                      dtype=S_eff.dtype, device=S_eff.device)
+    return out.index_add(0, batch_code, S_eff)
