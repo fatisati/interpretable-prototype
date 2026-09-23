@@ -378,6 +378,49 @@ def find_metacells(
             _within = _np.asarray(((_A @ _S).multiply(_S)).sum(0)).ravel() + _mk
             metrics['coh_aff'] = float(
                 (_within / _np.maximum(_mk, 1e-9)).sum() / _A.shape[0])
+            # coh_gram: same objective, similarity = cos of closed-neighbourhood
+            # affinity rows (2-hop). Reported alongside coh_aff so gram-trained
+            # and aff-trained runs are always on both scales.
+            _B = (_A + 1.0 * _sp.eye(_A.shape[0], format='csr', dtype=_np.float32)).tocsr()
+            _rn = _np.sqrt(_B.multiply(_B).sum(1)).A.ravel(); _rn[_rn == 0] = 1.0
+            _R = _sp.csr_matrix(_sp.diags(1.0 / _rn) @ _B)
+            _P = _R.T @ _S
+            _wg = _np.asarray(_P.multiply(_P).sum(0)).ravel()
+            metrics['coh_gram'] = float(
+                (_wg / _np.maximum(_mk, 1e-9)).sum() / _A.shape[0])
+            # --- dge_r (PEARSON) and n_covered: the niche-DGE recovery pass.
+            # Same call eval_all_vs_seacells.py makes, so the numbers agree.
+            # Needs the ground-truth DE table; skipped (not faked) if absent.
+            _gt_path = os.path.join(os.environ.get('CODE_DIR', '.'), 'files',
+                                    f'celltype_niches_full_{ds_id}.csv')
+            if _nk is not None and _nk in _ad.obs and os.path.exists(_gt_path):
+                from interpretable_ssl.evaluation import niche_dge as _nd
+                _gt = _nd.get_ground_truth(_ad, _gt_path, ct_key=_lk, niche_key=_nk)
+                _lab_s = _pd.Series(_lab, index=_ad.obs_names)
+                _out = result_save_path or t.get_dump_path()
+                _res = _nd.run_niche_dge('run', _lab_s, _ad, _gt, _out,
+                                         ct_key=_lk, niche_key=_nk)
+                _pp, _sm = _res['per_pair'], _res['summary']
+                if 'pearson_r' in _sm:
+                    metrics['dge_r'] = float(_sm['pearson_r'].iloc[0])
+                if 'tpr' in _sm:
+                    metrics['dge_tpr'] = float(_sm['tpr'].iloc[0])
+                if 'median_pos_mc_size' in _pp:
+                    metrics['n_covered'] = int(_pp['median_pos_mc_size'].notna().sum())
+            # === THE SCOREBOARD: the five decided metrics, nothing else =====
+            print("\n" + "=" * 64)
+            print("SCOREBOARD  (vs SEACells_bk02 on s28nsc/bk02/K=200)")
+            print("=" * 64)
+            _ref = {'coh_aff': 0.0418, 'n_dead': 0, 'joint_purity': 0.5035,
+                    'n_covered': 19, 'dge_r': 0.8487}
+            for _k, _fmt in (('coh_aff', '{:.4f}'), ('n_dead', '{:.0f}'),
+                             ('joint_purity', '{:.4f}'), ('n_covered', '{:.0f}'),
+                             ('dge_r', '{:.4f}')):
+                _v = metrics.get(_k)
+                _vs = _fmt.format(_v) if isinstance(_v, (int, float)) else '--'
+                _rs = _fmt.format(_ref[_k])
+                print(f"  {_k:<14} {_vs:>10}     SEACells {_rs:>8}")
+            print("=" * 64 + "\n")
             print(f"[scoreboard] joint_purity={metrics.get('joint_purity')} "
                   f"n_dead={metrics['n_dead']} coh_aff={metrics['coh_aff']:.4f}")
         except Exception as _e:

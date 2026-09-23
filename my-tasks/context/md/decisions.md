@@ -900,6 +900,17 @@ while SEACells partitions a BANKSY embedding that does).
 
 ## 14. The gap is INFORMATION, not the loss: the encoder never sees spatial context (2026-09-15)
 
+> **PARTIALLY SUPERSEDED (2026-09-23) by the linear probe — `EXPERIMENTS.md` §11
+> (2026-09-16).** ct-niche IS decodable from gene expression alone (91/99 states at
+> AUC>=0.60, mean 0.727), and scProto covers only 24/72 decodable states vs SEACells'
+> 36/72 with a better-spread prototype budget — the probe section's own verdict:
+> "a PLACEMENT difference, not a budget or a collapse difference." So the remaining
+> gap IS a loss/optimization problem after all. What survives from this section: the
+> probe-ladder measurements themselves, and the fact that the encoder is expression-only
+> — which is an INTENTIONAL design choice (states unsupported by expression are not
+> wanted), not a deficiency. The proposed fix below (feed `X_bklam02` to the encoder)
+> was NOT signed off and is rejected.
+
 **This supersedes the working assumption behind sections 3-13.** All of that work treated
 the gap to SEACells as a loss-design problem. It is not.
 
@@ -1860,3 +1871,34 @@ that pressure is arguably wanted. Both sides are being run (`cod_A` self=1, `cod
    so the recommendation was wrong by three orders of magnitude and would have changed
    nothing. Always measure a term's scale against the term it is meant to balance before
    proposing a weight.
+
+---
+
+## Correction (2026-09-23): the community/UMAP loss does NOT align batches
+
+I claimed the community term "is the only thing that aligns batches" and used that to
+argue it must be kept for multi-batch data. **That is wrong.** Fatemeh's design intent
+for the UMAP term is to PRESERVE THE GRAPH -- a local attractive push between
+graph-neighbours. Batch alignment is the CVAE/conditional side's job, not this term's.
+No measurement supported my claim; I asserted it from analogy. Retracted.
+
+The consequence matters for the roadmap: I had recommended deferring a community-lambda
+sweep until multi-batch data "where community has a real job". With the batch-alignment
+rationale gone, that argument collapses, and the case for the community term rests only
+on graph preservation -- which cohesion already provides through the affinity graph, and
+without the merge bias (`/size` rather than `/volume`, [D18]). So community is set aside
+for now, not deferred-pending-multi-batch.
+
+Measured basis for setting it aside, same graph/lambda/term ([D39], s28nsc/bk02/K=200):
+
+    arm                       dead  joint_pur  dge_r    coh_aff
+    d39_A_cohonly                0     0.4472  0.8006   0.0296
+    d39_B_cohcomm              125     0.3951  0.3603   0.0126
+
+Adding community costs 125 of 200 prototypes and halves niche-DGE recovery.
+
+### Also retracted the same day
+`epsilon` was NOT a candidate explanation for the encoder-vs-free-logits gap. Our
+calibrated value is 0.0664-0.0678; the free-logit reference uses 0.05 -- the same
+regime. The "sharp eps is REQUIRED" note in eval_all_vs_seacells.py refers to eps=1.0
+failing, which is far from where we operate. Checked before proposing a run, not after.

@@ -1,4 +1,4 @@
-"""[D39-gram] Same direction test, GRAM (2-hop) similarity instead of aff.
+"""[D39-gram] GRAM-only and GRAM+AFF, both with NO community term.
 
 THE QUESTION
 ------------
@@ -95,15 +95,19 @@ volume = modal.Volume.from_name("scproto-data")
 # just a different scale because the gram similarity spans a wider range.
 LAM_GRAM = 20.1
 
-# (name, lambda_umap, lambda_proto_recon)
+# AUTHORITY 1.5403 held fixed across every arm, so "does mixing help" is not
+# confounded with "is more cohesion better". The both-arm splits it 50/50:
+#   gram half -> 0.5*1.5403/0.076776 = 10.0     aff half -> 0.5*1.5403/0.034573 = 22.3
+# (name, lambda_gram, lambda_aff, lambda_umap, lambda_proto_recon)
 ARMS = [
-    ("d39_C_gramonly", 0.0, 0.0),     # gram cohesion ALONE -- direction test
-    ("d39_D_gramcomm", 1.0, 0.01),    # gram cohesion + community
+    ("d39_C_gramonly", 20.1,  0.0, 0.0, 0.0),   # GRAM alone
+    ("d39_E_bothonly", 10.0, 22.3, 0.0, 0.0),   # gram + aff, no community
 ]
 
 
 @app.function(image=image, gpu="T4", timeout=5400, volumes={"/vol": volume})
-def run(name: str, lam_umap: float, lam_proto_recon: float):
+def run(name: str, lam_gram: float, lam_aff: float,
+        lam_umap: float, lam_proto_recon: float):
     import os, sys
     os.environ["WANDB_MODE"] = "disabled"
     os.environ["HOME_DIR"] = "/vol/"
@@ -135,8 +139,8 @@ def run(name: str, lam_umap: float, lam_proto_recon: float):
         "lambda_umap": lam_umap,
         "lambda_proto_recon": lam_proto_recon,
         # --- cohesion: the plain formula ---
-        "lambda_cohesion": LAM_GRAM,      # drives the GRAM path
-        "lambda_cohesion_aff": 0.0,
+        "lambda_cohesion": lam_gram,      # drives the GRAM path
+        "lambda_cohesion_aff": lam_aff,   # independent 1-hop term
         "cohesion_sim": "gram",           # 2-hop: cos of affinity rows
         "cohesion_form": "perc",
         "cohesion_row_norm": "l2",
@@ -149,7 +153,8 @@ def run(name: str, lam_umap: float, lam_proto_recon: float):
         "coh_diag_every": 25,       # [D36] probe cadence
         "latent_dims": 16,
     }
-    assert lc["lambda_cohesion"] == 20.1 and lc["lambda_cohesion_aff"] == 0.0
+    _auth = lam_gram * 0.076776 + lam_aff * 0.034573
+    assert abs(_auth - 1.5403) < 0.05, f"authority drifted: {_auth}"
     assert lc["cohesion_self"] == 1.0 and lc["cohesion_diag"] == 1.0
     assert lc["proto_reinit_every"] == 0
     if name.startswith("d39_C"):
@@ -157,7 +162,7 @@ def run(name: str, lam_umap: float, lam_proto_recon: float):
             "arm A must have NOTHING but cohesion"
 
     print(f"\n{'='*78}\n=== {name}\n"
-          f"    lambda_cohesion(GRAM)={LAM_GRAM}  lambda_umap={lam_umap}  "
+          f"    lambda_gram={lam_gram}  lambda_aff={lam_aff}  umap={lam_umap}  "
           f"lambda_proto_recon={lam_proto_recon}\n"
           f"    cohesion_self=1.0, diag=1.0, D35 renorm, D37 normalizer fix\n"
           f"    NO reinit, NO early stop, 10 fixed epochs\n"
