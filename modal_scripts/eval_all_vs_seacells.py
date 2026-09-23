@@ -124,7 +124,17 @@ def evaluate():
     for sub in ("d26_A_gram", "d27_A_aff_self", "d27_B_gram_self",
                 "d28_A_aff", "d28_B_gram", "d28_C_both",
                 "d29_A_aff", "d29_B_gram", "d29_C_both",
-                "d30_A_aff", "d30_B_gram", "d30_C_both"):
+                "d30_A_aff", "d30_B_gram", "d30_C_both",
+                # [D31]/[D32]: age-weighted + honestly-initialized [D29] memory,
+                # gram and aff arms, all vs the d30 same-similarity control above
+                "d31_ctrl", "d31_init", "d31_full",
+                "d31a_ainit", "d31a_afull",
+                # [D39] the direction test, with the [D37] normalizer fixed:
+                # A = cohesion ALONE, B = cohesion + community. A reached
+                # coh_aff 0.0296 / joint_purity 0.4472 / 0 dead; B 0.0126 /
+                # 0.3951 / 125 dead. This pass adds dge_r (pearson) and
+                # n_covered, which run_mc_task cannot compute.
+                "d39_A_cohonly", "d39_B_cohcomm"):
         runs[sub] = find(sub)
 
     # --- FREE-LOGIT arm: the exact objective optimised directly (no encoder) ----
