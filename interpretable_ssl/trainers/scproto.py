@@ -3093,6 +3093,27 @@ class SCProtoTrainer(AdoptiveTrainer):
             loss.backward()
             optimizer.step()
 
+            # [D35] Rescale every prototype back to unit norm after each optimizer
+            # step, in the JOINT (not proto_decoupled) path. assignment_metric='dotp'
+            # scores a cell against prototype k as dot(z, proto_k) = |proto_k| *
+            # cos(angle), and z is ALREADY L2-normalized every forward pass
+            # (swav.py encoder_out/forward) -- but prototypes.weight is a plain
+            # optimizer-updated parameter with nothing constraining its norm.
+            # Confirmed: the ONLY other normalize_prototypes() call in this file is
+            # inside _update_protos_ema (line ~1278), reached ONLY when
+            # proto_decoupled=True -- none of these runs set that, so under plain
+            # gradient descent a prototype's norm can grow without bound. A
+            # prototype with |proto_k| > 1 then wins cells purely on MAGNITUDE,
+            # independent of direction -- so a freshly reinit-teleported prototype,
+            # placed EXACTLY at its founding cell's embedding (cosine similarity 1,
+            # the theoretical maximum), can still lose that cell's argmax to an
+            # established prototype whose norm has drifted above 1/cos(angle) to
+            # that same cell. This breaks the geometric guarantee the whole
+            # reinit/founder-gate design assumes. Renormalizing here restores it:
+            # every prototype competes on cosine similarity alone, matching z.
+            if self.l2norm == 1 and not proto_decoupled:
+                self.model.normalize_prototypes()
+
             # Decoupled proto update: online GMM M-step using same soft_assign from forward pass
             if proto_decoupled:
                 self._update_protos_ema(z_unique.detach(), soft_assign.detach(), _proto_eta)
@@ -3294,6 +3315,10 @@ class SCProtoTrainer(AdoptiveTrainer):
             extra += f" | nassoc={metrics['nassoc']:.4f} [diag={metrics['nassoc_diag_val']:.3f} offdiag={metrics['nassoc_offdiag_val']:.3f}]"
         if getattr(self, 'lambda_proto_usage', 0) > 0:
             extra += f" | proto_usage={metrics['proto_usage']:.4f}"
+        if getattr(self, 'lambda_cohesion', 0) > 0:
+            extra += f" | cohesion={metrics['cohesion_term']:.4f}"
+        if getattr(self, 'lambda_cohesion_aff', 0) > 0:
+            extra += f" | cohesion_aff={metrics['cohesion_aff_term']:.4f}"
         if getattr(self, 'lambda_sim_recon', 0) > 0:
             extra += f" | sim_recon={metrics['sim_recon']:.4f}"
             if getattr(self, 'sim_recon_target', 'full') == 'diffusion':

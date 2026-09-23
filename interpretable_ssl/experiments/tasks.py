@@ -142,6 +142,8 @@ def find_metacells(
     target_groups=None,
     skip_metrics=None,
     covet_alpha=None,
+    early_stop=True,
+    early_stop_metric='modularity',
 ):
     """Train and evaluate metacell quality for one dataset.
 
@@ -267,14 +269,23 @@ def find_metacells(
             t.model.freeze_decoder()
 
         # --- Train UMAP ---
-        t.train_umap_edges(
-            early_stop=True,
-            early_stop_metric='modularity',
-            eval_freq=eval_freq,
-            patience=patience,
-            max_epochs=train_epochs,
-            min_delta=min_delta,
-        )
+        if early_stop:
+            t.train_umap_edges(
+                early_stop=True,
+                early_stop_metric=early_stop_metric,
+                eval_freq=eval_freq,
+                patience=patience,
+                max_epochs=train_epochs,
+                min_delta=min_delta,
+            )
+        else:
+            # [D34] fixed-epoch mode, no checkpoint-selection-by-proxy-metric --
+            # every epoch runs, the LAST one is what gets saved/evaluated. Needed
+            # when the metric being validated (e.g. cohesion on a cohesion-only
+            # arm) has no early_stop_metric support yet, so early stopping would
+            # otherwise silently select on an unrelated metric (modularity,
+            # lambda_modularity=0 for these arms).
+            t.train_umap_edges(epochs=train_epochs, early_stop=False)
 
     # --- Eval ---
     t.load_umap_checkpoint()
