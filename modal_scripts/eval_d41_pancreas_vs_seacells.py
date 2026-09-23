@@ -15,9 +15,13 @@ Each metric answers one of the four claims:
 
   2. "but also combine batches"
         batch_entropy (mean + std, and size-weighted). SEACells: 0.1792 / 0.1909.
-        Shannon entropy of the tech distribution inside each metacell, in nats,
-        normalised by log(n_techs_present_in_the_dataset) -- 0 = the metacell is
-        one tech, 1 = the techs are mixed in the dataset's own proportions.
+        UNNORMALISED Shannon entropy of the tech distribution inside each
+        metacell, in nats -- exactly mc_metric_utils.calc_batch_entropy, which
+        is what the paper's published numbers use. 0 = the metacell is a single
+        tech; the ceiling is log(9) = 2.197 for pancreas. Higher = better mixed.
+        (This implementation was validated by reproducing SEACells' own stored
+        metrics.json: purity 0.9564/0.9667 and coverage 0.8571 match to 4
+        decimals, and entropy matches once the normalisation is removed.)
 
   3. "a bio proof"
         ct_purity (mean + std, and size-weighted): per metacell, the fraction of
@@ -28,7 +32,7 @@ Each metric answers one of the four claims:
         averaged, over the cell types flagged rare by the repo's own
         _get_rare_cts (rare_mode='median_batch', Q25 threshold). On pancreas
         those are the types that actually depend on cross-tech support:
-        t_cell (n=7), schwann (25), epsilon (32), mast (42), macrophage (79).
+        t_cell (n=7), schwann (25), epsilon (32), mast (42).
 
 Plus n_dead (prototypes no cell chose) and coverage (fraction of cell types that
 are the majority label of at least one metacell; SEACells: 0.857).
@@ -154,7 +158,12 @@ def evaluate():
             vc = g.ct.value_counts()
             p = vc.iloc[0] / len(g)
             tvc = g.tech.value_counts(normalize=True)
-            ent = float(-(tvc * np.log(tvc)).sum() / np.log(max(n_tech_all, 2)))
+            # EXACTLY mc_metric_utils.calc_batch_entropy: UNNORMALISED Shannon
+            # entropy in nats. Do not divide by log(n_techs) -- the paper's
+            # published SEACells number (0.1792) is on this scale, and
+            # normalising silently makes every number incomparable to it.
+            # Verified: this reproduces the stored metrics.json to 4 decimals.
+            ent = float(-(tvc * np.log(tvc + 1e-10)).sum())
             rows.append((mc, len(g), p, ent))
         r = pd.DataFrame(rows, columns=["mc", "size", "purity", "entropy"])
         w = r["size"] / r["size"].sum()
