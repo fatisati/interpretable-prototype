@@ -1334,6 +1334,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         cohesion_diag = float(getattr(self, 'cohesion_diag', 0.0))       # [D26]
         lambda_cohesion_aff = float(getattr(self, 'lambda_cohesion_aff', 0.0))  # [D26]
         cohesion_global = int(getattr(self, 'cohesion_global', 0))       # [D28]
+        coh_mem_hlife = float(getattr(self, 'coh_mem_hlife', 0.0) or 0.0)  # [D31]
         modularity_res = float(getattr(self, 'modularity_res', 1.0))
         modularity_agg = str(getattr(self, 'modularity_agg', 'glob'))
         modularity_res_pbch = float(getattr(self, 'modularity_res_pbch', 0.0) or 0.0)
@@ -1412,6 +1413,8 @@ class SCProtoTrainer(AdoptiveTrainer):
             'coh_redund_max': 0,         #       in the cohesion section for definitions
             'modularity_diag': 0,        # [D26] modularity VALUE at zero weight
             'modularity_term': 0,
+            'coh_mem_drift': 0,          # [D31] mean L1 move of a batch cell's assignment
+            'coh_mem_age': 0,            #       since its last visit, + that age in steps
             'sim_recon_pred_std': 0, 'sim_recon_target_std': 0,
             # collapse watch (see evaluation/collapse_diagnostics.py for the eval-time
             # versions computed on the full graph)
@@ -2643,17 +2646,53 @@ class SCProtoTrainer(AdoptiveTrainer):
                 # own gradient while its prototype-mates hold still. That is the classic
                 # Lloyd/EM assignment step.
                 if cohesion_global == 2:
+                    from interpretable_ssl.cohesion_memory import (
+                        assemble_membership, batch_drift)
                     if not hasattr(self, '_coh_Sfull'):
                         # uniform init so that at step 0 no prototype looks empty
                         self._coh_Sfull = torch.full((_Nall, _Kp), 1.0 / _Kp,
                                                      dtype=_Sc.dtype, device=self.device)
+                        # [D31] step of each cell's last visit; -1 = never visited,
+                        # so the uniform-init prior above ages (and fades) like any
+                        # other stale row instead of persisting at full weight.
+                        self._coh_seen = torch.full((_Nall,), -1, dtype=torch.long,
+                                                    device=self.device)
+                        self._coh_mem_step = 0
                         print(f"   [D29] remembering every cell's assignment: "
-                              f"{_Nall}x{_Kp} = {_Nall*_Kp*4/1e6:.0f}MB")
-                    _S_eff = self._coh_Sfull.clone()
-                    _S_eff[unique_idx] = _Sc               # batch rows carry the gradient
-                    _size_g = _S_eff.sum(0).clamp(min=1.0)  # EXACT global size
+                              f"{_Nall}x{_Kp} = {_Nall*_Kp*4/1e6:.0f}MB"
+                              + (f"; [D31] age half-life {coh_mem_hlife:g} steps"
+                                 if coh_mem_hlife > 0 else ""))
+                    # [D31] staleness diagnostic, BEFORE the overwrite: how far did
+                    # this batch's assignments move since these same cells were last
+                    # seen? drift ~0 -> remembered rows are still valid and plain
+                    # [D29] is effectively exact; sustained large drift -> pick
+                    # coh_mem_hlife around the timescale the drift shows. Logged
+                    # every step (two tensor ops on batch rows, no_grad).
+                    _drift, _age_m = batch_drift(self._coh_Sfull, _Sc.detach(),
+                                                 unique_idx, self._coh_seen,
+                                                 self._coh_mem_step)
+                    total_metrics['coh_mem_drift'] += _drift
+                    total_metrics['coh_mem_age'] += _age_m
+                    # [D31] AGE-WEIGHTED membership. Row j is discounted by
+                    #     w[j] = 0.5 ** (steps_since_last_visit[j] / coh_mem_hlife)
+                    # batch rows stay at weight 1 and LIVE. The weight multiplies
+                    # assign[j] wherever it appears -- the similarity numerators AND
+                    # size_g -- so everything downstream stays a proper weighted
+                    # mean and the [0,1] bound survives (both-sides rule, CLAUDE.md
+                    # 9b). coh_mem_hlife=0 (default) skips the weighting and is
+                    # bit-identical to [D29]. Validated against a triple-loop brute
+                    # force, finite-difference gradients and the full-batch exact
+                    # limit in interpretable_ssl/tests/test_cohesion_memory.py.
+                    _S_eff, _size_raw, _w_age = assemble_membership(
+                        self._coh_Sfull, _Sc, unique_idx,
+                        last_seen=self._coh_seen, step=self._coh_mem_step,
+                        half_life=coh_mem_hlife)
+                    _size_g = _size_raw.clamp(min=1.0)      # EXACT global size ([D29]),
+                                                            # age-weighted when [D31] on
                     with torch.no_grad():                   # remember for later steps
                         self._coh_Sfull[unique_idx] = _Sc.detach()
+                        self._coh_seen[unique_idx] = self._coh_mem_step
+                    self._coh_mem_step += 1
 
                 _AffB = self._coh_A_aff[_cidx][:, _cidx]
                 _AffT = _to_t(_AffB)
