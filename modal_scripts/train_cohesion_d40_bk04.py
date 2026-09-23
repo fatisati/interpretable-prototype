@@ -91,7 +91,13 @@ SPAN_GRAM, SPAN_AFF = 0.076776, 0.034573
 AUTHORITY = 20.0 * 0.077017
 
 # (name, lambda_gram, lambda_aff) -- SET THIS to the bk02 winner
-ARM_LAMBDAS = ("d40_bk04_aff", 0.0, 44.6)
+# WINNER on bk02 ([D39], measured): gram+aff at a 50/50 authority split beats
+# both single-similarity arms on the metrics that decide -- joint_purity
+# 0.4576 (vs aff 0.4472, gram 0.4558), dge_r 0.8105 (vs 0.8006, 0.6538),
+# 0 dead (vs 0, 5), coverage 1.0 -- while giving up almost nothing on either
+# cohesion scale (coh_aff 0.0289 vs aff-only's 0.0296; coh_gram 0.0593 vs
+# aff-only's 0.0598). Its one loss is n_covered, 16 vs gram-only's 18.
+ARM_LAMBDAS = ("d40_bk04", 10.0, 22.3)
 
 
 @app.function(image=image, gpu="T4", timeout=5400, volumes={"/vol": volume})
