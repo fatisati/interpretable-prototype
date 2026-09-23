@@ -331,6 +331,58 @@ def find_metacells(
     assignments, _ = t._get_assignments()
     t.train_ds.adata.obs['metacell_id'] = assignments
 
+    # --- [D38] The metrics the scoreboard is actually frozen on --------------
+    # run_mc_task previously returned only purity (CELL TYPE alone), modularity
+    # and dge_kendall -- none of which are the decided criteria. The real ones
+    # lived exclusively in modal_scripts/eval_all_vs_seacells.py, a separate
+    # post-hoc pass, so every finished run reported the wrong numbers and the
+    # right ones had to be computed later by hand. Same definitions as that
+    # script, so the two agree:
+    #   joint_purity  per metacell, the largest fraction of ONE (cell type,
+    #                 niche) pair, averaged over CELLS (size-weighted)
+    #   n_dead        prototypes holding no cells at all
+    #   coh_aff       the cohesion objective itself, HARD assignments, FULL
+    #                 graph, similarity = raw affinity with sim(c,c)=1
+    # dge_r (pearson) and n_covered still need the ground-truth DE table, so
+    # they stay in the post-hoc script -- not silently faked here.
+    if 'scoreboard' not in skip:
+        try:
+            import numpy as _np
+            import pandas as _pd
+            import scipy.sparse as _sp
+            from interpretable_ssl.datasets.dataset_configs import DATASETS as _DS
+            _ad = t.train_ds.adata
+            _lk = label_key
+            _nk = niche_key or _DS.get(ds_id, {}).get('niche_key')
+            _lab = _np.asarray(assignments)
+            metrics['n_dead'] = int(t.nmb_prototypes - len(_pd.unique(_lab)))
+            if _nk is not None and _nk in _ad.obs:
+                _df = _pd.DataFrame({
+                    'mc': _lab,
+                    'joint': (_ad.obs[_lk].astype(str) + '||'
+                              + _ad.obs[_nk].astype(str)).to_numpy(),
+                })
+                metrics['joint_purity'] = float(
+                    _df.groupby('mc')['joint']
+                       .agg(lambda s: s.value_counts().iloc[0]).sum() / len(_df))
+            # cohesion(aff), hard assignments, full graph -- comparable with the
+            # SEACells / Leiden references in eval_all_vs_seacells.py
+            _A = t.train_ds.aff_raw if hasattr(t.train_ds, 'aff_raw') else t.train_ds.aff
+            _A = _sp.csr_matrix(_A).astype(_np.float32)
+            _A = ((_A + _A.T) / 2).tocsr(); _A.setdiag(0); _A.eliminate_zeros()
+            _codes, _uniq = _pd.factorize(_lab)
+            _S = _sp.csr_matrix((_np.ones(len(_codes), _np.float32),
+                                 (_np.arange(len(_codes)), _codes)),
+                                shape=(len(_codes), len(_uniq)))
+            _mk = _np.asarray(_S.sum(0)).ravel()
+            _within = _np.asarray(((_A @ _S).multiply(_S)).sum(0)).ravel() + _mk
+            metrics['coh_aff'] = float(
+                (_within / _np.maximum(_mk, 1e-9)).sum() / _A.shape[0])
+            print(f"[scoreboard] joint_purity={metrics.get('joint_purity')} "
+                  f"n_dead={metrics['n_dead']} coh_aff={metrics['coh_aff']:.4f}")
+        except Exception as _e:
+            print(f"Warning: scoreboard metrics failed: {_e}")
+
     # --- Aff-DC compactness: diffusion map on raw affinity graph ---
     if 'aff_compactness' not in skip:
         try:

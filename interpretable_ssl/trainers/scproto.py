@@ -2764,9 +2764,32 @@ class SCProtoTrainer(AdoptiveTrainer):
                         _cpair = _cpair - (1.0 - cohesion_self) * _self_raw
                     _self_b = cohesion_self * _self_raw
                     if cohesion_global == 2:
-                        # [D29] GS already spans every cell, so no p-rescaling at all --
-                        # nothing was subsampled away. This is the exact objective.
-                        return (_cpair / _size_g).sum() / float(_Nall)
+                        # [D37] Divide by the number of cells actually SUMMED OVER
+                        # (this batch's), not by the full dataset size.
+                        #
+                        # The objective is an average over cells:
+                        #     contribution(c) = sum_k assign[c][k] * mean_sim_to_k(c)
+                        #     mean_sim_to_k(c) = sum over ALL j of sim(c,j)*assign[j][k]
+                        #                        / size_g[k]
+                        #     cohesion         = average of contribution(c) over cells
+                        #
+                        # _cpair sums contribution(c) over the BATCH's cells only --
+                        # the INNER sum spans every cell (that is what the [D29]
+                        # memory provides, and it is correct), but the OUTER sum is
+                        # still a subsample. Dividing that batch-sized sum by _Nall
+                        # treated it as if it had run over all N cells, so the value
+                        # came out too small by exactly n_batch/N.
+                        #
+                        # The old [D29] comment here claimed "GS already spans every
+                        # cell, so nothing was subsampled away" -- true of the inner
+                        # sum, FALSE of the outer one. That is what hid this.
+                        #
+                        # Measured on s28nsc/bk02 ([D36] probe, 2026-09-23): batch
+                        # metric 0.00086 vs true full-graph 0.0076, ratio 8.8 --
+                        # matching N/n_batch = 58423/6758 = 8.6. Dividing by n_batch
+                        # makes this an unbiased estimate of the full-graph average,
+                        # with no rescaling constant needed anywhere.
+                        return (_cpair / _size_g).sum() / float(_Sc.shape[0])
                     if cohesion_global:
                         # [D28] rescale each part to its FULL-GRAPH rate, then divide by
                         # the global size. The cross part needs both cells in the batch
