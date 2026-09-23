@@ -40,6 +40,17 @@ image = (
 
 volume = modal.Volume.from_name("scproto-data")
 
+# --- which graph this pass scores on -------------------------------------
+# A head-to-head is only valid when BOTH sides use the SAME graph, so the
+# affinity tag and the SEACells baseline fitted on that same embedding move
+# together. Pairs that actually exist (checked 2026-09-23):
+#     bk02 <-> seacell_X_bklam02_K200      (BANKSY lambda 0.2)
+#     bk04 <-> seacell_X_bklam04_K200      (BANKSY lambda 0.4)
+# lambda 0.5 / 0.8 have affinities but NO SEACells baseline yet, so they
+# cannot be added here until one is fitted.
+AFF_TAG = "bk02"
+SEACELLS_DIR = "seacell_X_bklam02_K200"
+
 
 @app.function(image=image, cpu=4, memory=16384, timeout=3600, volumes={"/vol": volume})
 def evaluate():
@@ -75,7 +86,7 @@ def evaluate():
     print(f"adata {adata.shape}")
 
     affinity = load_or_build_affinity(
-        adata, DS_ID, affinity_type="bk02", k=50, k_neighbors=50,
+        adata, DS_ID, affinity_type=AFF_TAG, k=50, k_neighbors=50,
         bk=ds_conf.get("batch_key"))
     A = sp.csr_matrix(affinity).astype(np.float32)
     A = ((A + A.T) / 2).tocsr(); A.setdiag(0); A.eliminate_zeros()
@@ -120,7 +131,7 @@ def evaluate():
         c = sorted(d for d in all_dirs if sub in d)
         return os.path.join(model_base, c[-1]) if c else None
 
-    runs = {"SEACells_bk02": os.path.join(model_base, "seacell_X_bklam02_K200")}
+    runs = {f"SEACells_{AFF_TAG}": os.path.join(model_base, SEACELLS_DIR)}
     for sub in ("d26_A_gram", "d27_A_aff_self", "d27_B_gram_self",
                 "d28_A_aff", "d28_B_gram", "d28_C_both",
                 "d29_A_aff", "d29_B_gram", "d29_C_both",
@@ -134,7 +145,11 @@ def evaluate():
                 # coh_aff 0.0296 / joint_purity 0.4472 / 0 dead; B 0.0126 /
                 # 0.3951 / 125 dead. This pass adds dge_r (pearson) and
                 # n_covered, which run_mc_task cannot compute.
-                "d39_A_cohonly", "d39_B_cohcomm"):
+                "d39_A_cohonly", "d39_B_cohcomm",
+                "d39_C_gramonly", "d39_E_bothonly",
+                # [D40] the bk02 winner retrained on bk04 -- only present, and
+                # only meaningful, when AFF_TAG == "bk04"
+                "d40_bk04"):
         runs[sub] = find(sub)
 
     # --- FREE-LOGIT arm: the exact objective optimised directly (no encoder) ----
@@ -170,7 +185,7 @@ def evaluate():
                              ct_key=CT_KEY, niche_key=NICHE_KEY)
     print(f"{len(gt)} (cell type, niche) pairs")
 
-    OUT = "/vol/code/files/tables/s28nsc_all_vs_seacells"
+    OUT = f"/vol/code/files/tables/s28nsc_all_vs_seacells_{AFF_TAG}"
     os.makedirs(OUT, exist_ok=True)
 
     rows = []
@@ -205,9 +220,9 @@ def evaluate():
         print(rows[-1])
 
     df = pd.DataFrame(rows).set_index("run")
-    df.to_csv(f"{OUT}/all_vs_seacells.csv")
+    df.to_csv(f"{OUT}/all_vs_seacells_{AFF_TAG}.csv")
     print("\n" + "=" * 118)
-    print("ALL ARMS vs SEACells -- s28nsc / bk02 / K=200")
+    print(f"ALL ARMS vs SEACells -- s28nsc / {AFF_TAG} / K=200")
     print("=" * 118)
     print(df.to_string())
     print("\ncohesion references (hard, full graph): gram Leiden 0.0816 random 0.0048 | "
