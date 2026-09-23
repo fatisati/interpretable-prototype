@@ -252,17 +252,35 @@ def test_uniform_prior_fades():
     print("PASS  uniform-init prior fades with age instead of persisting")
 
 
+def test_full_init_recipe():
+    """[D32] the init assignment softmax(z @ protos / eps): rows are a proper
+    distribution and each cell prefers its nearest prototype by dot product."""
+    rng = np.random.default_rng(7)
+    z = torch.tensor(rng.normal(size=(40, 8)))
+    protos = torch.tensor(rng.normal(size=(5, 8)))
+    eps = 0.1
+    S = torch.softmax((z @ protos.T) / eps, dim=1)
+    assert torch.allclose(S.sum(dim=1), torch.ones(40))
+    assert torch.equal(S.argmax(dim=1), (z @ protos.T).argmax(dim=1))
+    # rows are valid memory: age 0 (last_seen = step) -> weight exactly 1
+    w = age_weights(torch.zeros(40, dtype=torch.long), step=0, half_life=9.0)
+    assert torch.all(w == 1.0)
+    print("PASS  [D32] init rows are distributions, nearest-proto, weight 1")
+
+
 def test_model_name_registration():
-    """coh_mem_hlife reaches the model folder name when non-default ([9] step 3)."""
+    """coh_mem_hlife / coh_mem_init reach the model folder name ([9] step 3)."""
     from interpretable_ssl.model_name import generate_model_name
     defaults = {'model_name_version': 6, 'experiment_name': 'exp',
-                'version': 31, 'coh_mem_hlife': 0.0}
+                'version': 31, 'coh_mem_hlife': 0.0, 'coh_mem_init': 'unif'}
     on = generate_model_name(defaults, {'experiment_name': 'exp',
-                                        'coh_mem_hlife': 500.0})
+                                        'coh_mem_hlife': 500.0,
+                                        'coh_mem_init': 'full'})
     off = generate_model_name(defaults, {'experiment_name': 'exp'})
     assert 'cmhl500' in on, on
-    assert 'cmhl' not in off, off
-    print(f"PASS  model name carries the option: '{on}' vs '{off}'")
+    assert 'cmini-full' in on, on
+    assert 'cmhl' not in off and 'cmini' not in off, off
+    print(f"PASS  model name carries the options: '{on}' vs '{off}'")
 
 
 if __name__ == '__main__':
@@ -275,5 +293,6 @@ if __name__ == '__main__':
     test_bounds()
     test_drift_diagnostic()
     test_uniform_prior_fades()
+    test_full_init_recipe()
     test_model_name_registration()
     print("\nall tests passed")

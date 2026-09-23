@@ -2649,14 +2649,31 @@ class SCProtoTrainer(AdoptiveTrainer):
                     from interpretable_ssl.cohesion_memory import (
                         assemble_membership, batch_drift)
                     if not hasattr(self, '_coh_Sfull'):
-                        # uniform init so that at step 0 no prototype looks empty
-                        self._coh_Sfull = torch.full((_Nall, _Kp), 1.0 / _Kp,
-                                                     dtype=_Sc.dtype, device=self.device)
-                        # [D31] step of each cell's last visit; -1 = never visited,
-                        # so the uniform-init prior above ages (and fades) like any
-                        # other stale row instead of persisting at full weight.
-                        self._coh_seen = torch.full((_Nall,), -1, dtype=torch.long,
-                                                    device=self.device)
+                        _cm_init = str(getattr(self, 'coh_mem_init', 'unif'))
+                        if _cm_init == 'full':
+                            # [D32] real assignments from one no-grad inference pass
+                            # over ALL cells -- the pretrained encoder makes them
+                            # meaningful at step 0, so profiles and sizes start
+                            # honest instead of neutral-but-diluted. last_seen=0:
+                            # every row is as fresh as this first step.
+                            self._coh_Sfull = self._coh_init_memory_full().to(
+                                dtype=_Sc.dtype, device=self.device)
+                            assert self._coh_Sfull.shape == (_Nall, _Kp)
+                            self._coh_seen = torch.zeros(_Nall, dtype=torch.long,
+                                                         device=self.device)
+                            print(f"   [D32] memory initialized from a FULL forward "
+                                  f"pass over {_Nall} cells")
+                        else:
+                            # uniform init so that at step 0 no prototype looks empty
+                            self._coh_Sfull = torch.full((_Nall, _Kp), 1.0 / _Kp,
+                                                         dtype=_Sc.dtype,
+                                                         device=self.device)
+                            # [D31] -1 = never visited, so the uniform prior ages
+                            # (and fades) like any other stale row instead of
+                            # persisting at full weight until first visit.
+                            self._coh_seen = torch.full((_Nall,), -1,
+                                                        dtype=torch.long,
+                                                        device=self.device)
                         self._coh_mem_step = 0
                         print(f"   [D29] remembering every cell's assignment: "
                               f"{_Nall}x{_Kp} = {_Nall*_Kp*4/1e6:.0f}MB"
@@ -3990,6 +4007,28 @@ class SCProtoTrainer(AdoptiveTrainer):
             'label': str(data['label']),
             'metrics': metrics,
         }
+
+    @torch.no_grad()
+    def _coh_init_memory_full(self):
+        """[D32] Fill the [D29] assignment memory from ONE forward pass over ALL cells.
+
+        The uniform init is NEUTRAL -- every prototype receives the identical
+        memory contribution (verified: spread across protos ~1e-16), so it
+        creates no false preference -- but it is DILUTED: real differential
+        signal only accumulates as cells get visited over the first epoch. At
+        finetune start the encoder is PRETRAINED, so step-0 assignments are
+        already meaningful; one inference pass (forward-only, seconds) gives
+        every prototype its real profile and real size immediately.
+
+        Uses the UNCORRECTED canonical assignment softmax(z @ protos / eps):
+        the usage/log-correction variants depend on running EMAs that do not
+        exist before the first step, and the row is refreshed with the loop's
+        own (corrected) value the first time the cell lands in a batch.
+        """
+        z = self.encode_adata(self.train_ds.adata, self.model, z_idx=1)
+        protos = self.model.get_prototypes().detach()
+        return F.softmax(F.linear(z.to(self.device), protos) / self.epsilon,
+                         dim=1)
 
     def _get_assignments(self, assignments=None, label=None):
         """Resolve cluster assignments and label.
