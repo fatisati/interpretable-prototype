@@ -1736,22 +1736,13 @@ class SCProtoTrainer(AdoptiveTrainer):
                         self._n_k_ema = n_k_ema.detach().cpu()
                     proto_usage_loss = torch.log(1.0 + 1.0 / n_k_ema.clamp(min=1e-8)).mean()
 
-            # [D13] Keep the usage EMA alive for proto_reinit_every even when the usage
-            # LOSS is off. The reinit path below reads _c_k_ema/_n_k_ema to decide which
-            # prototypes are dead, but both were only ever written inside the
-            # `lambda_proto_usage > 0` branch above. With usage OFF they stayed None, so
-            # `if _usage is not None` was False and reinit silently did NOTHING -- in every
-            # run ever done, including the ones whose folder names carry `prie`. That is
-            # exactly backwards: usage OFF is the configuration where prototypes actually
-            # die, so it is the only one where reinit is needed. Tracked under no_grad, so
-            # this is pure bookkeeping and adds no gradient path.
-            if (lambda_proto_usage == 0 and use_proto_sim
-                    and int(getattr(self, 'proto_reinit_every', 0) or 0) > 0):
-                with torch.no_grad():
-                    _nk = soft_assign.sum(dim=0).detach().cpu()
-                    _a = float(getattr(self, 'usage_nk_alpha', 0.9))
-                    self._n_k_ema = (_nk if self._n_k_ema is None
-                                     else _a * self._n_k_ema + (1.0 - _a) * _nk)
+            # [D13, REMOVED by D33] Used to keep a usage EMA alive purely so the
+            # dead-prototype reinit trigger (below) had something non-None to read
+            # when the usage LOSS was off. [D33] replaced that EMA-threshold
+            # trigger with the exact "chosen by zero cells this epoch" test
+            # (used_proto_ids), which needs no EMA at all -- this block's entire
+            # reason to exist is gone. proto_usage_loss's own EMA branches above
+            # are unaffected; they serve the usage LOSS, a separate mechanism.
 
             # DMoN collapse regularization (Tsitsulin et al., JMLR 2023, eq. 5):
             #   (sqrt(K)/n_cells) * ||soft_sizes||_2 - 1
@@ -3162,23 +3153,29 @@ class SCProtoTrainer(AdoptiveTrainer):
         _reinit_every = int(getattr(self, 'proto_reinit_every', 0) or 0)
         if (_reinit_every > 0 and use_proto_sim
                 and (self._umap_state['epoch'] + 1) % _reinit_every == 0):
-            _thresh = float(getattr(self, 'proto_reinit_thresh', 0.01))
-            _usage = self._c_k_ema if self._c_k_ema is not None else self._n_k_ema
-            if _usage is not None and _last_soft_assign is not None:
-                _usage = _usage.to(self.device)
-                # [D15] Pick the cut on the scale of whichever EMA we are reading.
-                # _c_k_ema is a max-assignment PROBABILITY -> absolute 0.01 is meaningful.
-                # _n_k_ema is a soft MASS whose natural scale is batch_size/K (~5 at
-                # 1024/200) -> the same 0.01 flags almost nothing. Measured on the first
-                # working-reinit run: 10 flagged while 145 prototypes were unused. So for
-                # the mass path the cut is a FRACTION OF MEAN USAGE, which is scale-free
-                # in both batch_size and K.
-                if self._c_k_ema is not None:
-                    _cut = _thresh
-                else:
-                    _rel = float(getattr(self, 'proto_reinit_rel', 0.1))
-                    _cut = _rel * float(_usage.mean().clamp(min=1e-8).item())
-                _dead = (_usage < _cut).nonzero(as_tuple=True)[0]
+            # [D33] DEAD = literally no cell chose this prototype as its argmax,
+            # anywhere in the epoch. used_proto_ids is the exact full-epoch union
+            # (reset once per epoch, unioned every batch -- scproto.py ~1430/1526),
+            # so this reads what already happened, not an estimate.
+            #
+            # Replaces the old RELATIVE-TO-MEAN mass/probability cut ([D15]:
+            # usage < 0.1 * mean(usage)). That cut does not ask "did any cell pick
+            # this prototype" -- it asks "is this prototype smaller than average",
+            # which is a different and wrong question: with K=200 and mass
+            # concentrated into a handful of large prototypes (a real, measured
+            # failure mode of cohesion_form='perc', which has no size control),
+            # ~90% of prototypes legitimately sit under 10% of the mean while
+            # still holding real, distinct cells -- a rare cell state is SUPPOSED
+            # to be small. The old cut teleported all of them away every cycle
+            # regardless of whether a single cell had chosen them, which is
+            # exactly the measured failure: 175-180/200 revived at EVERY reinit
+            # cycle (epochs 2, 4, 6, 8; both gram and aff similarity; d31/d31a
+            # validation runs, 2026-09-23), with revival count never dropping --
+            # the reinit was destroying real small states, not fixing dead ones.
+            _dead = torch.tensor(
+                sorted(set(range(self.nmb_prototypes)) - used_proto_ids),
+                dtype=torch.long, device=self.device)
+            if _last_soft_assign is not None:
                 if len(_dead) > 0:
                     with torch.no_grad():
                         # worst-served cells in the last minibatch: lowest max assignment
@@ -3225,8 +3222,8 @@ class SCProtoTrainer(AdoptiveTrainer):
                         if self._n_k_ema is not None:
                             self._n_k_ema[_dead[:_n_take].cpu()] = 1.0
                     total_metrics['n_reinit'] = float(_n_take)
-                    print(f"   [reinit] revived {_n_take} dead prototypes "
-                          f"(usage < {_cut:.4g}; mean usage {float(_usage.mean()):.3f}) "
+                    print(f"   [D33] [reinit] revived {_n_take}/{self.nmb_prototypes} "
+                          f"prototypes with ZERO cells choosing them this epoch "
                           f"onto worst-served cells")
 
         # Hartigan dip test on the FULL-dataset prototype size distribution.
