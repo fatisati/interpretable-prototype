@@ -27,12 +27,24 @@ on the graph; those columns below are scored on bk02.
 
 ## scProto — cohesion "both" (gram + aff, 50/50 authority), community OFF
 
-| graph        | dge_r  | joint_pur | ct_pur | n_cov | dead | median | max/med |
-|--------------|--------|-----------|--------|-------|------|--------|---------|
-| lambda 0.2   | 0.8105 | 0.4576    | 0.8681 | 16    | 0    | 250    | 3.8     |
-| lambda 0.4   | 0.8404 | 0.4563    | 0.8491 | 13    | 0    | 252    | 4.8     |
-| lambda 0.8   | pending|           |        |       |      |        |         |
-| arbf         | pending|           |        |       |      |        |         |
+| graph        | dge_r  | joint_pur | ct_pur | n_cov | dead |
+|--------------|--------|-----------|--------|-------|------|
+| lambda 0.2   | 0.8105 | 0.4576    | 0.8681 | 16    | 0    |
+| lambda 0.4   | 0.8404 | 0.4563    | 0.8491 | 13    | 0    |
+| lambda 0.8   | 0.7388 | 0.4011    | 0.7412 | 15    | 0    |
+| arbf (PCA)   | 0.8019 | 0.3671    | 0.6798 | 14    | 0    |
+
+## Head to head, every graph (same graph both sides)
+
+| graph      | dge_r  scProto / SEACells | ct_pur  scProto / SEACells | winner        |
+|------------|---------------------------|----------------------------|---------------|
+| lambda 0.2 | 0.8105 / **0.8487**       | **0.8681** / 0.8227        | split         |
+| lambda 0.4 | **0.8404** / 0.7223       | **0.8491** / 0.6974        | scProto       |
+| lambda 0.8 | **0.7388** / 0.6648       | **0.7412** / 0.5127        | scProto       |
+| arbf (PCA) | **0.8019** / 0.7171       | **0.6798** / 0.4968        | scProto       |
+
+scProto leads dge_r on 3 of 4 graphs and ct_purity on all 4. SEACells leads only
+at lambda 0.2, and only on dge_r / joint_purity / n_covered.
 
 ## scProto ablations, all at lambda 0.2
 
