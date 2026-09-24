@@ -356,44 +356,58 @@ and silently falls back to `umap_proto_effk=5.0`, a hard-coded default nothing c
 which then drifts during training. **Still unfixed** — check the `[eps calibration]`
 line in any run log.
 
-## 9c. The old nassoc base config — HISTORICAL, do not start from this
+## 9c. REMOVED — there is no nassoc base config any more
 
-**Superseded. The current base config is §9d (cohesion).** `lambda_nassoc = 0` in every
-run we do now, so nothing below is active; it is recorded so the runs that used it stay
-reproducible and their model-folder names stay readable.
+The nassoc/CPM base config that used to live here has been **deleted, not demoted**,
+because leaving the code block visible is what caused a real mistake: it reads like the
+config to start from, and it was copied into a cohesion experiment, silently adding a
+second diagonal term and an unsettled `nassoc_gamma`.
 
-It was validated on `s28nsc`/K=200 at the time: DGE `pearson_r` 0.654 -> 0.780, 0/200 dead
-prototypes, and it rescued the affinities where the older loss collapsed to 15/200
-(0.342 -> 0.760). Those numbers describe the nassoc-era model, not the current one.
+**The config is §9d. There is no other.**
 
-```python
-lambda_config = dict(LAMBDA_PROTO_UMAP_PRECON) | {
-    'nassoc_diag_norm': 'pair',   # [D1] density, not containment: fixes the merge bias
-    'nassoc_diag_loss': 'cpm',    # [D2] CPM reward, not an unreachable target of 1
-    'nassoc_gamma':     0.15,     # empirical: the value validated on s28nsc/K=200 below.
-                                  # How to derive it from the graph is UNSETTLED -- see
-                                  # decisions.md. Don't treat 0.15 as principled.
-    'nassoc_size_scale': 'full',  # [D5] THE important one: without it density explodes (§9b)
-    'nassoc_cpm_norm': 'gful',    # full-graph normalizer so gamma keeps a gradient AND the
-                                  # term stays on the same scale as the other losses
-}
+If you need to reproduce a pre-2026-09-24 nassoc run, the settings are in
+`decisions.md` §15 and `EXPERIMENTS.md` §11a, and the run's own model-folder name
+records them.
+
+## 9d. THE config: COHESION ONLY. Every other loss term is 0.
+
+**This is the only config. Cohesion is the ONLY objective; everything else is zero.**
+
+```
+lambda_cohesion      > 0   gram, 2-hop   } the objective
+lambda_cohesion_aff  > 0   aff,  1-hop   }
+--------------------------------------------------------------------
+lambda_umap          = 0   community      OFF
+lambda_proto_recon   = 0                  OFF
+lambda_nassoc        = 0   (cohesion REPLACES nassoc — §9b)
+lambda_modularity    = 0                  OFF
+lambda_proto_usage   = 0                  OFF
+lambda_swav          = 0   lambda_kl = 0   lambda_recon = 0
+proto_reinit_every   = 0
 ```
 
-`nassoc_cpm_norm='graf'` is an even older minibatch-scaled normalizer. All of this is
-historical: prefer §9d.
+Nothing may outvote the term the model is built around. **Assert this in the run
+script** — do not rely on having remembered to zero them, because
+`LAMBDA_PROTO_UMAP_PRECON` turns several of them ON (see §10b) and starting from it and
+setting only the cohesion keys leaves nassoc and proto_usage running.
 
-## 9d. Cohesion config — `cohesion_self = 1.0`, ALWAYS. Never 0.5.
-
-**Every cohesion run uses `cohesion_self = 1.0`.** It is the `defaults.py` default, so
-it is also what you get by not passing it — but pass it explicitly and assert it, because
-old scripts in `modal_scripts/` still carry `cohesion_self: 0.5` and get copied.
+**`cohesion_self = 1.0`, ALWAYS. Never 0.5.** It is the `defaults.py` default, so it is
+also what you get by not passing it — but pass it explicitly and assert it, because old
+scripts in `modal_scripts/` still carry `cohesion_self: 0.5` and get copied.
 
 ```python
 lambda_config = dict(LAMBDA_PROTO_UMAP_PRECON) | {
-    'lambda_umap': 0.0, 'lambda_proto_recon': 0.0,   # [D39] community OFF -- see below
+    'lambda_umap': 0.0, 'lambda_proto_recon': 0.0,   # community OFF
     'lambda_nassoc': 0.0, 'lambda_modularity': 0.0, 'lambda_proto_usage': 0.0,
-    'lambda_cohesion':     10.0,   # gram, 2-hop   } 50/50 split of the measured
-    'lambda_cohesion_aff': 22.3,   # aff,  1-hop   } authority 1.5403 ([D39] winner)
+    'lambda_swav': 0.0, 'lambda_kl': 0.0, 'lambda_recon': 0.0,
+    'lambda_cohesion':     <gram>, # } 50/50 split of the authority 1.5403.
+    'lambda_cohesion_aff': <aff>,  # } MEASURE THESE PER DATASET -- spans are not
+                                   #   portable across graphs. lambda = authority/span,
+                                   #   span = value(leiden at K) - value(random at K)
+                                   #   on the graph training will actually see.
+                                   #   s28nsc/bk02 gave 10.0/22.3; every other dataset
+                                   #   differs (pancreas 4.04/11.99, lung 5.61/26.32,
+                                   #   immune 8.74/33.65 on the heldout-80% graphs).
     'cohesion_self':   1.0,   # <- ALWAYS 1.0. The self-pair counts like any other
                               #    member, sim(c,c)=1. This IS the plain formula:
                               #    "mean similarity to a prototype's members".
@@ -401,15 +415,9 @@ lambda_config = dict(LAMBDA_PROTO_UMAP_PRECON) | {
     'cohesion_global': 2,     # [D29] remembered full-graph profiles
     'coh_mem_init': 'full',   # [D32] memory from one inference pass, not uniform
     'coh_mem_hlife': 500.0,   # [D31] one-epoch age half-life
-    'proto_reinit_every': 0,  # [D39] not needed once community is off
+    'proto_reinit_every': 0,  # [D39] no reinit
 }
 ```
-
-**The config above IS the default. Community stays OFF.** `lambda_umap = 0`,
-`lambda_proto_recon = 0`, `lambda_nassoc = 0`, `lambda_modularity = 0`,
-`lambda_proto_usage = 0` — cohesion is the ONLY objective, so nothing can outvote the
-term the model is built around. Do not reintroduce the community term because §9c's
-historical base config had it; §9c is superseded.
 
 **MULTI-BATCH IS NOT A KNOB.** There is no `coh_batch` option. The trainer counts bio
 batches from the data: with >1 batch each cell is scored against `V[b]`, the node set of
@@ -687,6 +695,8 @@ and prepare paper for iclr submission so in case i got rejetced by neurips i wil
 please dont make up hallucinated things from yourself - make sure whatever reasoning you do for me is real and solid - not hallusicianted - this is important
 
 nassoc off diagonal correct dominator is min (voli, volj)
+  [HISTORICAL as of 2026-09-24 — nassoc is OFF (lambda_nassoc = 0) in every current
+   run; cohesion replaced it. True of nassoc if it is ever revived. See §9d.]
 ===
 remind me these - if you thaught i am forgeting:
 each run should have a decision before running - what do you expect? how would effect your decision
