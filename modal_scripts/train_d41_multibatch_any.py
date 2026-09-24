@@ -6,7 +6,6 @@ WHAT IS BEING TESTED
 On pancreas, coh_batch='locl' produced metacells that mix batches (batch entropy
 1.38 vs SEACells 0.18) at near-parity cell-type purity, and on the paper's own
 rare-cell metrics it roughly DOUBLED cross-batch homogeneity against its own
-control (0.4393 vs 0.2118, with SEACells at 0.2218). The control D_ctrl is
 identical except coh_batch, so the batch integration comes from the LOSS.
 
 This run asks whether that replicates on three more datasets, two of them
@@ -14,7 +13,6 @@ non-spatial multi-batch (immune, lung) and one multi-batch SPATIAL (crcx, which
 carries a niche annotation so covered states and joint purity are computable).
 
 WHAT WOULD CHANGE THE CONCLUSION
-  - if D_ctrl matches C_both on cross_batch_homogeneity anywhere, the batch
     integration is NOT coming from the loss on that dataset and [D41] is a no-op
     there -- that is the finding, and the next target is the latent space;
   - if ct_purity collapses (say below 0.85) while batch entropy rises, the term
@@ -112,10 +110,9 @@ def arms_for(ds):
     a1, g1 = AUTHORITY / s_aff, AUTHORITY / s_gram
     ah, gh = 0.5 * a1, 0.5 * g1
     return [
-        (ds, "A_aff",  0.0, a1, "locl", aff_t, K, ld, s_aff, s_gram),
-        (ds, "B_gram", g1,  0.0, "locl", aff_t, K, ld, s_aff, s_gram),
-        (ds, "C_both", gh,  ah,  "locl", aff_t, K, ld, s_aff, s_gram),
-        (ds, "D_ctrl", gh,  ah,  "off",  aff_t, K, ld, s_aff, s_gram),
+        (ds, "A_aff",  0.0, a1,  aff_t, K, ld, s_aff, s_gram),
+        (ds, "B_gram", g1,  0.0,  aff_t, K, ld, s_aff, s_gram),
+        (ds, "C_both", gh,  ah,   aff_t, K, ld, s_aff, s_gram),
     ]
 
 
@@ -161,7 +158,7 @@ def run(ds: str, arm: str, lam_gram: float, lam_aff: float, coh_batch: str,
         "lambda_recon": 0.0,
         "lambda_cohesion": lam_gram,
         "lambda_cohesion_aff": lam_aff,
-        "coh_batch": coh_batch,
+        
         "cohesion_sim": "gram",
         "cohesion_form": "perc",
         "cohesion_row_norm": "l2",

@@ -190,117 +190,233 @@ def _gram_rows(A, delta=1.0):
     return sp.csr_matrix(sp.diags(1.0 / n) @ cA)
 
 
-def cohesion(labels, A, batch_codes=None, sim="aff", per_batch=False,
-             cohesion_self=0.0, cohesion_diag=1.0, _cache=None):
-    """The training objective on hard assignments, over the full graph.
+def build_inV(A, batch_codes, n_bio):
+    """V[b] = node set of bio_graph_b = all edges with >=1 endpoint in batch b.
 
-        numer[c][p] = sum over j of similarity(c,j) * S[j][p]
-        den[c][p]   = size_in_batch[bio(c)][p]  if per_batch else size[p]
-        value       = (1/n_cells) * sum_c sum_p S[c][p]*numer[c][p]/max(den,1)
+        V[b] = {j : bio(j) == b}  U  {j : j has an edge into batch b}
 
-    cohesion_self defaults to 0: with per_batch=True a nonzero value rewards
-    smearing prototypes thinly across batches (the self part is 1/size_in_batch,
-    which a batch-SPREAD prototype maximises). Measured on pancreas, leaving it
-    at 1 collapses the span from 0.107 to 0.0006.
+    Returned as a dense (n_bio, n_cells) 0/1 array.
+    """
+    N = A.shape[0]
+    onehot = sp.csr_matrix((np.ones(N, np.float32), (np.arange(N), batch_codes)),
+                           shape=(N, n_bio))
+    touch = np.asarray(((A > 0).astype(np.float32) @ onehot).todense()) > 0
+    own = batch_codes[:, None] == np.arange(n_bio)[None, :]
+    return (touch | own).T.astype(np.float64)          # (n_bio, N)
+
+
+def cohesion_per_cell(labels, A, batch_codes=None, sim="aff",
+                      cohesion_self=1.0, cohesion_diag=1.0, _cache=None):
+    """The training objective, per cell, on HARD assignments.
+
+    Multi-batch is the BEHAVIOUR, not an option -- exactly as the trainer does it.
+    The only thing the batch structure changes is the SET OF CELLS each cell is
+    scored against:
+
+        V[b]        = node set of bio_graph_b (all edges with >=1 endpoint in b)
+        numer[c][p] = sum over j in V[bio(c)] of  ass[j][p] * sim[c][j]
+        denom[c][p] = sum over j in V[bio(c)] of  ass[j][p]
+        cohesion_c  = sum over p of ass[c][p] * numer[c][p] / denom[c][p]
+
+    With ONE batch (or batch_codes=None) V[b] is every cell, so the denominator
+    is the global size and this reduces to the batch-agnostic formula exactly.
+
+    Nothing is masked: cross-batch similarities keep their real values. What is
+    excluded are the cells whose zeros carry no information -- a cross-batch pair
+    with no edge is the batch effect, not measured dissimilarity, so it is absent
+    from the numerator and must be absent from the denominator too.
+
+    Returns a length-n_cells array; the caller takes mean and std OVER CELLS.
     """
     N = A.shape[0]
     _, codes = np.unique(np.asarray(labels), return_inverse=True)
     K = int(codes.max()) + 1
     S = sp.csr_matrix((np.ones(N, np.float32), (np.arange(N), codes)),
                       shape=(N, K))
-    Sd = S.toarray()
+    Sd = S.toarray().astype(np.float64)
 
-    M = A
-    if per_batch:
-        if batch_codes is None:
-            raise ValueError("per_batch=True needs batch_codes")
-        if _cache is not None and "A_mask" in _cache:
-            M = _cache["A_mask"]
-        else:
-            coo = A.tocoo()
-            keep = batch_codes[coo.row] == batch_codes[coo.col]
-            M = sp.csr_matrix((coo.data[keep], (coo.row[keep], coo.col[keep])),
-                              shape=A.shape)
-            if _cache is not None:
-                _cache["A_mask"] = M
+    if batch_codes is None:
+        batch_codes = np.zeros(N, np.int64)
+    n_bio = int(batch_codes.max()) + 1
 
     if sim == "aff":
-        numer = np.asarray((M @ S).todense()) + cohesion_diag * Sd
+        # sim[c][j] nonzero only for c's neighbours, and c is in b, so every such
+        # j is already in V[b]: the numerator restriction is AUTOMATIC.
+        numer = np.asarray((A @ S).todense()).astype(np.float64)
+        numer += cohesion_diag * Sd                    # sim(c,c)
     else:
-        rkey = f"R_{per_batch}"
-        if _cache is not None and rkey in _cache:
-            R = _cache[rkey]
-        else:
-            R = _gram_rows(M, cohesion_diag)
+        rk = "R" if _cache is None else "R_gram"
+        R = (_cache.get(rk) if _cache is not None else None)
+        if R is None:
+            R = _gram_rows(A, cohesion_diag)
             if _cache is not None:
-                _cache[rkey] = R
-        numer = np.asarray((R @ (R.T @ S)).todense())
-    # sim(c,c) == 1 in both modes (aff via cohesion_diag, gram via the L2 norm)
-    numer = numer - (1.0 - cohesion_self) * Sd
+                _cache[rk] = R
+        if n_bio == 1:
+            numer = np.asarray((R @ (R.T @ S)).todense()).astype(np.float64)
+        else:
+            # gram: the restriction is NOT automatic -- a 2-hop neighbour can sit
+            # OUTSIDE V[b] while having nonzero similarity. Restrict explicitly,
+            # one prototype profile per batch.
+            inV = (_cache.get("inV") if _cache is not None else None)
+            if inV is None:
+                inV = build_inV(A, batch_codes, n_bio)
+                if _cache is not None:
+                    _cache["inV"] = inV
+            numer = np.zeros((N, K), np.float64)
+            for b in range(n_bio):
+                selb = batch_codes == b
+                if not selb.any():
+                    continue
+                PV_b = R.T @ sp.csr_matrix(Sd * inV[b][:, None])
+                numer[selb] = np.asarray((R[selb] @ PV_b).todense())
+    numer = numer - (1.0 - cohesion_self) * Sd         # weight on the self-pair
 
-    if per_batch:
-        nb = int(batch_codes.max()) + 1
-        size_bp = np.zeros((nb, K), np.float64)
-        np.add.at(size_bp, batch_codes, Sd)
-        den = size_bp[batch_codes]
-    else:
+    if n_bio == 1:
         den = np.tile(Sd.sum(0), (N, 1))
-    return float((Sd * (numer / np.maximum(den, 1.0))).sum() / N)
+    else:
+        inV = (_cache.get("inV") if _cache is not None else None)
+        if inV is None:
+            inV = build_inV(A, batch_codes, n_bio)
+            if _cache is not None:
+                _cache["inV"] = inV
+        den = (inV @ Sd)[batch_codes]                  # (N, K)
+    return (Sd * (numer / np.maximum(den, 1e-12))).sum(axis=1)
+
+
+def cohesion(labels, A, batch_codes=None, sim="aff", **kw):
+    """Mean over cells of cohesion_per_cell."""
+    return float(cohesion_per_cell(labels, A, batch_codes, sim=sim, **kw).mean())
+
+
+def modularity_per_batch(labels, A, batch_codes, node_mask=None):
+    """Modularity computed inside each bio batch's own subgraph, per batch.
+
+    Returns a dict {batch -> modularity}; the caller takes mean and std OVER
+    BATCHES, which is the statistic the paper's Table 1 uses
+    (mc_metric_utils.calc_modularity_per_batch).
+
+    node_mask restricts to a set of nodes (e.g. test nodes). Per the definition
+    used throughout, the subgraph of a node set is ALL EDGES WITH AT LEAST ONE
+    ENDPOINT in the set -- not only edges with both endpoints inside.
+    """
+    labels = np.asarray(labels)
+    _, codes = np.unique(labels, return_inverse=True)
+    out = {}
+    for b in np.unique(batch_codes):
+        keep = batch_codes == b
+        if node_mask is not None:
+            keep = keep & node_mask
+        if keep.sum() < 2:
+            continue
+        idx = np.where(keep)[0]
+        # all edges with >=1 endpoint in this set
+        Ab = A[idx]                                   # rows of the set
+        coo = Ab.tocoo()
+        w = coo.data
+        if w.size == 0:
+            continue
+        ci = codes[idx][coo.row]
+        cj = codes[coo.col]
+        two_m = float(w.sum())                        # directed sum over these rows
+        if two_m <= 0:
+            continue
+        inside = float(w[ci == cj].sum())
+        deg = np.zeros(codes.max() + 1)
+        np.add.at(deg, ci, w)
+        out[str(b)] = inside / two_m - float((deg / two_m) ** 2 @ np.ones_like(deg))
+    return out
 
 
 # ------------------------------------------------------------ the composite ---
-def score_partition(labels, cell_types, batches, A=None, niches=None,
-                    n_proto=None, _cache=None):
-    """Every scoreboard metric for one partition. Returns a flat dict."""
+def _w_mean_std(x, w):
+    """Size-weighted mean and its matching weighted std.
+
+    w is normalised to sum 1, so
+        wmean = sum_i w_i x_i
+        wstd  = sqrt( sum_i w_i (x_i - wmean)^2 )
+    i.e. the spread ACROSS METACELLS weighted by size -- not a standard error.
+    """
+    w = np.asarray(w, np.float64)
+    w = w / w.sum()
+    m = float((w * x).sum())
+    return m, float(np.sqrt((w * (np.asarray(x, np.float64) - m) ** 2).sum()))
+
+
+def score_partition(labels, cell_types, batches, A_train=None, A_test=None,
+                    niches=None, n_proto=None, _cache=None, _cache_test=None):
+    """Every scoreboard metric for one partition.
+
+    A_train  the graph the model was fitted on (the visible 80%).
+    A_test   the held-out edges -- cohesion/modularity on these is the
+             de-circularised number: the model never had a training signal for
+             any of them.
+    """
     labels = np.asarray(labels)
-    df = pd.DataFrame({"mc": labels, "ct": np.asarray(cell_types),
-                       "b": np.asarray(batches)})
+    ct = np.asarray(cell_types).astype(str)
+    bt = np.asarray(batches).astype(str)
+    bcodes = pd.Categorical(bt).codes.astype(np.int64)
+    df = pd.DataFrame({"mc": labels, "ct": ct, "b": bt})
     out = {}
 
+    # --- per-metacell purity and batch entropy -----------------------------
     g = df.groupby("mc")
     size = g.size()
     purity = g.ct.agg(lambda s: s.value_counts().iloc[0] / len(s))
     major = g.ct.agg(lambda s: s.value_counts().index[0])
     # UNNORMALISED Shannon entropy in nats == mc_metric_utils.calc_batch_entropy
     entropy = g.b.agg(lambda s: float(
-        -(lambda p: (p * np.log(p + 1e-10)).sum())(
+        -(lambda q: (q * np.log(q + 1e-10)).sum())(
             s.value_counts(normalize=True).values)))
-    w = size / size.sum()
 
     out["ct_purity_mean"] = float(purity.mean())
     out["ct_purity_std"] = float(purity.std())
-    out["ct_purity_wmean"] = float((purity * w).sum())
+    out["ct_purity_wmean"], out["ct_purity_wstd"] = _w_mean_std(purity.values,
+                                                                size.values)
     out["batch_entropy_mean"] = float(entropy.mean())
     out["batch_entropy_std"] = float(entropy.std())
-    out["batch_entropy_wmean"] = float((entropy * w).sum())
+    out["batch_entropy_wmean"], out["batch_entropy_wstd"] = _w_mean_std(
+        entropy.values, size.values)
     out["coverage"] = float(major.nunique() / df.ct.nunique())
     out["n_mc"] = int(len(size))
     out["median_size"] = float(size.median())
     if n_proto is not None:
         out["n_dead"] = int(n_proto - len(np.unique(labels)))
 
+    # --- joint (cell type, niche) ------------------------------------------
     if niches is not None:
-        jdf = pd.DataFrame({
-            "mc": labels,
-            "joint": (pd.Series(np.asarray(cell_types)).astype(str) + "||"
-                      + pd.Series(np.asarray(niches)).astype(str)).to_numpy()})
+        jdf = pd.DataFrame({"mc": labels,
+                            "joint": (pd.Series(ct) + "||"
+                                      + pd.Series(np.asarray(niches).astype(str))
+                                      ).to_numpy()})
         jg = jdf.groupby("mc")
         out["joint_purity"] = float(
             jg.joint.agg(lambda s: s.value_counts().iloc[0]).sum() / len(jdf))
         jmaj = jg.joint.agg(lambda s: s.value_counts().index[0])
         out["n_covered_states"] = int(jmaj.nunique())
         out["n_states_total"] = int(jdf.joint.nunique())
-        out["state_coverage"] = float(jmaj.nunique() / jdf.joint.nunique())
 
-    out.update(rare_metrics_paper(labels, cell_types, batches))
+    # --- rare: the PAPER's batch-local definitions -------------------------
+    out.update(rare_metrics_paper(labels, ct, bt))
 
-    if A is not None:
-        bcodes = pd.Categorical(np.asarray(batches)).codes.astype(np.int64)
-        for s_ in ("aff", "gram"):
-            out[f"coh_{s_}_perbatch"] = cohesion(labels, A, bcodes, sim=s_,
-                                                 per_batch=True, _cache=_cache)
-            out[f"coh_{s_}_global"] = cohesion(labels, A, bcodes, sim=s_,
-                                               per_batch=False, _cache=_cache)
+    # --- the objective, mean +- std OVER CELLS -----------------------------
+    for tag, Ax, cch in (("train", A_train, _cache), ("test", A_test, _cache_test)):
+        if Ax is None:
+            continue
+        for sim in ("aff", "gram"):
+            v = cohesion_per_cell(labels, Ax, bcodes, sim=sim, _cache=cch)
+            out[f"coh_{sim}_{tag}_mean"] = float(v.mean())
+            out[f"coh_{sim}_{tag}_std"] = float(v.std())
+
+    # --- modularity per bio batch, mean +- std OVER BATCHES ----------------
+    for tag, Ax in (("train", A_train), ("test", A_test)):
+        if Ax is None:
+            continue
+        mods = modularity_per_batch(labels, Ax, bcodes)
+        if mods:
+            vals = np.array(list(mods.values()), np.float64)
+            out[f"modularity_{tag}_mean"] = float(vals.mean())
+            out[f"modularity_{tag}_std"] = float(vals.std())
+            out[f"modularity_{tag}_nbatch"] = int(len(vals))
     return out
 
 
