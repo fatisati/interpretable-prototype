@@ -323,38 +323,48 @@ metrics were plausible, and the loss decreased monotonically the whole time.
    (`size`, `volume`), so a ratio of the two is NOT an unbiased estimate of the
    full-graph ratio. Rescale both sides to the same scale, or don't compare them.
 
-Corollary for hyperparameters: a threshold parameter (`nassoc_gamma`) is only
-interpretable once the quantity it is compared against is on a known scale. Derive it
-from measured properties of the actual affinity graph rather than sweeping blind, and
-re-derive it if the scaling of the underlying quantity changes.
+Corollary for hyperparameters: a threshold parameter is only interpretable once the
+quantity it is compared against is on a known scale. Derive it from measured properties
+of the actual graph rather than sweeping blind, and re-derive it if the scaling of the
+underlying quantity changes. (`cohesion`'s span calibration is the live example — see
+§9d.)
 
-**How to derive `nassoc_gamma` — settled 2026-09-18** (`decisions.md` §15,
-`EXPERIMENTS.md` §11a). The CPM move rule is
+**`nassoc_gamma` — NO LONGER RELEVANT.** We are on cohesion. `nassoc` is **off** in every
+current run (`lambda_nassoc = 0`), so gamma is not a parameter of anything we train and
+must not be tuned, measured or reported.
+
+Why it went away rather than being fixed: `nassoc` and `cohesion` are **both diagonal
+terms, and cohesion replaces nassoc**. §9b's own argument is the reason — CPM's charge is
+a function of the assignment COLUMN SUMS only,
 
 ```
-delta(move cell i into p) = size[p] * ( mean_affinity(i -> ALL members of p) - gamma )
-=> cell i joins p  iff  mean_affinity(i -> members of p) > gamma
+d(CPM charge) / d assign[i][k] = gamma * ( size[k] - assign[i][k] )
 ```
 
-so gamma is **the minimum AVERAGE affinity a cell needs to a group to be worth joining
-it** — a property of the graph, measurable with no training. The mean is over *all*
-members including non-neighbours, so gamma is far below a typical edge weight. Measure
-it with `modal_scripts/measure_gamma_from_graph.py`; gamma is **not portable across
-graphs** (`s28nsc`/`bk02` → 0.026-0.030, `pancreas`/`arbf` → 0.11).
+so it cannot move a cell for SIMILARITY reasons at all; it is a size/capacity charge.
+That is exactly the defect cohesion was built to fix. Running both puts two diagonal
+terms in competition and drags in a threshold whose derivation was never settled, so any
+cohesion result would be confounded by a gamma nobody chose on principle.
 
-Two scale traps that made gamma meaningless before, both now handled:
-- the loss compares gamma against a **soft** density while every measurable value is a
-  **hard** one — pass `nassoc_gamma_scale='soft'` and the code converts it ([D10]);
-- `epsilon` calibration **fails on every dataset tried** and silently falls back to
-  `umap_proto_effk=5.0`, a hard-coded default nothing chose, which then drifts during
-  training. **Still unfixed** — check the `[eps calibration]` line in any run log.
+The old derivation (the CPM move rule, `measure_gamma_from_graph.py`, and the measured
+values `s28nsc`/`bk02` → 0.026-0.030, `pancreas`/`arbf` → 0.11) is kept in
+`decisions.md` §15 and `EXPERIMENTS.md` §11a **only** so runs that predate this change
+stay interpretable. Do not carry it into new work.
 
-## 9c. scProto base config — always start from this
+Still live and unrelated to gamma: `epsilon` calibration **fails on every dataset tried**
+and silently falls back to `umap_proto_effk=5.0`, a hard-coded default nothing chose,
+which then drifts during training. **Still unfixed** — check the `[eps calibration]`
+line in any run log.
 
-The loss fixes in §9b are **not** the `defaults.py` defaults (defaults stay
-behavior-preserving so existing model-folder names don't change). Pass them explicitly.
-Validated on `s28nsc`/K=200: DGE `pearson_r` 0.654 -> 0.780, 0/200 dead prototypes, and it
-also rescued the affinities where the old loss collapsed to 15/200 (0.342 -> 0.760).
+## 9c. The old nassoc base config — HISTORICAL, do not start from this
+
+**Superseded. The current base config is §9d (cohesion).** `lambda_nassoc = 0` in every
+run we do now, so nothing below is active; it is recorded so the runs that used it stay
+reproducible and their model-folder names stay readable.
+
+It was validated on `s28nsc`/K=200 at the time: DGE `pearson_r` 0.654 -> 0.780, 0/200 dead
+prototypes, and it rescued the affinities where the older loss collapsed to 15/200
+(0.342 -> 0.760). Those numbers describe the nassoc-era model, not the current one.
 
 ```python
 lambda_config = dict(LAMBDA_PROTO_UMAP_PRECON) | {
@@ -369,8 +379,8 @@ lambda_config = dict(LAMBDA_PROTO_UMAP_PRECON) | {
 }
 ```
 
-`nassoc_cpm_norm='graf'` is the older minibatch-scaled normalizer, kept only so the runs
-that used it stay reproducible — prefer `'gful'` with `nassoc_size_scale='full'`.
+`nassoc_cpm_norm='graf'` is an even older minibatch-scaled normalizer. All of this is
+historical: prefer §9d.
 
 ## 9d. Cohesion config — `cohesion_self = 1.0`, ALWAYS. Never 0.5.
 
@@ -394,6 +404,45 @@ lambda_config = dict(LAMBDA_PROTO_UMAP_PRECON) | {
     'proto_reinit_every': 0,  # [D39] not needed once community is off
 }
 ```
+
+**TWO VARIANTS, both legitimate — say which one a run is.** The block above is
+**cohesion-ONLY** (`lambda_umap = 0`), the [D39] ablation: nothing can outvote the term
+under test, which is what makes it a clean test of cohesion itself. The **reported
+model** instead keeps the community term ON:
+
+```python
+lambda_config = dict(LAMBDA_PROTO_UMAP_PRECON) | {
+    'lambda_nassoc': 0.0,          # cohesion replaces nassoc -- see §9b
+    'lambda_cohesion':     <gram>, # } 50/50 of the measured authority 1.5403,
+    'lambda_cohesion_aff': <aff>,  # } lambda = authority/span, span measured per graph
+    'cohesion_self': 1.0, 'cohesion_diag': 1.0,
+    'cohesion_global': 2, 'coh_mem_init': 'full', 'coh_mem_hlife': 500.0,
+}
+# lambda_umap stays 1 (community ON), lambda_proto_recon 0.01, usage 0.1
+```
+
+Caveat carried over from [D39]: `proto_reinit_every: 0` was justified by "not needed
+once community is off". With community ON that justification does not hold, so watch
+`n_dead` — if prototypes drain, reinit is the first thing to reconsider.
+
+**MULTI-BATCH IS NOT A KNOB.** There is no `coh_batch` option. The trainer counts bio
+batches from the data: with >1 batch each cell is scored against `V[b]`, the node set of
+its own bio-batch graph (all edges with at least one endpoint in `b`); with 1 batch
+`V[b]` is every cell, so the denominator is the global size and the formula is
+bit-identical to the batch-agnostic one (asserted to <1e-12 in
+`tests/test_cohesion_memory.py`). Nothing is masked — cross-batch similarities keep
+their real values. What is excluded are pairs whose zeros carry no information: a
+cross-batch zero is mostly the batch effect, not measured dissimilarity, so it is absent
+from the numerator and must be absent from the denominator too. Full formulas in
+`my-tasks/context/md/LOSS_FORMULAS.md`.
+
+**Two practical traps, both hit for real:**
+- **Filename length.** Pass lambdas ROUNDED (2 dp). Full-precision floats render as
+  `lcoh4.03750478377344` and push the run-folder name past the 255-byte limit — a run
+  died with `OSError [Errno 36] File name too long` AFTER finishing training.
+- **`affinity_type` truncates to 4 chars**, so `arbf` and `arbf_heldout20_seed0` both
+  render `aff-arbf` and collide into ONE folder. Always pass a distinct
+  `experiment_name` when training on a masked/held-out graph.
 
 **Why 1.0 and not 0.5** — five reasons; the first is the mechanistic one:
 
