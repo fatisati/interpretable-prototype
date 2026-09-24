@@ -395,6 +395,56 @@ lambda_config = dict(LAMBDA_PROTO_UMAP_PRECON) | {
 - **No reinit needed.** With community off, `proto_reinit_every=0` gives 0 dead across
   every graph tested (lambda 0, 0.2, 0.4, 0.8).
 
+## 9e. What the defaults actually are — check before assuming
+
+Defaults live in **three** places and they disagree with each other. A value you did
+not pass is NOT necessarily the one you think.
+
+**1. `find_metacells` / `run_mc_task` signature** (`experiments/tasks.py`):
+
+| arg | default | what our runs pass | note |
+|---|---|---|---|
+| `cvae_epochs` | **required** | 50 | no default — must be passed |
+| `train_epochs` | **required** | 10-20 | no default |
+| `batch_size` | **256** | 1024 | §5 wants 1024 — PASS IT |
+| `umap_steps_per_epoch` | **1000** | *not passed* -> 1000 | §5 says 500; nothing enforces it |
+| `load_pretrain` | **True** | (default) | reuses `pretrain_checkpoint.pth` if it exists |
+| `load_umap` | False | (default) | True = skip training, load checkpoint |
+| `early_stop` | **True** | False for cohesion arms | [D34] |
+| `early_stop_metric` | **'modularity'** | n/a when early_stop=False | wrong metric for a cohesion-only arm |
+| `min_delta` | 0.005 | (default) | |
+
+**Pretraining: yes, always — but reused, not recomputed.** `load_pretrain=True` means the
+CVAE encoder is loaded from `MODEL_DIR/<ds>/pretrain/pretrain_checkpoint.pth` when it
+exists, and only trained (for `cvae_epochs`) when it does not. Pretraining does NOT depend
+on the affinity graph, so one checkpoint covers every `affinity_type` / lambda sweep at a
+given K — which is why a whole sweep costs one pretrain, not one per arm.
+
+**2. `LAMBDA_PROTO_UMAP_PRECON`** (the usual starting dict) turns several terms ON:
+
+```
+lambda_umap=1          lambda_proto_recon=0.01     lambda_nassoc=1
+lambda_proto_usage=0.1 proto_usage_mode='ema'      nassoc_agg='max'
+prot_init='waypoint'   umap_similarity='proto'     calibrate_eps=1
+```
+
+So starting from it and only setting the cohesion keys leaves **nassoc and proto_usage
+running**. A cohesion-only arm must explicitly zero `lambda_nassoc`, `lambda_modularity`,
+`lambda_proto_usage`, `lambda_umap`, `lambda_proto_recon` — see the §9d block.
+
+**3. `configs/defaults.py`** — the model-level defaults. The ones that bite:
+`num_prototypes` 300 (we use 200), `latent_dims` 8 (we use 16), `affinity_type` `'uctx'`,
+`prot_init` `'kmeans'` (PRECON overrides to `'waypoint'`), `umap_similarity` `'embedding'`
+(PRECON overrides to `'proto'`), `epsilon` 0.05 (but `calibrate_eps=1` recomputes it at
+runtime — measured 0.0664-0.0678 on s28nsc, so the 0.05 is never used), `seed` 31.
+
+**CAUTION, measured 2026-09-23:** an epoch is **1000 steps**, not 500. CLAUDE.md §5 says
+to keep `umap_steps_per_epoch=500`, but no run passed it, so every result in the
+[D39]/[D40]/[D41] sweep used the code default of 1000 (confirmed from the tqdm totals in
+the run logs). One consequence: `coh_mem_hlife=500` was chosen as "one epoch" and is
+actually **half** an epoch. Nothing is invalidated — the runs are internally consistent and
+all used the same value — but do not repeat the "500 = one epoch" reasoning.
+
 ## 10. Explanation style
 
 Define every term and metric inline. Formulas as **plain-text code blocks with readable
