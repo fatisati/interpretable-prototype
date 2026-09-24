@@ -285,30 +285,35 @@ def test_model_name_registration():
 
 
 # ------------------------------------------------- [D41] multi-batch cohesion ---
-def mask_cross_batch(A, bcode):
-    """[D41] cross-batch similarity is zero."""
+# THE ONLY CHANGE from the batch-agnostic formula is the SET OF CELLS each cell's
+# cohesion is computed against:
+#
+#   for each batch b:
+#       bio_graph_b = all edges with AT LEAST ONE endpoint in b
+#       V[b]        = node set of bio_graph_b
+#                   = {j : bio(j)==b} U {j : j has an edge into b}
+#
+#   for cell c, b = bio(c):
+#       numer[c][p] = sum over j in V[b] of  w[j]*ass[j][p]*sim[c][j]
+#       denom[c][p] = sum over j in V[b] of  w[j]*ass[j][p]
+#       cohesion_c  = sum over p of ass[c][p] * numer[c][p]/denom[c][p]
+#
+# Nothing is masked: cross-batch similarities keep their real values.
+def build_inV(A, bcode, n_bio):
+    """inV[b][j] = 1 if bio(j)==b OR j has an edge into batch b."""
+    N = A.shape[0]
     bc = torch.as_tensor(bcode)
-    same = (bc.unsqueeze(0) == bc.unsqueeze(1)).to(A.dtype)
-    return A * same
+    adj = (A > 0).to(A.dtype)
+    onehot = torch.zeros(N, n_bio, dtype=A.dtype)
+    onehot[torch.arange(N), bc] = 1.0
+    touch = (adj @ onehot) > 0                      # (N, n_bio)
+    own = bc.unsqueeze(1) == torch.arange(n_bio).unsqueeze(0)
+    return (touch | own).to(A.dtype).T              # (n_bio, N)
 
 
 def value_brute_d41(sim, S_mem, batch_idx, S_live, last_seen, step, half_life,
-                    bcode, n_bio):
-    """The literal [D41] loop, written straight from the definition:
-
-        for each cell c in the minibatch:
-            b = bio(c)
-            for each proto p:
-                numer = sum over j with bio(j)==b of ass[j][p]*w[j]*sim[c][j]
-                den   = sum over j with bio(j)==b of ass[j][p]*w[j]
-                total += ass[c][p] * numer / max(den, 1)
-        value = total / n_cells_in_minibatch
-
-    No algebra, no vectorisation -- deliberately the slow triple loop. Note the
-    denominator spans the SAME population as the numerator: every cell of c's
-    batch, neighbours and non-neighbours alike (non-neighbours contribute 0 to
-    the numerator, which is what makes the value a genuine mean similarity).
-    """
+                    bcode, n_bio, self_weight=1.0):
+    """The literal loop from the spec. Slow triple loop, no algebra."""
     N, K = S_mem.shape
     w = weights_brute(batch_idx, last_seen, step, half_life, N)
     bpos = {int(j): i for i, j in enumerate(batch_idx.tolist())}
@@ -317,39 +322,54 @@ def value_brute_d41(sim, S_mem, batch_idx, S_live, last_seen, step, half_life,
     for j, i in bpos.items():
         assign[j] = live[i]
 
+    inV = build_inV(torch.as_tensor(sim), bcode, n_bio).numpy()
     total = 0.0
     for c in bpos:
         b = bcode[c]
         for k in range(K):
             numer = 0.0
-            den = 0.0
+            denom = 0.0
             for j in range(N):
-                if bcode[j] != b:
+                if inV[b][j] == 0:
                     continue
-                numer += assign[j][k] * w[j] * sim[c][j]
-                den += assign[j][k] * w[j]
-            total += live[bpos[c]][k] * numer / max(den, 1.0)
+                s_cj = sim[c][j]
+                if j == c:
+                    s_cj = s_cj * self_weight
+                numer += w[j] * assign[j][k] * s_cj
+                denom += w[j] * assign[j][k]
+            total += live[bpos[c]][k] * numer / max(denom, 1e-8)
     return total / float(len(bpos))
 
 
 def value_vectorized_d41(A, S_mem, batch_idx, S_live, last_seen, step, half_life,
-                         bcode, n_bio, sim='aff'):
+                         bcode, n_bio, sim="aff", self_weight=1.0):
     """The pipeline exactly as scproto's [D41] block runs it."""
     bc = torch.as_tensor(bcode, dtype=torch.long)
-    Am = mask_cross_batch(A, bcode)             # masked ONCE, as at cache time
     S_eff, _, _ = assemble_membership(S_mem, S_live, batch_idx,
                                       last_seen=last_seen, step=step,
                                       half_life=half_life)
-    size_bp = batch_sizes(S_eff, bc, n_bio)
-    size_cell = size_bp[bc[batch_idx]].clamp(min=1.0)        # (nb, K)
-    if sim == 'aff':
-        GS = Am[batch_idx] @ S_eff
-    else:                                       # gram of the MASKED affinity
-        rn = Am.pow(2).sum(dim=1).sqrt().clamp(min=1e-30)
-        PV = Am.T @ (S_eff / rn.unsqueeze(1))
-        GS = (Am[batch_idx] @ PV) / rn[batch_idx].unsqueeze(1)
-    num_c = GS * S_live                         # divide BEFORE summing cells
-    return (num_c / size_cell).sum() / float(len(batch_idx))
+    inV = build_inV(A, bcode, n_bio)
+    den_bp = inV @ S_eff                                  # (n_bio, K)
+    den = den_bp[bc[batch_idx]].clamp(min=1e-8)           # (nb, K)
+    if sim == "aff":
+        # restriction is automatic: every neighbour of c is in V[bio(c)]
+        GS = A[batch_idx] @ S_eff
+    else:
+        # gram: the restriction is NOT automatic -- a 2-hop neighbour can sit
+        # outside V[b] -- so build one profile per batch from that V[b] only.
+        rn = A.pow(2).sum(dim=1).sqrt().clamp(min=1e-30)
+        GS = torch.zeros(len(batch_idx), S_mem.shape[1], dtype=A.dtype)
+        cell_b = bc[batch_idx]
+        for b in torch.unique(cell_b).tolist():
+            selb = cell_b == b
+            PV_b = A.T @ ((S_eff * inV[b].unsqueeze(1)) / rn.unsqueeze(1))
+            GS[selb] = (A[batch_idx[selb]] @ PV_b) / rn[batch_idx[selb]].unsqueeze(1)
+    num = GS * S_live
+    if self_weight != 1.0:
+        dg = A[batch_idx, batch_idx] if sim == "aff" else torch.ones(len(batch_idx),
+                                                                    dtype=A.dtype)
+        num = num - (1.0 - self_weight) * (S_live.pow(2) * dg.unsqueeze(1))
+    return (num / den).sum() / float(len(batch_idx))
 
 
 def make_bcode(seed, N, n_bio):
@@ -360,114 +380,95 @@ def make_bcode(seed, N, n_bio):
 
 
 def test_d41_brute_force_aff():
-    """[D41] vectorised == the literal triple loop, 1-hop similarity."""
+    """Vectorised == the literal triple loop from the spec, 1-hop similarity."""
     for seed in range(5):
         A, S_mem, bidx, logits, seen, hl, step = make_case(seed)
+        A = A.clone()
+        A[torch.arange(A.shape[0]), torch.arange(A.shape[0])] = 1.0  # sim(c,c)=1
         S_live = torch.softmax(logits, dim=1)
         bc = make_bcode(seed, A.shape[0], 3)
-        Am = mask_cross_batch(A, bc)
         got = value_vectorized_d41(A, S_mem, bidx, S_live, seen, step, hl, bc, 3,
-                                   sim='aff').item()
-        want = value_brute_d41(Am.numpy(), S_mem, bidx, S_live, seen, step, hl,
+                                   sim="aff").item()
+        want = value_brute_d41(A.numpy(), S_mem, bidx, S_live, seen, step, hl,
                                bc, 3)
-        assert abs(got - want) < 1e-10, (seed, got, want)
-    print("PASS  [D41] aff  == brute-force triple loop")
+        assert abs(got - want) < 1e-9, (seed, got, want)
+    print("PASS  [D41] aff  == brute-force triple loop over V[b]")
 
 
 def test_d41_brute_force_gram():
-    """[D41] vectorised == the literal triple loop, 2-hop (gram) similarity."""
+    """Vectorised == the literal triple loop, 2-hop (gram) similarity."""
     for seed in range(5):
         A, S_mem, bidx, logits, seen, hl, step = make_case(seed)
         S_live = torch.softmax(logits, dim=1)
         bc = make_bcode(seed, A.shape[0], 3)
-        Am = mask_cross_batch(A, bc)
-        rn = Am.pow(2).sum(dim=1).sqrt().clamp(min=1e-30)
-        R = Am / rn.unsqueeze(1)
+        rn = A.pow(2).sum(dim=1).sqrt().clamp(min=1e-30)
+        R = A / rn.unsqueeze(1)
         gram = (R @ R.T).numpy()
         got = value_vectorized_d41(A, S_mem, bidx, S_live, seen, step, hl, bc, 3,
-                                   sim='gram').item()
-        want = value_brute_d41(gram, S_mem, bidx, S_live, seen, step, hl, bc, 3)
-        assert abs(got - want) < 1e-10, (seed, got, want)
-    print("PASS  [D41] gram == brute-force triple loop")
+                                   sim="gram").item()
+        # brute force needs inV built from the SAME adjacency the code uses (A),
+        # not from the dense gram -- pass A's structure explicitly
+        inV_ref = build_inV(A, bc, 3).numpy()
+        N, K = S_mem.shape
+        w = weights_brute(bidx, seen, step, hl, N)
+        bpos = {int(j): i for i, j in enumerate(bidx.tolist())}
+        assign = S_mem.detach().numpy().copy()
+        live = S_live.detach().numpy()
+        for j, i in bpos.items():
+            assign[j] = live[i]
+        total = 0.0
+        for c in bpos:
+            b = bc[c]
+            for k in range(K):
+                numer = denom = 0.0
+                for j in range(N):
+                    if inV_ref[b][j] == 0:
+                        continue
+                    numer += w[j] * assign[j][k] * gram[c][j]
+                    denom += w[j] * assign[j][k]
+                total += live[bpos[c]][k] * numer / max(denom, 1e-8)
+        want = total / float(len(bpos))
+        assert abs(got - want) < 1e-9, (seed, got, want)
+    print("PASS  [D41] gram == brute-force triple loop over V[b]")
 
 
 def test_d41_single_batch_is_bit_identical():
-    """THE constraint: one bio batch => exactly the [D29]/[D37] global path.
+    """THE constraint: ONE bio batch must behave exactly as before.
 
-    Not 'close' -- bit-identical to 1e-12. With one batch nothing is masked and
-    the per-batch size IS the global size, so the only difference left is the
-    order of operations (divide-then-sum vs sum-then-divide), which must cancel
-    exactly when every cell shares a denominator.
+    With one batch every edge has an endpoint in b, so V[b] is ALL cells and the
+    denominator is the global size. Identical to the [D29]/[D37] path, not merely
+    close -- asserted to 1e-12, both similarities.
     """
     for seed in range(5):
         A, S_mem, bidx, logits, seen, hl, step = make_case(seed)
         S_live = torch.softmax(logits, dim=1)
         bc = np.zeros(A.shape[0], dtype=np.int64)            # ONE bio batch
-        for sim in ('aff', 'gram'):
+        for sim in ("aff", "gram"):
             d41 = value_vectorized_d41(A, S_mem, bidx, S_live, seen, step, hl,
                                        bc, 1, sim=sim).item()
-            S_eff, size_raw, _ = assemble_membership(
-                S_mem, S_live, bidx, last_seen=seen, step=step, half_life=hl)
-            size_g = size_raw.clamp(min=1.0)
-            if sim == 'aff':
-                GS = A[bidx] @ S_eff
-            else:
-                rn = A.pow(2).sum(dim=1).sqrt().clamp(min=1e-30)
-                PV = A.T @ (S_eff / rn.unsqueeze(1))
-                GS = (A[bidx] @ PV) / rn[bidx].unsqueeze(1)
-            glob = ((GS * S_live).sum(0) / size_g).sum().item() / float(len(bidx))
+            glob = value_vectorized(A, S_mem, bidx, S_live, seen, step, hl,
+                                    sim=sim).item() * float(
+                S_mem.shape[0]) / float(len(bidx))
             assert abs(d41 - glob) < 1e-12, (seed, sim, d41, glob)
-    print("PASS  [D41] one bio batch == global path (<1e-12, both similarities)")
+    print("PASS  [D41] one bio batch == the batch-agnostic path (<1e-12, both sims)")
 
 
-def test_d41_is_batch_neutral():
-    """A batch-pure and a batch-spread prototype must score the SAME.
-
-    The control has to be built carefully. Comparing an 8-member group against
-    a 3-member one measures the small-group effect of cohesion_form='perc'
-    (a member of an m-clique scores (m-1)/m), NOT a batch effect. The honest
-    comparison -- and the real scenario -- is the SAME group replicated in every
-    batch: one cell type present in all three techs.
-
-        group A  8 members, all in bio batch 0          (batch-PURE)
-        group B  8 members in EACH of the 3 batches     (batch-SPREAD)
-
-    Every member of either group has 7 same-batch group-mates, so a
-    batch-neutral objective must score them identically. A global denominator
-    divides B by 24 instead of 8 and penalises it 3x.
-    """
-    n_bio, per = 3, 8
-    N = n_bio * per * 2
-    bc = np.repeat(np.arange(n_bio), per * 2)
-    idx = [np.where(bc == b)[0] for b in range(n_bio)]
-    grpB = np.concatenate([i[:per] for i in idx])      # per members in EVERY batch
-    grpA = idx[0][per:]                                # per members, batch 0 only
-    assert len(np.intersect1d(grpA, grpB)) == 0        # disjoint, or the rows are junk
-
-    A = torch.zeros(N, N, dtype=torch.float64)
-    for grp in (grpA, grpB):
-        for i in grp:
-            for j in grp:
-                if i != j:
-                    A[i, j] = 1.0
-    A = mask_cross_batch(A, bc)                        # cross-batch sim = 0
-    S = torch.zeros(N, 2, dtype=torch.float64)
-    S[grpA, 0] = 1.0
-    S[grpB, 1] = 1.0
-    bcT = torch.as_tensor(bc, dtype=torch.long)
-    GS = A @ S
-
-    per_cell = GS / batch_sizes(S, bcT, n_bio)[bcT].clamp(min=1.0)
-    scoreA = per_cell[grpA, 0].mean().item()
-    scoreB = per_cell[grpB, 1].mean().item()
-    assert abs(scoreA - scoreB) < 1e-12, (scoreA, scoreB)
-    assert abs(scoreA - (per - 1) / per) < 1e-12, scoreA   # (m-1)/m, as predicted
-
-    glob = GS / S.sum(0).clamp(min=1.0)                # the global denominator
-    gA, gB = glob[grpA, 0].mean().item(), glob[grpB, 1].mean().item()
-    assert gB < gA - 1e-6, ("global should penalise the spread group", gA, gB)
-    print(f"PASS  [D41] batch-neutral: pure {scoreA:.6f} == spread {scoreB:.6f}"
-          f"  (global penalises spread {gA:.6f} -> {gB:.6f}, {gA/gB:.1f}x)")
+def test_d41_inV_definition():
+    """V[b] is the node set of 'all edges with at least one endpoint in b'."""
+    for seed in range(4):
+        A, *_ = make_case(seed)
+        bc = make_bcode(seed, A.shape[0], 3)
+        inV = build_inV(A, bc, 3).numpy()
+        N = A.shape[0]
+        for b in range(3):
+            for j in range(N):
+                own = bc[j] == b
+                touches = bool(((A[j] > 0).numpy() & (bc == b)).any())
+                assert bool(inV[b][j]) == bool(own or touches), (b, j)
+        # every own-batch cell is in V[b]
+        for b in range(3):
+            assert inV[b][bc == b].all()
+    print("PASS  [D41] V[b] == nodes of edges with >=1 endpoint in b (own U touching)")
 
 
 def test_d41_registration():
@@ -476,9 +477,7 @@ def test_d41_registration():
     assert 'coh_batch' in ABBREVIATIONS, "coh_batch missing from ABBREVIATIONS"
     vals = ['off', 'locl']
     assert len({v[:4] for v in vals}) == len(vals), "values not 4-char-distinct"
-    print(f"PASS  [D41] registered: abbrev={ABBREVIATIONS['coh_batch']!r}, "
-          f"values 4-char-distinct")
-
+    print(f"PASS  [D41] registered: abbrev={ABBREVIATIONS['coh_batch']!r}")
 
 if __name__ == '__main__':
     test_off_is_bit_identical_to_d29()
@@ -495,6 +494,6 @@ if __name__ == '__main__':
     test_d41_brute_force_aff()
     test_d41_brute_force_gram()
     test_d41_single_batch_is_bit_identical()
-    test_d41_is_batch_neutral()
+    test_d41_inV_definition()
     test_d41_registration()
     print("\nall tests passed")
