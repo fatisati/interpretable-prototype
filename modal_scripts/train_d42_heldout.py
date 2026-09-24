@@ -90,6 +90,10 @@ volume = modal.Volume.from_name("scproto-data")
 
 AUTHORITY = 1.5403
 HELDOUT = "arbf_heldout20_seed0"
+# Baked into experiment_name so the run FOLDER records which config ran.
+# Bump it whenever the loss config changes -- a stale deployment then
+# shows up as a wrong tag instead of silently producing wrong results.
+CONFIG_TAG = "cohonly"
 
 # ds -> (K, span_aff, span_gram, gamma_p25)
 # spans + gamma measured on the heldout-train graphs, 2026-09-24
@@ -113,6 +117,18 @@ def jobs_for(datasets):
         out.append((ds, K, round(0.5 * AUTHORITY / sg, 2),
                     round(0.5 * AUTHORITY / sa, 2), gamma, sa, sg))
     return out
+
+
+@app.function(image=image, timeout=600, volumes={"/vol": volume})
+def probe():
+    """Return the lambda config the DEPLOYED code would use.
+
+    Exists because a stale deployment silently cost three GPU runs: `modal
+    deploy` followed immediately by Function.from_name().spawn() resolved the
+    PREVIOUS version, which still had community ON, and nothing in the run name
+    or the call status revealed it. Always probe after deploying.
+    """
+    return {"community_off": True, "tag": CONFIG_TAG}
 
 
 @app.function(image=image, gpu="T4", timeout=21600, volumes={"/vol": volume})
@@ -141,7 +157,7 @@ def run(ds: str, K: int, lam_gram: float, lam_aff: float, gamma: float,
     from interpretable_ssl.experiments.tasks import (run_mc_task,
                                                      LAMBDA_PROTO_UMAP_PRECON)
 
-    name = f"d42_{ds}"
+    name = f"d42{CONFIG_TAG}_{ds}"
     lc = dict(LAMBDA_PROTO_UMAP_PRECON) | {
         # --- CLAUDE.md 9d: the cohesion config. Community OFF. ------------
         "lambda_umap": 0.0,

@@ -45,6 +45,11 @@ T2 = [
 
 # Row order and display names. Keep it short: the canonical baselines plus the
 # dim-matched variants that the fairness argument needs.
+# Row order and display names.
+# DIM-MATCHED ONLY: for the batch-correction methods that expose a latent
+# dimension, keep ONLY the 8-dim variant, matching scProto's latent_dims=8.
+# Comparing scProto-8 against Harmony-50 would confound "better method" with
+# "more latent capacity", which is the whole reason the d8 runs exist.
 ROWS = [
     ("scProto (cohesion)",     "scProto (cohesion, D42)"),
     ("SEACells",               "SEACells"),
@@ -53,15 +58,12 @@ ROWS = [
     ("MetaQ",                  "MetaQ"),
     ("Leiden + scPoli-St1",    "Leiden + scPoli-Stage1"),
     ("Leiden + scVI",          "Leiden + scVI"),
-    ("Leiden + Harmony",       "Leiden + Harmony"),
     ("Leiden + Harmony d8",    "Leiden + Harmony d8"),
-    ("Leiden + ComBat",        "Leiden + ComBat"),
     ("Leiden + ComBat d8",     "Leiden + ComBat d8"),
-    ("Leiden + BBKNN",         "Leiden + BBKNN"),
     ("Leiden + BBKNN d8",      "Leiden + BBKNN d8"),
-    ("SEACells + Harmony",     "SEACells + Harmony"),
-    ("SEACells + ComBat",      "SEACells + ComBat"),
-    ("SEACells + BBKNN",       "SEACells + BBKNN"),
+    ("SEACells + Harmony d8",  "SEACells + Harmony d8"),
+    ("SEACells + ComBat d8",   "SEACells + ComBat d8"),
+    ("SEACells + BBKNN d8",    "SEACells + BBKNN d8"),
     ("SEACells + scVI",        "SEACells + scVI"),
 ]
 

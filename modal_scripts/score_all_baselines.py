@@ -63,7 +63,9 @@ BASELINES = [
     ("SEACells + Harmony",       r"^seacell_X_harmony$"),
     ("SEACells + Harmony d8",    r"^seacell_X_harmony_d8$"),
     ("SEACells + ComBat",        r"^seacell_X_combat$"),
+    ("SEACells + ComBat d8",     r"^seacell_X_combat_d8$"),
     ("SEACells + BBKNN",         r"^seacell_X_bbknn$"),
+    ("SEACells + BBKNN d8",      r"^seacell_X_bbknn_d8$"),
     # scProto: the NEW cohesion runs carry an explicit experiment name
     ("scProto (cohesion, D42)",  r"^d42_[a-z\-]+_"),
 ]
