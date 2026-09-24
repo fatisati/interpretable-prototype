@@ -1902,3 +1902,95 @@ Adding community costs 125 of 200 prototypes and halves niche-DGE recovery.
 calibrated value is 0.0664-0.0678; the free-logit reference uses 0.05 -- the same
 regime. The "sharp eps is REQUIRED" note in eval_all_vs_seacells.py refers to eps=1.0
 failing, which is far from where we operate. Checked before proposing a run, not after.
+
+---
+
+## [D46] Community + proto_recon at GRADIENT-BALANCED weights — VERDICT: FAILS
+2026-09-24. s28nsc / bk02 / K=200 / latent_dims=16 / 10 epochs / reinit OFF.
+Script: `modal_scripts/train_d46_gradbalance.py`. Run name `d46_balanced`.
+
+### Decision written BEFORE the run
+[D39] turned community off, but at ONE inherited lambda (`lambda_umap=1`,
+`lambda_proto_recon=0.01`) that was never chosen for this loss. So "community is
+harmful" might really be "community at that weight is harmful". This run asks:
+does a clearly SUBORDINATE community term help, hurt, or do nothing?
+
+Balancing rule, fixed in advance — influence measured, not assumed ([D45]):
+
+    influence[term] = lambda[term] * || d(term) / d(encoder params) ||
+    lambda[other]   = SHARE * (lambda[cohesion] * gnorm[cohesion]) / gnorm[other]
+    SHARE = 0.25          # community and proto_recon each pull at 1/4 of cohesion
+
+Stage 1 (probe, 1 epoch, placeholder lambdas) MEASURED at step 0:
+
+    term            lambda * gnorm_enc     ratio to cohesion
+    umap                  18.73                  23.8x
+    proto_recon            3.78                   4.8x
+    cohesion (gram+aff)    0.788                  1.0x   (0.362 + 0.426)
+
+So community was pulling ~24x harder than the term the model is built around.
+That is the mechanical explanation of [D39]'s 125-dead collapse.
+
+Stage 2 lambdas: `lambda_umap = 0.0105` (95x smaller), `lambda_proto_recon =
+0.00052` (19x smaller), cohesion 10.0 / 22.3, `cohesion_self=1.0`,
+`coh_mem_hlife=0.0`, `proto_reinit_every=0` (deaths stay VISIBLE, not repaired).
+
+### What was expected to decide it
+1. `unused_proto` per epoch. [D39] saw first deaths at epoch 2, 125 by epoch 10.
+   Deaths again at quarter strength -> term is harmful at any weight that matters.
+2. `dge_r` / `joint_purity` at the end vs cohesion-only.
+3. `coh_aff` trend — it FELL under community before (0.0078 -> 0.0051).
+
+### RESULT 1 — the calibration DOES prevent the collapse
+    epoch          1   2   3   4   5   6   7   8   9  10
+    d39_B (old)    0  55  83  94  97 102 106 110   -   -   (125 by eval)
+    d46 (balanced) 0   0   0   1   0   0   0   0   0   0   (1 at eval)
+
+So prototype death was a WEIGHT problem, not a property of the community term.
+
+### RESULT 2 — but the term earns nothing on the frozen scoreboard
+Same graph, same K, same eval code:
+
+    arm                        dead  joint_pur  ct_pur   dge_r   n_cov  coh_gram  coh_aff
+    d39_E  cohesion only          0     0.4576  0.8681  0.8105     16    0.0593   0.0289
+    d46    + comm + precon @1/4   1     0.4507  0.7946  0.7739     15    0.0587   0.0285
+    d39_B  + comm uncalibrated  125     0.3951  0.8235  0.3603     11    0.0300   0.0126
+    SEACells lambda 0.2           0     0.5035  0.8227  0.8487     19       -     0.0418
+
+Every scoreboard metric is equal-or-worse than cohesion-only. Largest losses:
+ct_purity 0.8681 -> 0.7946 (-8.5%) and dge_r 0.8105 -> 0.7739 (-4.5%). Cohesion
+itself is unchanged (0.0289 -> 0.0285), i.e. the extra terms did not even buy a
+better graph score to trade against the biology loss.
+
+### RESULT 3 — the calibration HELD; my own caveat was wrong
+The script warned (from [D45]) that cohesion's encoder gradient DECAYS as
+assignments saturate, which would make the other two lambdas too generous later.
+Measured over the run (`grad_probe.jsonl`, every 50 steps, lambda*gnorm_enc):
+
+    step      umap   proto_recon   cohesion   umap/coh   precon/coh
+       0    0.0210      0.1519       0.1506       0.14        1.01
+    2000    0.0181      0.0162       0.0964       0.19        0.17
+    5000    0.0240      0.0127       0.1686       0.14        0.08
+    9950    0.0285      0.0184       0.1689       0.17        0.11
+
+Cohesion's gradient did NOT decay — it ended slightly ABOVE its start. The ratios
+stayed at or below the 0.25 target for the whole run. So the negative result is
+not an artifact of drift: community really was subordinate the whole time and
+still cost biology.
+
+(proto_recon fell to ~0.10x rather than the intended 0.25x because its own gnorm
+collapsed 292 -> ~30 right after step 0. That makes the test CONSERVATIVE, not
+invalid — an even weaker proto_recon still did not help.)
+
+### VERDICT: FAILS. Community/UMAP and proto_recon stay OFF.
+CLAUDE.md 9d is unchanged, but its REASON is now stronger and correctly stated:
+
+  OLD reason: "community at lambda_umap=1 costs 125/200 prototypes."
+  NEW reason: "community costs biology at EVERY weight tested. At full weight it
+  destroys the partition (125 dead, dge_r halved). At a measured 1/6-1/4 of
+  cohesion's gradient pull it keeps the partition alive but still costs 4.5% of
+  dge_r and 8.5% of ct_purity, and buys nothing back — cohesion itself is flat."
+
+This closes the question [D39] left open. Do not re-run a community-lambda sweep:
+the two ends of the range are now measured and both lose, so there is no interior
+point worth the GPU time.

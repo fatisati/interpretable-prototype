@@ -547,10 +547,24 @@ from the numerator and must be absent from the denominator too. Full formulas in
 
 **Also settled with it ([D39], s28nsc/bk02/K=200, all with `cohesion_self=1.0`):**
 
-- **Community/UMAP loss OFF.** Same cohesion term and lambda, adding it costs
-  **125 of 200 prototypes** and more than halves dge_r (0.8105 -> 0.3603). Its design
-  intent was graph preservation, which cohesion already supplies without the merge bias —
-  it does NOT align batches (that claim was retracted, see `decisions.md` 2026-09-23).
+- **Community/UMAP loss OFF — at EVERY weight, not just the loud one.** Its design
+  intent was graph preservation, which cohesion already supplies without the merge bias;
+  it does NOT align batches (retracted, `decisions.md` 2026-09-23). Two weights are now
+  measured and both lose, so **do not re-run a community-lambda sweep**:
+
+  ```
+  arm                        dead  joint_pur  ct_pur   dge_r   n_cov   coh_aff
+  cohesion only                 0     0.4576  0.8681  0.8105     16    0.0289
+  + community, GRAD-BALANCED    1     0.4507  0.7946  0.7739     15    0.0285   [D46]
+  + community, inherited lam  125     0.3951  0.8235  0.3603     11    0.0126   [D39]
+  ```
+
+  At the inherited `lambda_umap=1` community pulled **23.8x** cohesion's gradient
+  (measured, [D45] probe) and destroyed the partition. [D46] rebalanced it to a measured
+  0.14-0.19x — the partition survives (1 dead), **and it still costs 4.5% of dge_r and
+  8.5% of ct_purity while cohesion itself stays flat.** Proto_recon likewise (ran at
+  0.08-0.17x cohesion, bought nothing). The gradient ratios were verified stable for the
+  whole run, so this is not a drift artifact. Verdict: FAILS, both terms stay 0.
 - **gram + aff beats either alone.** joint_purity 0.4576 / dge_r 0.8105 / 0 dead, against
   aff-only 0.4472 / 0.8006 / 0 and gram-only 0.4558 / 0.6538 / 5.
 - **No reinit needed.** With community off, `proto_reinit_every=0` gives 0 dead across
