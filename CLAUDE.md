@@ -431,7 +431,14 @@ finishes and reports numbers from a setup nobody chose:
 ```python
 trainer, metrics, _ = run_mc_task(
     ds_id, affinity_type=<graph>,
-    num_prototypes=200,          # defaults.py says 300
+    num_prototypes=None,         # <- USE THE DATASET DEFAULT. K is a property of the
+                                 #   dataset, not of the experiment. None resolves via
+                                 #   _resolve_num_prototypes to DATASETS[ds]
+                                 #   ['num_prototypes']: s28nsc 800, crcx 670, lung 300,
+                                 #   pbmc-immune 300, pancreas 220, fibnsc 204.
+                                 #   (configs/defaults.py's 300 is only the fallback for
+                                 #   a dataset with no entry.) Pass an int ONLY to
+                                 #   reproduce an older run at its K.
     cvae_epochs=50,              # required, no default
     train_epochs=10,             # required, no default
     batch_size=1024,             # DEFAULT 256      <- wrong
@@ -445,6 +452,24 @@ trainer, metrics, _ = run_mc_task(
     trainer_kwargs={'experiment_name': <name>},
 )
 ```
+
+**K CHANGED — IT BREAKS THE SAVED BASELINES. Read before comparing anything.** Every
+[D39]/[D40]/[D41] number was produced with `num_prototypes=200` hardcoded, which
+overrode `s28nsc`'s dataset default of **800**. Runs that follow this file now use the
+dataset default, i.e. **K=800 on s28nsc**, and therefore:
+
+- every saved SEACells baseline is **K=200** (`seacell_X_bklam02_K200`,
+  `seacell_X_bklam04_K200`, `seacell_bk08`, `seacell_arbf`, `seacell_K200`) — a K=800
+  run is **not comparable to any of them**;
+- `files/tables/s28nsc_lambda_sweep_vs_seacells.md` is a K=200 result and remains valid
+  *as one*. Do not add a K=800 row to it;
+- a head-to-head at the dataset default needs SEACells **refit at K=800** on each graph
+  (four CPU fits) before the comparison means anything.
+
+**Never compare across K.** The scoreboard metrics move mechanically with it: `n_dead` is
+out of K; `coh_aff` carries a constant `K/N` floor (0.00342 at K=200 vs 0.0137 at K=800,
+measured §9b-style on bk02); and purity / `n_covered` both rise as metacells get smaller
+and more numerous.
 
 **MULTI-BATCH IS NOT A KNOB.** There is no `coh_batch` option. The trainer counts bio
 batches from the data: with >1 batch each cell is scored against `V[b]`, the node set of
