@@ -168,10 +168,11 @@ the word "epoch" in them does not mean a pass over the data.
 - Cost: a true epoch is ~4.2x the steps, so ~2.5-3 h per arm instead of ~35 min at
   `train_epochs=10`. Budget for it, or cut `train_epochs`, but do not go back to a
   hardcoded step count to save time.
-- Anything defined in "epochs" has to be re-derived. `coh_mem_hlife=500` was picked as
-  "one epoch" under the false 500-step assumption; against a real 4,224-step epoch it is
-  ~0.12 of one. Note also that the memory's natural clock is the **cell revisit interval**
-  (~8.6 steps, [D29]), not the edge pass — so state the unit you mean.
+- Anything defined in "epochs" has to be re-derived. `coh_mem_hlife` is the live example:
+  it was set to 500 as "one epoch", which is wrong twice over — a real epoch is ~4,224
+  steps, AND the memory's clock is the **cell revisit interval** (~8.65 steps), not the
+  edge pass. At 500 the decay was a measured no-op (0.9881 at refresh). It is now derived
+  from dataset and batch size, §9d.
 
 `len(edge_dataset)` counts DIRECTED entries surviving the `max_weight / n_epochs`
 threshold (4.33M on bk02 against 2.30M undirected edges), so the exact count shifts a
@@ -593,7 +594,8 @@ running**. A cohesion-only arm must explicitly zero `lambda_nassoc`, `lambda_mod
 `lambda_proto_usage`, `lambda_umap`, `lambda_proto_recon` — see the §9d block.
 
 **3. `configs/defaults.py`** — the model-level defaults. The ones that bite:
-`num_prototypes` 300 (we use 200), `latent_dims` 8 (we use 16), `affinity_type` `'uctx'`,
+`num_prototypes` 300 (only a fallback -- K comes from the dataset config, §9d),
+`latent_dims` 8 (KEEP IT -- the D39/D40/D41 runs overrode it to 16), `affinity_type` `'uctx'`,
 `prot_init` `'kmeans'` (PRECON overrides to `'waypoint'`), `umap_similarity` `'embedding'`
 (PRECON overrides to `'proto'`), `epsilon` 0.05 (but `calibrate_eps=1` recomputes it at
 runtime — measured 0.0664-0.0678 on s28nsc, so the 0.05 is never used), `seed` 31.
