@@ -414,9 +414,36 @@ lambda_config = dict(LAMBDA_PROTO_UMAP_PRECON) | {
     'cohesion_diag':   1.0,   # sim(c,c) = 1 in both aff and gram modes
     'cohesion_global': 2,     # [D29] remembered full-graph profiles
     'coh_mem_init': 'full',   # [D32] memory from one inference pass, not uniform
-    'coh_mem_hlife': 500.0,   # [D31] one-epoch age half-life
+    'coh_mem_hlife': 500.0,   # [D31] age half-life in STEPS -- NOT "one epoch". A real
+                              #    epoch is ~4,224 steps (§5a); the memory's natural clock
+                              #    is the ~8.6-step cell revisit interval ([D29]), so 500
+                              #    steps ~= 58 revisits. Re-derive from the logged
+                              #    coh_mem_drift, don't reuse this number blindly.
     'proto_reinit_every': 0,  # [D39] no reinit
+    'latent_dims': 16,        # defaults.py says 8; every current result used 16
 }
+```
+
+**The run-level arguments are part of THE config too.** They are not in `lambda_config`,
+and four of them default to values that are **wrong here** — silently, so the run
+finishes and reports numbers from a setup nobody chose:
+
+```python
+trainer, metrics, _ = run_mc_task(
+    ds_id, affinity_type=<graph>,
+    num_prototypes=200,          # defaults.py says 300
+    cvae_epochs=50,              # required, no default
+    train_epochs=10,             # required, no default
+    batch_size=1024,             # DEFAULT 256      <- wrong
+    umap_steps_per_epoch=None,   # DEFAULT 1000     <- wrong: 24% of a pass, see §5a
+    early_stop=False,            # DEFAULT True on 'modularity'  <- wrong: this arm has
+                                 #   lambda_modularity = 0, so it would both stop AND
+                                 #   pick its saved checkpoint by a metric it never
+                                 #   optimizes. See §9e.
+    eval_freq=2, patience=4,     # required positionally; unused when early_stop=False
+    lambda_config=lambda_config,
+    trainer_kwargs={'experiment_name': <name>},
+)
 ```
 
 **MULTI-BATCH IS NOT A KNOB.** There is no `coh_batch` option. The trainer counts bio
