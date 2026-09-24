@@ -414,13 +414,10 @@ lambda_config = dict(LAMBDA_PROTO_UMAP_PRECON) | {
     'cohesion_diag':   1.0,   # sim(c,c) = 1 in both aff and gram modes
     'cohesion_global': 2,     # [D29] remembered full-graph profiles
     'coh_mem_init': 'full',   # [D32] memory from one inference pass, not uniform
-    'coh_mem_hlife': 500.0,   # [D31] age half-life in STEPS -- NOT "one epoch". A real
-                              #    epoch is ~4,224 steps (§5a); the memory's natural clock
-                              #    is the ~8.6-step cell revisit interval ([D29]), so 500
-                              #    steps ~= 58 revisits. Re-derive from the logged
-                              #    coh_mem_drift, don't reuse this number blindly.
+    'coh_mem_hlife': c * N / uniq,  # [D31] DERIVE IT -- see the box below. NEVER 500.
     'proto_reinit_every': 0,  # [D39] no reinit
-    'latent_dims': 16,        # defaults.py says 8; every current result used 16
+    # latent_dims: NOT passed -- use the defaults.py default of 8. The
+    #   [D39]/[D40]/[D41] runs passed 16; that was an override, not the standard.
 }
 ```
 
@@ -452,6 +449,31 @@ trainer, metrics, _ = run_mc_task(
     trainer_kwargs={'experiment_name': <name>},
 )
 ```
+
+**`coh_mem_hlife` IS DERIVED FROM DATASET SIZE AND BATCH SIZE — never a constant.**
+The memory's clock is the **cell revisit interval**, not epochs: a remembered row is
+*replaced* the moment its cell reappears in a batch, so the only timescale that matters
+is how long that takes.
+
+```
+uniq  = unique cells per batch      # = batch_size * (1 + neg_rate) * 2, deduped.
+                                    #   MEASURED, printed every run as
+                                    #   "[D26] cohesion sample: <uniq> unique cells"
+                                    #   s28nsc @ batch_size=1024, neg_rate=5 -> 6,757
+R     = N_cells / uniq              # steps between a cell's visits: 58,423/6,757 = 8.65
+coh_mem_hlife = c * R               # c = revisit cycles until a row is half-trusted
+```
+
+`c` is the only free choice and it is readable: `c=1` -> a row is worth 0.50 when it is
+refreshed, `c=3` -> 0.79, `c=10` -> 0.93. Pick it from the logged `coh_mem_drift` (how
+far an assignment actually moved between visits); if drift is ~0, decay is not needed at
+all and `coh_mem_hlife=0` is the honest setting.
+
+**MEASURED 2026-09-23 — the old `500` was a NO-OP.** At `half_life=500` a row has decayed
+to **0.9881** by the time it is overwritten at step ~8.65. So [D31]'s decay did nothing in
+any reported run; those results are effectively plain [D29] with the memory at full
+weight. Nothing is invalidated — but do not describe those runs as having used age
+decay, and do not copy `500`.
 
 **K CHANGED — IT BREAKS THE SAVED BASELINES. Read before comparing anything.** Every
 [D39]/[D40]/[D41] number was produced with `num_prototypes=200` hardcoded, which
