@@ -27,7 +27,8 @@ LOSS CONFIG -- CLAUDE.md 9c base, plus the two things CLAUDE.md asks for on top:
         now unconditional (no flag): each cell is scored against V[b], the node
         set of its own bio-batch graph.
 
-nassoc_gamma IS AN ASSUMPTION, FLAGGED. CLAUDE.md 9b marks the derivation
+nassoc_gamma IS NO LONGER USED -- nassoc is OFF (see the config below).
+The measurement is kept here only as a record. ORIGINAL NOTE: CLAUDE.md 9b marks the derivation
 UNSETTLED and says explicitly not to treat 0.15 as principled, so gamma is
 MEASURED per dataset here from the move rule
     gamma = (same-label weighted degree) / (target_size - 1),  target_size = N/K
@@ -98,8 +99,14 @@ def jobs_for(datasets):
     out = []
     for ds in datasets:
         K, sa, sg, gamma = CFG[ds]
-        out.append((ds, K, 0.5 * AUTHORITY / sg, 0.5 * AUTHORITY / sa, gamma,
-                    sa, sg))
+        # ROUND the lambdas before they reach the model name. Full-precision
+        # floats render as 'lcoh4.03750478377344' and pushed the run-folder name
+        # past the 255-byte filename limit -- the pancreas run died with
+        # OSError [Errno 36] File name too long AFTER training. Two decimals
+        # costs nothing numerically (the authority assert still passes to 0.03)
+        # and saves ~25 characters per lambda.
+        out.append((ds, K, round(0.5 * AUTHORITY / sg, 2),
+                    round(0.5 * AUTHORITY / sa, 2), gamma, sa, sg))
     return out
 
 
@@ -131,14 +138,17 @@ def run(ds: str, K: int, lam_gram: float, lam_aff: float, gamma: float,
 
     name = f"d42_{ds}"
     lc = dict(LAMBDA_PROTO_UMAP_PRECON) | {
-        # --- CLAUDE.md 9c: the scProto base config ---
-        "nassoc_diag_norm": "pair",
-        "nassoc_diag_loss": "cpm",
-        "nassoc_gamma": gamma,
-        "nassoc_size_scale": "full",
-        "nassoc_cpm_norm": "gful",
-        # --- CLAUDE.md header: off-diagonal denominator is min(vol_p, vol_q) ---
-        "nassoc_offdiag_norm": "min",
+        # --- nassoc OFF: these are COHESION runs -------------------------
+        # CLAUDE.md 9c's base config carries lambda_nassoc=1 with the CPM
+        # diagonal, but nassoc and cohesion are BOTH diagonal terms and cohesion
+        # exists to REPLACE nassoc: 9b shows CPM's charge is a function of the
+        # assignment column sums only, so it cannot move a cell for similarity
+        # reasons at all -- exactly the defect cohesion fixes. Running both puts
+        # two diagonal terms in competition AND drags in nassoc_gamma, whose
+        # derivation 9b marks UNSETTLED. Any cohesion result would then be
+        # confounded by a gamma nobody chose on principle.
+        # So: community + proto_recon + usage + COHESION as the diagonal.
+        "lambda_nassoc": 0.0,
         # --- the cohesion term (multi-batch handling is unconditional now) ---
         "lambda_cohesion": lam_gram,
         "lambda_cohesion_aff": lam_aff,
@@ -155,7 +165,8 @@ def run(ds: str, K: int, lam_gram: float, lam_aff: float, gamma: float,
     auth = lam_gram * span_gram + lam_aff * span_aff
     assert abs(auth - AUTHORITY) < 0.03, f"authority drifted: {auth}"
     assert lc["cohesion_self"] == 1.0 and lc["cohesion_diag"] == 1.0
-    assert lc["lambda_umap"] == 1, "this is the FULL model -- community stays on"
+    assert lc["lambda_umap"] == 1, "community stays on"
+    assert lc["lambda_nassoc"] == 0.0, "cohesion run: nassoc must be off"
 
     print("\n" + "=" * 78)
     print(f"=== {name}   K={K}  graph={HELDOUT}  LD=8")
