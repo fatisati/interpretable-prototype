@@ -1,135 +1,189 @@
-"""Render the two requested tables as markdown from the scoreboard CSVs.
+"""Render the two result tables as markdown, in the NeurIPS submission layout.
 
-Section 1 -- "scProto preserves the similarities defined in the graph while also
-              mixing batches"
-    cohesion        mean +- std OVER CELLS, on the HELD-OUT edges (and on train)
-    modularity      mean +- std OVER BATCHES, on the held-out edges
-    batch entropy   mean +- std over metacells, AND size-weighted mean +- weighted std
-    ct purity       the same two pairs
+Structure copied from manuscripts/neurips_manuscript/sections/results.tex: METHODS
+are rows, DATASETS are column groups, best is **bold** and second-best is
+_underlined_ per column. Two tables only -- one per claim -- so the thing stays
+readable.
 
-Section 2 -- "scProto preserves rare cell types better"
-    coverage        mean +- std OVER BATCHES     (a per-batch quantity)
-    homogeneity     mean +- std OVER BATCHES     (paper aggregation)
-    f1              mean +- std OVER BATCHES
-    plus cross_batch_homogeneity, the only one of these that cannot be gamed by
-    giving each batch its own private cluster
+TABLE 1 -- affinity / community preservation and batch integration
+    Modularity     mean +- std OVER BATCHES     (per bio batch)
+    Cohesion       mean +- std OVER CELLS       (the training objective, self-sim
+                                                 = 1, computed exactly as in
+                                                 training: V[b] denominator)
+    Batch entropy  mean +- std OVER METACELLS   (unnormalised nats)
+    Purity         unweighted AND size-weighted, each with its matching std
 
-Usage: python modal_scripts/write_d42_tables.py  > /dev/null
-       (writes files/tables/d42_scoreboard/RESULTS.md)
+TABLE 2 -- rare cell types
+    Coverage       mean +- std OVER BATCHES     (a per-batch quantity)
+    Homogeneity    mean +- std OVER CELLS       (pooled across batches)
+
+Every number is scored on the HELD-OUT 20% of edges unless the column says
+(train): no model had a training signal for those edges.
+
+Usage: python modal_scripts/write_d42_tables.py
 """
 import os
-import sys
 
 import numpy as np
 import pandas as pd
 
 DIR = "files/tables/d42_scoreboard"
-DATASETS = ["pancreas", "lung", "pbmc-immune"]
+DATASETS = [("pancreas", "Pancreas"), ("pbmc-immune", "Immune"), ("lung", "Lung")]
 
-S1 = [
-    ("cohesion aff (test edges)",  "coh_aff_test_mean",  "coh_aff_test_std",  4),
-    ("cohesion gram (test edges)", "coh_gram_test_mean", "coh_gram_test_std", 4),
-    ("cohesion aff (train)",       "coh_aff_train_mean", "coh_aff_train_std", 4),
-    ("modularity (test edges)",    "modularity_test_mean", "modularity_test_std", 4),
-    ("modularity (train)",         "modularity_train_mean", "modularity_train_std", 4),
-    ("batch entropy",              "batch_entropy_mean", "batch_entropy_std", 4),
-    ("batch entropy (size-wtd)",   "batch_entropy_wmean", "batch_entropy_wstd", 4),
-    ("ct purity",                  "ct_purity_mean",     "ct_purity_std",     4),
-    ("ct purity (size-wtd)",       "ct_purity_wmean",    "ct_purity_wstd",    4),
+# (display, mean col, std col, decimals, higher_is_better)
+T1 = [
+    ("Modularity",       "modularity_test_mean",  "modularity_test_std",  3, True),
+    ("Cohesion",         "coh_aff_test_mean",     "coh_aff_test_std",     4, True),
+    ("Batch Entropy",    "batch_entropy_mean",    "batch_entropy_std",    2, True),
+    ("Purity",           "ct_purity_mean",        "ct_purity_std",        3, True),
+    ("Purity (wtd)",     "ct_purity_wmean",       "ct_purity_wstd",       3, True),
 ]
-S2 = [
-    ("rare coverage",              "rare_coverage_mean", "rare_coverage_std", 4),
-    ("rare homogeneity",           "rare_homogeneity_mean", "rare_homogeneity_std", 4),
-    ("rare F1",                    "rare_f1_mean",       "rare_f1_std",       4),
-    ("rare cross-batch homog.",    "rare_cross_batch_homogeneity_mean",
-                                   "rare_cross_batch_homogeneity_std", 4),
-    ("rare recall",                "rare_recall_mean",   "rare_recall_std",   4),
-    ("rare precision",             "rare_precision_mean", "rare_precision_std", 4),
+T2 = [
+    ("Coverage",     "rare_coverage_mean",        "rare_coverage_std",        3, True),
+    ("Homogeneity",  "rare_homogeneity_cellmean", "rare_homogeneity_cellstd", 3, True),
 ]
-EXTRA = [("K (metacells)", "n_mc", None, 0),
-         ("median size", "median_size", None, 1)]
+
+# Row order and display names. Keep it short: the canonical baselines plus the
+# dim-matched variants that the fairness argument needs.
+ROWS = [
+    ("scProto (cohesion)",     "scProto (cohesion, D42)"),
+    ("SEACells",               "SEACells"),
+    ("SuperCell",              "SuperCell"),
+    ("MetaCell2",              "MetaCell2"),
+    ("MetaQ",                  "MetaQ"),
+    ("Leiden + scPoli-St1",    "Leiden + scPoli-Stage1"),
+    ("Leiden + scVI",          "Leiden + scVI"),
+    ("Leiden + Harmony",       "Leiden + Harmony"),
+    ("Leiden + Harmony d8",    "Leiden + Harmony d8"),
+    ("Leiden + ComBat",        "Leiden + ComBat"),
+    ("Leiden + ComBat d8",     "Leiden + ComBat d8"),
+    ("Leiden + BBKNN",         "Leiden + BBKNN"),
+    ("Leiden + BBKNN d8",      "Leiden + BBKNN d8"),
+    ("SEACells + Harmony",     "SEACells + Harmony"),
+    ("SEACells + ComBat",      "SEACells + ComBat"),
+    ("SEACells + BBKNN",       "SEACells + BBKNN"),
+    ("SEACells + scVI",        "SEACells + scVI"),
+]
 
 
-def fmt(v, s, nd):
-    if v is None or (isinstance(v, float) and np.isnan(v)):
-        return "--"
-    if s is None or (isinstance(s, float) and np.isnan(s)):
-        return f"{v:.{nd}f}"
-    return f"{v:.{nd}f} ± {s:.{nd}f}"
+def load():
+    out = {}
+    for ds, _ in DATASETS:
+        p = f"{DIR}/{ds}_scoreboard.csv"
+        if os.path.exists(p):
+            df = pd.read_csv(p, index_col=0)
+            # collapse "[run_dir]" suffixes so a method matches its canonical row
+            df.index = [i.split(" [")[0] for i in df.index]
+            df = df[~df.index.duplicated(keep="first")]
+            out[ds] = df
+    return out
 
 
-def table(df, spec, title, note=""):
-    lines = [f"### {title}", ""]
-    if note:
-        lines += [note, ""]
-    hdr = "| method | " + " | ".join(n for n, *_ in spec) + " |"
-    sep = "|---|" + "|".join("---" for _ in spec) + "|"
-    lines += [hdr, sep]
-    for m in df.index:
+def render(dfs, spec, title, note):
+    ngrp = len(spec)
+    lines = [f"### {title}", "", note, ""]
+    head1 = "| Method | " + " | ".join(
+        f"**{lbl}** " + " | ".join([""] * (ngrp - 1)) for _, lbl in DATASETS) + " |"
+    # simple flat header: dataset prefix on each metric, easier to read in md
+    cols = []
+    for ds, lbl in DATASETS:
+        for disp, *_ in spec:
+            cols.append(f"{lbl[:4]}: {disp}")
+    lines = [f"### {title}", "", note, "",
+             "| Method | " + " | ".join(cols) + " |",
+             "|---|" + "|".join("---" for _ in cols) + "|"]
+
+    # best / second per column, over the rows actually present
+    best = {}
+    for ds, _ in DATASETS:
+        df = dfs.get(ds)
+        for disp, mk, sk, nd, hi in spec:
+            key = (ds, mk)
+            if df is None or mk not in df.columns:
+                best[key] = (None, None)
+                continue
+            vals = {}
+            for _, src in ROWS:
+                if src in df.index and pd.notna(df.loc[src, mk]):
+                    vals[src] = float(df.loc[src, mk])
+            if not vals:
+                best[key] = (None, None)
+                continue
+            order = sorted(vals.items(), key=lambda kv: -kv[1] if hi else kv[1])
+            best[key] = (order[0][0], order[1][0] if len(order) > 1 else None)
+
+    for disp_row, src in ROWS:
         cells = []
-        for _, mk, sk, nd in spec:
-            v = df.loc[m, mk] if mk in df.columns else None
-            s = df.loc[m, sk] if (sk and sk in df.columns) else None
-            cells.append(fmt(v, s, nd))
-        lines.append(f"| {m} | " + " | ".join(cells) + " |")
+        any_val = False
+        for ds, _ in DATASETS:
+            df = dfs.get(ds)
+            for _, mk, sk, nd, hi in spec:
+                if df is None or src not in df.index or mk not in df.columns \
+                        or pd.isna(df.loc[src, mk]):
+                    cells.append("--")
+                    continue
+                any_val = True
+                v = float(df.loc[src, mk])
+                s = float(df.loc[src, sk]) if sk in df.columns and pd.notna(
+                    df.loc[src, sk]) else None
+                txt = f"{v:.{nd}f}" + (f" ± {s:.{nd}f}" if s is not None else "")
+                b, sec = best[(ds, mk)]
+                if src == b:
+                    txt = f"**{txt}**"
+                elif src == sec:
+                    txt = f"_{txt}_"
+                cells.append(txt)
+        if any_val:
+            lines.append(f"| {disp_row} | " + " | ".join(cells) + " |")
     return "\n".join(lines) + "\n"
 
 
 def main():
-    out = ["# scProto results — held-out-edge evaluation", "",
-           "Every number below is produced by "
-           "`interpretable_ssl/evaluation/metacell_scoreboard.py`, so scProto and "
-           "every baseline go through **identical code on identical graphs**.", "",
-           "**Setup.** 20% of each affinity graph's edges were hidden "
-           "(`FRAC_HELDOUT=0.20`, `MIN_VISIBLE_DEGREE=5`, `SEED=0`, `arbf`). "
-           "Models that train on a graph saw only the visible 80%. The `test "
-           "edges` columns are scored on the hidden 20% — **no model had a "
-           "training signal for any of those edges**, which is what "
-           "de-circularises the metric. The split is exact: train + test "
-           "partition the edge set with no overlap and no loss.", "",
-           "**Cohesion** is the training objective itself. Multi-batch is handled "
-           "unconditionally: each cell is scored against `V[b]`, the node set of "
-           "its own bio-batch graph (all edges with ≥1 endpoint in `b`). Nothing "
-           "is masked — cross-batch similarities keep their real values; what is "
-           "excluded are pairs whose zeros carry no information. With one batch "
-           "`V[b]` is every cell, so the formula reduces exactly to the "
-           "batch-agnostic one.", "",
-           "**Batch entropy** is unnormalised Shannon entropy in nats "
-           "(`mc_metric_utils.calc_batch_entropy`), so the ceiling is "
-           "`log(n_batches)`. Higher = better mixed.", "",
-           "**Rare metrics** are the paper's own definitions "
-           "(`paper_figures._rare_table_one`): rare types are defined **per "
-           "batch** (within-batch frequency below mean−std, Q25 fallback) and "
-           "every quantity is aggregated mean ± std **across batches**.", ""]
-
-    for ds in DATASETS:
-        p = f"{DIR}/{ds}_scoreboard.csv"
-        if not os.path.exists(p):
-            out += [f"## {ds}", "", "_not scored yet_", ""]
-            continue
-        df = pd.read_csv(p, index_col=0)
-        nb = df["modularity_test_nbatch"].dropna().iloc[0] if \
-            "modularity_test_nbatch" in df.columns and \
-            df["modularity_test_nbatch"].notna().any() else "?"
-        out += [f"## {ds}", "",
-                f"_{int(nb) if nb != '?' else nb} biological batches; "
-                f"batch-entropy ceiling log({nb}) = "
-                f"{np.log(int(nb)):.3f}_" if nb != "?" else f"## {ds}", ""]
-        out += [table(df, S1 + EXTRA,
-                      "Section 1 — preserves graph similarity while mixing batches",
-                      "std over **cells** for cohesion; over **batches** for "
-                      "modularity; over **metacells** for entropy/purity "
-                      "(size-weighted rows use the weighted std)."), ""]
-        out += [table(df, S2,
-                      "Section 2 — rare cell types",
-                      "std over **batches** throughout (the paper's aggregation). "
-                      "`rare cross-batch homog.` is the only column here that "
-                      "cannot be maximised by giving each batch its own private "
-                      "cluster."), ""]
-
+    dfs = load()
+    hdr = [
+        "# scProto — results", "",
+        "**Setup.** 20% of each affinity graph's edges were held out "
+        "(`FRAC_HELDOUT=0.20`, `MIN_VISIBLE_DEGREE=5`, `SEED=0`, `arbf`); models "
+        "that train on a graph saw only the visible 80%. Every number below is "
+        "scored on the **held-out 20%** — no model had a training signal for any "
+        "of those edges. The split is exact (train + test partition the edge set "
+        "with no overlap and no loss).", "",
+        "All numbers come from `interpretable_ssl/evaluation/metacell_scoreboard.py`, "
+        "so scProto and every baseline go through identical code on identical "
+        "graphs. **Bold** = best, _italic_ = second best, per column.", "",
+        "**Cohesion** is the training objective itself, with self-similarity = 1, "
+        "computed exactly as in training: multi-batch is unconditional, so each "
+        "cell is scored against `V[b]` — the node set of its own bio-batch graph "
+        "(all edges with ≥1 endpoint in `b`). Nothing is masked; cross-batch "
+        "pairs whose zeros carry no information are excluded from numerator and "
+        "denominator alike. With one batch `V[b]` is every cell and the formula "
+        "reduces exactly to the batch-agnostic one.", "",
+        "**Batch entropy** is unnormalised Shannon entropy in nats "
+        "(`mc_metric_utils.calc_batch_entropy`); ceiling is `log(n_batches)` = "
+        "2.20 pancreas (9), 1.61 immune (5), 2.77 lung (16). Higher = better mixed.",
+        "",
+        "**Rare cell types** use the paper's definition: rare is decided **within "
+        "each batch** (frequency below mean−std, Q25 fallback).", "",
+    ]
+    body = [
+        render(dfs, T1, "Table 1 — community preservation and batch integration",
+               "Modularity: mean ± std **across batches**. Cohesion: mean ± std "
+               "**across cells**. Batch entropy and purity: mean ± std **across "
+               "metacells**; `Purity (wtd)` is weighted by metacell size with the "
+               "matching weighted std."),
+        "",
+        render(dfs, T2, "Table 2 — rare cell types",
+               "Coverage: mean ± std **across batches** (it is a per-batch "
+               "quantity). Homogeneity: mean ± std **across cells**, pooled over "
+               "batches."),
+        "",
+    ]
+    missing = [ds for ds, _ in DATASETS if ds not in dfs]
+    if missing:
+        body += [f"_Not yet scored: {', '.join(missing)}._", ""]
     os.makedirs(DIR, exist_ok=True)
     with open(f"{DIR}/RESULTS.md", "w", encoding="utf-8") as f:
-        f.write("\n".join(out))
+        f.write("\n".join(hdr + body))
     print(f"wrote {DIR}/RESULTS.md")
 
 

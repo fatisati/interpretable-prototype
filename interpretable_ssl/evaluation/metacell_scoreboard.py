@@ -114,6 +114,12 @@ def rare_metrics_paper(labels, cell_types, batches, rare_quantile=0.25):
     acc = {k: [] for k in ("coverage", "repr_macro", "homogeneity",
                            "cross_batch_homogeneity", "purity",
                            "recall", "precision", "f1")}
+    # every rare cell's own homogeneity score, pooled across batches, so the
+    # spread can be reported OVER CELLS as well as over batches. The paper
+    # aggregates over batches; a per-cell std answers a different and equally
+    # fair question ("how variable is a rare cell's experience") and is what the
+    # table asks for.
+    cell_scores, cell_cross = [], []
     rare_seen = set()
 
     for batch_val, bdf in df.groupby("b"):
@@ -138,6 +144,7 @@ def rare_metrics_paper(labels, cell_types, batches, rare_quantile=0.25):
         scores.index = bl_cells.index
         acc["repr_macro"].append(float(scores.groupby(bl_cells.ct).mean().mean()))
         acc["homogeneity"].append(float(scores.mean()))
+        cell_scores.append(np.asarray(scores.values, np.float64))
 
         same_b = mc_label_batch_counts.reindex(
             pd.MultiIndex.from_arrays([bl_cells.metacell_id, bl_cells.ct,
@@ -148,6 +155,7 @@ def rare_metrics_paper(labels, cell_types, batches, rare_quantile=0.25):
         ).fillna(0.0).values
         cross = (total - same_b) / mc_sizes.reindex(bl_cells.metacell_id).values
         acc["cross_batch_homogeneity"].append(float(np.mean(cross)))
+        cell_cross.append(np.asarray(cross, np.float64))
 
         rare_mc = mc_majority.isin(bl_rare)
         pur = mc_purity_series[rare_mc].values
@@ -178,6 +186,14 @@ def rare_metrics_paper(labels, cell_types, batches, rare_quantile=0.25):
         out[f"rare_{k}_std"] = float(a.std()) if a.size else float("nan")
     out["n_rare_types"] = len(rare_seen)
     out["rare_types_seen"] = ",".join(sorted(rare_seen))
+    # std OVER CELLS (pooled across batches), alongside the over-batches std
+    for key, chunks in (("homogeneity", cell_scores),
+                        ("cross_batch_homogeneity", cell_cross)):
+        if chunks:
+            allv = np.concatenate(chunks)
+            out[f"rare_{key}_cellmean"] = float(allv.mean())
+            out[f"rare_{key}_cellstd"] = float(allv.std())
+            out[f"rare_{key}_ncells"] = int(allv.size)
     return out
 
 
