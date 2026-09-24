@@ -329,6 +329,72 @@ lambda_config = dict(LAMBDA_PROTO_UMAP_PRECON) | {
 `nassoc_cpm_norm='graf'` is the older minibatch-scaled normalizer, kept only so the runs
 that used it stay reproducible — prefer `'gful'` with `nassoc_size_scale='full'`.
 
+## 9d. Cohesion config — `cohesion_self = 1.0`, ALWAYS. Never 0.5.
+
+**Every cohesion run uses `cohesion_self = 1.0`.** It is the `defaults.py` default, so
+it is also what you get by not passing it — but pass it explicitly and assert it, because
+old scripts in `modal_scripts/` still carry `cohesion_self: 0.5` and get copied.
+
+```python
+lambda_config = dict(LAMBDA_PROTO_UMAP_PRECON) | {
+    'lambda_umap': 0.0, 'lambda_proto_recon': 0.0,   # [D39] community OFF -- see below
+    'lambda_nassoc': 0.0, 'lambda_modularity': 0.0, 'lambda_proto_usage': 0.0,
+    'lambda_cohesion':     10.0,   # gram, 2-hop   } 50/50 split of the measured
+    'lambda_cohesion_aff': 22.3,   # aff,  1-hop   } authority 1.5403 ([D39] winner)
+    'cohesion_self':   1.0,   # <- ALWAYS 1.0. The self-pair counts like any other
+                              #    member, sim(c,c)=1. This IS the plain formula:
+                              #    "mean similarity to a prototype's members".
+    'cohesion_diag':   1.0,   # sim(c,c) = 1 in both aff and gram modes
+    'cohesion_global': 2,     # [D29] remembered full-graph profiles
+    'coh_mem_init': 'full',   # [D32] memory from one inference pass, not uniform
+    'coh_mem_hlife': 500.0,   # [D31] one-epoch age half-life
+    'proto_reinit_every': 0,  # [D39] not needed once community is off
+}
+```
+
+**Why 1.0 and not 0.5** — five reasons; the first is the mechanistic one:
+
+0. **THE SELF TERM IS WHAT KEEPS PROTOTYPES ALIVE — without it they go empty.**
+   A prototype's score is `within[k] / size[k]`. For an EMPTY slot that is 0. For a
+   SINGLETON it is exactly `cohesion_self` (its only pair is itself, `sim(c,c)=1`):
+
+   ```
+   empty prototype      within = 0              size = 0   -> scores 0
+   singleton, self=w    within = w * 1          size = 1   -> scores w
+   ```
+
+   So a live prototype beats an empty one by exactly `w`. At `w = 0` a singleton and an
+   empty slot score **identically** — nothing in the objective prefers using a prototype
+   at all, and they drain. `w = 1` gives the largest possible margin; `w = 0.5` halves it
+   for no benefit. This is why the self term exists and why it should be at full weight.
+
+1. **It is the plain formula.** At 1.0 the discount branch (`if cohesion_self != 1.0`)
+   never executes, so cohesion reduces to exactly
+   `sum over members of sim(c,j) / size[k]` with the self-loop at 1.
+2. **It is SEACells-exact.** `defaults.py` [D17]: minimizing `||M - M B A||_F^2` equals
+   maximizing `sum_k within_dot[k]/size[k]` with self-pairs INCLUDED, verified to 1.8e-12.
+3. **SEACells itself does this.** `SEACells/build_graph.py` does `knn_graph.setdiag(1)`
+   with the comment "Include self as neighbour", and its RBF gives `exp(0) = 1` on the
+   diagonal — so their kernel has `M[i][i] = 1` too.
+4. **The reason 0.5 existed is refuted.** [D30] introduced 0.5 to lower the founder gate
+   (`sim > cohesion_self/2`) because small prototypes could not recruit. Measured
+   2026-09-23: at the SAME gate of 0.5, free-logit optimisation gives **0 dead / 1
+   fragment** while the trained encoder gives **5 dead / 54 fragments** — identical gate,
+   opposite outcomes, so the gate was never the cause (the encoder was). The free-logit
+   ceiling also barely moves between the two settings (coh_gram 0.0908 at 0.5 vs 0.0901
+   at 1.0), so it is not a sensitive knob.
+
+**Also settled with it ([D39], s28nsc/bk02/K=200, all with `cohesion_self=1.0`):**
+
+- **Community/UMAP loss OFF.** Same cohesion term and lambda, adding it costs
+  **125 of 200 prototypes** and more than halves dge_r (0.8105 -> 0.3603). Its design
+  intent was graph preservation, which cohesion already supplies without the merge bias —
+  it does NOT align batches (that claim was retracted, see `decisions.md` 2026-09-23).
+- **gram + aff beats either alone.** joint_purity 0.4576 / dge_r 0.8105 / 0 dead, against
+  aff-only 0.4472 / 0.8006 / 0 and gram-only 0.4558 / 0.6538 / 5.
+- **No reinit needed.** With community off, `proto_reinit_every=0` gives 0 dead across
+  every graph tested (lambda 0, 0.2, 0.4, 0.8).
+
 ## 10. Explanation style
 
 Define every term and metric inline. Formulas as **plain-text code blocks with readable
