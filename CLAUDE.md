@@ -405,25 +405,11 @@ lambda_config = dict(LAMBDA_PROTO_UMAP_PRECON) | {
 }
 ```
 
-**TWO VARIANTS, both legitimate — say which one a run is.** The block above is
-**cohesion-ONLY** (`lambda_umap = 0`), the [D39] ablation: nothing can outvote the term
-under test, which is what makes it a clean test of cohesion itself. The **reported
-model** instead keeps the community term ON:
-
-```python
-lambda_config = dict(LAMBDA_PROTO_UMAP_PRECON) | {
-    'lambda_nassoc': 0.0,          # cohesion replaces nassoc -- see §9b
-    'lambda_cohesion':     <gram>, # } 50/50 of the measured authority 1.5403,
-    'lambda_cohesion_aff': <aff>,  # } lambda = authority/span, span measured per graph
-    'cohesion_self': 1.0, 'cohesion_diag': 1.0,
-    'cohesion_global': 2, 'coh_mem_init': 'full', 'coh_mem_hlife': 500.0,
-}
-# lambda_umap stays 1 (community ON), lambda_proto_recon 0.01, usage 0.1
-```
-
-Caveat carried over from [D39]: `proto_reinit_every: 0` was justified by "not needed
-once community is off". With community ON that justification does not hold, so watch
-`n_dead` — if prototypes drain, reinit is the first thing to reconsider.
+**The config above IS the default. Community stays OFF.** `lambda_umap = 0`,
+`lambda_proto_recon = 0`, `lambda_nassoc = 0`, `lambda_modularity = 0`,
+`lambda_proto_usage = 0` — cohesion is the ONLY objective, so nothing can outvote the
+term the model is built around. Do not reintroduce the community term because §9c's
+historical base config had it; §9c is superseded.
 
 **MULTI-BATCH IS NOT A KNOB.** There is no `coh_batch` option. The trainer counts bio
 batches from the data: with >1 batch each cell is scored against `V[b]`, the node set of

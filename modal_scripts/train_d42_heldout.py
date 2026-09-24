@@ -16,7 +16,12 @@ notebook hit this: its held-out scProto run and the canonical full-graph run
 share a folder, so that older checkpoint can no longer be attributed to either
 graph. Every run here therefore carries an explicit experiment_name 'd42_<ds>'.
 
-LOSS CONFIG -- CLAUDE.md 9c base, plus the two things CLAUDE.md asks for on top:
+LOSS CONFIG -- CLAUDE.md 9d, the cohesion config. Community OFF, nassoc OFF,
+modularity OFF, usage OFF: cohesion is the ONLY objective, so nothing can
+outvote the term under test. cohesion_self=1.0 and cohesion_diag=1.0 per 9d.
+Multi-batch is unconditional (no flag): each cell scored against V[b].
+
+SUPERSEDED NOTE -- what 9c used to say:
   9c:   nassoc_diag_norm='pair', nassoc_diag_loss='cpm', nassoc_size_scale='full',
         nassoc_cpm_norm='gful'   (on top of LAMBDA_PROTO_UMAP_PRECON, i.e. the
         community term, proto_recon, usage and nassoc are all ON -- this is the
@@ -138,6 +143,12 @@ def run(ds: str, K: int, lam_gram: float, lam_aff: float, gamma: float,
 
     name = f"d42_{ds}"
     lc = dict(LAMBDA_PROTO_UMAP_PRECON) | {
+        # --- CLAUDE.md 9d: the cohesion config. Community OFF. ------------
+        "lambda_umap": 0.0,
+        "lambda_proto_recon": 0.0,
+        "lambda_modularity": 0.0,
+        "lambda_proto_usage": 0.0,
+        "proto_reinit_every": 0,
         # --- nassoc OFF: these are COHESION runs -------------------------
         # CLAUDE.md 9c's base config carries lambda_nassoc=1 with the CPM
         # diagonal, but nassoc and cohesion are BOTH diagonal terms and cohesion
@@ -165,13 +176,14 @@ def run(ds: str, K: int, lam_gram: float, lam_aff: float, gamma: float,
     auth = lam_gram * span_gram + lam_aff * span_aff
     assert abs(auth - AUTHORITY) < 0.03, f"authority drifted: {auth}"
     assert lc["cohesion_self"] == 1.0 and lc["cohesion_diag"] == 1.0
-    assert lc["lambda_umap"] == 1, "community stays on"
+    assert lc["lambda_umap"] == 0.0, "CLAUDE.md 9d: community OFF"
     assert lc["lambda_nassoc"] == 0.0, "cohesion run: nassoc must be off"
+    assert lc["lambda_cohesion"] > 0 and lc["lambda_cohesion_aff"] > 0
 
     print("\n" + "=" * 78)
     print(f"=== {name}   K={K}  graph={HELDOUT}  LD=8")
-    print(f"    FULL model: community ON, nassoc CPM ON (gamma={gamma}, "
-          f"offdiag=min), cohesion ON")
+    print(f"    CLAUDE.md 9d cohesion config: community OFF, nassoc OFF, "
+          f"modularity OFF, usage OFF -- cohesion is the ONLY objective")
     print(f"    lambda_cohesion(gram)={lam_gram:.2f}  "
           f"lambda_cohesion_aff={lam_aff:.2f}  authority={auth:.4f}")
     print(f"    cohesion_self=1.0 cohesion_diag=1.0 (unchanged); multi-batch "
