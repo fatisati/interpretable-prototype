@@ -33,7 +33,7 @@ DATASETS = [("pancreas", "Pancreas"), ("pbmc-immune", "Immune"), ("lung", "Lung"
 # (display, mean col, std col, decimals, higher_is_better)
 T1 = [
     ("Modularity",       "modularity_test_mean",  "modularity_test_std",  3, True),
-    ("Cohesion",         "coh_aff_test_mean",     "coh_aff_test_std",     4, True),
+    ("Cohesion",         "coh_aff_mean",          "coh_aff_std",          4, True),
     ("Batch Entropy",    "batch_entropy_mean",    "batch_entropy_std",    2, True),
     ("Purity",           "ct_purity_mean",        "ct_purity_std",        3, True),
     ("Purity (wtd)",     "ct_purity_wmean",       "ct_purity_wstd",       3, True),
@@ -51,7 +51,7 @@ T2 = [
 # Comparing scProto-8 against Harmony-50 would confound "better method" with
 # "more latent capacity", which is the whole reason the d8 runs exist.
 ROWS = [
-    ("scProto (cohesion)",     "scProto (cohesion, D42)"),
+    ("scProto (cohesion)",     "scProto (cohesion)"),
     ("SEACells",               "SEACells"),
     ("SuperCell",              "SuperCell"),
     ("MetaCell2",              "MetaCell2"),
@@ -153,13 +153,21 @@ def main():
         "All numbers come from `interpretable_ssl/evaluation/metacell_scoreboard.py`, "
         "so scProto and every baseline go through identical code on identical "
         "graphs. **Bold** = best, _italic_ = second best, per column.", "",
-        "**Cohesion** is the training objective itself, with self-similarity = 1, "
-        "computed exactly as in training: multi-batch is unconditional, so each "
-        "cell is scored against `V[b]` — the node set of its own bio-batch graph "
-        "(all edges with ≥1 endpoint in `b`). Nothing is masked; cross-batch "
-        "pairs whose zeros carry no information are excluded from numerator and "
+        "**Cohesion** is the training objective itself, self-similarity = 1, computed "
+        "exactly as in training: multi-batch is unconditional, so each cell is "
+        "scored against `V[b]` — the node set of its own bio-batch graph (all "
+        "edges with ≥1 endpoint in `b`). Nothing is masked; cross-batch pairs "
+        "whose zeros carry no information are excluded from numerator and "
         "denominator alike. With one batch `V[b]` is every cell and the formula "
         "reduces exactly to the batch-agnostic one.", "",
+        "It is averaged over the **test nodes** (cells with ≥1 held-out edge) but "
+        "computed on the **full** bio-batch graph — a held-out node's similarity "
+        "to train nodes counts too. Scoring on the held-out edges *alone* is a "
+        "different and degenerate quantity: ~5x smaller, and it ranks a random "
+        "partition **first**. On these three datasets the test-node set is 100% "
+        "of cells (20% of edges removed at random means essentially every cell "
+        "loses one), so the de-circularisation comes from the model having "
+        "*trained* on 80%, not from the node subset.", "",
         "**Batch entropy** is unnormalised Shannon entropy in nats "
         "(`mc_metric_utils.calc_batch_entropy`); ceiling is `log(n_batches)` = "
         "2.20 pancreas (9), 1.61 immune (5), 2.77 lung (16). Higher = better mixed.",
@@ -169,10 +177,10 @@ def main():
     ]
     body = [
         render(dfs, T1, "Table 1 — community preservation and batch integration",
-               "Modularity: mean ± std **across batches**. Cohesion: mean ± std "
-               "**across cells**. Batch entropy and purity: mean ± std **across "
-               "metacells**; `Purity (wtd)` is weighted by metacell size with the "
-               "matching weighted std."),
+               "Modularity: mean ± std **across batches**, on the held-out edges. "
+               "Cohesion: mean ± std **across cells**, full graph, self-sim = 1. "
+               "Batch entropy and purity: mean ± std **across metacells**; "
+               "`Purity (wtd)` is size-weighted with the matching weighted std."),
         "",
         render(dfs, T2, "Table 2 — rare cell types",
                "Coverage: mean ± std **across batches** (it is a per-batch "

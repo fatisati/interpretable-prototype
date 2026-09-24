@@ -29,6 +29,10 @@ from interpretable_ssl.evaluation.metacell_scoreboard import (  # noqa: E402
     load_affinity, read_obs, score_partition)
 
 MODELS = r"G:/.shortcut-targets-by-id/1-0FnoSFlnEGxgKJQCAbspCuHc3osVs25/models"
+# Runs trained on Modal live on the VOLUME, not in the Drive model dir. Fetch
+# their clusters.npz into files/volume_runs/<ds>/<run>/ and they are scored by
+# the same code as everything else -- no separate path, no separate metrics.
+VOLUME_RUNS = "files/volume_runs"
 
 # ds -> (n_cells, h5ad rel to DATA_DIR, batch_key, label_key, niche_key, K)
 DATASETS = {
@@ -67,7 +71,7 @@ BASELINES = [
     ("SEACells + BBKNN",         r"^seacell_X_bbknn$"),
     ("SEACells + BBKNN d8",      r"^seacell_X_bbknn_d8$"),
     # scProto: the NEW cohesion runs carry an explicit experiment name
-    ("scProto (cohesion, D42)",  r"^d42_[a-z\-]+_"),
+    ("scProto (cohesion)",       r"^d42cohonly_"),
 ]
 
 
@@ -103,6 +107,7 @@ def run(ds):
     A_te = load_affinity(
         f"graphs/affinity_{ds}{n}_ncomp50_kneighbors50_arbf_heldout20_seed0"
         f"_testedges.pkl")
+    A_fu = load_affinity(f"graphs/affinity_{ds}{n}_ncomp50_kneighbors50_arbf.pkl")
     obs = read_obs(os.path.join(os.environ["DATA_DIR"], h5),
                    [bk, lk] + ([nk] if nk else []))
     cts = np.asarray(obs[lk]).astype(str)
@@ -112,25 +117,29 @@ def run(ds):
           f"test-edges={A_te.nnz//2:,}  batches={len(set(bts))}  "
           f"celltypes={len(set(cts))}  ({time.time()-t0:.0f}s)")
 
-    root = os.path.join(MODELS, ds)
-    dirs = [e for e in sorted(os.listdir(root))
-            if os.path.isdir(os.path.join(root, e))]
-    cache_tr, cache_te = {}, {}
+    roots = [os.path.join(MODELS, ds), os.path.join(VOLUME_RUNS, ds)]
+    dirs = []           # (display_root, dirname)
+    for r in roots:
+        if os.path.isdir(r):
+            dirs += [(r, e) for e in sorted(os.listdir(r))
+                     if os.path.isdir(os.path.join(r, e))]
+    cache_tr, cache_te, cache_fu = {}, {}, {}
     rows = []
     for label, pat in BASELINES:
-        hits = [d for d in dirs if re.search(pat, d)]
+        hits = [(r, d) for (r, d) in dirs if re.search(pat, d)]
         if not hits:
             print(f"   --  {label:<26} MISSING")
             continue
-        for h in hits:
-            lab = load_labels(os.path.join(root, h), n)
+        for r, h in hits:
+            lab = load_labels(os.path.join(r, h), n)
             if lab is None:
                 print(f"   --  {label:<26} {h[:40]}: no usable per-cell labels")
                 continue
             name = label if len(hits) == 1 else f"{label} [{h[:28]}]"
             r = score_partition(lab, cts, bts, A_train=A_tr, A_test=A_te,
-                                niches=nis, n_proto=None,
-                                _cache=cache_tr, _cache_test=cache_te)
+                                A_full=A_fu, niches=nis, n_proto=None,
+                                _cache=cache_tr, _cache_test=cache_te,
+                                _cache_full=cache_fu)
             r["method"] = name
             r["run_dir"] = h
             rows.append(r)

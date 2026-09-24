@@ -119,19 +119,96 @@ def jobs_for(datasets):
     return out
 
 
-@app.function(image=image, timeout=600, volumes={"/vol": volume})
-def probe():
-    """Return the lambda config the DEPLOYED code would use.
+ZERO_TERMS = ("lambda_umap", "lambda_proto_recon", "lambda_nassoc",
+              "lambda_modularity", "lambda_proto_usage", "lambda_swav",
+              "lambda_kl", "lambda_recon")
 
-    Exists because a stale deployment silently cost three GPU runs: `modal
-    deploy` followed immediately by Function.from_name().spawn() resolved the
-    PREVIOUS version, which still had community ON, and nothing in the run name
-    or the call status revealed it. Always probe after deploying.
+
+def build_config(lam_gram, lam_aff):
+    """THE loss config -- CLAUDE.md 9d. Cohesion is the ONLY objective.
+
+    ONE definition, used by run() AND returned by probe(), so the probe reports
+    what the deployed code actually builds rather than a hand-written summary
+    that can drift from it. A stale deployment already cost three GPU runs.
+
+    nassoc is OFF: nassoc and cohesion are both DIAGONAL terms and cohesion
+    replaces nassoc (CLAUDE.md 9b -- CPM's charge is a function of the
+    assignment column sums only, so it cannot move a cell for similarity
+    reasons). Running both competes and drags in nassoc_gamma, whose derivation
+    9b marks UNSETTLED.
     """
-    return {"community_off": True, "tag": CONFIG_TAG}
+    from interpretable_ssl.experiments.tasks import LAMBDA_PROTO_UMAP_PRECON
+    return dict(LAMBDA_PROTO_UMAP_PRECON) | {
+        # every non-cohesion loss term is ZERO
+        "lambda_umap": 0.0,
+        "lambda_proto_recon": 0.0,
+        "lambda_nassoc": 0.0,
+        "lambda_modularity": 0.0,
+        "lambda_proto_usage": 0.0,
+        "lambda_swav": 0.0,
+        "lambda_kl": 0.0,
+        "lambda_recon": 0.0,
+        "proto_reinit_every": 0,
+        # the objective
+        "lambda_cohesion": lam_gram,        # gram, 2-hop
+        "lambda_cohesion_aff": lam_aff,     # aff,  1-hop
+        "cohesion_sim": "gram",
+        "cohesion_form": "perc",
+        "cohesion_row_norm": "l2",
+        "cohesion_diag": 1.0,               # sim(c,c) = 1
+        "cohesion_self": 1.0,               # ALWAYS 1.0 (CLAUDE.md 9d)
+        "cohesion_global": 2,               # [D29] full-graph memory
+        "coh_mem_init": "full",             # [D32]
+        "coh_mem_hlife": 500.0,             # [D31]
+        "latent_dims": 8,
+    }
 
 
-@app.function(image=image, gpu="T4", timeout=21600, volumes={"/vol": volume})
+def validate(lc, lam_gram, lam_aff, span_aff, span_gram):
+    """Every check that must hold before a GPU is touched. Returns a summary."""
+    for k in ZERO_TERMS:
+        assert float(lc[k]) == 0.0, f"{k} must be 0, got {lc[k]}"
+    assert lc["lambda_cohesion"] > 0 and lc["lambda_cohesion_aff"] > 0
+    assert lc["cohesion_self"] == 1.0, "cohesion_self must be 1.0"
+    assert lc["cohesion_diag"] == 1.0, "cohesion_diag must be 1.0"
+    assert lc["cohesion_global"] == 2 and lc["coh_mem_init"] == "full"
+    assert lc["latent_dims"] == 8, f"latent_dims must be 8, got {lc['latent_dims']}"
+    auth = lam_gram * span_gram + lam_aff * span_aff
+    assert abs(auth - AUTHORITY) < 0.03, f"authority drifted: {auth}"
+    return {
+        "config_tag": CONFIG_TAG,
+        "graph": HELDOUT,
+        "authority": round(auth, 4),
+        "all_zero_terms": {k: float(lc[k]) for k in ZERO_TERMS},
+        "objective": {"lambda_cohesion(gram)": lc["lambda_cohesion"],
+                      "lambda_cohesion_aff": lc["lambda_cohesion_aff"]},
+        "cohesion_self": lc["cohesion_self"],
+        "cohesion_diag": lc["cohesion_diag"],
+        "cohesion_global": lc["cohesion_global"],
+        "coh_mem_init": lc["coh_mem_init"],
+        "coh_mem_hlife": lc["coh_mem_hlife"],
+        "latent_dims": lc["latent_dims"],
+    }
+
+
+@app.function(image=image, timeout=900, volumes={"/vol": volume})
+def probe(lam_gram: float = 4.04, lam_aff: float = 11.99,
+          span_aff: float = 0.064251, span_gram: float = 0.190749):
+    """Return the validated config the DEPLOYED code builds. CPU-only, ~free.
+
+    Run after every deploy and BEFORE spawning. This is the check that catches a
+    stale deployment; without it, the wrong config produces plausible-looking
+    results and nothing in the run status reveals it.
+    """
+    import os, sys
+    os.environ["CODE_DIR"] = "/vol/code/"
+    sys.path.insert(0, "/vol/code")
+    os.chdir("/vol/code")
+    return validate(build_config(lam_gram, lam_aff),
+                    lam_gram, lam_aff, span_aff, span_gram)
+
+
+@app.function(image=image, gpu="A10G", timeout=21600, volumes={"/vol": volume})
 def run(ds: str, K: int, lam_gram: float, lam_aff: float, gamma: float,
         span_aff: float, span_gram: float):
     import os
@@ -154,61 +231,26 @@ def run(ds: str, K: int, lam_gram: float, lam_aff: float, gamma: float,
     except TypeError:
         pass
 
-    from interpretable_ssl.experiments.tasks import (run_mc_task,
-                                                     LAMBDA_PROTO_UMAP_PRECON)
+    from interpretable_ssl.experiments.tasks import run_mc_task
 
     name = f"d42{CONFIG_TAG}_{ds}"
-    lc = dict(LAMBDA_PROTO_UMAP_PRECON) | {
-        # --- CLAUDE.md 9d: the cohesion config. Community OFF. ------------
-        "lambda_umap": 0.0,
-        "lambda_proto_recon": 0.0,
-        "lambda_modularity": 0.0,
-        "lambda_proto_usage": 0.0,
-        "proto_reinit_every": 0,
-        # --- nassoc OFF: these are COHESION runs -------------------------
-        # CLAUDE.md 9c's base config carries lambda_nassoc=1 with the CPM
-        # diagonal, but nassoc and cohesion are BOTH diagonal terms and cohesion
-        # exists to REPLACE nassoc: 9b shows CPM's charge is a function of the
-        # assignment column sums only, so it cannot move a cell for similarity
-        # reasons at all -- exactly the defect cohesion fixes. Running both puts
-        # two diagonal terms in competition AND drags in nassoc_gamma, whose
-        # derivation 9b marks UNSETTLED. Any cohesion result would then be
-        # confounded by a gamma nobody chose on principle.
-        # So: community + proto_recon + usage + COHESION as the diagonal.
-        "lambda_nassoc": 0.0,
-        # --- the cohesion term (multi-batch handling is unconditional now) ---
-        "lambda_cohesion": lam_gram,
-        "lambda_cohesion_aff": lam_aff,
-        "cohesion_sim": "gram",
-        "cohesion_form": "perc",
-        "cohesion_row_norm": "l2",
-        "cohesion_diag": 1.0,
-        "cohesion_self": 1.0,      # UNCHANGED from the batch-agnostic formula
-        "cohesion_global": 2,      # [D29] full-graph assignment memory
-        "coh_mem_init": "full",    # [D32]
-        "coh_mem_hlife": 500.0,    # [D31]
-        "latent_dims": 8,
-    }
-    auth = lam_gram * span_gram + lam_aff * span_aff
-    assert abs(auth - AUTHORITY) < 0.03, f"authority drifted: {auth}"
-    assert lc["cohesion_self"] == 1.0 and lc["cohesion_diag"] == 1.0
-    assert lc["lambda_umap"] == 0.0, "CLAUDE.md 9d: community OFF"
-    assert lc["lambda_nassoc"] == 0.0, "cohesion run: nassoc must be off"
-    assert lc["lambda_cohesion"] > 0 and lc["lambda_cohesion_aff"] > 0
+    lc = build_config(lam_gram, lam_aff)
+    checked = validate(lc, lam_gram, lam_aff, span_aff, span_gram)
+    print(f"   [CONFIG VERIFIED IN-RUN] {checked}")
 
     print("\n" + "=" * 78)
     print(f"=== {name}   K={K}  graph={HELDOUT}  LD=8")
     print(f"    CLAUDE.md 9d cohesion config: community OFF, nassoc OFF, "
           f"modularity OFF, usage OFF -- cohesion is the ONLY objective")
     print(f"    lambda_cohesion(gram)={lam_gram:.2f}  "
-          f"lambda_cohesion_aff={lam_aff:.2f}  authority={auth:.4f}")
+          f"lambda_cohesion_aff={lam_aff:.2f}  authority={checked['authority']}")
     print(f"    cohesion_self=1.0 cohesion_diag=1.0 (unchanged); multi-batch "
           f"cohesion is unconditional -> V[b]")
     print("=" * 78)
 
     t0 = time.time()
     trainer, metrics, _ = run_mc_task(
-        ds, cvae_epochs=50, train_epochs=20, eval_freq=2, patience=4,
+        ds, cvae_epochs=50, train_epochs=10, eval_freq=2, patience=4,
         batch_size=1024, affinity_type=HELDOUT, num_prototypes=K,
         lambda_config=lc, trainer_kwargs={"experiment_name": name},
         early_stop=False,
