@@ -131,9 +131,52 @@ results before the next starts. Prefer many small resumable steps over one long 
 - **Pretrain: `cvae_epochs=50`. scProto finetune: `train_epochs=20`.**
 - Scale early stopping to fit 20 epochs: `eval_freq=2`, `patience=4`. (The old
   `eval_freq=3, patience=6` was for 50 epochs and effectively disables early stopping at 20.)
-- Keep `batch_size=1024`, `umap_steps_per_epoch=500`.
+- Keep `batch_size=1024`.
+- **`umap_steps_per_epoch=None` — an epoch is ONE PASS OVER THE EDGES, derived from the
+  data, never a hardcoded step count.** See §5a.
 - Don't raise epochs unasked. If something looks undertrained, **say so** rather than
   silently training longer.
+
+## 5a. An epoch = one pass over the edges. Pass `umap_steps_per_epoch=None`.
+
+**Always pass `umap_steps_per_epoch=None`.** `scproto.py` already implements it:
+
+```python
+n_samples = (min(len(edge_dataset), steps_per_epoch * batch_size)
+             if steps_per_epoch else len(edge_dataset))   # None -> every edge, once
+```
+
+so `None` samples `len(edge_dataset)` edges, i.e. exactly `n_edges / batch_size` steps —
+the only definition of "epoch" that means anything. **Do not pass a step count**: any
+fixed number is an arbitrary fraction of the graph that silently changes meaning whenever
+the dataset, the affinity or `batch_size` changes.
+
+**What the old numbers actually were** (measured from the run logs, 2026-09-23):
+
+```
+umap_steps_per_epoch=1000  ->  1,024,000 edges/epoch  of  4,325,186 total   = 24% of the graph
+one true pass (bk02)       ->  4,325,186 / 1024       =  4,224 steps        = 4.2x more
+```
+
+Every result in the [D39]/[D40]/[D41] sweep used the **code default of 1000**, i.e. a
+quarter of a pass — not the 500 this file used to recommend, and not a real epoch. Those
+runs are internally consistent (all used the same value) so their comparisons hold, but
+the word "epoch" in them does not mean a pass over the data.
+
+**Two consequences to keep straight:**
+
+- Cost: a true epoch is ~4.2x the steps, so ~2.5-3 h per arm instead of ~35 min at
+  `train_epochs=10`. Budget for it, or cut `train_epochs`, but do not go back to a
+  hardcoded step count to save time.
+- Anything defined in "epochs" has to be re-derived. `coh_mem_hlife=500` was picked as
+  "one epoch" under the false 500-step assumption; against a real 4,224-step epoch it is
+  ~0.12 of one. Note also that the memory's natural clock is the **cell revisit interval**
+  (~8.6 steps, [D29]), not the edge pass — so state the unit you mean.
+
+`len(edge_dataset)` counts DIRECTED entries surviving the `max_weight / n_epochs`
+threshold (4.33M on bk02 against 2.30M undirected edges), so the exact count shifts a
+little with `train_epochs`. That is second-order; the point is that it comes from the
+data, not from a constant.
 
 ## 6. One dataset first, fully
 
@@ -407,7 +450,7 @@ not pass is NOT necessarily the one you think.
 | `cvae_epochs` | **required** | 50 | no default — must be passed |
 | `train_epochs` | **required** | 10-20 | no default |
 | `batch_size` | **256** | 1024 | §5 wants 1024 — PASS IT |
-| `umap_steps_per_epoch` | **1000** | *not passed* -> 1000 | §5 says 500; nothing enforces it |
+| `umap_steps_per_epoch` | **1000** | *not passed* -> 1000 | **pass `None`** = one real pass, §5a |
 | `load_pretrain` | **True** | (default) | reuses `pretrain_checkpoint.pth` if it exists |
 | `load_umap` | False | (default) | True = skip training, load checkpoint |
 | `early_stop` | **True** | False for cohesion arms | [D34] |
@@ -438,12 +481,22 @@ running**. A cohesion-only arm must explicitly zero `lambda_nassoc`, `lambda_mod
 (PRECON overrides to `'proto'`), `epsilon` 0.05 (but `calibrate_eps=1` recomputes it at
 runtime — measured 0.0664-0.0678 on s28nsc, so the 0.05 is never used), `seed` 31.
 
-**CAUTION, measured 2026-09-23:** an epoch is **1000 steps**, not 500. CLAUDE.md §5 says
-to keep `umap_steps_per_epoch=500`, but no run passed it, so every result in the
-[D39]/[D40]/[D41] sweep used the code default of 1000 (confirmed from the tqdm totals in
-the run logs). One consequence: `coh_mem_hlife=500` was chosen as "one epoch" and is
-actually **half** an epoch. Nothing is invalidated — the runs are internally consistent and
-all used the same value — but do not repeat the "500 = one epoch" reasoning.
+**On epochs, see §5a** — the [D39]/[D40]/[D41] sweep ran at the code default of 1000
+steps, which is 24% of one pass over the edges, not an epoch. New runs pass
+`umap_steps_per_epoch=None`.
+
+**Early stopping: ON by default, on the WRONG metric for a cohesion arm.**
+`early_stop=True, early_stop_metric='modularity', min_delta=0.005` with `eval_freq` /
+`patience` required positionally. So unless you pass `early_stop=False`, training stops on
+**Newman modularity** — a metric a cohesion-only arm has `lambda_modularity=0` for and
+never optimizes. It also **selects the saved checkpoint**, so an arm can be reported at an
+epoch chosen by a quantity it was not training on. `'homophily'` and `'modularity'` are the
+only two metrics implemented; there is no `'cohesion'` option. Until there is:
+
+- cohesion arms: pass **`early_stop=False`** ([D34] added the passthrough) and a fixed
+  `train_epochs`. Every [D39]/[D40]/[D41] result used this.
+- if you do want early stopping, say which metric and why — and remember eval runs only
+  every `eval_freq` epochs, so `patience` is counted in evals, not epochs.
 
 ## 10. Explanation style
 
