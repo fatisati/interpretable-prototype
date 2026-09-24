@@ -471,13 +471,20 @@ def test_d41_inV_definition():
     print("PASS  [D41] V[b] == nodes of edges with >=1 endpoint in b (own U touching)")
 
 
-def test_d41_registration():
-    """coh_batch must reach the model name, or two runs clobber each other."""
+def test_d41_is_unconditional():
+    """Multi-batch cohesion is the BEHAVIOUR, not an option.
+
+    There is no coh_batch config key: the trainer detects >1 bio batch from the
+    data and uses V[b]; with one batch V[b] is every cell, so the denominator is
+    the global size and nothing changes. Guarding against the key creeping back
+    in as an option.
+    """
     from interpretable_ssl.constants import ABBREVIATIONS
-    assert 'coh_batch' in ABBREVIATIONS, "coh_batch missing from ABBREVIATIONS"
-    vals = ['off', 'locl']
-    assert len({v[:4] for v in vals}) == len(vals), "values not 4-char-distinct"
-    print(f"PASS  [D41] registered: abbrev={ABBREVIATIONS['coh_batch']!r}")
+    from interpretable_ssl.configs.defaults import get_defaults
+    assert 'coh_batch' not in ABBREVIATIONS, "coh_batch came back as an option"
+    assert 'coh_batch' not in get_defaults(), "coh_batch came back as a default"
+    print("PASS  [D41] unconditional: no coh_batch key in defaults or ABBREVIATIONS")
+
 
 if __name__ == '__main__':
     test_off_is_bit_identical_to_d29()
@@ -495,5 +502,5 @@ if __name__ == '__main__':
     test_d41_brute_force_gram()
     test_d41_single_batch_is_bit_identical()
     test_d41_inV_definition()
-    test_d41_registration()
+    test_d41_is_unconditional()
     print("\nall tests passed")

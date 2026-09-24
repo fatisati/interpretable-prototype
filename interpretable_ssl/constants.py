@@ -163,7 +163,6 @@ ABBREVIATIONS = {
     'cohesion_self': 'cslf',
     'cohesion_row_norm': 'crn',
     'coh_diag_every': 'cdev',         # [D26] diagnostic cadence
-    'coh_batch': 'cbat',              # [D41] per-bio-batch cohesion (multi-batch)
     'cohesion_global': 'cglb',        # [D28] full-graph scale estimate
     'coh_mem_hlife': 'cmhl',          # [D31] age half-life of the [D29] assignment memory (numeric, no truncation risk)
     'coh_mem_init': 'cmini',          # [D32] memory init: 'unif' (default) or 'full' (one inference pass)

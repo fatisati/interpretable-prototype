@@ -1335,7 +1335,6 @@ class SCProtoTrainer(AdoptiveTrainer):
         lambda_cohesion_aff = float(getattr(self, 'lambda_cohesion_aff', 0.0))  # [D26]
         cohesion_global = int(getattr(self, 'cohesion_global', 0))       # [D28]
         coh_mem_hlife = float(getattr(self, 'coh_mem_hlife', 0.0) or 0.0)  # [D31]
-        coh_batch = str(getattr(self, 'coh_batch', 'off'))               # [D41]
         modularity_res = float(getattr(self, 'modularity_res', 1.0))
         modularity_agg = str(getattr(self, 'modularity_agg', 'glob'))
         modularity_res_pbch = float(getattr(self, 'modularity_res_pbch', 0.0) or 0.0)
@@ -2459,23 +2458,23 @@ class SCProtoTrainer(AdoptiveTrainer):
                     # per step the denominator is inV @ S_eff -> (n_batches, K), which
                     # is a small dense matmul (n_batches is 9 on pancreas).
                     self._coh_bcode = None
-                    if coh_batch != 'off':
-                        assert cohesion_global == 2, (
-                            "coh_batch requires cohesion_global=2 ([D29] memory): the "
-                            "denominator is taken from the remembered full-graph "
-                            "membership, which only mode 2 maintains.")
-                        _bk = getattr(self.train_ds, 'batch_key', None)
-                        _obs = self.train_ds.adata.obs
-                        if _bk is None or _bk not in _obs:
-                            raise ValueError(
-                                f"coh_batch={coh_batch!r} needs a batch key; "
-                                f"train_ds.batch_key={_bk!r} not in adata.obs")
+                    self._coh_multi = False
+                    _bk = getattr(self.train_ds, 'batch_key', None)
+                    _obs = self.train_ds.adata.obs
+                    if _bk is not None and _bk in _obs:
                         # str() first: the column is usually categorical, and
                         # np.unique on the raw dtype is not reliable there.
                         _, _bcode = np.unique(np.asarray(_obs[_bk].astype(str)),
                                               return_inverse=True)
                         _bcode = _bcode.astype(np.int64)
                         _nb_bio = int(_bcode.max()) + 1
+                        self._coh_multi = _nb_bio > 1
+                    if self._coh_multi:
+                        assert cohesion_global == 2, (
+                            "multi-batch cohesion requires cohesion_global=2 (the "
+                            "[D29] memory): the denominator is taken from the "
+                            "remembered full-graph membership, which only mode 2 "
+                            "maintains.")
                         self._coh_bcode = torch.as_tensor(
                             _bcode, dtype=torch.long, device=self.device)
                         self._coh_nbio = _nb_bio
@@ -2494,15 +2493,17 @@ class SCProtoTrainer(AdoptiveTrainer):
                         self._coh_inV = torch.as_tensor(
                             _inV.T.astype(np.float32), device=self.device)
                         _frac = _inV.mean(axis=0)
-                        print(f"   [D41] coh_batch={coh_batch}: {_nb_bio} bio batches "
-                              f"('{_bk}'); NOTHING masked, cross-batch similarities "
-                              f"kept. |V[b]|/N spans "
+                        print(f"   [D41] MULTI-BATCH cohesion: {_nb_bio} bio "
+                              f"batches ('{_bk}'). Each cell is scored against V[b], "
+                              f"the node set of its own bio-batch graph. NOTHING is "
+                              f"masked -- cross-batch similarities keep their real "
+                              f"values. |V[b]|/N spans "
                               f"{100*_frac.min():.1f}%-{100*_frac.max():.1f}% "
                               f"(mean {100*_frac.mean():.1f}%)")
-                        print(f"   [D41] cohesion_self={cohesion_self} "
-                              f"cohesion_diag={cohesion_diag} -- unchanged from the "
-                              f"batch-agnostic formula, as intended: the ONLY change "
-                              f"is the set of cells each cohesion is computed against.")
+                    else:
+                        print(f"   [D41] single bio batch -> V[b] is every cell, so "
+                              f"the denominator IS the global size; using the "
+                              f"batch-agnostic path (identical, and cheaper).")
 
                     # --- 1-hop matrix, for lambda_cohesion_aff and for the redundancy
                     # diagnostic. RAW affinity, deliberately NOT row-normalised: the
@@ -2639,7 +2640,7 @@ class SCProtoTrainer(AdoptiveTrainer):
                 else:
                     _size_g = None
                 # [D41] per-cell (n_batch, K) denominator; stays None unless
-                # coh_batch is on, so every other mode keeps the (K,) path exactly.
+                # the dataset is multi-batch; single-batch keeps the (K,) path exactly.
                 _size_cell = None
 
                 # === [D26] NEVER FORM THE GRAM =================================
@@ -2799,7 +2800,7 @@ class SCProtoTrainer(AdoptiveTrainer):
                     # so a live prototype always has real mass in it. A tiny eps only
                     # guards a genuinely empty prototype, which contributes 0 to the
                     # numerator anyway.
-                    if coh_batch != 'off':
+                    if self._coh_multi:
                         _den_bp = self._coh_inV @ _S_eff          # (n_bio, K)
                         _size_cell = _den_bp[self._coh_bcode[unique_idx]].clamp(
                             min=1e-8)
@@ -2838,7 +2839,7 @@ class SCProtoTrainer(AdoptiveTrainer):
                         # divide on both sides exactly as in the batch-only path.
                         _rall = torch.as_tensor(self._coh_rn, dtype=torch.float32,
                                                 device=self.device).unsqueeze(1)
-                        if coh_batch != 'off':
+                        if self._coh_multi:
                             # [D41] The GRAM numerator must be restricted to V[b]
                             # EXPLICITLY. For 'aff' the restriction is automatic --
                             # sim[c][j] is nonzero only for c's neighbours, and c is
