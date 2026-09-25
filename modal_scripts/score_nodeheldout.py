@@ -116,7 +116,10 @@ def run(ds):
     n, h5, bk, lk, nk, K = DATASETS[ds]
     t0 = time.time()
     h5_path = os.path.join(os.environ["DATA_DIR"], h5)
-    A_fu = load_affinity(f"graphs/affinity_{ds}{n}_ncomp50_kneighbors50_arbf.pkl")
+    # GRAPHS_DIR override: the Drive-synced graphs/ dir fails h5py/pickle
+    # reads on large files (Errno 22); fetch from the Modal volume instead
+    _gd = os.environ.get("GRAPHS_DIR", "graphs")
+    A_fu = load_affinity(f"{_gd}/affinity_{ds}{n}_ncomp50_kneighbors50_arbf.pkl")
     obs = read_obs(h5_path, [bk, lk])
     cts = np.asarray(obs[lk]).astype(str)
     bts = np.asarray(obs[bk]).astype(str)

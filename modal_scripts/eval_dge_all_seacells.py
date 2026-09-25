@@ -160,6 +160,9 @@ def evaluate():
                 # n_covered, which run_mc_task cannot compute.
                 "d39_A_cohonly", "d39_B_cohcomm",
                 "d39_C_gramonly", "d39_E_bothonly",
+                # [D50] the routed-community arm: D39-E cohesion + lambda_umap
+                # 0.02 with umap_proto_sg=1 (encoder-only community gradient)
+                "d50rt_rtA",
                 # [D40] the bk02 winner retrained on bk04 -- only present, and
                 # only meaningful, when AFF_TAG == "bk04"
                 "d40_bk04"):

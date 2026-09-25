@@ -2324,6 +2324,21 @@ class SCProtoTrainer(AdoptiveTrainer):
                 S_h = S[_gather(head)]
                 S_t = S[_gather(tail)]
                 _alpha = float(getattr(self, 'modularity_ema_alpha', 0.9))
+                # [D51] modularity_diag: self-pair reward w_ii = modularity_diag
+                # for EVERY cell (minibatch-rescaled so all N cells count in
+                # expectation). The graph pkl has diagonal 0, so without this an
+                # EMPTY slot (Q=0) beats a SINGLETON (Q = -res*(d/2m)^2 < 0):
+                # the term actively pays to evict a prototype's last members.
+                # With w_ii=1 the singleton margin flips positive for every cell
+                # with degree < sqrt(2m/res) (100% of the pancreas-nh graph at
+                # res=18.62). The self reward follows the cell into any group,
+                # so it CANCELS in every merge/split comparison -- occupancy
+                # incentive only, boundary behavior untouched. The null side
+                # keeps diag-0 degrees on purpose: adding 1 to every degree is a
+                # ~4% uniform rescale that reorders nothing, and leaving it out
+                # isolates the occupancy effect cleanly. Same design as
+                # cohesion_diag/cohesion_self and SEACells' setdiag(1).
+                _mdia = float(getattr(self, 'modularity_diag', 0.0) or 0.0)
 
                 if modularity_agg == 'pbch':
                     # [D12] per BIOLOGICAL BATCH, then max per prototype, then sum.
@@ -2350,6 +2365,20 @@ class SCProtoTrainer(AdoptiveTrainer):
                             continue          # no sampled edges touch this batch
                         _td_b = self._modu_total_degree_b[_bi].clamp(min=1e-8)
                         _aff_in = (_td_b / _ne) * (S_h[_em] * S_t[_em]).sum(0)
+                        if _mdia > 0:
+                            # [D51] self-pairs of batch b's OWN cells, rescaled
+                            # from the minibatch to the batch's full cell count
+                            if not hasattr(self, '_modu_ncells_b'):
+                                _cd_all = self._umap_state['cell_ds']
+                                self._modu_ncells_b = {
+                                    int(bb): int((_cd_all == bb).sum())
+                                    for bb in self._modu_batches}
+                            _cm = (_cell_batch == _b)
+                            _ncm = float(_cm.sum().item())
+                            if _ncm >= 1.0:
+                                _aff_in = _aff_in + _mdia * (
+                                    float(self._modu_ncells_b[int(_b)]) / _ncm
+                                ) * (S[_cm] * S[_cm]).sum(0)
                         _deg_b = self._modu_degree_b[_bi].to(self.device)[_gidx]
                         _vol = (S * (_deg_b / _pin).unsqueeze(1)).sum(0)
                         if bool(self._modu_ema_init_b[_bi]):
@@ -2370,6 +2399,11 @@ class SCProtoTrainer(AdoptiveTrainer):
                     total_deg = self._full_graph_weight
                     n_edges_b = float(weights.numel())
                     affinity_inside = (total_deg / max(n_edges_b, 1.0)) * (S_h * S_t).sum(0)
+                    if _mdia > 0:
+                        # [D51] self-pairs for every cell, minibatch -> N rescale
+                        affinity_inside = affinity_inside + _mdia * (
+                            float(self._cell_degree.shape[0]) / float(S.shape[0])
+                        ) * (S * S).sum(0)
                     _deg = self._cell_degree.to(self.device)[_gidx]
                     volume = (S * (_deg / _pin).unsqueeze(1)).sum(0)
                     if getattr(self, '_modu_volume_ema', None) is None:
@@ -3427,6 +3461,8 @@ class SCProtoTrainer(AdoptiveTrainer):
                             'cohesion_aff': ('lambda_cohesion_aff',
                                              'cohesion_aff_loss'),
                             'nassoc': ('lambda_nassoc', 'nassoc_loss'),
+                            'modularity': ('lambda_modularity',
+                                           'modularity_loss'),
                         }
                         _row = {'step': int(self._gprobe_step)}
                         for _nm, (_ln, _tn) in _term_map.items():
@@ -3696,6 +3732,22 @@ class SCProtoTrainer(AdoptiveTrainer):
                 f.write(json.dumps(row) + chr(10))
         except Exception as e:                       # never break training
             print(f"   [epoch_trace] skipped: {type(e).__name__}: {e}")
+
+        # [D49] epoch_dump_assign: also dump this epoch's HARD assignments
+        # (argmax over all training cells -- one forward pass, a few seconds,
+        # a few KB). A LOCAL monitor with the graph + obs already cached can
+        # then compute cohesion / modularity / purity / batch entropy per
+        # epoch, live, at zero extra GPU cost -- per-epoch scoreboard metrics
+        # without putting any scoring code in the training container.
+        if int(getattr(self, 'epoch_dump_assign', 0) or 0):
+            try:
+                import numpy as _np
+                _lab, _ = self._get_assignments()
+                _np.savez(os.path.join(self.get_dump_path(),
+                                       f'epoch_assign_{int(epoch)}.npz'),
+                          labels=_np.asarray(_lab))
+            except Exception as e:                   # never break training
+                print(f"   [epoch_assign] skipped: {type(e).__name__}: {e}")
 
     def _print_umap_epoch(self, epoch, total_epochs, metrics):
         """Print one line of UMAP training progress."""

@@ -165,6 +165,8 @@ ABBREVIATIONS = {
     'coh_diag_every': 'cdev',         # [D26] diagnostic cadence
     'grad_probe': 'gprb',             # [D45] per-term gradient-norm probe cadence (numeric)
     'umap_proto_sg': 'upsg',          # [D48] umap loss sees detached prototypes (encoder-only gradient)
+    'epoch_dump_assign': 'edas',      # [D49] per-epoch hard-assignment dump for live local monitoring
+    'modularity_diag': 'mdia',        # [D51] self-pair weight in the modularity reward (numeric)
     'cohesion_global': 'cglb',        # [D28] full-graph scale estimate
     'coh_mem_hlife': 'cmhl',          # [D31] age half-life of the [D29] assignment memory (numeric, no truncation risk)
     'coh_mem_init': 'cmini',          # [D32] memory init: 'unif' (default) or 'full' (one inference pass)

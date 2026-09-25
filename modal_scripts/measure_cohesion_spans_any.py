@@ -63,6 +63,10 @@ DATASETS = {
         "_ncomp50_kneighbors50_arbf.pkl",
         "node_heldout_data/lung_arbf_nodeheldout20_seed0_train.h5ad",
         "batch", "cell_type", None, 300),
+    "crcx-bk05": (
+        "graphs/affinity_crcx50130_ncomp50_kneighbors50_bk05.pkl",
+        "spatial/crc_xenium/crc_xenium_prepped.h5ad", "patient_id",
+        "celltype", "Niche", 670),
     "pbmc-immune-nh": (
         "graphs/affinity_pbmc-immune_arbf_nodeheldout20_seed0_train26806"
         "_ncomp50_kneighbors50_arbf.pkl",

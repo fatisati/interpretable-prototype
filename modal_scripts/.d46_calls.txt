@@ -3,3 +3,4 @@ gmB_gradmeasure_fixed	fc-01M3ABDEE9AKH64Z9N01FKRHWV
 cohO_nh_cohesion_only	fc-01M3ACBK5W3ACJA2HARHTBFW6T
 calU_nh_calibrated_umap006	fc-01M3ACBKHYH75QF5EQHZKT684P
 decA_umap_encoder_only	fc-01M3BR56VTBRCSDZAMXRBR6VH8
+decB_umap042_encoder_only	fc-01M3BR950NKF9DH59EFMPVMM9H

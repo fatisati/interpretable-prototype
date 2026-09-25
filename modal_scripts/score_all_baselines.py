@@ -81,6 +81,11 @@ BASELINES = [
     # cells only, Leiden on the train latent, held-out cells placed by frozen
     # encoder + 15-NN majority (leiden_st1_nodeheldout.py). The fair NH control.
     ("Leiden + scPoli-St1 NH",   r"^leiden_st1_nh_K\d+$"),
+    # [D48] routed community + cohesion, the best scProto NH arm so far
+    ("scProto NH (routed)",      r"^d46nh_decB$"),
+    # lung / pbmc-immune NH runs of the fixed loss (suffix _A / _B rerun)
+    ("scProto NH (routed)",      r"^d46nh_A$"),
+    ("scProto NH (routed)",      r"^d46nh_B$"),
 ]
 
 

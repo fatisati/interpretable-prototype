@@ -49,8 +49,13 @@ volume = modal.Volume.from_name("scproto-data")
 TAG = "arbf_nodeheldout20_seed0"
 
 
+DS_KEYS = {"pancreas": ("tech", "celltype", 220),
+           "lung": ("batch", "cell_type", 300),
+           "pbmc-immune": ("study", "final_annotation", 300)}
+
+
 @app.function(image=image, gpu="T4", timeout=7200, volumes={"/vol": volume})
-def run():
+def run(ds: str = "pancreas"):
     import os
     import sys
     import time
@@ -84,9 +89,10 @@ def run():
         get_preprocessed_adata, build_latent_affinity, leiden_resolution_search)
 
     t0 = time.time()
-    train_h5 = f"/vol/data/node_heldout/pancreas_{TAG}_train.h5ad"
-    ds_id = _resolve_ds_id(train_h5, batch_key="tech", label_key="celltype",
-                           niche_key=None, num_prototypes=220)
+    bkey, lkey, K = DS_KEYS[ds]
+    train_h5 = f"/vol/data/node_heldout/{ds}_{TAG}_train.h5ad"
+    ds_id = _resolve_ds_id(train_h5, batch_key=bkey, label_key=lkey,
+                           niche_key=None, num_prototypes=K)
     t = get_trainer(experiment_name="stage1_nh_extract", cvae_epochs=50,
                     dataset_id=ds_id, l2norm=1, assignment_metric="dotp",
                     batch_size=1024, affinity_type="arbf")
@@ -96,8 +102,8 @@ def run():
         z_tr = t.encode_adata(ad_tr, t.model, z_idx=1).cpu().numpy()
     print(f"[st1-nh] encoded {len(ad_tr)} train cells ({time.time()-t0:.0f}s)")
 
-    ad_full = get_preprocessed_adata("pancreas")
-    d = np.load(f"/vol/data/node_heldout/pancreas_{TAG}_split.npz",
+    ad_full = get_preprocessed_adata(ds)
+    d = np.load(f"/vol/data/node_heldout/{ds}_{TAG}_split.npz",
                 allow_pickle=True)
     test_ids = [str(x) for x in d["test_ids"]]
     ad_test = ad_full[ad_full.obs_names.get_indexer(test_ids)].copy()
@@ -112,7 +118,7 @@ def run():
     # baseline (build_latent_affinity + leiden_resolution_search).
     ad_tr.obsm["X_st1nh"] = z_tr
     aff = build_latent_affinity(ad_tr, "X_st1nh")
-    lab_tr, _, nk = leiden_resolution_search(aff, 220)
+    lab_tr, _, nk = leiden_resolution_search(aff, K)
     print(f"[st1-nh] leiden on train latent: K={nk} ({time.time()-t0:.0f}s)")
 
     # Place held-out cells: 15-NN cosine majority among train cells.
@@ -130,7 +136,7 @@ def run():
     test_mask = np.zeros(len(ad_full), bool)
     test_mask[ad_full.obs_names.get_indexer(test_ids)] = True
 
-    out_dir = "/vol/models/pancreas/leiden_st1_nh_K220"
+    out_dir = f"/vol/models/{ds}/leiden_st1_nh_K{K}"
     os.makedirs(out_dir, exist_ok=True)
     np.savez(os.path.join(out_dir, "clusters.npz"),
              labels=labels, test_mask=test_mask)
@@ -141,5 +147,5 @@ def run():
 
 
 @app.local_entrypoint()
-def main():
-    print(run.remote())
+def main(ds: str = "pancreas"):
+    print(run.remote(ds))

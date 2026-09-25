@@ -64,12 +64,19 @@ DATASETS = {
                     "final_annotation", 300),
 }
 
-ZERO_TERMS = ("lambda_nassoc", "lambda_modularity", "lambda_proto_usage",
+ZERO_TERMS = ("lambda_nassoc", "lambda_proto_usage",
               "lambda_swav", "lambda_kl")
+# [D50] lambda_modularity is no longer in ZERO_TERMS: the blended arm adds the
+# [D11]/[D12] soft-modularity term ON THE PROTOTYPE SIDE (boundary/valley
+# pressure cohesion lacks), with modularity_agg='pbch' (per-bio-batch judging;
+# the global version collapses batch entropy, measured 0.247) and a DERIVED
+# resolution: median per-batch Leiden bisection to K on the actual graph
+# (18.62 on the pancreas nh train graph; NOT portable).
 
 
 def build_config(lam_gram, lam_aff, lam_recon=0.0, lam_proto_recon=0.0,
-                 lam_umap=0.0, grad_probe=0, umap_proto_sg=0):
+                 lam_umap=0.0, grad_probe=0, umap_proto_sg=0,
+                 lam_mod=0.0, mod_res=0.0, mod_diag=0.0):
     """THE loss config (CLAUDE.md 9d cohesion base), with the [D44]/[D45]
     parameterized terms. ONE definition used by run() AND probe()."""
     from interpretable_ssl.experiments.tasks import LAMBDA_PROTO_UMAP_PRECON
@@ -77,7 +84,11 @@ def build_config(lam_gram, lam_aff, lam_recon=0.0, lam_proto_recon=0.0,
         "lambda_umap": lam_umap,
         "lambda_proto_recon": lam_proto_recon,
         "lambda_nassoc": 0.0,
-        "lambda_modularity": 0.0,
+        # [D50] soft modularity (DMoN), per-bio-batch, derived resolution
+        "lambda_modularity": lam_mod,
+        **({"modularity_agg": "pbch", "modularity_res_pbch": mod_res,
+            "modularity_diag": mod_diag}
+           if lam_mod > 0 else {}),
         "lambda_proto_usage": 0.0,
         "lambda_swav": 0.0,
         "lambda_kl": 0.0,
@@ -104,12 +115,20 @@ def build_config(lam_gram, lam_aff, lam_recon=0.0, lam_proto_recon=0.0,
 def validate(lc, lam_gram, lam_aff, span_aff, span_gram):
     for k in ZERO_TERMS:
         assert float(lc[k]) == 0.0, f"{k} must be 0, got {lc[k]}"
-    assert lc["lambda_cohesion"] > 0 and lc["lambda_cohesion_aff"] > 0
+    # [D51] modularity-ONLY probe arms (cohesion zero) are allowed: they test
+    # whether the modularity term alone sheds prototypes. Cohesion asserts and
+    # the authority check apply only when cohesion is the/an objective.
+    _mod_only = (lc["lambda_modularity"] > 0
+                 and lam_gram == 0.0 and lam_aff == 0.0)
+    if not _mod_only:
+        assert lc["lambda_cohesion"] > 0 and lc["lambda_cohesion_aff"] > 0
+        auth = lam_gram * span_gram + lam_aff * span_aff
+        assert abs(auth - AUTHORITY) < 0.03, f"authority drifted: {auth}"
+    else:
+        auth = 0.0
     assert lc["cohesion_self"] == 1.0 and lc["cohesion_diag"] == 1.0
     assert lc["cohesion_global"] == 2 and lc["coh_mem_init"] == "full"
     assert lc["latent_dims"] == 8
-    auth = lam_gram * span_gram + lam_aff * span_aff
-    assert abs(auth - AUTHORITY) < 0.03, f"authority drifted: {auth}"
     return {
         "config_tag": CONFIG_TAG, "protocol": "node-holdout", "tag": TAG,
         "authority": round(auth, 4),
@@ -121,6 +140,9 @@ def validate(lc, lam_gram, lam_aff, span_aff, span_gram):
         "lambda_proto_recon": lc["lambda_proto_recon"],
         "grad_probe": lc["grad_probe"],
         "umap_proto_sg": lc["umap_proto_sg"],
+        "lambda_modularity": lc["lambda_modularity"],
+        "modularity_res_pbch": lc.get("modularity_res_pbch", 0.0),
+        "modularity_diag": lc.get("modularity_diag", 0.0),
         "cohesion_self": lc["cohesion_self"],
         "latent_dims": lc["latent_dims"],
     }
@@ -160,11 +182,13 @@ def _env():
 @app.function(image=image, timeout=900, volumes={"/vol": volume})
 def probe(lam_gram: float, lam_aff: float, span_aff: float, span_gram: float,
           lam_recon: float = 0.0, lam_proto_recon: float = 0.0,
-          lam_umap: float = 0.0, grad_probe: int = 0, umap_proto_sg: int = 0):
+          lam_umap: float = 0.0, grad_probe: int = 0, umap_proto_sg: int = 0,
+          lam_mod: float = 0.0, mod_res: float = 0.0, mod_diag: float = 0.0):
     """Validated config the DEPLOYED code builds. Run after EVERY deploy."""
     _env()
     return validate(build_config(lam_gram, lam_aff, lam_recon, lam_proto_recon,
-                                 lam_umap, grad_probe, umap_proto_sg),
+                                 lam_umap, grad_probe, umap_proto_sg,
+                                 lam_mod, mod_res, mod_diag),
                     lam_gram, lam_aff, span_aff, span_gram)
 
 
@@ -172,7 +196,8 @@ def probe(lam_gram: float, lam_aff: float, span_aff: float, span_gram: float,
 def run(ds: str, lam_gram: float, lam_aff: float,
         span_aff: float, span_gram: float, epochs: int = 10,
         suffix: str = "", lam_recon: float = 0.0, lam_proto_recon: float = 0.0,
-        lam_umap: float = 0.0, grad_probe: int = 0, umap_proto_sg: int = 0):
+        lam_umap: float = 0.0, grad_probe: int = 0, umap_proto_sg: int = 0,
+        lam_mod: float = 0.0, mod_res: float = 0.0, mod_diag: float = 0.0):
     import os
     _env()
 
@@ -190,7 +215,8 @@ def run(ds: str, lam_gram: float, lam_aff: float,
 
     name = f"{CONFIG_TAG}{suffix}_{ds}"
     lc = build_config(lam_gram, lam_aff, lam_recon, lam_proto_recon,
-                      lam_umap, grad_probe, umap_proto_sg)
+                      lam_umap, grad_probe, umap_proto_sg, lam_mod, mod_res,
+                      mod_diag)
     checked = validate(lc, lam_gram, lam_aff, span_aff, span_gram)
     print(f"   [CONFIG VERIFIED IN-RUN] {checked}")
 
