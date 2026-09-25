@@ -95,6 +95,97 @@ def batch_drift(S_mem, S_live_det, batch_idx, last_seen, step):
     return drift, age
 
 
+def bio_batch_degrees(A, bcode, n_bio):
+    """[D47] Per-bio-batch filtered-subgraph degrees, precomputed once.
+
+    Batch b's graph keeps every edge with AT LEAST ONE endpoint in b (both
+    stored directions) -- the same edge rule as [D41]'s V[b] and as
+    metacell_scoreboard.modularity_per_batch, so the training term and the
+    eval metric agree on what "batch b's graph" means.
+
+        deg_b[b][j] = full degree of j            if bio(j) == b
+                      weight of j's edges into b  otherwise
+        twom[b]     = sum over j of deg_b[b][j]   (total degree of b's graph)
+
+    With n_bio == 1 this is the plain global degree vector and twom = 2m, so
+    the single-batch path is bit-identical to the batch-agnostic formula.
+
+    Args:
+        A:     scipy.sparse CSR, symmetric, zero diagonal (the [D26] _coh_A).
+        bcode: (N,) int64 bio-batch code per cell.
+        n_bio: int number of bio batches.
+
+    Returns:
+        (deg_b, twom): float32 ndarray (n_bio, N) and float64 ndarray (n_bio,).
+    """
+    import numpy as np
+    import scipy.sparse as sp
+    N = A.shape[0]
+    full_deg = np.asarray(A.sum(axis=1)).ravel().astype(np.float32)
+    onehot = sp.csr_matrix((np.ones(N, np.float32), (np.arange(N), bcode)),
+                           shape=(N, n_bio))
+    into_b = np.asarray((A @ onehot).todense()).astype(np.float32)  # (N, n_bio)
+    deg_b = into_b.T.copy()                                         # (n_bio, N)
+    for b in range(n_bio):
+        sel = bcode == b
+        deg_b[b, sel] = full_deg[sel]
+    twom = deg_b.sum(axis=1).astype(np.float64)
+    return deg_b, twom
+
+
+def memory_modularity(GS_raw, S_live, S_eff, deg_b, twom, bcode_cells,
+                      cell_idx, n_all):
+    """[D47] Age-weighted soft modularity from the [D29]/[D31] memory.
+
+    Per minibatch cell c, against its OWN bio batch's filtered subgraph
+    (b = bcode_cells[c]; c is in b, so every edge of c is in that graph and
+    GS_raw's full-affinity row is already the right reward):
+
+        reward(c,p)   = sum over ALL j of  w[c,j] * S_eff[j,p]     (= GS_raw)
+        vol_eff[b,p]  = sum over ALL j of  deg_b[b,j] * S_eff[j,p]
+        luck(c,p)     = deg_b[b,c] * vol_eff[b,p] / twom[b]
+        q(c)          = sum over p of  S_live[c,p] * (reward - luck) / twom[b]
+
+    Returns  n_all * mean over minibatch cells of q(c)  -- a minibatch
+    estimate of the all-cells total sum_c q(c). In the full-batch / fresh /
+    hard / single-bio-batch limit that total IS Newman's Q exactly
+    (tests/test_memory_modularity.py), so the value lives on the familiar
+    modularity scale (trivial partition 0, max 1, min -0.5).
+
+    Age handling: S_eff already carries w_age[j] on the MEMBERSHIP (the
+    claim), so reward and luck are discounted together; deg_b and twom are
+    graph EVIDENCE and are never age-weighted. That both-sides placement is
+    what keeps the trivial/uniform anchors at exactly 0 for any age vector
+    (CLAUDE.md 9b, modularity flavour). Unlike cohesion there is NO
+    per-prototype size division -- modularity is a luck-corrected TOTAL, and
+    dividing by membership mass would flatten the size^2 merge penalty and
+    turn this into a second cohesion.
+
+    Args:
+        GS_raw:      (n_batch, K) spmm(A[batch rows], S_eff), raw affinity,
+                     zero diagonal -- scproto's _GS_aff_raw under
+                     cohesion_global=2. No cohesion_diag added: w[c,c]=0 is
+                     the Newman convention (the self-pair enters only through
+                     vol_eff, matching igraph's d_c^2 term).
+        S_live:      (n_batch, K) live gradient-carrying batch assignments.
+        S_eff:       (N, K) from assemble_membership (age weights included).
+        deg_b:       (n_bio, N) torch tensor from bio_batch_degrees.
+        twom:        (n_bio,) torch tensor from bio_batch_degrees.
+        bcode_cells: (n_batch,) long, bio batch of each minibatch cell.
+        cell_idx:    (n_batch,) long, global index of each minibatch cell.
+        n_all:       int, N.
+
+    Returns:
+        scalar tensor (keeps gradient through S_live and S_eff's live rows).
+    """
+    vol = deg_b @ S_eff                                    # (n_bio, K)
+    twom_c = twom[bcode_cells].clamp(min=1e-8)             # (n_batch,)
+    deg_c = deg_b[bcode_cells, cell_idx]                   # (n_batch,)
+    luck = deg_c.unsqueeze(1) * vol[bcode_cells] / twom_c.unsqueeze(1)
+    q = (S_live * (GS_raw - luck)).sum(dim=1) / twom_c     # (n_batch,)
+    return float(n_all) * q.mean()
+
+
 def batch_sizes(S_eff, batch_code, n_bio):
     """[D41] Per-bio-batch prototype size, for multi-batch cohesion.
 

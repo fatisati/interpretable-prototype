@@ -1335,6 +1335,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         lambda_cohesion_aff = float(getattr(self, 'lambda_cohesion_aff', 0.0))  # [D26]
         cohesion_global = int(getattr(self, 'cohesion_global', 0))       # [D28]
         coh_mem_hlife = float(getattr(self, 'coh_mem_hlife', 0.0) or 0.0)  # [D31]
+        lambda_mod_mem = float(getattr(self, 'lambda_mod_mem', 0.0))       # [D47]
         modularity_res = float(getattr(self, 'modularity_res', 1.0))
         modularity_agg = str(getattr(self, 'modularity_agg', 'glob'))
         modularity_res_pbch = float(getattr(self, 'modularity_res_pbch', 0.0) or 0.0)
@@ -1413,6 +1414,7 @@ class SCProtoTrainer(AdoptiveTrainer):
             'coh_redund_max': 0,         #       in the cohesion section for definitions
             'modularity_diag': 0,        # [D26] modularity VALUE at zero weight
             'modularity_term': 0,
+            'mod_mem_term': 0,           # [D47] memory-based soft modularity value
             'coh_mem_drift': 0,          # [D31] mean L1 move of a batch cell's assignment
             'coh_mem_age': 0,            #       since its last visit, + that age in steps
             'sim_recon_pred_std': 0, 'sim_recon_target_std': 0,
@@ -1537,9 +1539,29 @@ class SCProtoTrainer(AdoptiveTrainer):
                         else:
                             _batch_nk_accum[_b_int] = _nk_b
 
-                s_head = soft_assign[_gather(head)]
-                s_tail = soft_assign[_gather(tail)]
-                s_neg = soft_assign[_gather(neg_samples.flatten())].view(B, neg_K, -1)
+                # [D48] umap_proto_sg: the community/UMAP loss reads assignments
+                # computed against DETACHED prototypes, so its gradient reaches
+                # the ENCODER only; cohesion (which uses the live soft_assign,
+                # _Sc at 2621) remains the sole owner of the prototypes.
+                # Motive: the pairwise community term is what forces the encoder
+                # to learn feature-consistent, GENERALIZING graph geometry
+                # (rebuttal node-holdout modularity 0.599 under the old
+                # community-heavy objective vs 0.127 for cohesion-only), but at
+                # full strength its negative-sampling repulsion owned 89% of the
+                # prototype gradient and killed prototypes (umU/umUP, 14-16
+                # dead). Splitting the routes gives each subsystem its right
+                # teacher. The stop-grad branch mirrors the PLAIN softmax path;
+                # usage-mode logit corrections are not replicated here (they
+                # only matter when proto_usage machinery is active).
+                if getattr(self, 'umap_proto_sg', 0):
+                    _sa_umap = F.softmax(
+                        F.linear(z_unique, self.model.get_prototypes().detach())
+                        / self.epsilon, dim=1)
+                else:
+                    _sa_umap = soft_assign
+                s_head = _sa_umap[_gather(head)]
+                s_tail = _sa_umap[_gather(tail)]
+                s_neg = _sa_umap[_gather(neg_samples.flatten())].view(B, neg_K, -1)
                 _eps = 1e-4
 
                 usage_mode = getattr(self, 'usage_norm_sim', 0)
@@ -2408,7 +2430,15 @@ class SCProtoTrainer(AdoptiveTrainer):
             # possible. It is asserted below on the first step rather than assumed.
             cohesion_loss = torch.tensor(0.0, device=self.device)
             cohesion_aff_loss = torch.tensor(0.0, device=self.device)
-            if (lambda_cohesion > 0 or lambda_cohesion_aff > 0) and use_proto_sim:
+            if (lambda_cohesion > 0 or lambda_cohesion_aff > 0
+                    or lambda_mod_mem > 0) and use_proto_sim:
+                # [D47] the memory-modularity term rides on the [D29] memory and the
+                # raw-affinity spmm this block maintains; it has no standalone path.
+                if lambda_mod_mem > 0:
+                    assert cohesion_global == 2, (
+                        "[D47] lambda_mod_mem needs cohesion_global=2: reward and "
+                        "volume are exact full-graph sums over the [D29] membership "
+                        "memory; without it there is nothing to sum over.")
                 if not hasattr(self, '_coh_A'):
                     import scipy.sparse as _csp
                     # [D26] EXPLICIT copy. csr_matrix(X) on an already-CSR X does NOT
@@ -2511,6 +2541,30 @@ class SCProtoTrainer(AdoptiveTrainer):
                     # divide row c by ||row c|| while leaving column j alone, giving an
                     # ASYMMETRIC matrix that is not a similarity at all.
                     self._coh_A_aff = _csp.csr_matrix(_cA)
+
+                    # === [D47] memory-modularity precompute: per-bio-batch degrees.
+                    # Same edge rule as V[b] above ("at least one endpoint in b") and
+                    # as modularity_per_batch, so train and eval agree on the graph.
+                    # deg/2m are EVIDENCE: computed once from the affinity, never
+                    # age-weighted (age lives on the membership via S_eff only).
+                    if lambda_mod_mem > 0:
+                        from interpretable_ssl.cohesion_memory import bio_batch_degrees
+                        if self._coh_multi:
+                            _mm_bcode_np, _mm_nbio = _bcode, _nb_bio
+                        else:
+                            _mm_bcode_np = np.zeros(_cA.shape[0], np.int64)
+                            _mm_nbio = 1
+                        _mm_deg, _mm_2m = bio_batch_degrees(_cA, _mm_bcode_np,
+                                                            _mm_nbio)
+                        self._modmem_deg_b = torch.as_tensor(
+                            _mm_deg, device=self.device)
+                        self._modmem_2m = torch.as_tensor(
+                            _mm_2m.astype(np.float32), device=self.device)
+                        self._modmem_bcode = torch.as_tensor(
+                            _mm_bcode_np, dtype=torch.long, device=self.device)
+                        print(f"   [D47] memory-modularity: {_mm_nbio} bio-batch "
+                              f"graph(s), 2m_b = "
+                              f"{np.array2string(_mm_2m, precision=0)}")
 
                     # --- descriptor matrix for the 'gram' term ----------------------
                     # [D26] cohesion_diag is the CLOSED-neighbourhood self-affinity and
@@ -3050,6 +3104,38 @@ class SCProtoTrainer(AdoptiveTrainer):
                               f"cohesion_aff(TRUE full-graph)={_true_coh_aff:.6f}  "
                               f"grad_norm(wrt soft_assign)={_gn:.6e}"
                               + ("  <<< GRAPH DISCONNECTED" if _grad is None else ""))
+
+                # === [D47] MEMORY-BASED SOFT MODULARITY =========================
+                # The luck-corrected companion to cohesion, sharing its whole shell:
+                # same [D29]/[D31] memory (S_eff, age weights on the MEMBERSHIP),
+                # same ass[c][p] weighting, same mean over minibatch cells, same
+                # per-bio-batch graphs. The core differs and must: cohesion is a
+                # per-member MEAN (within/size), modularity is a luck-corrected
+                # TOTAL (reward - deg*vol/2m, one global /2m_b) -- no size division,
+                # or it degenerates into a second cohesion (see cohesion_memory.py).
+                # Unlike the [D11] DMoN branch there is no volume EMA, no p_in
+                # correction and no edge rescaling: the memory makes reward and
+                # volume exact full-graph sums, so nothing is subsampled away.
+                if lambda_mod_mem > 0:
+                    from interpretable_ssl.cohesion_memory import memory_modularity
+                    _mm_cells = unique_idx.to(self.device)
+                    mod_mem = memory_modularity(
+                        _GS_aff_raw, _Sc, _S_eff,
+                        self._modmem_deg_b, self._modmem_2m,
+                        self._modmem_bcode[_mm_cells], _mm_cells, _Nall)
+                    loss = loss + lambda_mod_mem * (-mod_mem)
+                    total_metrics['mod_mem_term'] += mod_mem.item()
+                    if not getattr(self, '_modmem_printed', False):
+                        # [9b] first-run scale check: the value must sit in
+                        # [-0.5, 1] (Newman range); outside it the term is wrong,
+                        # not the graph.
+                        self._modmem_printed = True
+                        _mmv = mod_mem.item()
+                        print(f"   [D47] mod_mem first value = {_mmv:.4f} "
+                              f"(valid range [-0.5, 1])"
+                              + ("   <<< OUT OF RANGE -- 9b check FAILED"
+                                 if not (-0.5 - 1e-6 <= _mmv <= 1.0 + 1e-6)
+                                 else ""))
 
                 # === [D26] ZERO-WEIGHT DIAGNOSTICS ==============================
                 # Cohesion has NO between-prototype term: nothing stops two prototypes

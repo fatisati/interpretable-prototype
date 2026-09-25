@@ -164,11 +164,13 @@ ABBREVIATIONS = {
     'cohesion_row_norm': 'crn',
     'coh_diag_every': 'cdev',         # [D26] diagnostic cadence
     'grad_probe': 'gprb',             # [D45] per-term gradient-norm probe cadence (numeric)
+    'umap_proto_sg': 'upsg',          # [D48] umap loss sees detached prototypes (encoder-only gradient)
     'cohesion_global': 'cglb',        # [D28] full-graph scale estimate
     'coh_mem_hlife': 'cmhl',          # [D31] age half-life of the [D29] assignment memory (numeric, no truncation risk)
     'coh_mem_init': 'cmini',          # [D32] memory init: 'unif' (default) or 'full' (one inference pass)
     'cohesion_diag': 'cdia',          # [D26] closed-neighbourhood self-affinity for the gram descriptor
     'lambda_cohesion_aff': 'lcha',    # [D26] weight of the second (1-hop) cohesion term
+    'lambda_mod_mem': 'lmodm',        # [D47] memory-based soft modularity (numeric, no truncation risk)
     'lambda_sim_recon': 'lsr',
     'sim_recon_hidden_dim': 'srhd',
     'sim_recon_target': 'srt',

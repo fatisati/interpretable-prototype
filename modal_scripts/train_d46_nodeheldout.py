@@ -69,7 +69,7 @@ ZERO_TERMS = ("lambda_nassoc", "lambda_modularity", "lambda_proto_usage",
 
 
 def build_config(lam_gram, lam_aff, lam_recon=0.0, lam_proto_recon=0.0,
-                 lam_umap=0.0, grad_probe=0):
+                 lam_umap=0.0, grad_probe=0, umap_proto_sg=0):
     """THE loss config (CLAUDE.md 9d cohesion base), with the [D44]/[D45]
     parameterized terms. ONE definition used by run() AND probe()."""
     from interpretable_ssl.experiments.tasks import LAMBDA_PROTO_UMAP_PRECON
@@ -94,6 +94,9 @@ def build_config(lam_gram, lam_aff, lam_recon=0.0, lam_proto_recon=0.0,
         "coh_mem_init": "full",
         "coh_mem_hlife": 500.0,
         "grad_probe": grad_probe,      # [D45] gradient-norm probe cadence
+        # [D48] 1 = community/UMAP gradient reaches the ENCODER only (detached
+        # prototypes in its similarity); cohesion is sole owner of prototypes.
+        "umap_proto_sg": umap_proto_sg,
         "latent_dims": 8,
     }
 
@@ -117,6 +120,7 @@ def validate(lc, lam_gram, lam_aff, span_aff, span_gram):
         "lambda_recon": lc["lambda_recon"],
         "lambda_proto_recon": lc["lambda_proto_recon"],
         "grad_probe": lc["grad_probe"],
+        "umap_proto_sg": lc["umap_proto_sg"],
         "cohesion_self": lc["cohesion_self"],
         "latent_dims": lc["latent_dims"],
     }
@@ -156,11 +160,11 @@ def _env():
 @app.function(image=image, timeout=900, volumes={"/vol": volume})
 def probe(lam_gram: float, lam_aff: float, span_aff: float, span_gram: float,
           lam_recon: float = 0.0, lam_proto_recon: float = 0.0,
-          lam_umap: float = 0.0, grad_probe: int = 0):
+          lam_umap: float = 0.0, grad_probe: int = 0, umap_proto_sg: int = 0):
     """Validated config the DEPLOYED code builds. Run after EVERY deploy."""
     _env()
     return validate(build_config(lam_gram, lam_aff, lam_recon, lam_proto_recon,
-                                 lam_umap, grad_probe),
+                                 lam_umap, grad_probe, umap_proto_sg),
                     lam_gram, lam_aff, span_aff, span_gram)
 
 
@@ -168,7 +172,7 @@ def probe(lam_gram: float, lam_aff: float, span_aff: float, span_gram: float,
 def run(ds: str, lam_gram: float, lam_aff: float,
         span_aff: float, span_gram: float, epochs: int = 10,
         suffix: str = "", lam_recon: float = 0.0, lam_proto_recon: float = 0.0,
-        lam_umap: float = 0.0, grad_probe: int = 0):
+        lam_umap: float = 0.0, grad_probe: int = 0, umap_proto_sg: int = 0):
     import os
     _env()
 
@@ -186,7 +190,7 @@ def run(ds: str, lam_gram: float, lam_aff: float,
 
     name = f"{CONFIG_TAG}{suffix}_{ds}"
     lc = build_config(lam_gram, lam_aff, lam_recon, lam_proto_recon,
-                      lam_umap, grad_probe)
+                      lam_umap, grad_probe, umap_proto_sg)
     checked = validate(lc, lam_gram, lam_aff, span_aff, span_gram)
     print(f"   [CONFIG VERIFIED IN-RUN] {checked}")
 
