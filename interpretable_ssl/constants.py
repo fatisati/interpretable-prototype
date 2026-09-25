@@ -163,6 +163,7 @@ ABBREVIATIONS = {
     'cohesion_self': 'cslf',
     'cohesion_row_norm': 'crn',
     'coh_diag_every': 'cdev',         # [D26] diagnostic cadence
+    'grad_probe': 'gprb',             # [D45] per-term gradient-norm probe cadence (numeric)
     'cohesion_global': 'cglb',        # [D28] full-graph scale estimate
     'coh_mem_hlife': 'cmhl',          # [D31] age half-life of the [D29] assignment memory (numeric, no truncation risk)
     'coh_mem_init': 'cmini',          # [D32] memory init: 'unif' (default) or 'full' (one inference pass)

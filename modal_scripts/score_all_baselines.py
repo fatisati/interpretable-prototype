@@ -72,6 +72,15 @@ BASELINES = [
     ("SEACells + BBKNN d8",      r"^seacell_X_bbknn_d8$"),
     # scProto: the NEW cohesion runs carry an explicit experiment name
     ("scProto (cohesion)",       r"^d42cohonly_"),
+    # [D46] node-holdout-trained runs (leak-free on the node-holdout protocol:
+    # trained on the 80% train-cell graph; held-out cells placed by a frozen
+    # encoder pass). Their clusters.npz covers ALL cells.
+    ("scProto NH (cohesion)",    r"^d46nh_cohO$"),
+    ("scProto NH (coh+comm)",    r"^d46nh_calU$"),
+    # Leak-free Leiden+scPoli-St1: stage-1 encoder trained on the 80% train
+    # cells only, Leiden on the train latent, held-out cells placed by frozen
+    # encoder + 15-NN majority (leiden_st1_nodeheldout.py). The fair NH control.
+    ("Leiden + scPoli-St1 NH",   r"^leiden_st1_nh_K\d+$"),
 ]
 
 

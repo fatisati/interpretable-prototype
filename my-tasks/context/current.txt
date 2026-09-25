@@ -1,86 +1,102 @@
-[nassoc diagonal]
-within / vol
-the proportaion of edges inside a com
-if we merge 2 community - the one being merged of course improve - while the other the vol would get very small - and i think also the within
-so both numerator and devidor get low? and as ass get lower in both i think it shoud not have specific effect
+ok here i want to decide for each section of the results
+concept
+metric, source of variance fr each metric
+baslines
+datasets
 
-[off diag]
-between / min(vol)
-the ratio of sharing edges - for small volumes - we dont let share
-if we merge 2 community - the volume of one gets lower = although the numerator gets lower too 
-but i think the change on the devidor is more - thus the score gets higher
+========section 1===========
+[scproto can preserve simialrities defined in latent space better, while also mix batches and remove batch effect]
 
 
-[modularity]
-join k if your aff > di*dj/2m 
-fraction of your affinity into k > fraction of k affinity of the whole graph
-affinity(i -> k) / d_i   >   D_k / 2m [D_k is the community's total degree (our volume).]
-join k if a larger share of your edges points into k than k's share of the graph
+[metrics]: 
+mean cohesion [of test nodes / if we dont have it yet - use train fine] - std over cells
+modularity on test nodes - std over batches [consider if we have a set of nodes - the graph would be all edges where at least one of our nodes is a part of it]
+batch entropy, ct purity [report both mean over all metacells [+std ove the mc], weighted mean by mc sizes [and proper std]]
 
-[cpm]
-join k  iff  mean over members j of w_ij  >  gamma
+[baselines]
+scproto, seacell, supercell, metacell, umap, metaQ, sure
+scpoli / scvi / harmoney [matched dim] / bknn / combat + archetypal/leiden/kmeans
 
-[cohesion]
-join k  iff  your mean similarity to k's members  >  cohesion[k]
-join k  iff  your mean similarity to k's members    >  k's internal average
+[datasets]: pancreas, lung, immune
 
-profile_p = (1-alpha) * profile_p + alpha * [sum over all cell i (ass[i][p] * affinity_row[i]) / sum(ass[i][p])] # shoud be detached
+[notes]
+for fair comparison - scproto shoudl be compared to same pretreind vae [for exmaple scpoli default + scproto part]
+because the latent idm effect - the recon loss mse vs guass / nb matter - if we change one scproto may loose [scproto pretrain can be either scpoli / scvi]
+we can sho wthta scproto part would improve whtever it was before
+for harmoney / bknn / combat - we need same number of dim - if theri defualt is 50 we shoud compare with scproto 50 - or if we want to compare with scproto 8 dim - we shoud run them on 8 dim
 
-size_p = (1-alpha) * size_p + alpha*[sum over all cells i ass[i][p]]
+[later notes]
+early stopping
+to choose test / val node set - choose a set from each bio batch
 
-then to calc mean sim to k s members
+======section 2======
+[scproto can preserve rare cell types better]
 
-for cell c, proto p
-for cells in batch:
-    sum_sim = ass[c][p] * ass[i][p] * sim[c,i]
-
-sum_sim += size_p * sim_p[i] # if aff would be profile_p[i], if gram would be cosine(profile_p, aff_row[i])
-
-
-sum_sim / [sum(ass[i][p]) + size_p]
-
-
-[metrics / baslines]
-this is also very important part 
-
-sum = 0 
-for each cell c in batch:
-    for ech proto p:
-        for each cell j in the c bio batch graph graph:
-            sum_p = ass[j][p] * w[j] * sim[c][j]
-        sum_p /= for all cells in c bio batch graph sum(ass[j][p] * w[j])
-        sum += sum_p * ass[c][p]
-and consider c bio batch graph is all edges were at least one nodes bio batch is same as c bio batch
+coverage [std over batches] - homogeneity [std over cells]
+same baslines and datasets as above
 
 
----for arbf on pca aff---
-we want to say we do preserve good withi batch communities [the reported metric should be what we do optmize - but on test set - i think here we would use coheison maybe]
-but also combine batches [batch entropy]
-and maybe a bio proof: [ct_purity]
-and why usefull? for rare ct: we say thats where why model works better
-so we will show [rare homogeneity - rare f1 - coverage]
 
---for spatial--
-we shoud check the graph criteria [cohesion]
-we do care to recover correct states [niche - ct]
-so joint purity matter, n covered states matters, mean dge [i think mean spearman wsa it]
-so we know we are grouping correct cells together
-[cohesion, n_dead_proto, joitn_purity, n_covered staes, mean dge [pearson]] 
-we shoud be better / comparable to seacell on these
+tb1
+modularity [mean over batch +- std], cohesion [mean over cells [with self sim = 1, same way we calc in the train] - std], batch entropy, ct purity of metacells [both weighted by mc size and unweighted - proper std]
+
+tb2
+[metrics]
+coverage [std over batches] - homogeneity [std over cells]
+
+======
+
+current challenge:
+
+it seems the cross batch aligment of scproto is not good - although if we look at within batch mc purity - the across batch is not that good
+i dont knwo why - was it proto recon effect? was it community loss effect - no idea
+community loss - the siialrity of proto assigment vector of 2 cells shoud follow their simialrity defined by affinity graph
+
+the more similar - their 
+=======
+
+we had the neurips submitted loss [community - nassoc - usage]
+the performance on the transcriptional was good [higher batch entropy than seacell, comparabe modulariyt and cell type purity - better modualirty than other vae methods]
+also better rare metrics
+how ever on spatial graph we had collapse - i realized thats nassoc bug
+then we moved to cohesion loss - and i relized cohesion alon had good performance on spatial dataset - and i tried with community otgther - the performance got worse [worse dge - worse joint purity]
+then I tried same cohesion loss on pancreas - but the performace was not good - it seems it was mixing cells of different batches 
+[the results where not valid and fair comparison - the  more accurate comparison is being run now]
+
+what i expect for pancreas 
+better graph metric on held-out-node comparing to scpoli + leiden, comparable to seacell
+better batch entropy than seacell, comparable to scpoli
+comparble ct purity to both seacell, scpoli
 
 
---todo list---
+load scpoli pretrain - run leiden on the embedding report : cohesions [aff gram] - modularity - 
+===
 
-[spatial]
-make sure gram implementaion is correct - the free logit one shoud be more close to seacell - make sure choose correct founder gate value
-then compare between cehsion_aff, cheison_gram [corrceted], both [gram corrceted] and choose best
-the run over lambda sweep for banksy [0.2, 0.5, 0.8] - compare over seacell [joint_purity, ct_purty, coeverd states, dge_pearson [what we have for niche in each ct]]
+again start from begining - we had submitted neruips loss [community - nassoc - usage] - good results on pca arbf graphs bad on spatial
+for pca arbf what i expect from the model
+[comparing to seacell]: comparable graph preservation metric on heldout nodes [modualirty or cohesion] / better batch entropy [weighted by mc size] / comparable ct purity
+[comparing to spocli + leiden]: better grpah preservation metric on hedout nodes / comparable batch entropy and ct purity
 
-[pancreas]
-make sure main metrics are fine on pancreas [cohesion, batch entrpy, ct purity, rar homogenity, rar f1, rar ecoverage]
-then try on immune and lung as well
+for spatial submitted neruios was bad one - what expect for spatial
+[comparing to seacell on same graph]: comparable joitn purity - comparable dge metrics - higher ct purity 
+[comparing to scpoli + leiden]: comparable joint / ct purity - better dge metrics
+[seacell pca]: better dge metrics
 
-[multi batch spatial]
-then train on muti batch spatial dataset we have
-but for now no need to reort dge pearson
-but ocvere states, joitn purity, rare homgenity, batch netropy, 
+the cohesion loss - which seacell basicaly has gram only cohesion loss - joint version had good results on spatial
+howver on pancreas - the results was bad - although in train set the cohesion over scpoli prerain is better [both gram and aff]
+but on test heldout set - scpoli is still better - so its kinf od overfitting on train data
+another fact i relaized [need verification althoug] - i realized on full mode - comparing scpoli vs seacell - the cohesion aff and gram were really close - bu modualirty different
+that means the recon loss itself preserve the affinty almost - but not the modularity [i mean does not pur the cells in the latent space in corrcet position so that the clustering satifly the input affinity graph]
+but from cohesion view it seems it is almost doing the job - but from modultiy view not 
+i am thinkin - what if i calc modualirty excatly same way as i calc cohesion now [with same memory thing]
+the only differ would be like this
+for cohesion
+for each cell in the mini_batch
+score = sum over p [ass[i][p] * (for all cells j ass[j][p]*sim[c][j]*w[j]) / (sum over all cells k ass[k][p]*w[j])
+mean over mini batch score
+
+for modualiryt
+we can calc
+
+for each cell c in mini batch
+score = sum over all proto p ass[c][p] * [sum over all cells j ass[j][p] (wij - didj / )

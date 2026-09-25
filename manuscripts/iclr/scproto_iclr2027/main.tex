@@ -1,0 +1,92 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% scProto -- ICLR 2027 submission
+%
+% Content ported from the NeurIPS 2026 submission
+% (../../neurips_manuscript/, which is READ-ONLY and must not be edited).
+% Only the shell (this file) and the statements/ section are ICLR-specific.
+%
+% Build:  ./build.ps1        (or see README.md)
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\documentclass{article}
+
+% ---- ICLR 2027 official style (unmodified, in style/) -----------------------
+% NOTE: ICLR's .sty loads natbib itself in AUTHOR-YEAR mode. Do NOT pass
+% [numbers,compress] the way the NeurIPS shell did -- ICLR asks for
+% author-last-name + year citations.
+\usepackage{style/iclr2027_conference,times}
+
+% Uncomment ONLY for the camera-ready version -- never for submission
+% (submission must stay anonymous or it is desk-rejected).
+%\iclrfinalcopy
+
+% ---- packages actually used by the content ---------------------------------
+\usepackage[utf8]{inputenc}   % utf-8 input
+\usepackage[T1]{fontenc}      % 8-bit T1 fonts
+\usepackage{hyperref}         % hyperlinks
+\usepackage{url}              % simple URL typesetting
+\usepackage{booktabs}         % \toprule / \midrule / \cmidrule in the tables
+\usepackage{amsmath}          % align, cases, ...
+\usepackage{amsfonts}         % \mathbb
+\usepackage{graphicx}         % \includegraphics
+\usepackage{microtype}        % microtypography
+\usepackage{xcolor}           % colors
+
+\graphicspath{{figures/}}
+
+% ---- placeholder for figures whose source file is missing ------------------
+% Two appendix figures referenced by the NeurIPS source have no file anywhere
+% in the repo (figures/pancreas_aff.png, figures/nsclc_affinity_comparison.png).
+% This macro keeps the document compiling and the \label/\ref numbering intact
+% while making the gap impossible to miss. Delete each \missingfig and restore
+% the real \includegraphics once the files are regenerated. See README.md.
+\newcommand{\missingfig}[1]{%
+  \fcolorbox{red}{gray!12}{%
+    \begin{minipage}[c][3.2cm][c]{0.95\linewidth}
+      \centering
+      \textcolor{red}{\bfseries MISSING FIGURE FILE}\par\vspace{3pt}
+      \texttt{\detokenize{#1}}\par\vspace{3pt}
+      {\small regenerate this figure, then replace \texttt{\textbackslash missingfig}
+       with \texttt{\textbackslash includegraphics}\par}
+    \end{minipage}%
+  }%
+}
+
+% ---- title -----------------------------------------------------------------
+\title{scProto: Affinity-Guided Prototype Learning\ for Cross-Batch Metacell Construction}
+
+% ICLR 2027 is DOUBLE BLIND. Authors must not appear in the submitted version;
+% \iclrfinalcopy above stays commented out, which hides this block.
+\author{Anonymous authors\Paper under double-blind review}
+
+\begin{document}
+
+\maketitle
+
+% ------------------------------------------------ Abstract
+\input{sections/abstract}
+
+% ------------------------------------------------ Main paper
+\input{sections/introduction}
+\input{sections/related_work}
+\input{sections/method}
+\input{sections/results}
+\input{sections/discussion}
+
+% ------------------------------------------------ Required / recommended
+% ICLR statements. None of these count toward the 9-page limit, and they go
+% at the end of the main text, BEFORE the references.
+\input{statements/ai_use}          % REQUIRED by ICLR 2027
+\input{statements/ethics}           % recommended
+\input{statements/reproducibility}  % recommended
+
+% ------------------------------------------------ References
+% Does not count toward the page limit.
+\bibliographystyle{style/iclr2027_conference}
+\bibliography{references}
+
+% ------------------------------------------------ Appendix
+% Unlimited pages allowed after the bibliography.
+\appendix
+\input{appendix/training}
+
+\end{document}

@@ -3302,6 +3302,86 @@ class SCProtoTrainer(AdoptiveTrainer):
                 proto_anchor_loss = F.mse_loss(self.model.get_prototypes(), recon_proto)
                 loss = loss + lambda_proto_anchor * proto_anchor_loss
 
+            # [D45] Per-term gradient probe (grad_probe=N steps; 0=off). Loss-VALUE
+            # shares are a poor proxy for influence: a term's pull on the shared
+            # weights is lambda * ||d(term)/d(params)||, and e.g. cohesion's encoder
+            # gradient dies as assignments saturate while its printed value stays
+            # large. Appends one JSON line per probed step to <dump>/grad_probe.jsonl
+            # with, per term: lambda, raw value, grad norm w.r.t. encoder-side params
+            # and w.r.t. the prototype params. Used to calibrate lambdas on measured
+            # gradient shares instead of value shares.
+            _gp = int(getattr(self, 'grad_probe', 0) or 0)
+            if _gp > 0:
+                self._gprobe_step = getattr(self, '_gprobe_step', -1) + 1
+                if self._gprobe_step % _gp == 0:
+                    try:
+                        _named = [(n, p) for n, p in self.model.named_parameters()
+                                  if p.requires_grad]
+                        _enc_p = [p for n, p in _named if 'prototypes' not in n]
+                        _pro_p = [p for n, p in _named if 'prototypes' in n]
+
+                        def _gnorm(t_, ps):
+                            if not ps:
+                                return 0.0
+                            gs = torch.autograd.grad(t_, ps, retain_graph=True,
+                                                     allow_unused=True)
+                            s = 0.0
+                            for g in gs:
+                                if g is not None:
+                                    s += float(g.pow(2).sum().item())
+                            return s ** 0.5
+
+                        _loc = locals()
+                        _term_map = {
+                            'umap': ('lambda_umap', 'umap_loss'),
+                            'recon': ('lambda_recon', 'recon_loss'),
+                            'kl': ('lambda_kl', 'kl_loss'),
+                            'proto_recon': ('lambda_proto_recon', 'proto_recon_loss'),
+                            'cohesion_gram': ('lambda_cohesion', 'cohesion_loss'),
+                            'cohesion_aff': ('lambda_cohesion_aff',
+                                             'cohesion_aff_loss'),
+                            'nassoc': ('lambda_nassoc', 'nassoc_loss'),
+                        }
+                        _row = {'step': int(self._gprobe_step)}
+                        for _nm, (_ln, _tn) in _term_map.items():
+                            _t = _loc.get(_tn)
+                            if (_t is None or not torch.is_tensor(_t)
+                                    or not _t.requires_grad):
+                                continue
+                            _row[_nm] = {
+                                'lambda': float(_loc.get(_ln, 0.0) or 0.0),
+                                'value': float(_t.item()),
+                                'gnorm_enc': _gnorm(_t, _enc_p),
+                                'gnorm_proto': _gnorm(_t, _pro_p),
+                            }
+                        import json as _json
+                        _pp = os.path.join(self.get_dump_path(),
+                                           'grad_probe.jsonl')
+                        os.makedirs(os.path.dirname(_pp), exist_ok=True)
+                        with open(_pp, 'a') as _f:
+                            _f.write(_json.dumps(_row) + chr(10))
+                        _sum = '  '.join(
+                            f"{k}:lam*g_enc={v['lambda'] * v['gnorm_enc']:.3e}"
+                            for k, v in _row.items() if isinstance(v, dict))
+                        print(f"   [GPROBE] step={self._gprobe_step}  {_sum}")
+                    except Exception as _e:
+                        print(f"   [GPROBE] failed: {type(_e).__name__}: {_e}")
+                        # Log the failure into the jsonl too: Modal's visible
+                        # log window is tqdm-dominated, and two measurement
+                        # runs "silently" stopped probing after step 0 -- the
+                        # file must carry its own post-mortem.
+                        try:
+                            import json as _json
+                            _pp = os.path.join(self.get_dump_path(),
+                                               'grad_probe.jsonl')
+                            with open(_pp, 'a') as _f:
+                                _f.write(_json.dumps({
+                                    'step': int(self._gprobe_step),
+                                    'error': f"{type(_e).__name__}: {_e}"[:400],
+                                }) + chr(10))
+                        except Exception:
+                            pass
+
             loss.backward()
             optimizer.step()
 
@@ -3508,8 +3588,32 @@ class SCProtoTrainer(AdoptiveTrainer):
         s['epoch'] += 1
         return total_metrics
 
+    def _append_epoch_trace(self, epoch, metrics):
+        """Append this epoch's metrics to <dump>/epoch_trace.jsonl.
+
+        Exists because the per-epoch line is PRINTED but not recoverable: Modal
+        serves only a short recent log window dominated by tqdm output, so
+        unused_proto, the loss terms and the cohesion value are all unreadable
+        after the fact -- which blocked both live monitoring and any
+        magnitude-based lambda calibration. A few hundred bytes per epoch on the
+        volume makes them permanent and machine-readable.
+        """
+        import json
+        try:
+            path = os.path.join(self.get_dump_path(), 'epoch_trace.jsonl')
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            row = {'epoch': int(epoch)}
+            for k, v in metrics.items():
+                if isinstance(v, (int, float)) and not isinstance(v, bool):
+                    row[k] = float(v)
+            with open(path, 'a') as f:
+                f.write(json.dumps(row) + chr(10))
+        except Exception as e:                       # never break training
+            print(f"   [epoch_trace] skipped: {type(e).__name__}: {e}")
+
     def _print_umap_epoch(self, epoch, total_epochs, metrics):
         """Print one line of UMAP training progress."""
+        self._append_epoch_trace(epoch, metrics)
         extra = ""
         if self.lambda_recon > 0:
             extra += f" | recon={metrics['recon']:.4f}"

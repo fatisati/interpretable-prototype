@@ -1,0 +1,15 @@
+---for arbf on pca aff---
+we want to say we do preserve good withi batch communities [the reported metric should be what we do optmize - but on test set - i think here we would use coheison maybe]
+but also combine batches [batch entropy]
+and maybe a bio proof: [ct_purity]
+and why usefull? for rare ct: we say thats where why model works better
+so we will show [rare homogeneity - rare f1 - coverage]
+
+--for spatial--
+we shoud check the graph criteria [cohesion]
+we do care to recover correct states [niche - ct]
+so joint purity matter, n covered states matters, mean dge [i think mean spearman wsa it]
+so we know we are grouping correct cells together
+[cohesion, n_dead_proto, joitn_purity, n_covered staes, mean dge [pearson]] 
+we shoud be better / comparable to seacell on these
+

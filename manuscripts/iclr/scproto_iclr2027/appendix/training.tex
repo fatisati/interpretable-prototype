@@ -1,0 +1,220 @@
+\section{Dataset Preprocessing Details}
+\label{app:datasets}
+
+The three scRNA-seq datasets (Pancreas, PBMC, Lung) are taken from the benchmarking collection of \citet{luecken2022benchmarking}.
+For the NSCLC spatial transcriptomics dataset~\citep{pentimalli2025combining}, the original data comprises 6 slides; we select slide 28, subsample 30,000 cells stratified by cell type and niche label, and exclude cells assigned to uninformative niche labels, yielding 28,804 cells across 18 cell types and 9 niches.
+Niche labels are defined by clustering cells based on the local cell-type composition of their spatial neighborhood.
+All datasets are preprocessed with Scanpy~\citep{wolf2018scanpy} by normalizing total counts and applying log1p transformation.
+For the scRNA-seq datasets, 4,000 highly variable genes are selected; for NSCLC, HVG selection is omitted as the panel comprises approximately 950 genes.
+
+\section{Affinity Graph and Batch Structure}
+\label{app:graph_structure}
+
+The affinity graph $P$ is computed using an adaptive Gaussian (RBF) kernel in PCA space, following the SEACells protocol~\citep{seacells} with default hyperparameter choices (15 nearest neighbors for bandwidth estimation).
+Because PCA embeddings reflect both biological variation and technical batch effects, the resulting graph encodes a mixture of biological and batch-driven proximity.
+Figure~\ref{fig:graph_umap} visualizes this directly: a UMAP embedding of the affinity matrix on the Pancreas dataset~\citep{luecken2022benchmarking} reveals clear batch structure alongside biological cell-type organization.
+This confirms that the input graph is not batch-free, and motivates the batch-conditional encoder design, which explicitly disentangles these signals during training rather than requiring a pre-corrected graph.
+
+\begin{figure}[h]
+\centering
+\missingfig{figures/pancreas_aff.png}
+\caption{
+UMAP of the precomputed RBF affinity graph on the Pancreas dataset.
+Left: colored by cell type. Right: colored by batch label.
+Batch structure is clearly visible in the graph embedding, confirming that the input affinity graph reflects both biological and technical variation.
+The batch-conditional encoder disentangles these signals during training.
+}
+\label{fig:graph_umap}
+\end{figure}
+
+
+\section{Spatial Affinity Construction}
+\label{app:spatial_affinity}
+
+For spatial experiments, the cell--cell affinity is computed from spatially aggregated features rather than individual cell transcriptomes.
+Concretely, for each cell $i$ we identify all cells within a fixed spatial radius $r$ (in physical coordinates) and compute the average of their PCA embeddings:
+\[
+\tilde{x}_i = \frac{1}{|\mathcal{N}_r(i)|} \sum_{j \in \mathcal{N}_r(i)} \mathrm{PCA}(x_j),
+\]
+where $\mathcal{N}_r(i) = \{j : \|p_i - p_j\|_2 \leq r\}$ and $p_i$ denotes the physical coordinates of cell $i$.
+This contextual feature vector $\tilde{x}_i$ encodes the local microenvironmental composition of cell $i$ by averaging the transcriptomic profiles of its spatial neighbors.
+The same adaptive Gaussian (RBF) kernel used for transcriptomic affinity is then applied to these aggregated features to construct the spatial affinity graph.
+
+The key property of this construction is that cells in similar spatial microenvironments receive high affinity---regardless of their individual transcriptomic state.
+Because the model receives only the cell's own gene expression as input, the community-preserving objective forces the encoder to identify gene expression patterns that correlate with microenvironmental context, while the reconstruction objective keeps prototypes faithful to overall gene expression, preventing spatial context from overriding cell-type identity.
+
+This construction is intentionally simple and serves as a proof of concept that scProto's affinity framework generalizes beyond transcriptomic similarity.
+More principled affinities---for example, based on ligand--receptor interaction scores or cell-type composition of the local neighborhood---are natural extensions left for future work.
+
+Figure~\ref{fig:affinity_comparison} compares the transcriptomic RBF affinity and the spatial affinity on the NSCLC dataset~\citep{pentimalli2025combining}.
+Using spatial affinity yields substantially better niche separation, at the cost of slightly increased mixing of cell types within niches---consistent with the fact that cells in the same niche can belong to different cell types.
+
+\begin{figure}[h]
+\centering
+\missingfig{figures/nsclc_affinity_comparison.png}
+\caption{
+UMAP of the two affinity graphs on the NSCLC dataset, colored by cell type (left) and niche label (right).
+Top: transcriptomic RBF affinity. Bottom: spatial affinity (RBF on neighborhood-averaged PCA).
+Spatial affinity produces substantially cleaner niche separation, while the transcriptomic affinity preserves sharper cell-type boundaries.
+}
+\label{fig:affinity_comparison}
+\end{figure}
+
+
+\section{Training Details and Hyperparameters}
+\label{app:training}
+
+\paragraph{Architecture.}
+The encoder and decoder follow the scPoli architecture~\citep{scpoli} with default settings: hidden dimension 64, latent dimension 8, and 50 PCA components as input features.
+
+\paragraph{$\ell_2$ normalization.}
+Following \citet{swav}, both cell embeddings $z_i$ and prototype vectors $c_k$ are projected onto the unit hypersphere before computing soft assignments, so the dot product $z_i^\top c_k$ is bounded in $[-1,1]$.
+Prototype vectors are re-normalized at the start of each mini-batch, immediately after the preceding gradient update.
+
+\paragraph{Optimizer.}
+We use Adam~\citep{adam} with learning rate $3 \times 10^{-4}$, $\varepsilon = 0.01$, and weight decay $10^{-5}$.
+Batch embedding parameters are excluded from weight decay to avoid penalizing dataset-specific offsets.
+A linear warmup over 5 epochs is followed by cosine learning rate decay.
+
+\paragraph{Batch size.}
+Mini-batches contain 1024 cells sampled uniformly across batches.
+
+\paragraph{Training stages.}
+Stage 1 (cVAE pretraining) runs for 50 epochs.
+Stage 2 (joint prototype learning) uses early stopping based on modularity, evaluated every few epochs, with a minimum improvement threshold of 0.005 and 1000 gradient steps per epoch.
+
+\paragraph{Loss weights.}
+The total objective is
+\[
+\mathcal{L} = \mathcal{L}_{\text{community}} + \lambda\,\mathcal{L}_{\text{rec}} + \lambda_n\,\mathcal{L}_{\text{nassoc}} + \lambda_u\,\mathcal{L}_{\text{usage}},
+\]
+with $\lambda = 0.01$, $\lambda_n = 1.0$, and $\lambda_u = 0.1$.
+The normalized association loss uses element-wise max aggregation across batches ($\alpha = 1.0$).
+These values were chosen to balance community structure preservation against reconstruction fidelity, and were not tuned per dataset.
+
+\paragraph{Gradient flow in $\mathcal{L}_{\text{rec}}$.}
+Although the soft assignments $s_{ik}$ depend on the encoder output $z_i$, we stop the gradient through $s_{ik}$ when backpropagating $\mathcal{L}_{\text{rec}}$.
+Reconstruction gradients therefore reach only the decoder $g_\phi$ and the prototype vectors $\{c_k\}$ (via their role as decoder inputs); the encoder $f_\theta$ receives no gradient from $\mathcal{L}_{\text{rec}}$.
+The motivation is to keep the two objectives from pulling the encoder in conflicting directions: $\mathcal{L}_{\text{community}}$ encourages encoder outputs to reflect affinity-graph structure, while an unconstrained $\mathcal{L}_{\text{rec}}$ gradient could push the encoder toward assignments that minimise reconstruction error regardless of graph proximity.
+By stopping the gradient, the encoder receives no gradient from $\mathcal{L}_{\text{rec}}$, preventing reconstruction from conflicting with the affinity-based objectives; the prototypes are jointly regularised by all objectives: they must sit at the centre of well-connected cell communities \emph{and} be decodable to meaningful gene-expression profiles.
+
+\paragraph{Number of prototypes $K$.}
+Following SEACells~\citep{seacells}, we set $K \approx N / 75$, where $N$ is the total number of cells.
+This yields approximately one metacell per 75 cells and provides a natural starting point for unannotated datasets.
+The ratio of 75 cells per metacell reflects a target aggregation granularity that preserves rare populations while achieving meaningful compression.
+Users may increase $K$ for finer resolution or decrease it for coarser summaries.
+
+\paragraph{Graph construction.}
+The affinity graph uses an adaptive Gaussian (RBF) kernel in 50-dimensional PCA space, with 15 nearest neighbors used to estimate per-cell bandwidth, following the SEACells protocol~\citep{seacells}.
+All graph hyperparameters are kept at their SEACells defaults across all experiments.
+For spatial experiments, see Appendix~\ref{app:spatial_affinity}.
+
+\section{Temperature Calibration}
+\label{app:calibration}
+
+The temperature $\tau$ in the soft assignment formula controls the sharpness of prototype assignments: a smaller $\tau$ yields near-one-hot assignments concentrated on a single prototype, while a larger $\tau$ spreads probability across many prototypes. Rather than setting $\tau$ as a fixed hyperparameter, we calibrate it from data after encoder pretraining and prototype initialization.
+
+\paragraph{Effective number of prototypes.}
+We characterize assignment sharpness through the effective number of prototypes per cell,
+\[
+\mathrm{effk}_i = \frac{1}{\displaystyle\sum_{k} s_{ik}^2},
+\]
+which equals 1 when a cell is assigned entirely to one prototype and $K$ when assignments are perfectly uniform.
+
+\paragraph{Default calibration: affinity-matching.}
+For dot-product similarity ($q_{ij} = s_i^\top s_j$), we calibrate $\tau$ so that the expected assignment similarity on positive edges matches the expected affinity weight:
+\[
+\mathbb{E}_{(i,j) \sim P}\bigl[s_i^\top s_j\bigr] = \mathbb{E}_{(i,j) \sim P}\bigl[P_{ij}\bigr].
+\]
+Intuitively, this sets the temperature so that the degree of overlap between prototype assignments on truly connected cell pairs mirrors the strength of their affinity. We solve for $\tau$ via binary search, holding the encoder logits fixed.
+
+If the target is unreachable (i.e., even at the sharpest feasible $\tau$ the left-hand side cannot reach the right-hand side), or if the resulting mean effective number of prototypes falls below 3 (indicating over-collapse), we fall back to effective-$k$ alignment.
+
+\paragraph{Fallback: effective-$k$ alignment.}
+We binary-search for $\tau$ such that the mean effective number of prototypes per cell equals a target $K_\mathrm{eff}$:
+\[
+\mathrm{mean}_i\,\mathrm{effk}_i = K_\mathrm{eff}.
+\]
+The target $K_\mathrm{eff}$ is derived from the median effective number of neighbors in the affinity graph, $\mathrm{effk}_i^{\mathrm{aff}} = 1/\sum_j P_{ij}^2$. This alignment ensures that assignment sharpness is commensurate with the local neighborhood structure of the data. This fallback is also the default for non-dot-product similarity metrics, for which the affinity-matching criterion is not meaningful.
+
+Calibration runs once on the full dataset immediately after prototype initialization and before joint optimization begins.
+
+\section{Evaluation Metrics}
+\label{app:metrics}
+
+\paragraph{Modularity.}
+We compute modularity of the metacell assignments with respect to the per-batch affinity subgraph (all edges incident to at least one cell in the batch). Mean and standard deviation are reported across batches.
+
+\paragraph{Batch entropy.}
+For each metacell $m$, batch entropy is the Shannon entropy of its batch label distribution:
+\[
+H(m) = -\sum_b p_b \log p_b,
+\]
+where $p_b$ is the fraction of cells in $m$ from batch $b$. Higher values indicate more uniform mixing across batches.
+
+\paragraph{Cell-type purity.}
+Purity measures the fraction of cells in a metacell belonging to its most frequent cell type:
+\[
+\text{purity}(m) = \frac{1}{|m|} \max_{c} \sum_{i \in m} \mathbf{1}[y_i = c].
+\]
+
+\paragraph{Rare cell type metrics.}
+All rare-cell metrics identify rare cell types \emph{within each batch separately}.
+Let $f_c^{(b)}$ be the frequency of cell type $c$ in batch $b$ (fraction of cells).
+A cell type is locally rare in $b$ if $f_c^{(b)} < \bar{f}^{(b)} - \sigma_f^{(b)}$, where $\bar{f}^{(b)}$ and $\sigma_f^{(b)}$ are the mean and standard deviation of within-batch cell-type frequencies.
+If no cell type satisfies this criterion, we fall back to the 25th percentile of $\{f_c^{(b)}\}$.
+All per-batch scores are aggregated as mean~$\pm$~std across batches.
+
+\textbf{Coverage} (per batch) is the fraction of locally-rare cell types for which at least one cell of that type in the current batch is assigned to a metacell whose majority label is that cell type.
+
+For each cell $i$ with a locally-rare label $c$ in batch $b$, the \textbf{homogeneity score} is the fraction of cells in $i$'s metacell $m(i)$ that share label $c$ (across all batches):
+\[
+h_i = \frac{1}{|m(i)|}\sum_{j \in m(i)} \mathbf{1}[y_j = c].
+\]
+The per-batch \textbf{homogeneity} is the mean of $h_i$ over all locally-rare cells in batch $b$.
+Unlike coverage, which only checks whether a dedicated metacell exists, homogeneity measures how coherently each rare cell is grouped---a method can achieve full coverage while assigning rare cells to large, impure metacells, which homogeneity captures.
+
+\paragraph{Niche purity.}
+Analogous to cell-type purity but computed with respect to spatial niche labels: each metacell is assigned a majority niche label, and niche purity is the fraction of its member cells sharing that label.
+Unlike cell-type purity and batch entropy, niche purity is computed without size weighting, treating each metacell as an equal spatial unit.
+This is appropriate because niche-driven expression changes can be subtle, and the metacells capturing them tend to be small; size-weighting would suppress exactly these rare and spatially specific structures.
+
+\section{Additional Results}
+\label{app:results}
+
+\begin{figure*}[h]
+\centering
+\includegraphics[width=\textwidth]{figures/heatmap.png}
+\caption{
+Cell-type- and niche-specific breakdown of niche purity and cell-type purity for six key cell types in the NSCLC tumor microenvironment, selected for visual clarity.
+Each entry shows mean $\pm$ standard deviation across metacells assigned to that cell type (unweighted; see Appendix~\ref{app:metrics}).
+scProto consistently achieves higher niche purity than SEACells (transcriptomic) while maintaining higher cell-type purity than SEACells (spatial).
+}
+\label{fig:spatial_heatmap}
+\end{figure*}
+
+\begin{figure*}[h]
+\centering
+\includegraphics[width=\textwidth]{figures/pancreas_fig1.png}
+\caption{
+Per-metacell analysis of purity and batch mixing on the Pancreas dataset.
+Left: Cell-type purity vs. batch entropy (point size proportional to metacell size).
+Middle: Distribution of cell-type purity (size-weighted violin).
+Right: Distribution of batch entropy (size-weighted violin).
+scProto achieves higher batch entropy while maintaining comparable purity to SEACells.
+}
+\label{fig:purity_entropy}
+\end{figure*}
+
+\begin{figure*}[h]
+\centering
+\includegraphics[width=\textwidth]{figures/spatial.png}
+\caption{
+Spatial visualization of cell types, niches, and metacell assignments across methods.
+Columns correspond to selected cell types (fibroblasts, macrophages, cytotoxic T cells), and rows show cell-type annotations, niche annotations, scProto metacells (trained on spatial affinity), and SEACells metacells (trained on the same affinity).
+In the annotation rows, each cell is colored by its ground-truth niche label; in the metacell rows, each cell is colored by the majority niche label of its assigned metacell.
+scProto produces spatially coherent patterns aligned with niche structure, while SEACells exhibits more fragmented patterns.
+}
+\label{fig:spatial}
+\end{figure*}
+

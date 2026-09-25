@@ -119,12 +119,33 @@ def jobs_for(datasets):
     return out
 
 
-ZERO_TERMS = ("lambda_umap", "lambda_proto_recon", "lambda_nassoc",
+ZERO_TERMS = ("lambda_nassoc",
               "lambda_modularity", "lambda_proto_usage", "lambda_swav",
-              "lambda_kl", "lambda_recon")
+              "lambda_kl")
+# [D44] lambda_umap is deliberately NOT in ZERO_TERMS any more. Diagnosis
+# (2026-09-24): the purity gap is GROUP-LEVEL cross-batch block mispairing
+# (blockAgree 0.9240 vs Leiden-on-stage1's 0.9825 -- on OUR OWN pretrain
+# latent), and BOTH recon anchors at share-0.5 lambdas failed to move it
+# (0.9217 / 0.9142) while costing rare coverage. The submitted NeurIPS model
+# had NO purity gap on pancreas (0.98, best in table) and its config differed
+# by exactly this term: the community/UMAP loss is a PAIRWISE cell-cell term
+# (pull edge-connected cells' assignment profiles together, push sampled
+# negatives apart) -- the only term that actively maintains the stage-1
+# cross-batch structure through stage 2. Cohesion cannot: its sims are fixed
+# graph weights and it has no cell-pair coupling and no repulsion.
+# [D43] lambda_recon is deliberately NOT in ZERO_TERMS any more. Diagnosis:
+# stage-2 cohesion training DEGRADES the cross-batch alignment stage 1 built.
+# Measured on pancreas -- within-batch purity 0.9819 (the best of every method)
+# but overall 0.9114, so the whole deficit is cross-batch; and Leiden on the
+# stage-1 latent ALONE reaches gap 0.0119 at the same ~6 batches/metacell
+# against scProto's 0.0706. Cohesion has no cross-batch term by construction
+# (0.00% penalty for a bad cross-batch merge, measured), so nothing opposes the
+# drift. Recon is what CREATED the batch-corrected latent, so keeping it in
+# stage 2 re-imposes that constraint.
 
 
-def build_config(lam_gram, lam_aff):
+def build_config(lam_gram, lam_aff, lam_recon=0.0, lam_proto_recon=0.0,
+                 lam_umap=0.0):
     """THE loss config -- CLAUDE.md 9d. Cohesion is the ONLY objective.
 
     ONE definition, used by run() AND returned by probe(), so the probe reports
@@ -139,15 +160,28 @@ def build_config(lam_gram, lam_aff):
     """
     from interpretable_ssl.experiments.tasks import LAMBDA_PROTO_UMAP_PRECON
     return dict(LAMBDA_PROTO_UMAP_PRECON) | {
-        # every non-cohesion loss term is ZERO
-        "lambda_umap": 0.0,
-        "lambda_proto_recon": 0.0,
+        # every non-cohesion loss term is ZERO unless explicitly parameterized
+        # [D44] community/UMAP loss -- raw magnitude measured on pancreas
+        # (epoch_trace of the [D43] magnitude run): umap=2.62 vs cohesion loss
+        # side 4.04*(1-0.128)+11.99*(1-0.057)=14.84, so lam_umap=1.0 makes it
+        # ~15% of the total loss (anchor, not competitor) AND is verbatim the
+        # submitted NeurIPS value that produced purity 0.98 on this dataset.
+        "lambda_umap": lam_umap,
+        # [D43] proto_recon: each prototype is decoded SEPARATELY INTO EVERY
+        # BATCH it spans (decoded_all[cond]) and must reconstruct its members
+        # there. So a prototype whose batch-A block and batch-B block are
+        # DIFFERENT cell types cannot satisfy both -> a direct penalty on
+        # GROUP-LEVEL cross-batch mispairing, which is the measured failure
+        # (7.6% of cell mass on pancreas) and exactly cohesion's blind spot
+        # (0.00% penalty, measured). CVAE recon cannot do this: it is per-cell
+        # and never asks which cells share a prototype.
+        "lambda_proto_recon": lam_proto_recon,
         "lambda_nassoc": 0.0,
         "lambda_modularity": 0.0,
         "lambda_proto_usage": 0.0,
         "lambda_swav": 0.0,
         "lambda_kl": 0.0,
-        "lambda_recon": 0.0,
+        "lambda_recon": lam_recon,   # [D43] CVAE reconstruction, see below
         "proto_reinit_every": 0,
         # the objective
         "lambda_cohesion": lam_gram,        # gram, 2-hop
@@ -164,10 +198,13 @@ def build_config(lam_gram, lam_aff):
     }
 
 
-def validate(lc, lam_gram, lam_aff, span_aff, span_gram):
+def validate(lc, lam_gram, lam_aff, span_aff, span_gram):  # noqa: C901
     """Every check that must hold before a GPU is touched. Returns a summary."""
     for k in ZERO_TERMS:
         assert float(lc[k]) == 0.0, f"{k} must be 0, got {lc[k]}"
+    assert float(lc["lambda_recon"]) >= 0.0
+    assert float(lc["lambda_proto_recon"]) >= 0.0
+    assert float(lc["lambda_umap"]) >= 0.0
     assert lc["lambda_cohesion"] > 0 and lc["lambda_cohesion_aff"] > 0
     assert lc["cohesion_self"] == 1.0, "cohesion_self must be 1.0"
     assert lc["cohesion_diag"] == 1.0, "cohesion_diag must be 1.0"
@@ -188,12 +225,17 @@ def validate(lc, lam_gram, lam_aff, span_aff, span_gram):
         "coh_mem_init": lc["coh_mem_init"],
         "coh_mem_hlife": lc["coh_mem_hlife"],
         "latent_dims": lc["latent_dims"],
+        "lambda_recon": lc["lambda_recon"],
+        "lambda_proto_recon": lc["lambda_proto_recon"],
+        "lambda_umap": lc["lambda_umap"],
     }
 
 
 @app.function(image=image, timeout=900, volumes={"/vol": volume})
 def probe(lam_gram: float = 4.04, lam_aff: float = 11.99,
-          span_aff: float = 0.064251, span_gram: float = 0.190749):
+          span_aff: float = 0.064251, span_gram: float = 0.190749,
+          lam_recon: float = 0.0, lam_proto_recon: float = 0.0,
+          lam_umap: float = 0.0):
     """Return the validated config the DEPLOYED code builds. CPU-only, ~free.
 
     Run after every deploy and BEFORE spawning. This is the check that catches a
@@ -204,13 +246,16 @@ def probe(lam_gram: float = 4.04, lam_aff: float = 11.99,
     os.environ["CODE_DIR"] = "/vol/code/"
     sys.path.insert(0, "/vol/code")
     os.chdir("/vol/code")
-    return validate(build_config(lam_gram, lam_aff),
+    return validate(build_config(lam_gram, lam_aff, lam_recon,
+                                 lam_proto_recon, lam_umap),
                     lam_gram, lam_aff, span_aff, span_gram)
 
 
-@app.function(image=image, gpu="A10G", timeout=21600, volumes={"/vol": volume})
+@app.function(image=image, gpu="A100", timeout=21600, volumes={"/vol": volume})
 def run(ds: str, K: int, lam_gram: float, lam_aff: float, gamma: float,
-        span_aff: float, span_gram: float):
+        span_aff: float, span_gram: float, lam_recon: float = 0.0,
+        freeze_be: bool = False, epochs: int = 10, suffix: str = "",
+        lam_proto_recon: float = 0.0, lam_umap: float = 0.0):
     import os
     import sys
 
@@ -233,8 +278,8 @@ def run(ds: str, K: int, lam_gram: float, lam_aff: float, gamma: float,
 
     from interpretable_ssl.experiments.tasks import run_mc_task
 
-    name = f"d42{CONFIG_TAG}_{ds}"
-    lc = build_config(lam_gram, lam_aff)
+    name = f"d42{CONFIG_TAG}{suffix}_{ds}"
+    lc = build_config(lam_gram, lam_aff, lam_recon, lam_proto_recon, lam_umap)
     checked = validate(lc, lam_gram, lam_aff, span_aff, span_gram)
     print(f"   [CONFIG VERIFIED IN-RUN] {checked}")
 
@@ -250,13 +295,16 @@ def run(ds: str, K: int, lam_gram: float, lam_aff: float, gamma: float,
 
     t0 = time.time()
     trainer, metrics, _ = run_mc_task(
-        ds, cvae_epochs=50, train_epochs=10, eval_freq=2, patience=4,
+        ds, cvae_epochs=50, train_epochs=epochs, eval_freq=2, patience=4,
         batch_size=1024, affinity_type=HELDOUT, num_prototypes=K,
         lambda_config=lc, trainer_kwargs={"experiment_name": name},
-        early_stop=False,
+        early_stop=False, freeze_batch_embedding=freeze_be,
     )
     print(f"\n[{name}] model: {trainer.get_model_name()}")
     print(f"[{name}] done in {time.time()-t0:.0f}s")
     print(f"[{name}] >>> {metrics}")
+    print(f"[{name}] TERM MAGNITUDES for lambda calibration: "
+          f"recon={metrics.get('recon')}  cohesion={metrics.get('cohesion_term')}  "
+          f"cohesion_aff={metrics.get('cohesion_aff_term')}  loss={metrics.get('loss')}")
     volume.commit()
     return name, trainer.get_model_name(), metrics

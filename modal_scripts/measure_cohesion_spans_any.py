@@ -50,6 +50,24 @@ DATASETS = {
     "crcx": ("graphs/affinity_crcx50130_ncomp50_kneighbors50_arbf.pkl",
              "spatial/crc_xenium/crc_xenium_prepped.h5ad", "patient_id",
              "celltype", "Niche", 670),
+    # Node-holdout TRAIN graphs (the protocol pivot, 2026-09-24): spans are not
+    # portable across graphs, so the node-holdout runs need their own. Run with
+    # DATA_DIR pointing at the REPO ROOT -- the h5ads live in node_heldout_data/.
+    "pancreas-nh": (
+        "graphs/affinity_pancreas_arbf_nodeheldout20_seed0_train13105"
+        "_ncomp50_kneighbors50_arbf.pkl",
+        "node_heldout_data/pancreas_arbf_nodeheldout20_seed0_train.h5ad",
+        "tech", "celltype", None, 220),
+    "lung-nh": (
+        "graphs/affinity_lung_arbf_nodeheldout20_seed0_train25977"
+        "_ncomp50_kneighbors50_arbf.pkl",
+        "node_heldout_data/lung_arbf_nodeheldout20_seed0_train.h5ad",
+        "batch", "cell_type", None, 300),
+    "pbmc-immune-nh": (
+        "graphs/affinity_pbmc-immune_arbf_nodeheldout20_seed0_train26806"
+        "_ncomp50_kneighbors50_arbf.pkl",
+        "node_heldout_data/pbmc-immune_arbf_nodeheldout20_seed0_train.h5ad",
+        "study", "final_annotation", None, 300),
 }
 
 
@@ -119,17 +137,19 @@ def run(ds):
     parts["celltype x batch"] = np.array(
         [f"{a}|{b}" for a, b in zip(obs[lkey].astype(str), batches)])
 
-    cache = {}
+    # V[b] semantics = pass batch_codes; the old global denominator = None.
+    # (cohesion_per_cell no longer takes per_batch -- multi-batch is the
+    # behaviour, not an option.) Separate caches: the two denominators cache
+    # different intermediates.
+    cache_pb, cache_gl = {}, {}
     print(f"\n  {'partition':<18}{'K':>6}{'aff [D41]':>12}{'gram [D41]':>12}"
           f"{'aff global':>12}{'gram global':>13}")
     vals = {}
     for name, lab in parts.items():
         row = {}
         for s_ in ("aff", "gram"):
-            row[f"{s_}_pb"] = cohesion(lab, A, bcodes, sim=s_, per_batch=True,
-                                       _cache=cache)
-            row[f"{s_}_gl"] = cohesion(lab, A, bcodes, sim=s_, per_batch=False,
-                                       _cache=cache)
+            row[f"{s_}_pb"] = cohesion(lab, A, bcodes, sim=s_, _cache=cache_pb)
+            row[f"{s_}_gl"] = cohesion(lab, A, None, sim=s_, _cache=cache_gl)
         vals[name] = row
         nk = len(np.unique(np.asarray(lab)))
         print(f"  {name:<18}{nk:>6}{row['aff_pb']:>12.6f}{row['gram_pb']:>12.6f}"

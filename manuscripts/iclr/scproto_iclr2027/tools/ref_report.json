@@ -1,0 +1,464 @@
+[
+  {
+    "key": "schaar2024nicheformer",
+    "title": "Nicheformer: a foundation model for single-cell and spatial omics",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [],
+    "source": "Crossref/DOI",
+    "found_title": "Nicheformer: a foundation model for single-cell and spatial omics",
+    "found_doi": "10.1038/s41592-025-02814-z"
+  },
+  {
+    "key": "luecken2019current",
+    "title": "Current best practices in single-cell RNA-seq analysis: a tutorial",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [
+      "no doi field; real DOI is 10.15252/msb.20188746"
+    ],
+    "source": "Crossref/title",
+    "found_title": "Current best practices in single\u2010cell RNA\u2010seq analysis: a tutorial",
+    "found_doi": "10.15252/msb.20188746"
+  },
+  {
+    "key": "cutler1994archetypal",
+    "title": "Archetypal analysis",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [],
+    "source": "Crossref/DOI",
+    "found_title": "Archetypal Analysis",
+    "found_doi": "10.1080/00401706.1994.10485840"
+  },
+  {
+    "key": "luecken2022benchmarking",
+    "title": "Benchmarking atlas-level data integration in single-cell genomics -- integration task datasets",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [],
+    "source": "DataCite/DOI",
+    "found_title": "Benchmarking atlas-level data integration in single-cell genomics - integration task datasets",
+    "found_doi": "10.6084/m9.figshare.12420968.v8"
+  },
+  {
+    "key": "pentimalli2025combining",
+    "title": "Combining spatial transcriptomics and ECM imaging in 3D for mapping cellular interactions in the tumor microenvironment",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [
+      "no doi field; real DOI is 10.1016/j.cels.2025.101261"
+    ],
+    "source": "Crossref/title",
+    "found_title": "Combining spatial transcriptomics and ECM imaging in 3D for mapping cellular interactions in the tumor microenvironment",
+    "found_doi": "10.1016/j.cels.2025.101261"
+  },
+  {
+    "key": "sure",
+    "title": "Distribution-preserved compression of single-cell atlases for privacy-protected data dissemination and novel cell type discovery",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [
+      "no doi field; real DOI is 10.1101/2024.11.16.622584"
+    ],
+    "source": "Crossref/title",
+    "found_title": "Distribution-preserved compression of single-cell atlases for privacy-protected data dissemination and novel cell type discovery",
+    "found_doi": "10.1101/2024.11.16.622584"
+  },
+  {
+    "key": "metacell",
+    "title": "MetaCell: analysis of single-cell RNA-seq data using K-nn graph partitions",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [
+      "no doi field; real DOI is 10.1186/s13059-019-1812-2"
+    ],
+    "source": "Crossref/title",
+    "found_title": "MetaCell: analysis of single-cell RNA-seq data using K-nn graph partitions",
+    "found_doi": "10.1186/s13059-019-1812-2"
+  },
+  {
+    "key": "metacell2",
+    "title": "Metacell-2: a divide-and-conquer metacell algorithm for scalable scRNA-seq analysis",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [
+      "no doi field; real DOI is 10.1186/s13059-022-02667-1"
+    ],
+    "source": "Crossref/title",
+    "found_title": "Metacell-2: a divide-and-conquer metacell algorithm for scalable scRNA-seq analysis",
+    "found_doi": "10.1186/s13059-022-02667-1"
+  },
+  {
+    "key": "supercell",
+    "title": "Metacells untangle large and complex single-cell transcriptome networks",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [],
+    "source": "Crossref/DOI",
+    "found_title": "Metacells untangle large and complex single-cell transcriptome networks",
+    "found_doi": "10.1186/s12859-022-04861-1"
+  },
+  {
+    "key": "seacells",
+    "title": "SEACells infers transcriptional and epigenomic cellular states from single-cell genomics data",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [],
+    "source": "Crossref/DOI",
+    "found_title": "SEACells infers transcriptional and epigenomic cellular states from single-cell genomics data",
+    "found_doi": "10.1038/s41587-023-01716-9"
+  },
+  {
+    "key": "metaq",
+    "title": "MetaQ: fast, scalable and accurate metacell inference via single-cell quantization",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [
+      "no doi field; real DOI is 10.1038/s41467-025-56424-6"
+    ],
+    "source": "Crossref/title",
+    "found_title": "MetaQ: fast, scalable and accurate metacell inference via single-cell quantization",
+    "found_doi": "10.1038/s41467-025-56424-6"
+  },
+  {
+    "key": "vqvae",
+    "title": "Neural discrete representation learning",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [],
+    "source": "arXiv",
+    "found_title": "Neural Discrete Representation Learning",
+    "found_doi": null
+  },
+  {
+    "key": "cvae",
+    "title": "Learning Structured Output Representation using Deep Conditional Generative Models",
+    "verdict": "MANUAL-OK",
+    "problems": [],
+    "suggestions": [
+      "no API record; verified by hand: https://proceedings.neurips.cc/paper/2015/hash/8d55a249e6baa5c06772297520da2051-Abstract.html"
+    ],
+    "source": "hand-checked"
+  },
+  {
+    "key": "vae",
+    "title": "Auto-Encoding Variational Bayes",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [
+      "year: bib=2014  record=2013 (online vs issue?)"
+    ],
+    "source": "arXiv",
+    "found_title": "Auto-Encoding Variational Bayes",
+    "found_doi": null
+  },
+  {
+    "key": "harmony",
+    "title": "Fast, sensitive and accurate integration of single-cell data with Harmony",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [
+      "no doi field; real DOI is 10.1038/s41592-019-0619-0"
+    ],
+    "source": "Crossref/title",
+    "found_title": "Fast, sensitive and accurate integration of single-cell data with Harmony",
+    "found_doi": "10.1038/s41592-019-0619-0"
+  },
+  {
+    "key": "bbknn",
+    "title": "BBKNN: fast batch alignment of single cell transcriptomes",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [
+      "year: bib=2020  record=2019 (online vs issue?)"
+    ],
+    "source": "Crossref/DOI",
+    "found_title": "BBKNN: fast batch alignment of single cell transcriptomes",
+    "found_doi": "10.1093/bioinformatics/btz625"
+  },
+  {
+    "key": "scvi",
+    "title": "scVI: Deep generative modeling for single-cell transcriptomics",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [
+      "no doi field; real DOI is 10.1038/s41592-018-0229-2"
+    ],
+    "source": "Crossref/title",
+    "found_title": "Deep generative modeling for single-cell transcriptomics",
+    "found_doi": "10.1038/s41592-018-0229-2"
+  },
+  {
+    "key": "scpoli",
+    "title": "Population-level integration of single-cell datasets enables multi-scale analysis across samples",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [],
+    "source": "Crossref/DOI",
+    "found_title": "Population-level integration of single-cell datasets enables multi-scale analysis across samples",
+    "found_doi": "10.1038/s41592-023-02035-2"
+  },
+  {
+    "key": "traag2019leiden",
+    "title": "From Louvain to Leiden: guaranteeing well-connected communities",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [
+      "no doi field; real DOI is 10.1038/s41598-019-41695-z"
+    ],
+    "source": "Crossref/title",
+    "found_title": "From Louvain to Leiden: guaranteeing well-connected communities",
+    "found_doi": "10.1038/s41598-019-41695-z"
+  },
+  {
+    "key": "louvain",
+    "title": "Fast unfolding of communities in large networks",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [
+      "no doi field; real DOI is 10.1088/1742-5468/2008/10/p10008"
+    ],
+    "source": "Crossref/title",
+    "found_title": "Fast unfolding of communities in large networks",
+    "found_doi": "10.1088/1742-5468/2008/10/p10008"
+  },
+  {
+    "key": "spectral",
+    "title": "A tutorial on spectral clustering",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [
+      "no doi field; real DOI is 10.1007/s11222-007-9033-z"
+    ],
+    "source": "Crossref/title",
+    "found_title": "A tutorial on spectral clustering",
+    "found_doi": "10.1007/s11222-007-9033-z"
+  },
+  {
+    "key": "deepcluster",
+    "title": "Deep Clustering for Unsupervised Learning of Visual Features",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [
+      "venue: bib='European Conference on Computer Vision (ECCV)', registered under the series 'Lecture Notes in Computer Science'"
+    ],
+    "source": "Crossref/DOI",
+    "found_title": "Deep Clustering for Unsupervised Learning of Visual Features",
+    "found_doi": "10.1007/978-3-030-01264-9_9"
+  },
+  {
+    "key": "mcinnes2018umap",
+    "title": "Umap: Uniform manifold approximation and projection for dimension reduction",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [],
+    "source": "arXiv",
+    "found_title": "UMAP: Uniform Manifold Approximation and Projection for Dimension Reduction",
+    "found_doi": null
+  },
+  {
+    "key": "wolf2018scanpy",
+    "title": "SCANPY: large-scale single-cell gene expression data analysis",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [
+      "no doi field; real DOI is 10.1186/s13059-017-1382-0"
+    ],
+    "source": "Crossref/title",
+    "found_title": "SCANPY: large-scale single-cell gene expression data analysis",
+    "found_doi": "10.1186/s13059-017-1382-0"
+  },
+  {
+    "key": "arteaga2026prototypes",
+    "title": "Why Prototypes Collapse: Diagnosing and Preventing Partial Collapse in Prototypical Self-Supervised Learning",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [
+      "year: bib=2026  record=2025 (online vs issue?)"
+    ],
+    "source": "arXiv",
+    "found_title": "Why Prototypes Collapse: Diagnosing and Preventing Partial Collapse in Prototypical Self-Supervised Learning",
+    "found_doi": null
+  },
+  {
+    "key": "parametric_umap",
+    "title": "Parametric UMAP Embeddings for Representation and Semisupervised Learning",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [
+      "pages: bib='2881--2907'  record='1-27'"
+    ],
+    "source": "Crossref/DOI",
+    "found_title": "Parametric UMAP Embeddings for Representation and Semisupervised Learning",
+    "found_doi": "10.1162/neco_a_01434"
+  },
+  {
+    "key": "golpayegani2025interpretable",
+    "title": "Interpretable Self-Supervised Prototype Learning for Single-Cell Transcriptomics",
+    "verdict": "MANUAL-OK",
+    "problems": [],
+    "suggestions": [
+      "no API record; verified by hand: https://iclr.cc/virtual/2025/35927"
+    ],
+    "source": "hand-checked"
+  },
+  {
+    "key": "asano2019self",
+    "title": "Self-labelling via simultaneous clustering and representation learning",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [],
+    "source": "arXiv",
+    "found_title": "Self-labelling via simultaneous clustering and representation learning",
+    "found_doi": null
+  },
+  {
+    "key": "swav",
+    "title": "Unsupervised learning of visual features by contrasting cluster assignments",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [],
+    "source": "arXiv",
+    "found_title": "Unsupervised Learning of Visual Features by Contrasting Cluster Assignments",
+    "found_doi": null
+  },
+  {
+    "key": "adam",
+    "title": "Adam: A method for stochastic optimization",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [],
+    "source": "arXiv",
+    "found_title": "Adam: A Method for Stochastic Optimization",
+    "found_doi": null
+  },
+  {
+    "key": "sinkhorn",
+    "title": "Sinkhorn distances: Lightspeed computation of optimal transport",
+    "verdict": "MANUAL-OK",
+    "problems": [],
+    "suggestions": [
+      "no API record; verified by hand: https://papers.nips.cc/paper/4927-sinkhorn-distances-lightspeed-computation-of-optimal-transport"
+    ],
+    "source": "hand-checked"
+  },
+  {
+    "key": "nichenet",
+    "title": "NicheNet: modeling intercellular communication by linking ligands to target genes",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [
+      "year: bib=2020  record=2019 (online vs issue?)"
+    ],
+    "source": "Crossref/DOI",
+    "found_title": "NicheNet: modeling intercellular communication by linking ligands to target genes",
+    "found_doi": "10.1038/s41592-019-0667-5"
+  },
+  {
+    "key": "cellchat",
+    "title": "Inference and analysis of cell-cell communication using CellChat",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [],
+    "source": "Crossref/DOI",
+    "found_title": "Inference and analysis of cell-cell communication using CellChat",
+    "found_doi": "10.1038/s41467-021-21246-9"
+  },
+  {
+    "key": "mecell",
+    "title": "Microenvironment-aware spatial modeling for accurate inference of cell identity",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [],
+    "source": "Crossref/DOI",
+    "found_title": "Microenvironment-aware spatial modeling for accurate inference of cell identity",
+    "found_doi": "10.1093/nar/gkaf1477"
+  },
+  {
+    "key": "spatial1",
+    "title": "Visualization and analysis of gene expression in tissue sections by spatial transcriptomics",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [],
+    "source": "Crossref/DOI",
+    "found_title": "Visualization and analysis of gene expression in tissue sections by spatial transcriptomics",
+    "found_doi": "10.1126/science.aaf2403"
+  },
+  {
+    "key": "spatial2",
+    "title": "Giotto: a toolbox for integrative analysis and visualization of spatial expression data",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [
+      "no doi field; real DOI is 10.1186/s13059-021-02286-2"
+    ],
+    "source": "Crossref/title",
+    "found_title": "Giotto: a toolbox for integrative analysis and visualization of spatial expression data",
+    "found_doi": "10.1186/s13059-021-02286-2"
+  },
+  {
+    "key": "zeng2022cell",
+    "title": "What is a cell type and how to define it?",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [
+      "no doi field; real DOI is 10.1016/j.cell.2022.06.031"
+    ],
+    "source": "Crossref/title",
+    "found_title": "What is a cell type and how to define it?",
+    "found_doi": "10.1016/j.cell.2022.06.031"
+  },
+  {
+    "key": "bahrami2026modality",
+    "title": "From modality-specific to compositional foundation models for cell biology",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [],
+    "source": "Crossref/DOI",
+    "found_title": "From modality-specific to compositional foundation models for cell biology",
+    "found_doi": "10.1016/j.cels.2026.101534"
+  },
+  {
+    "key": "richter2026beyond",
+    "title": "Beyond alignment: synergistic integration is required for multimodal cell foundation models",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [],
+    "source": "Crossref/DOI",
+    "found_title": "Beyond alignment: synergistic integration is required for multimodal cell foundation models",
+    "found_doi": "10.64898/2026.02.23.707420"
+  },
+  {
+    "key": "bahrami2025scconcept",
+    "title": "scConcept: Contrastive pretraining for technology-agnostic single-cell representations beyond reconstruction",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [],
+    "source": "Crossref/DOI",
+    "found_title": "scConcept: Contrastive pretraining for technology-agnostic single-cell representations beyond reconstruction",
+    "found_doi": "10.1101/2025.10.14.682419"
+  },
+  {
+    "key": "richter2025delineating",
+    "title": "Delineating the effective use of self-supervised learning in single-cell genomics",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [
+      "year: bib=2025  record=2024 (online vs issue?)"
+    ],
+    "source": "Crossref/DOI",
+    "found_title": "Delineating the effective use of self-supervised learning in single-cell genomics",
+    "found_doi": "10.1038/s42256-024-00934-3"
+  },
+  {
+    "key": "szalata2024transformers",
+    "title": "Transformers in single-cell omics: a review and new perspectives",
+    "verdict": "OK",
+    "problems": [],
+    "suggestions": [],
+    "source": "Crossref/DOI",
+    "found_title": "Transformers in single-cell omics: a review and new perspectives",
+    "found_doi": "10.1038/s41592-024-02353-z"
+  }
+]

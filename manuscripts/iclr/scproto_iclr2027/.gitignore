@@ -1,0 +1,13 @@
+# LaTeX build output -- everything regenerable
+build/
+*.aux
+*.bbl
+*.blg
+*.log
+*.out
+*.toc
+*.synctex.gz
+*.fdb_latexmk
+*.fls
+# Google Drive litter
+desktop.ini

@@ -51,6 +51,9 @@ T2 = [
 # Comparing scProto-8 against Harmony-50 would confound "better method" with
 # "more latent capacity", which is the whole reason the d8 runs exist.
 ROWS = [
+    ("scProto NH (cohesion)",  "scProto NH (cohesion)"),
+    ("scProto NH (coh+comm)",  "scProto NH (coh+comm)"),
+    ("Leiden + scPoli-St1 NH", "Leiden + scPoli-St1 NH"),
     ("scProto (cohesion)",     "scProto (cohesion)"),
     ("SEACells",               "SEACells"),
     ("SuperCell",              "SuperCell"),

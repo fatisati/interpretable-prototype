@@ -1,0 +1,15 @@
+# References that no machine-readable index can confirm, verified by hand.
+#
+# NeurIPS/ICML proceedings papers carry no DOI and are absent from Crossref;
+# workshop papers live only on OpenReview. Without this file they come back
+# NOT-FOUND on every run, which trains you to ignore the one category that
+# actually catches hallucinated references.
+#
+# Only add a key here AFTER opening the URL and confirming title, authors,
+# venue and year against the .bib entry. Re-check if the entry is edited.
+#
+# format:  <bibkey>  <evidence-URL>
+
+cvae        https://proceedings.neurips.cc/paper/2015/hash/8d55a249e6baa5c06772297520da2051-Abstract.html
+sinkhorn    https://papers.nips.cc/paper/4927-sinkhorn-distances-lightspeed-computation-of-optimal-transport
+golpayegani2025interpretable  https://iclr.cc/virtual/2025/35927
