@@ -1,11 +1,224 @@
-# Base lambda calibration — numbers, plan, and what is still missing
+# Base lambda calibration — the `[D60]` measurement, and how it was reached
 
-**Written 2026-10-06.** Pure analysis of data already on disk. **No runs were launched.**
-Everything marked `PENDING` needs the frozen probe described in §6.
+**2026-10-06.** §0 is the result. §1-§5 are the audit that led to it and the record of why
+every earlier measurement was unusable. Read §0 first.
 
 Terms: `cohesion_gram` (2-hop structural equivalence), `cohesion_aff` (1-hop proximity),
 `umap` (routed community, `umap_proto_sg=1`), `recon` (CVAE reconstruction,
 `freeze_batch_embedding=True`). See CLAUDE.md §9d.
+
+---
+
+## 0. RESULT — `[D60]` frozen full-pass gradient norms, and the base lambdas
+
+`modal_scripts/measure_grad_shares_d60.py`, 5 datasets, T4, all four lambdas = 1,
+`grad_probe=1` (every step), one pass over every edge at the **deployment** threshold
+(`train_epochs=10`), weights **verified bit-identical** before and after the pass.
+
+### What the probe does, and why it is not the same work as training
+
+```
+1. load the pretrained CVAE checkpoint                 (identical to real training)
+2. build the edge dataset at the deployment threshold, train_epochs=10
+3. freeze the weights 3 ways, then ASSERT every parameter tensor is bit-identical
+4. loop over every batch of edges exactly once          (= one real epoch)
+5. at each batch, measure EACH TERM's gradient size SEPARATELY
+6. report median / mean / std per term
+7. lambda_i = share_i / median(gnorm_i)
+```
+
+Step 5 is the only thing real training does not do, and it is why the probe costs more,
+not less, despite taking no optimizer step:
+
+```
+REAL TRAINING     total = l1*L1 + l2*L2 + l3*L3 + l4*L4 ;  total.backward()
+                  -> ONE backward. Every parameter holds d(total)/d(param), i.e. the four
+                     terms' contributions ALREADY SUMMED. They cannot be separated again:
+                     knowing a+b+c+d = 300 does not give you a, b, c or d.
+
+THE PROBE         needs ||d(L_i)/d(params)|| for each i SEPARATELY
+                  -> four separate backward passes. Four people on one scale read 300 kg;
+                     to learn each person's weight you weigh each one. Four weighings.
+```
+
+So ~5x (4 terms + the real backward) is **irreducible**. Skipping `optimizer.step()` saves
+almost nothing — it is the cheapest part of a step.
+
+### The freeze is verified, two ways
+
+```
+(1) ASSERTION   every parameter tensor bit-identical before vs after the pass -- passed
+                on all five datasets (the run raises and fails otherwise)
+(2) FLATNESS    median(gnorm over LAST 50 steps) / median(over FIRST 50 steps)
+```
+
+| dataset | gram | aff | community | recon |
+|---|---|---|---|---|
+| pancreas | 1.01x | 1.01x | 1.00x | 1.01x |
+| lung | 0.99x | 0.99x | 0.98x | 1.00x |
+| immune | 1.00x | 1.01x | 1.00x | 1.01x |
+| crcx | 0.98x | 0.99x | 1.00x | 1.00x |
+| s28nsc | 1.04x | 1.02x | 1.01x | 1.00x |
+
+With frozen weights, early and late batches see the **same model**, so the only variation
+is which cells land in each batch — noise with no trend. A trend would mean the weights
+moved: that is exactly how the broken `d58d` reveals itself (immune `recon` 4.51 early →
+8.65 late = **1.92x**). Flat to within 1-4% here.
+
+**Consequence worth noting:** because there is no trend and CV is 0.02-0.11, the median is
+pinned long before 2,000 samples. A few hundred would have given the same answer, so
+`grad_probe=5` would have been equally accurate and ~5x cheaper. See §0c.
+
+### The measurement
+
+Medians over the full pass; `step0` kept to show how misleading a single minibatch is.
+
+| dataset | steps (1 pass) | term | **median** | mean | std | CV | step0 |
+|---|---|---|---|---|---|---|---|
+| pancreas | 896 | gram | **0.0999** | 0.0998 | 0.00283 | 0.03 | 0.0971 |
+| | | aff | **0.0661** | 0.0661 | 0.00223 | 0.03 | 0.0661 |
+| | | community | **1.317** | 1.322 | 0.1060 | 0.08 | 1.334 |
+| | | recon | **73.96** | 73.99 | 1.209 | 0.02 | 77.60 |
+| lung | 1,892 | gram | **0.0828** | 0.0829 | 0.00325 | 0.04 | 0.1012 |
+| | | aff | **0.0432** | 0.0432 | 0.00200 | 0.05 | 0.0544 |
+| | | community | **5.444** | 5.462 | 0.3568 | 0.07 | 5.189 |
+| | | recon | **11.77** | 11.77 | 0.1946 | 0.02 | 12.03 |
+| pbmc-immune | 2,001 | gram | **0.0480** | 0.0481 | 0.00255 | 0.05 | 0.0577 |
+| | | aff | **0.0350** | 0.0352 | 0.00247 | 0.07 | 0.0451 |
+| | | community | **8.525** | 8.540 | 0.8004 | 0.09 | 8.622 |
+| | | recon | **16.45** | 16.53 | 1.819 | 0.11 | 16.57 |
+| s28nsc | 4,483 | gram | **0.0123** | 0.0123 | 0.00061 | 0.05 | 0.0124 |
+| | | aff | **0.00861** | 0.00862 | 0.00046 | 0.05 | 0.00840 |
+| | | community | **3.033** | 3.040 | 0.2078 | 0.07 | 3.018 |
+| | | recon | **30.91** | 30.94 | 0.7645 | 0.02 | 33.67 |
+| crcx `[76%]` | 3,664 | gram | 0.0166 | 0.0167 | 0.00149 | 0.09 | 0.0263 |
+| | | aff | 0.0146 | 0.0148 | 0.00142 | 0.10 | 0.0249 |
+| | | community | 5.748 | 5.773 | 0.6253 | 0.11 | 5.825 |
+| | | recon | 5.126 | 5.130 | 0.1294 | 0.03 | 4.913 |
+
+crcx is at 2,777/3,664 steps; its last50/first50 is already 0.98-1.00, so the median will
+not move materially. **Mark it final only after the run reports.**
+
+**s28nsc is measured at the current K=800 / `latent_dims=8` config for the first time.**
+Its only prior probe data was at the old K=200 / `latent_dims=16` setup (§4b) and could
+not set a lambda.
+
+### Cross-check — `d60` agrees with the only other frozen probe, and not with `d58d`
+
+| dataset | term | d60 | d58c (frozen, 10 steps) | d60/d58c | d58d (CONTAMINATED) | d60/d58d |
+|---|---|---|---|---|---|---|
+| pancreas | gram | 0.0999 | 0.1060 | 0.94x | 0.1567 | 0.64x |
+| | community | 1.317 | 1.724 | 0.76x | 1.806 | 0.73x |
+| | recon | 73.96 | 44.05 | 1.68x | 14.16 | **5.22x** |
+| lung | gram | 0.0828 | 0.0962 | 0.86x | 0.1876 | **0.44x** |
+| | community | 5.444 | 3.912 | 1.39x | 2.134 | 2.55x |
+| | recon | 11.77 | 6.399 | 1.84x | 4.415 | 2.67x |
+| immune | gram | 0.0480 | 0.0453 | 1.06x | 0.0791 | 0.61x |
+| | community | 8.525 | 5.270 | 1.62x | 1.691 | **5.04x** |
+| | recon | 16.45 | 9.600 | 1.71x | 5.565 | 2.96x |
+| crcx | gram | 0.0166 | 0.0231 | 0.72x | 0.0386 | 0.43x |
+| | community | 5.748 | 6.438 | 0.89x | 2.164 | 2.66x |
+
+`d58c` (10 frozen single steps) is the only other uncontaminated probe, and `d60` lands
+within **0.72-1.84x** of it — the residual gap is the 10-minibatch sampling error `d58c`
+was always going to have. Against `d58d` the disagreement reaches **5.2x**, confirming
+that run moved its weights.
+
+### Base lambdas — `lambda_i = share_i / median(gnorm_i)`, 4 significant digits
+
+**Candidate A — flat 0.25 each.** Cohesion gets half the budget, because it happens to be
+written as two kernels.
+
+| dataset | gram | aff | community | recon |
+|---|---|---|---|---|
+| pancreas | 2.502 | 3.781 | 0.1899 | 0.003380 |
+| lung | 3.021 | 5.790 | 0.04593 | 0.02123 |
+| pbmc-immune | 5.212 | 7.146 | 0.02933 | 0.01520 |
+| s28nsc | 20.29 | 29.05 | 0.08243 | 0.008088 |
+| crcx `[76%]` | *pending* | *pending* | *pending* | *pending* |
+
+**Candidate B — per-subsystem 1/6, 1/6, 1/3, 1/3.** Three *mechanisms* weighted equally
+(who belongs together / does it generalize / is z still about genes).
+
+| dataset | gram | aff | community | recon |
+|---|---|---|---|---|
+| pancreas | 1.668 | 2.521 | 0.2532 | 0.004507 |
+| lung | 2.014 | 3.860 | 0.06123 | 0.02831 |
+| pbmc-immune | 3.475 | 4.764 | 0.03910 | 0.02026 |
+| s28nsc | 13.53 | 19.36 | 0.1099 | 0.01078 |
+| crcx `[76%]` | *pending* | *pending* | *pending* | *pending* |
+
+Exact conversion, no probe needed: `lambda_B = lambda_A * 2/3` (gram, aff),
+`* 4/3` (community, recon).
+
+**Rounding:** 4 significant digits, NOT 2 decimal places. CLAUDE.md §9d's rule exists for
+*filename length* (`lcoh4.03750478377344` blew the 255-byte limit and killed a run after
+training finished), but blind 2 dp would turn `recon = 0.003380` into `0.00`.
+
+### 0a. The decisive finding — the sweep is NOT optional
+
+The question registered before the run was: does the frozen median land near the **step-0**
+values, or near `d58b`'s **run-averaged** ones? It lands near step-0:
+
+```
+immune cohesion_gram:   d60 frozen median   0.0480
+                        step-0              0.0498 - 0.0577    (0.83 - 0.96x)
+                        d58b average        0.1328             (0.36x)
+```
+
+So candidate A on immune gives **5.212 / 7.146 / 0.02933 / 0.01520**, which is essentially
+`d59_v3` (5.345 / 7.728 / 0.0345 / 0.0140) — **the weakest-performing immune arm on the
+scoreboard** (modularity 0.3032, purity 0.779, vs `d59`'s 0.3833 / 0.8264). Candidate B
+only moves community to 0.03910, still ~3x below `d59`'s 0.124.
+
+**The correctly calibrated a-priori base reproduces the arm that lost.** That is a clean,
+pre-registered outcome: the dose sweep is the experiment, not a robustness afterthought.
+It also retires FINDING 2's tentative reading — `d58b`'s averages are not a valid basis,
+they were just accidentally closer to a better dose.
+
+### 0b. Two things this settles about the per-dataset question
+
+```
+RAW LAMBDA is NOT portable -- confirmed. Measured gnorm spread across the five datasets:
+    gram        0.0123 (s28nsc)  ..  0.0999 (pancreas)      8.1x
+    community   1.317  (pancreas) ..  8.525 (immune)        6.5x
+    recon       5.126  (crcx)     .. 73.96  (pancreas)     14.4x
+  The same raw lambda means a 6-14x different influence depending on the dataset.
+
+RECON's gnorm does NOT track the data normalization. pancreas carries 18.5x lung's
+  per-cell sum_g x^2 (section 1) but only 6.3x its recon gnorm (73.96 vs 11.77), and
+  immune sits between on normalization yet BELOW lung-adjacent on gnorm. So the
+  normalization difference is real but is not what sets recon's gradient.
+```
+
+### 0c. Cost, and one misjudgment to record
+
+```
+measured:   immune probe 2.52 it/s   vs real training ~26.7 it/s on a T4
+            (CLAUDE.md section 11: 20,000 steps in ~12-13 min)
+            -> 10.6x slower per step
+total:      ~2.5 GPU-hours on T4 at $0.000164/s  ->  ~$1.70 for all five datasets
+wall-clock: 13 min (immune) to ~65 min (crcx), run in parallel
+```
+
+~5x of the 10.6x is irreducible (four separate backward passes). The rest was avoidable,
+and two parts of it are **fixable inefficiencies in `grad_probe` itself**:
+
+```
+scproto.py:3481-3483   each term is back-propagated TWICE -- once for encoder params,
+                       once for prototype params. One autograd.grad call with both
+                       lists, splitting the norms afterwards, halves this.   2x
+scproto.py:3458        `.item()` inside the accumulation loop forces a GPU->CPU sync
+                       for EVERY parameter tensor on EVERY call -- hundreds per probed
+                       step where one would do.
+my choice              grad_probe=1 instead of 5. CV is 0.02-0.11, so 400 samples pin
+                       the median; 2,000 was waste.                          5x
+```
+
+Low priority: the ablation/sweep runs use `grad_probe=25`, where this overhead is 1/25
+and invisible. Only matters if every-step probing is ever needed again. **Not changed
+mid-run** — editing library code while five runs read it off the volume is how you get an
+unreproducible result.
 
 ---
 
@@ -390,10 +603,7 @@ mid-run, and it answers [D46] Result 3's drift worry.
 
 ## 6. What is PENDING, and the two findings that complicate it
 
-### `PENDING` — the frozen full-pass probe has NOT been run
-
-No mean/median/std exists for **pancreas** or **lung** at all; §4 is step-0 single-batch
-only. Recipe:
+### `RESOLVED by [D60]` — see §0 for the numbers. Recipe kept for the record:
 
 ```python
 base_lr      = 0.0     # Adam step = 0*m/sqrt(v) = 0 -> weights EXACTLY frozen at the
@@ -486,7 +696,57 @@ lambda-free choice, plus always reporting the realized shares from the run itsel
 (c) once on pancreas as a cross-check — if (a) and (c) agree, (a) is vindicated for free;
 if they disagree by more than ~2x, that disagreement is itself a finding worth a paragraph.
 
+### FINDING 1b — EVERY existing averaged measurement is CONTAMINATED
+
+Four probe generations exist. Only one of them froze the weights, and it is the one
+that takes a single step:
+
+| probe | rows | weights frozen? | usable as an averaged gnorm? |
+|---|---|---|---|
+| `d58b` | 81 (every 25 steps, 1 epoch) | **NO** — real updates, admitted in `d58d`'s docstring | no |
+| `d58c` | 10 (single steps) | **yes** (one step calls no optimizer) | no — 10 minibatches, not a pass |
+| `d58d` | full epoch, **every step** | **NO** — patched the wrong optimizer (FIX 4 / `[D60]`) | no |
+| `d58p` | 1 | — | no — one row |
+
+`d58d` looked like the answer: all lambdas = 1, `grad_probe=1`, full epoch on the NH
+train graph, 896 / 1,892 / 2,001 / 3,664 steps for pancreas / lung / immune / crcx. But
+`measure_grad_shares_d58d.py:180` patched `t.optimizer`, while `_run_umap_epoch` uses
+`t._umap_state['optimizer']` (`scproto.py:1294`) — two different objects
+(`self.optimizer` is assigned only at `scproto.py:859`, in the *pretraining* optimizer
+builder). So the weights moved for the whole pass.
+
+The decisive tell is `recon`: it never touches the cohesion memory, so with frozen
+weights its gnorm can only vary by batch composition. It moved **1.92x** on immune
+(4.51 → 8.65, first vs last decile) and 1.70x on lung. `d60` asserts bit-exact parameter
+equality so this cannot recur silently.
+
+**So there is currently NO valid full-pass gnorm for any dataset.** Every lambda in §4,
+§4b and §5 rests on either a single-minibatch measurement or a contaminated average.
+
+### The `d58c` reference — the only uncontaminated measurement that exists
+
+10 steps, no updates possible (a single step never reaches an optimizer call), all
+lambdas = 1, NH train graph, correct `train_epochs=10` edge threshold. Median over the 10
+steps:
+
+| dataset | gram | aff | community | recon |
+|---|---|---|---|---|
+| pancreas | 0.1060 | 0.0693 | 1.724 | 44.05 |
+| lung | 0.0962 | 0.0568 | 3.912 | 6.399 |
+| immune | 0.0453 | 0.0284 | 5.270 | 9.600 |
+| crcx | 0.0231 | 0.0198 | 6.438 | 4.850 |
+
+**This is the cross-check for `d60`.** `d60`'s first-50-step median should land near these
+rows (same frozen state, more batches). If instead it lands near `d58d`'s full-pass
+medians (pancreas gram 0.157, lung 0.188, immune 0.079), the freeze failed again — though
+`d60`'s bit-exact parameter assertion should have aborted the run before that could be
+reported.
+
+Not usable as the lambda basis itself: 10 minibatches is not a pass, and `recon`'s CV over
+those 10 steps is already 0.24-0.33.
+
 ### FINDING 2 — the best-performing immune arm matches RUN-AVERAGED calibration
+*(weakened by FINDING 1b — read the caveat at the end)*
 
 Flat-0.25 lambdas computed from d58b's **run-median** gnorm, against what was actually
 deployed:
@@ -515,6 +775,24 @@ not a proof.
 But it points the same way as candidate B (more community + recon, less cohesion), and it
 is the strongest available argument that **the sweep is not optional** — the a-priori base,
 however principled, may not be the good point, and only the dose-response curve will say.
+
+**The caveat that matters (FINDING 1b).** `d58b`'s medians come from a pass in which the
+weights *were* updating, at all-lambdas-1 — a trajectory on which the model trains almost
+entirely toward recon and community. So this is **not** evidence that averaged calibration
+is a sound method; it is evidence that the lambdas `d59` happened to inherit from a
+contaminated average outperformed the step-0 ones. Two things survive that caveat:
+
+```
+SURVIVES   the step-0 basis is probably too cohesion-heavy on immune -- the two arms with
+           less cohesion share beat it on both modularity and purity.
+DOES NOT   "run-averaged gnorm is the right basis". d58b's average is not a clean
+           measurement of anything. Only d60's frozen pass can settle this.
+```
+
+When `d60` lands, the direct test is: does its frozen full-pass median sit nearer the
+step-0 values (so candidate A reproduces `d59_v3`, the weakest arm) or nearer `d58b`'s
+averages (so it reproduces `d59`, the strongest)? Either answer is informative, and it is
+the reason the probe is worth running rather than reasoning about.
 
 ---
 
@@ -557,4 +835,6 @@ however principled, may not be the good point, and only the dose-response curve 
 | s28nsc gnorm stats | `modal volume get scproto-data models/s28nsc/{d46_probe,d46_balanced,d50rt_gmA}/grad_probe.jsonl` | 2026-10-06 |
 | implied gnorms, all 5 datasets | back-solved from `train_d59_share25_matrix.py` lambdas | on disk |
 | Modal GPU rates | modal.com/pricing (T4 $0.000164/s, L4 $0.000222/s, A100-40 $0.000583/s) | 2026-10-06 |
-| **PENDING: frozen full-pass gnorm** | not run on any dataset | — |
+| **[D60] frozen full-pass gnorm (§0)** | `measure_grad_shares_d60.py`, app `ap-3GxWCMC0KXYL6U9TPaB6oj`; `models/<ds>/d60_<ds>_..._blr0.0_gprb1_.../grad_probe.jsonl` | 2026-10-06 |
+| └ pancreas / lung / immune / s28nsc | complete (896 / 1,892 / 2,001 / 4,483 steps) | 2026-10-06 |
+| └ crcx | **2,777 / 3,664 steps — finalize when the run reports** | 2026-10-06 |
