@@ -1,0 +1,19 @@
+ablation design
+
+base lambda: option b [same share between subsystems]
+for each term, ratio to base: 0, 0.5, 1, 2, 4
+
+metrics we do care about:
+test modularity / test cohesion / bacth entropy, cell type purity [on both full, and test only] [metacell size weighted]
+rare homog / rare f1 / rare coverage
+
+
+cohesion [gram / aff]: i expect effect on cohesion and rare metrics
+recon: expect effect on batch entropy / rare metrics [becasue it pushes aligment across batches - so does not let mix of cells within one batch if they are from diffreent type]
+community: simialr as cohesion - but still i dont know why we shoud need it when we have cohesion
+
+
+questions:
+what metrics shoud be effected by cvae recon loss? i remember we had a probelm and thus we added this - and it seems it improved things - but not sure
+on modualirty - should cohesion terms help conceptualy? or not?
+what is the use of community loss when we have cohesion loss?
