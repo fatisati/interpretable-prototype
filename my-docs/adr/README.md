@@ -4,7 +4,7 @@ One decision per file: `adr/D##-short-kebab-title.md`, plus one line in
 `../DECISION-LOG.md`. **One template**, `TEMPLATE.md`, for every decision —
 a minor one just leaves most sections as a dash.
 
-Highest ID so far: **D56**. Next is **D57**. IDs are never reused or renumbered.
+Highest ID so far: **D58**. Next is **D59**. IDs are never reused or renumbered.
 
 ```
 cp adr/TEMPLATE.md adr/D56-short-kebab-title.md
