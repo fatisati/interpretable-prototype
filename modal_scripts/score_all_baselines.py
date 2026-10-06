@@ -86,6 +86,11 @@ BASELINES = [
     # lung / pbmc-immune NH runs of the fixed loss (suffix _A / _B rerun)
     ("scProto NH (routed)",      r"^d46nh_A$"),
     ("scProto NH (routed)",      r"^d46nh_B$"),
+    ("scProto NH (comm+CVAErecon)", r"^d46nh_cvae$"),
+    # [D59] unified 4-term loss (cohesion-gram + cohesion-aff + routed community
+    # + CVAE-recon), all gradient-share calibrated at share=0.25 each -- resolves
+    # [D55]'s PENDING target-share vector.
+    ("scProto NH (4-term share25)", r"^d59_"),
 ]
 
 

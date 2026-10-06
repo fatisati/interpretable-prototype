@@ -45,6 +45,7 @@ Run:
   PYTHONIOENCODING=utf-8 PYTHONUTF8=1 modal run modal_scripts/train_d58_ablation.py --arms wave1
 """
 import json
+import os
 import time
 
 import modal
@@ -296,8 +297,13 @@ def main(arms: str = "ref"):
         print(f"{a:<10}{s['train_seconds']:>9.0f}{str(s['metrics'].get('n_dead')):>8}  "
               f"{cfg['gram']:g} / {cfg['aff']:g} / {cfg['community']:g} / {cfg['recon']:g}")
     print(f"\ntotal train time this wave: {tot/3600:.2f} GPU-h on {GPU}")
-    with open("d58_arms.json", "w") as f:
+    # CLAUDE.md 3: never a new file in the repo ROOT -- every output type gets
+    # its own subfolder.
+    outdir = os.path.join("files", "tables", "d58_ablation")
+    os.makedirs(outdir, exist_ok=True)
+    op = os.path.join(outdir, "d58_arms.json")
+    with open(op, "w") as f:
         json.dump({"ok": out, "failed": failed, "gpu": GPU}, f, indent=2, default=str)
-    print("[D58] wrote d58_arms.json")
+    print(f"[D58] wrote {op}")
     if failed:
         print(f"[D58] {len(failed)} FAILED: {list(failed)}")

@@ -76,11 +76,12 @@ ZERO_TERMS = ("lambda_nassoc", "lambda_proto_usage",
 
 def build_config(lam_gram, lam_aff, lam_recon=0.0, lam_proto_recon=0.0,
                  lam_umap=0.0, grad_probe=0, umap_proto_sg=0,
-                 lam_mod=0.0, mod_res=0.0, mod_diag=0.0):
+                 lam_mod=0.0, mod_res=0.0, mod_diag=0.0, epoch_dump_assign=0):
     """THE loss config (CLAUDE.md 9d cohesion base), with the [D44]/[D45]
     parameterized terms. ONE definition used by run() AND probe()."""
     from interpretable_ssl.experiments.tasks import LAMBDA_PROTO_UMAP_PRECON
     return dict(LAMBDA_PROTO_UMAP_PRECON) | {
+        "epoch_dump_assign": epoch_dump_assign,  # [D49] per-epoch hard-assign dump
         "lambda_umap": lam_umap,
         "lambda_proto_recon": lam_proto_recon,
         "lambda_nassoc": 0.0,
@@ -183,12 +184,13 @@ def _env():
 def probe(lam_gram: float, lam_aff: float, span_aff: float, span_gram: float,
           lam_recon: float = 0.0, lam_proto_recon: float = 0.0,
           lam_umap: float = 0.0, grad_probe: int = 0, umap_proto_sg: int = 0,
-          lam_mod: float = 0.0, mod_res: float = 0.0, mod_diag: float = 0.0):
+          lam_mod: float = 0.0, mod_res: float = 0.0, mod_diag: float = 0.0,
+          epoch_dump_assign: int = 0):
     """Validated config the DEPLOYED code builds. Run after EVERY deploy."""
     _env()
     return validate(build_config(lam_gram, lam_aff, lam_recon, lam_proto_recon,
                                  lam_umap, grad_probe, umap_proto_sg,
-                                 lam_mod, mod_res, mod_diag),
+                                 lam_mod, mod_res, mod_diag, epoch_dump_assign),
                     lam_gram, lam_aff, span_aff, span_gram)
 
 
@@ -197,7 +199,8 @@ def run(ds: str, lam_gram: float, lam_aff: float,
         span_aff: float, span_gram: float, epochs: int = 10,
         suffix: str = "", lam_recon: float = 0.0, lam_proto_recon: float = 0.0,
         lam_umap: float = 0.0, grad_probe: int = 0, umap_proto_sg: int = 0,
-        lam_mod: float = 0.0, mod_res: float = 0.0, mod_diag: float = 0.0):
+        lam_mod: float = 0.0, mod_res: float = 0.0, mod_diag: float = 0.0,
+        freeze_be: bool = False, epoch_dump_assign: int = 0):
     import os
     _env()
 
@@ -216,7 +219,7 @@ def run(ds: str, lam_gram: float, lam_aff: float,
     name = f"{CONFIG_TAG}{suffix}_{ds}"
     lc = build_config(lam_gram, lam_aff, lam_recon, lam_proto_recon,
                       lam_umap, grad_probe, umap_proto_sg, lam_mod, mod_res,
-                      mod_diag)
+                      mod_diag, epoch_dump_assign)
     checked = validate(lc, lam_gram, lam_aff, span_aff, span_gram)
     print(f"   [CONFIG VERIFIED IN-RUN] {checked}")
 
@@ -225,7 +228,8 @@ def run(ds: str, lam_gram: float, lam_aff: float,
     print(f"    train h5ad: {train_h5}")
     print(f"    lam_gram={lam_gram:.2f} lam_aff={lam_aff:.2f} "
           f"lam_umap={lam_umap} lam_recon={lam_recon} "
-          f"lam_proto_recon={lam_proto_recon} grad_probe={grad_probe}")
+          f"lam_proto_recon={lam_proto_recon} grad_probe={grad_probe} "
+          f"freeze_be={freeze_be}")
     print("=" * 78)
 
     t0 = time.time()
@@ -234,7 +238,7 @@ def run(ds: str, lam_gram: float, lam_aff: float,
         cvae_epochs=50, train_epochs=epochs, eval_freq=2, patience=4,
         batch_size=1024, affinity_type="arbf", num_prototypes=K,
         lambda_config=lc, trainer_kwargs={"experiment_name": name},
-        early_stop=False,
+        early_stop=False, freeze_batch_embedding=freeze_be,
     )
     print(f"[{name}] trained in {time.time()-t0:.0f}s  "
           f"n_dead={metrics.get('n_dead')}")

@@ -17,12 +17,25 @@ lambda_umap routed. Two phases:
      shares (norms are NOT portable across graphs or code paths -- measured
      twice already: 17.71 vs 1.65 for the same term).
   2. real run: 10 epochs at lambda_umap set for ~40% encoder share (decB's
-     validated operating point).
+     validated operating point) -- CORRECTION [D55]: this was never actually
+     true. decB's real ratio-to-cohesion (measured from its own grad_probe.jsonl,
+     matching [D46]'s convention) is 7.60x, not ~40% share. "rtA" below used
+     lumap=0.02, which is itself ~9.1x ratio-to-cohesion, not the intended 40%
+     either -- so this phase never ran at a properly calibrated dose. See [D55].
 
 EXPECTED (phase 2): n_dead=0; coh_aff/dge_r >= the [D39] E-arm's
 (0.4576 joint_purity / 0.8105 dge_r / 0 dead); any clear regression on those =
 the routed term does NOT transfer to spatial, and cohesion-only stays the
-s28nsc config. VERDICT: [ ] transfers  [ ] fails  [ ] inconclusive because ___
+s28nsc config.
+VERDICT: [x] FAILS -- confirmed at TWO doses. rtA (lumap=0.02, ~9.1x ratio,
+uncalibrated) collapsed dge_rbo_avg to 0.137 vs the 0.8105 baseline. The one
+PROPERLY calibrated dose ([D46], share=0.25x ratio, a different, more careful
+run) still lost on every scoreboard metric (ct_purity -8.5%, dge_r -4.5%) even
+without collapsing. Community does not transfer to s28nsc at any dose tested,
+calibrated or not. Cohesion-only ([D39]-E) stays s28nsc's config -- confirmed,
+not reopened, by the 2026-09-26 `d50rt_cvA` run (cohesion + CVAE-recon, no
+community): dge_r=0.796 vs baseline 0.8105, n_dead=3 vs 0 -- recon alone is a
+mild regression too, not a fix. Do not re-run this arm.
 
 Deploy + spawn (server-side, survives disconnects):
   PYTHONIOENCODING=utf-8 PYTHONUTF8=1 modal deploy modal_scripts/train_d50_s28nsc_routed.py
@@ -63,15 +76,17 @@ SPAN_GRAM, SPAN_AFF = 0.076776, 0.034573
 AUTHORITY = 1.5403
 
 
-def build_config(lam_umap=0.0, grad_probe=0, umap_proto_sg=0):
+def build_config(lam_umap=0.0, grad_probe=0, umap_proto_sg=0, lam_recon=0.0,
+                 epoch_dump_assign=0):
     from interpretable_ssl.experiments.tasks import LAMBDA_PROTO_UMAP_PRECON
     return dict(LAMBDA_PROTO_UMAP_PRECON) | {
+        "epoch_dump_assign": epoch_dump_assign,
         "lambda_nassoc": 0.0,
         "lambda_modularity": 0.0,
         "lambda_proto_usage": 0.0,
         "lambda_swav": 0.0,
         "lambda_kl": 0.0,
-        "lambda_recon": 0.0,
+        "lambda_recon": lam_recon,
         "lambda_proto_recon": 0.0,
         "lambda_umap": lam_umap,
         "lambda_cohesion": LAM_GRAM,
@@ -94,7 +109,7 @@ def build_config(lam_umap=0.0, grad_probe=0, umap_proto_sg=0):
 
 def validate(lc):
     for k in ("lambda_nassoc", "lambda_modularity", "lambda_proto_usage",
-              "lambda_swav", "lambda_kl", "lambda_recon", "lambda_proto_recon"):
+              "lambda_swav", "lambda_kl", "lambda_proto_recon"):
         assert float(lc[k]) == 0.0, f"{k} must be 0, got {lc[k]}"
     auth = LAM_GRAM * SPAN_GRAM + LAM_AFF * SPAN_AFF
     assert abs(auth - AUTHORITY) < 0.05, f"authority drifted: {auth}"
@@ -106,6 +121,7 @@ def validate(lc):
             "lambda_cohesion_aff": lc["lambda_cohesion_aff"],
             "lambda_umap": lc["lambda_umap"],
             "umap_proto_sg": lc["umap_proto_sg"],
+            "lambda_recon": lc["lambda_recon"],
             "grad_probe": lc["grad_probe"]}
 
 
@@ -135,28 +151,32 @@ def _env():
 
 
 @app.function(image=image, timeout=900, volumes={"/vol": volume})
-def probe(lam_umap: float = 0.0, grad_probe: int = 0, umap_proto_sg: int = 0):
+def probe(lam_umap: float = 0.0, grad_probe: int = 0, umap_proto_sg: int = 0,
+          lam_recon: float = 0.0, epoch_dump_assign: int = 0):
     _env()
-    return validate(build_config(lam_umap, grad_probe, umap_proto_sg))
+    return validate(build_config(lam_umap, grad_probe, umap_proto_sg, lam_recon,
+                                 epoch_dump_assign))
 
 
 @app.function(image=image, gpu="A100", timeout=21600, volumes={"/vol": volume})
 def run(lam_umap: float = 0.0, epochs: int = 10, suffix: str = "",
-        grad_probe: int = 0, umap_proto_sg: int = 0):
+        grad_probe: int = 0, umap_proto_sg: int = 0, lam_recon: float = 0.0,
+        freeze_be: bool = False, epoch_dump_assign: int = 0):
     _env()
     from interpretable_ssl.experiments.tasks import run_mc_task
 
     name = f"d50rt{suffix}"
-    lc = build_config(lam_umap, grad_probe, umap_proto_sg)
+    lc = build_config(lam_umap, grad_probe, umap_proto_sg, lam_recon,
+                      epoch_dump_assign)
     checked = validate(lc)
-    print(f"   [CONFIG VERIFIED IN-RUN] {checked}")
+    print(f"   [CONFIG VERIFIED IN-RUN] {checked}  freeze_be={freeze_be}")
 
     t0 = time.time()
     trainer, metrics, _ = run_mc_task(
         "s28nsc", cvae_epochs=50, train_epochs=epochs, eval_freq=2, patience=4,
         batch_size=1024, affinity_type="bk02", num_prototypes=200,
         lambda_config=lc, trainer_kwargs={"experiment_name": name},
-        early_stop=False,
+        early_stop=False, freeze_batch_embedding=freeze_be,
     )
     print(f"[{name}] model: {trainer.get_model_name()}")
     print(f"[{name}] done in {time.time()-t0:.0f}s")

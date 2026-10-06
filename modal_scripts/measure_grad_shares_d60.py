@@ -442,8 +442,14 @@ def main():
 
     out = {"results": results, "failed": failed, "shares": SHARES,
            "real_train_epochs": REAL_TRAIN_EPOCHS}
-    with open("d60_gradshares.json", "w") as f:
+    # CLAUDE.md 3: never a new file in the repo ROOT -- every output type gets its
+    # own subfolder.
+    import os as _os
+    outdir = _os.path.join("files", "tables", "gradnorm_calibration")
+    _os.makedirs(outdir, exist_ok=True)
+    op = _os.path.join(outdir, "d60_gradshares.json")
+    with open(op, "w") as f:
         json.dump(out, f, indent=2)
-    print("\n[D60] wrote d60_gradshares.json")
+    print(f"\n[D60] wrote {op}")
     if failed:
         print(f"[D60] {len(failed)} dataset(s) FAILED: {list(failed)}")

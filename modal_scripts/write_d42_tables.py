@@ -53,6 +53,7 @@ T2 = [
 ROWS = [
     ("scProto NH (cohesion)",  "scProto NH (cohesion)"),
     ("scProto NH (coh+comm)",  "scProto NH (coh+comm)"),
+    ("scProto NH (4-term share25)", "scProto NH (4-term share25)"),
     ("Leiden + scPoli-St1 NH", "Leiden + scPoli-St1 NH"),
     ("scProto (cohesion)",     "scProto (cohesion)"),
     ("SEACells",               "SEACells"),

@@ -2,8 +2,12 @@
 
 THE FIXED LOSS (user decision 2026-09-25): joint cohesion (gram+aff, spans per
 graph, 50/50 authority) + community with DETACHED prototypes (umap_proto_sg=1,
-encoder-only gradient), lambda_umap tuned per (dataset, graph) by the
-gradient-share strategy (~40% of the encoder gradient, within-run ratios).
+encoder-only gradient). lambda_umap here was NOT actually calibrated by a
+gradient-share target -- see [D55] (decisions.md): reconstructing crcx's real
+ratio-to-cohesion from its own grad_probe.jsonl gives 3.63x, not "~40% of the
+encoder gradient" as this docstring used to claim. [D46] is the only
+gradient-share calibration with a real paper trail (s28nsc, share=0.25x,
+VERDICT: FAILS). Do not cite "~40%" as what was done here -- it wasn't.
 
 Program: transcriptional datasets get NH + FULL runs (NH via scproto-d46; FULL
 via this app). Multi-batch spatial (crcx) gets FULL only. s28nsc keeps its
@@ -58,15 +62,16 @@ DATASETS = {
 
 
 def build_config(lam_gram, lam_aff, lam_umap=0.0, grad_probe=0,
-                 umap_proto_sg=0):
+                 umap_proto_sg=0, lam_recon=0.0, epoch_dump_assign=0):
     from interpretable_ssl.experiments.tasks import LAMBDA_PROTO_UMAP_PRECON
     return dict(LAMBDA_PROTO_UMAP_PRECON) | {
+        "epoch_dump_assign": epoch_dump_assign,
         "lambda_nassoc": 0.0,
         "lambda_modularity": 0.0,
         "lambda_proto_usage": 0.0,
         "lambda_swav": 0.0,
         "lambda_kl": 0.0,
-        "lambda_recon": 0.0,
+        "lambda_recon": lam_recon,
         "lambda_proto_recon": 0.0,
         "lambda_umap": lam_umap,
         "lambda_cohesion": lam_gram,
@@ -88,7 +93,7 @@ def build_config(lam_gram, lam_aff, lam_umap=0.0, grad_probe=0,
 
 def validate(lc, lam_gram, lam_aff, span_aff, span_gram):
     for k in ("lambda_nassoc", "lambda_modularity", "lambda_proto_usage",
-              "lambda_swav", "lambda_kl", "lambda_recon", "lambda_proto_recon"):
+              "lambda_swav", "lambda_kl", "lambda_proto_recon"):
         assert float(lc[k]) == 0.0, f"{k} must be 0, got {lc[k]}"
     auth = lam_gram * span_gram + lam_aff * span_aff
     assert abs(auth - AUTHORITY) < 0.05, f"authority drifted: {auth}"
@@ -99,6 +104,7 @@ def validate(lc, lam_gram, lam_aff, span_aff, span_gram):
             "lambda_cohesion_aff": lc["lambda_cohesion_aff"],
             "lambda_umap": lc["lambda_umap"],
             "umap_proto_sg": lc["umap_proto_sg"],
+            "lambda_recon": lc["lambda_recon"],
             "grad_probe": lc["grad_probe"]}
 
 
@@ -130,11 +136,12 @@ def _env():
 @app.function(image=image, timeout=900, volumes={"/vol": volume})
 def probe(ds: str, lam_gram: float, lam_aff: float,
           span_aff: float, span_gram: float, lam_umap: float = 0.0,
-          grad_probe: int = 0, umap_proto_sg: int = 0):
+          grad_probe: int = 0, umap_proto_sg: int = 0, lam_recon: float = 0.0,
+          epoch_dump_assign: int = 0):
     _env()
     r = validate(build_config(lam_gram, lam_aff, lam_umap, grad_probe,
-                              umap_proto_sg), lam_gram, lam_aff,
-                 span_aff, span_gram)
+                              umap_proto_sg, lam_recon, epoch_dump_assign),
+                 lam_gram, lam_aff, span_aff, span_gram)
     r["ds"] = ds
     r["K"] = DATASETS[ds][0]
     return r
@@ -144,22 +151,24 @@ def probe(ds: str, lam_gram: float, lam_aff: float,
 def run(ds: str, lam_gram: float, lam_aff: float,
         span_aff: float, span_gram: float, lam_umap: float = 0.0,
         epochs: int = 10, suffix: str = "", grad_probe: int = 0,
-        umap_proto_sg: int = 0, aff_type: str = "arbf"):
+        umap_proto_sg: int = 0, aff_type: str = "arbf", lam_recon: float = 0.0,
+        freeze_be: bool = False, epoch_dump_assign: int = 0):
     _env()
     from interpretable_ssl.experiments.tasks import run_mc_task
 
     K = DATASETS[ds][0]
     name = f"d53full{suffix}_{ds}"
-    lc = build_config(lam_gram, lam_aff, lam_umap, grad_probe, umap_proto_sg)
+    lc = build_config(lam_gram, lam_aff, lam_umap, grad_probe, umap_proto_sg,
+                      lam_recon, epoch_dump_assign)
     checked = validate(lc, lam_gram, lam_aff, span_aff, span_gram)
-    print(f"   [CONFIG VERIFIED IN-RUN] {checked}  ds={ds} K={K}")
+    print(f"   [CONFIG VERIFIED IN-RUN] {checked}  ds={ds} K={K} freeze_be={freeze_be}")
 
     t0 = time.time()
     trainer, metrics, _ = run_mc_task(
         ds, cvae_epochs=50, train_epochs=epochs, eval_freq=2, patience=4,
         batch_size=1024, affinity_type=aff_type, num_prototypes=K,
         lambda_config=lc, trainer_kwargs={"experiment_name": name},
-        early_stop=False,
+        early_stop=False, freeze_batch_embedding=freeze_be,
     )
     print(f"[{name}] model: {trainer.get_model_name()}")
     print(f"[{name}] done in {time.time()-t0:.0f}s")
