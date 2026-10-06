@@ -1,9 +1,9 @@
 ---
 id:             D58
 title:          ablate each loss term around share vector B, immune, dose 0/1x/2x
-status:         running
+status:         works
 date_opened:    2026-10-06
-date_closed:
+date_closed:    2026-10-06
 supersedes:
 superseded_by:
 tags:           [ablation, dose-sweep, loss-weighting, rare-cells]
@@ -12,6 +12,7 @@ protocol:       NH-heldout (arbf_nodeheldout20_seed0, 20% test, frozen-pass plac
 K:              300
 comparable_to:  the immune NH scoreboard in files/tables/node_heldout_scoreboard/
 runs:           [d58_base_s31, d58_base_s32, d58_gram0, d58_aff0, d58_comm0, d58_recon0]
+cost_actual:    4.23 GPU-h train on L4, ~$5 billed (6 arms, at the cap)
 lit:            [chen2018gradnorm]
 code:           fa04afd
 cost:           ~$0.79/arm measured on L4; 6 arms ~= $4.1-4.7 (hard cap $5)
@@ -145,36 +146,91 @@ it bounds scale but is not a proper std), one dataset, one term at a time.
 
 > Every number with the path it was read from. Means with their std.
 
-Reference arm, from `files/tables/d58_ablation/pbmc-immune_d58_ablation.csv`:
+All 6 arms completed, 0 failures. Full tables:
+`my-docs/experiments/d58-ablation-results.md`, from
+`files/tables/d58_ablation/pbmc-immune_d58_ablation.csv`.
 
-| metric | base_s31 |
-|---|---|
-| rare homogeneity | 0.5849 |
-| rare F1 | 0.7046 |
-| rare coverage | 0.9333 |
-| cross-batch homogeneity | 0.2599 |
-| batch entropy (test, wtd) | 0.8699 |
-| purity (test, wtd) | 0.7594 |
-| purity (full, wtd) | 0.7798 |
-| cohesion aff (test) | 0.0788 |
-| cohesion gram (test) | 0.1541 |
-| modularity (test) | 0.1506 |
-| metacells used | 300 / 300 |
-| train time | 3553 s on L4 |
+**Deltas vs `base_s31`** (negative = arm is worse); primary metric in bold:
 
-*Remaining arms running; table to be completed before this ADR closes.*
+| arm | rare homog | rare F1 | entropy | **purity (test)** | purity (full) | coh gram | modularity | n_dead |
+|---|---|---|---|---|---|---|---|---|
+| gram0 | -0.0587 | **-0.1243** | +0.0195 | **+0.0099** | +0.0016 | +0.0068 | -0.0083 | 0 |
+| aff0 | +0.0355 | -0.0597 | **-0.2199** | **+0.0361** | +0.0247 | +0.0111 | +0.0469 | **1** |
+| comm0 | -0.0764 | -0.0054 | +0.1339 | **-0.0137** | -0.0120 | -0.0113 | -0.0184 | 0 |
+| recon0 | **-0.1268** | -0.0804 | +0.0342 | **-0.0339** | -0.0177 | -0.0146 | -0.0176 | 0 |
 
-- **Good** — pending
-- **Bad** — pending
-- **Surprised me** — `gram0` trained in **1125 s** against base's **3553 s**, a
-  3.2x speedup, because `scproto.py:2943` skips the 2-hop Gram similarity entirely
-  when `lambda_cohesion=0`. So the gram kernel is ~70% of this loss's step cost,
-  and ablation arms that remove a term are materially cheaper than the base.
-- **Deviations from Confirmation** — pending
+**Noise floor, 2 base seeds:** purity (test) std **0.0026**; rare homogeneity std
+**0.0416**.
+
+- **Good** — every arm separates cleanly on purity (3.8 to 13.9 noise-std), so the
+  ablation is readable. `recon` is the most load-bearing term, `community` the least.
+  The two cohesion kernels turn out to do *different* jobs: `aff` buys batch mixing,
+  `gram` buys rare-type F1 and coverage. The whole table lies on a single
+  purity-versus-batch-mixing axis with base B mid-axis, which is a cleaner story than
+  "every term helps everything".
+
+- **Bad** — the primary metric had to be swapped mid-analysis, under the
+  pre-declared fallback. Rare homogeneity's run-to-run spread (0.0416) is **10x** the
+  within-run SE (0.0041) I used in `D58`'s own selection rule to justify choosing it.
+  Within-run SE underestimates run-to-run variance badly, because changing the seed
+  changes the prototype init and batch order, not just which cells are sampled. On
+  rare homogeneity only `recon0` (-3.0 std) is unambiguous. The plan declared this
+  fallback in advance, so the swap is not post-hoc — but the original justification
+  was wrong and is recorded as such.
+
+- **Surprised me** — three things.
+  1. **Removing recon RAISED batch entropy** (0.8699 → 0.9041, +3.6 std) and
+     cross-batch homogeneity (+1.7 std). Both the plan and I predicted a drop, on the
+     mechanism that recon keeps batch information out of `z` via the batch embedding.
+     That mechanism is **not supported**: recon earns its place through purity and
+     rare homogeneity instead.
+  2. **Recon, not community, is the term that generalizes.** The pre-registered
+     discriminating test (held-out penalty > full-dataset penalty) comes out
+     `recon0` **1.92x**, `aff0` 1.46x, `comm0` **1.14x**. I argued community should
+     show this gap because routed community can only change the encoder map. It
+     barely does; recon nearly doubles its penalty on unseen cells.
+  3. `gram0` trained in **1125 s** against base's 3553 s — `scproto.py:2943` skips
+     the 2-hop Gram similarity when `lambda_cohesion=0`, so the gram kernel is ~70%
+     of this loss's per-step cost.
+
+- **Deviations from Confirmation** — the `aff0` arm has `n_dead=1`, so by the gate as
+  written (`n_unused_protos == 0`) it is **INVALID**, and it is also the arm carrying
+  the most interesting finding. 1/300 is marginal and `D46` treated "1 at eval" as a
+  live partition, but relaxing the gate after seeing the result would be post-hoc, so
+  it stands as declared pending a user decision. Nothing else depends on `aff0`.
 
 ## Verdict
 
-*pending — 1 of 6 arms scored.*
+**works.** 6/6 arms completed, every arm separates on the primary metric, and the
+experiment answered its question — including by falsifying two of its own
+predictions, which is the outcome a pre-registered design exists to make visible.
+
+What it establishes, on one dataset with one seed per arm:
+```
+recon      MOST load-bearing: purity -0.0339 (13 std), rare homog -0.1268 (3.0 std),
+           and the only term with a real held-out-vs-full generalization gap (1.92x).
+           NOT a batch-integration term -- removing it raised entropy.
+aff        buys BATCH MIXING: removing it collapses entropy by 0.2199 (23 std) while
+           improving purity and modularity. (gate-flagged, n_dead=1)
+gram       buys RARE-TYPE recovery: removing it costs rare F1 -0.1243 and coverage
+           -0.0667, the largest F1 effect in the set.
+community  earns its place but is the WEAKEST of the four on purity (-0.0137,
+           5.3 std) -- and its generalization gap is 1.14x, i.e. essentially absent.
+```
+
+What it rules out: the mechanism story that recon maintains batch integration, and
+the claim that routed community is what makes the model generalize to unseen cells.
+Both were pre-registered and both failed.
+
+What it does NOT establish: anything about dose (all arms are 0 vs 1x), anything
+on another dataset, and anything that needs a proper std — the floor is 2 points.
+
+Next, in order:
+1. A third base seed, to turn the noise floor into a real std (~$1).
+2. `comm2x` — the highest-value missing arm, since `d59`'s best immune result used
+   community at ~2.9x base B and this experiment only tested 0 vs 1x.
+3. Transfer the configuration to a second dataset before any of this is claimed as
+   general.
 
 ## More Information
 

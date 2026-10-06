@@ -42,13 +42,16 @@ decision gets a new ADR, and both lines stay here.
   spread on the cohesion terms, since traced to an unseeded prototype init (-> D57).
   -> `adr/D56-lambda-from-frozen-full-pass-gradnorm-median.md`
 
-- **D58** `running` 2026-10-06 — In the context of a 4-term loss whose terms had
+- **D58** `works` 2026-10-06 — In the context of a 4-term loss whose terms had
   never been individually tested, facing that we could not say whether community
   earns its place when cohesion is already there nor which cohesion kernel does the
   work, we decided for one dose curve per term around D56's share vector B — where
   dose=0 IS that term's ablation arm — over running ablation and sweep separately,
   to achieve both results from one set of runs inside a $5 cap, accepting one term
-  varied at a time, a single dataset, and one seed per arm.
+  varied at a time, a single dataset, and one seed per arm. Recon is most
+  load-bearing and the only term with a generalization gap; community is weakest;
+  aff buys batch mixing and gram buys rare-type recovery. Two pre-registered
+  predictions falsified.
   -> `adr/D58-ablate-each-loss-term-around-share-vector-B.md`
 
 <!-- new entries here, newest last -->

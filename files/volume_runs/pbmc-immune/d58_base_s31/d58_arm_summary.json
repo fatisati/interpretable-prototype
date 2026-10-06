@@ -1,0 +1,41 @@
+{
+  "arm": "base_s31",
+  "config": {
+    "arm": "base_s31",
+    "gram": 3.794,
+    "aff": 6.399,
+    "community": 0.04307,
+    "recon": 0.02042,
+    "seed": 31,
+    "train_epochs": 10
+  },
+  "train_seconds": 3552.8,
+  "gpu": "L4",
+  "model_name": "d58_base_s31_ds-pbmc_prtInit-wayp_frzbe1_aff-arbf_recon0.02042_lumap0.04307_usim-prot_cvae_e50_ecal1_pum-ema_nagg-max_lcoh3.794_upsg1_gprb25_cglb2_cmini-full_cdia1.0_lcha6.399_upm-dotp_v31",
+  "dump_path": "/vol/models//pbmc-immune_arbf_nodeheldout20_seed0_train/d58_base_s31_ds-pbmc_prtInit-wayp_frzbe1_aff-arbf_recon0.02042_lumap0.04307_usim-prot_cvae_e50_ecal1_pum-ema_nagg-max_lcoh3.794_upsg1_gprb25_cglb2_cmini-full_cdia1.0_lcha6.399_upm-dotp_v31",
+  "metrics": {
+    "seed": 31,
+    "purity": 0.7667494344784032,
+    "niche_purity": null,
+    "batch_entropy": 0.8919742413483944,
+    "modularity": 0.3258058057774879,
+    "coverage": 1.0,
+    "dge_rbo_avg": 0.07468098335228765,
+    "dge_kendall_avg": 0.1800378927058679,
+    "dge_jaccard_avg": 0.1310507800014333,
+    "scgraph_corr_avg": 0.6744233348169943,
+    "scgraph_corr_std": 0.12977690777022763,
+    "ct_niche_rbo_avg": null,
+    "n_dead": 0,
+    "coh_aff": 0.08230380927678285,
+    "coh_gram": 0.14953584021013153,
+    "aff_compactness_per_batch": {
+      "10X": 0.40061265217516884,
+      "Freytag": 0.3098454637783804,
+      "Oetjen": 0.319174125730264,
+      "Sun": 0.11832238108236301,
+      "Villani": 0.03463322155307529
+    },
+    "aff_compactness_mean": 1.2228209372523808
+  }
+}
