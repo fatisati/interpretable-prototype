@@ -1,0 +1,4 @@
+does it make sense to use gradnorm lambda training in my model?
+is it common to use it? when do people usualy use it?
+what would be pros and cons for me?
+why in single cell/deep cluetsring models people dont use it?

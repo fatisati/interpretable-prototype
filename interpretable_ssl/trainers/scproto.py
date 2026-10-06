@@ -406,11 +406,33 @@ class SCProtoTrainer(AdoptiveTrainer):
         L_sym      = D_inv_sqrt @ A @ D_inv_sqrt
 
         n_eigs = min(n_eigs, N - 2)
-        _, vecs = eigsh(L_sym, k=n_eigs, which='LM', tol=1e-2)   # [N, n_eigs]
+        # [D57] v0 MUST be fixed. eigsh is ARPACK: without v0 it starts from a
+        # RANDOM vector, and tol=1e-2 is loose enough that different starts return
+        # materially different eigenvectors. Since `vecs` is what the MaxMin below
+        # measures distances in, a random v0 => different seed cells => different
+        # prototypes on every run, even from the same pretrain checkpoint.
+        # MEASURED (synthetic graph at this shape, identical MaxMin loop, separate
+        # processes): no v0 -> seed-cell overlap 31-36% across runs; fixed v0 ->
+        # 100%, and identical at OMP_NUM_THREADS=1/2/8 so BLAS threading does not
+        # reintroduce it. Fixing v0 alone is sufficient; tol does not need tightening.
+        _v0 = np.random.RandomState(int(getattr(self, 'seed', 31))).rand(L_sym.shape[0])
+        _, vecs = eigsh(L_sym, k=n_eigs, which='LM', tol=1e-2, v0=_v0)   # [N, n_eigs]
         print(f"[waypoint init] diffusion map done — {n_eigs} eigenvectors")
 
         # --- greedy MaxMin in diffusion space ---
-        chosen    = [np.random.randint(0, N)]
+        # First seed cell MUST be reproducible across separate process invocations
+        # (a probe run measuring gnorm and the real training run both call this),
+        # or the two end up with different random prototypes despite loading the
+        # SAME pretrain checkpoint -- np.random.randint here used the global RNG
+        # state, which differs run-to-run depending on unrelated prior random
+        # calls.
+        # CORRECTED [D57]: this comment used to claim "everything after this first
+        # pick is already deterministic given it (plain greedy argmax), so seeding
+        # just this one draw is sufficient". The greedy argmax is deterministic
+        # given `vecs` -- but `vecs` was NOT, per the note above, so seeding this
+        # draw alone was NOT sufficient. Both are seeded now.
+        _rng = np.random.RandomState(int(getattr(self, 'seed', 31)))
+        chosen    = [int(_rng.randint(0, N))]
         min_dists = np.full(N, np.inf)
 
         for _ in tqdm(range(K - 1), desc="waypoint MaxMin", unit="proto"):

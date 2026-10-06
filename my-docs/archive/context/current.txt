@@ -1,0 +1,48 @@
+===ablation - sweep===
+now we have community cohesion and cvae_recon terms in our model
+also metrics and whta is the concept and why we have each is collapse_summary
+but we need numerical proof that each term mattres and is doing what we want
+firts conceptualy exlpain what is each term is - and what do we expect from each term? why we need that term
+
+then help me design experiments based on best practice
+like abaltion [remove one by one maybe? and chec effect on metrics]
+also sweep like experiments
+
+how do people hadnle this? in ablation what value for other terms?
+for sweep same quetison as above? also what numebrs to sweep?
+cosider we had the lambda nor grad based lambd choicing ot wokred well 
+help we decide a clear strategy - and design 
+===
+[quadratics] ratio of two quadratics : what does it mean? what do you mean by quadratic?
+[kmeans?] It is weighted kernel k-means: what do you mean by this? in kmeans - we do compare each term with center of other clusters and assign to closest - then update centers - then how what we have is like that?
+
+[other deep cluetsring?]any body used this function we use for deep clustering? like get the sim from input and define latent clusters with cohesion like loss?
+
+[dead proto]: Known failure mode it does NOT fix: with cohesion_form='perc' a dead prototype contributes exactly 0 — it is never penalised, only unrewarded. And size control is ~1/m, which vanishes for large metacells. So cohesion alone does not control how big metacells get.: but as self sim = 1
+using a proto is better than not using it - thus if initialy all proto used - i dont thing we shoud have dead proto - or shall we?
+i felt this is not a real issue - i mean i think i tried and cohesion loss worked somehow anti collapse - while community loss tends to collapse
+correct me but i think cohesion only loss functions we didnt have any collapse yes? or i am wrong and we need to have some seprate anti collapse mechanism?
+
+1b. lambda_umap (routed community) — generalizing graph geometry: what does this mean? graph geomatry?
+detaching proto for commuity loss - we again had less dead proto i assume
+
+the routing splits the two subsystems so each gets its right teacher.: what does it mean?
+constrains pairwise structure: what do you mean by this?
+
+i knwo that what community loss force is like yhis: the proto assigment based similarity of 2 cells shoud be simialr to their real simialrity
+so if 2 cells simialr the encoder learn to adjust their assigment to the proto vectors so they have simialr assigemtn vectors
+[do we need to have a queue here? is that going to have real effect and why? like save from past batches]
+however what does cohesion do? in cohesion, simialr cells shoud be assigned to simialr protoypes - it looks at all cells assigned to each proto and copare siialrty to all of them
+so if two cells simialr, the enocde try to put them in same protoype - like find copact simialr cluster of cells that what cohesion loss do 
+now why the comm loss generalize but cohesion dont? i dont get why?
+
+Known risk, measured: on s28nsc, at a ratio of 0.25x cohesion's encoder gradient the partition survives (1 dead) but it still costs 4.5% of dge_r and 8.5% of ct_purity and buys nothing back ([D46], VERDICT: FAILS). At an uncalibrated ~24x it kills 125/200 prototypes and halves dge_r. So this term is dose-critical, and s28nsc and the transcriptomic datasets may genuinely differ — that is exactly what [D55] says is still unresolved.
+: i didnt get this - explain easier t undetatd
+can you please explain eveything simple clear and compact - so i dont have to ask again and again?
+satisfied by drifting batch structure back into z — then recon is actively harming batch integration instead of anchoring biology. Recon-with-frozen-embedding and recon-without are not the same term : what our experimetns show?
+
+===
+1. Fix the two CLAUDE.md statements above (the division caveat; add the verified-shares fact).: i didnt get this
+
+abltions: remove each term keep others -chekc metrics
+sweep - kee other lamba - sweep others

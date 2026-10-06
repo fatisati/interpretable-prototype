@@ -1,0 +1,178 @@
+PLAN — ADD MODULARITY AS ITS OWN LOSS TERM
+==========================================
+written 2026-09-18 · decisions.md §18 has the reasoning and the derivation
+
+
+WHAT WE ARE ADDING
+------------------
+One scalar term. Not a diagonal + off-diagonal pair.
+
+    modularity = ( sum_k affinity_inside[k]
+                 - resolution * sum_k volume[k]^2 / total_degree ) / total_degree
+
+    loss_modularity = -modularity [we need to find proper lambda for this tern]
+
+Every cell pair is scored once: earn the affinity you actually contain, pay the
+affinity you would contain by chance given your members' connectivity. Pairs in
+DIFFERENT prototypes score zero — so "keep communities separate" is already in
+there, by omission. That is why no off-diagonal term is needed.
+
+It replaces nassoc, it does not live inside it:
+
+    loss_total = loss_community
+               + 0.01 * loss_proto_recon
+               + lambda_nassoc     * (nassoc diag + offdiag)     <- 0 when using modu
+               + lambda_modularity * loss_modularity
+
+
+WHY (one line each, full argument in decisions.md §18)
+-----------------------------------------------------
+  · same graph, same optimizer, same K: modularity DGE 0.856 vs CPM 0.630
+  · CPM's quality depends on local density (spearman +0.118 / +0.304); modularity's
+    does not (+0.025). Our graph spans 17.8x in degree.
+  · CPM allows 1-cell communities; modularity's minimum was 15. DGE is pseudobulk,
+    so tiny communities are noisy.
+  · `resolution` transfers in from Leiden. `gamma` never transferred from anything.
+  · correctness is checkable against igraph before spending any GPU time.
+
+
+DECISIONS ALREADY MADE
+----------------------
+  target        s28nsc first (fully), then pancreas         [CLAUDE.md §6]
+  role          candidate replacement for CPM, so tune it properly
+  structure     its own term; no diagonal/off-diagonal decomposition
+  degrees       EXACT, precomputed. Never batch-local — see the trap below.
+  normalizer    total_degree (DMoN's convention), so `resolution` transfers
+
+
+DECISIONS TO MAKE DURING IMPLEMENTATION
+---------------------------------------
+1. COLLAPSE GUARD — start with NONE.
+   Modularity already scores the one-blob solution at (1 - resolution) = -18.4, so
+   collapse is never rewarded. DMoN still ships a guard because the gradient near a
+   uniform assignment is weak. Plan: run without one, watch `n_unused_protos` and
+   `proto_largest_share`. Only add a guard if collapse actually appears, and then
+   pick ONE (lambda_collapse is DMoN's own and is already implemented) so the effect
+   is attributable.
+
+2. lambda_modularity — MEASURE IT, DO NOT GUESS.
+   The scale is new. Read loss_community and loss_modularity off epoch 1 and set
+   lambda so the two are the same order. Precedent: guessing this wasted a pancreas
+   run this session (lambda=1 would have made the term 0.3% of the loss).
+
+3. USAGE LOSS — keep OFF.
+   Measured worth +0.015 to +0.040 DGE when off, under CPM. No reason to expect
+   modularity differs, but re-check `n_unused_protos`.
+
+4. resolution FOR PANCREAS — re-derive, do not reuse 19.43.
+   One Leiden bisection on the arbf graph. gamma was not portable across graphs and
+   there is no reason resolution would be.
+for resolution - i think we can consider this formula: min_possible_size = n / sqrt(2m*resoltion) [validate it] - if so we can set some min size and calc res based on that - use min number of cells of same state [niche - ct] tell me the numebr
+
+THE TRAP — DO NOT USE BATCH-LOCAL DEGREES
+-----------------------------------------
+1024 sampled edges give 2048 endpoints over ~2006 unique cells: 1.02 appearances
+per cell. Almost every cell appears exactly ONCE whatever its true degree, so the
+batch degree distribution is nearly flat while the real one spans 17.8x. A flat
+null model is a constant charge — i.e. batch-local modularity degenerates back into
+CPM. Use the precomputed degrees; they are free.
+
+
+THE THREE ESTIMATORS (details in decisions.md §18)
+--------------------------------------------------
+  affinity_inside   scale the sampled-edge sum by total_degree / n_sampled_edges.
+                    NO affinity factor inside the sum — the sampler applied it.
+  volume            Horvitz-Thompson: weighted_degree[i]*assign[i,k]/prob_in_batch[i].
+                    prob_in_batch already exists as self._nassoc_p_in.
+  volume^2          NEVER square the estimate. Multiply the live estimate by a
+                    detached running average, or small prototypes get over-charged.
+
+
+CONFIG (CLAUDE.md §9 — both files, same edit)
+---------------------------------------------
+  lambda_modularity   default 0.0   abbrev 'lmod'   numeric, so no 4-char issue
+  modularity_res      default 1.0   abbrev 'mres'   numeric
+
+  Both are NEW KEYS: defaults.py AND interpretable_ssl/constants.py.
+  Verify by printing get_model_name() once and seeing lmod / mres appear.
+
+
+WHAT TO TEST, IN ORDER
+----------------------
+STEP 1 — free, no GPU, do this before writing the training path
+  Feed Leiden's hard one-hot partition into the modularity function.
+  It MUST equal igraph's modularity at the same resolution.
+  If it does not, the implementation is wrong. Stop and fix.
+  CPM never had this check — which is how two counting bugs survived for weeks.
+
+STEP 2 — free, local, reuses measure_estimator_bias.py
+  Simulate the sampler and compare estimate vs truth for affinity_inside,
+  volume, and volume^2, binned by prototype size.
+  PASS = ratios near 1.00 and FLAT across sizes.
+  This is what caught the w^2 and degree-bias bugs in CPM.
+
+STEP 3 — range checks on epoch 1 (CLAUDE.md §9b)
+  modularity in [-1, 1]                      outside = bug, stop
+  at init, near-uniform assignments  ~ (1 - resolution)/K = -0.092
+  lambda_modularity * loss_modularity  same order as loss_community (~2.5)
+
+STEP 3b — GRADIENT PROBE: set lambda the correct way   (~$0.08, both datasets)
+  decisions.md §20. What balances loss terms in gradient descent is how hard each
+  PUSHES the parameters (its gradient norm), not how big its value is. Our modularity
+  term has a big value but a small push -- the bulk charge is 18x the reward at init --
+  which is why value-matching and convergence-matching disagreed 10x.
+
+    1. build the trainer, load the pretrain checkpoint, take ONE batch
+    2. backward on loss_community  alone -> ||grad_community||
+    3. backward on loss_modularity alone -> ||grad_modularity||
+    4. lambda = ||grad_community|| / ||grad_modularity||
+
+  Ref: GradNorm (Chen et al., ICML 2018) -- they re-balance every step, we measure once.
+  Run on BOTH datasets and check whether lambda*resolution is constant. That tests
+  whether the 1/resolution heuristic being replaced was ever real. Either answer is
+  useful. Gradient matching absorbs the resolution coupling automatically, so if it
+  works we drop that heuristic for good.
+
+  IF IT WORKS -> update decisions.md §20 with the measured numbers.
+
+STEP 4 — s28nsc, latent 16, usage off, resolution 19.43   (~$0.25)
+  Compare against:
+    Leiden-modularity   DGE 0.856  18 pairs  jointP 0.534  int_frac 0.5147
+    SEACells            DGE 0.849  19 pairs  jointP 0.504  int_frac 0.4465
+    scProto best (CPM)  DGE 0.842  13 pairs  jointP 0.437  int_frac 0.3338
+  Also report: n_unused_protos, min/median/max size, connected components
+  per prototype (the CPM run had median 13 — modularity should be far lower).
+
+STEP 5 — pancreas, paper config, only the loss term swapped   (~$0.15)
+  Re-derive resolution first. Compare against the reproduced paper row:
+    modularity 0.6924  batch entropy 0.4220  purity 0.9041  coverage 1.0
+
+
+STOP RULES
+----------
+  · Step 1 or 2 fails            -> fix before any GPU time
+  · modularity outside [-1, 1]   -> bug, stop
+  · prototypes start dying       -> add ONE collapse guard, rerun, attribute it
+  · s28nsc lands at ~0.84 / 13   -> the objective was never the binding constraint;
+                                    stop and look at the search, not the loss
+
+
+WHAT WOULD COUNT AS SUCCESS
+---------------------------
+  DGE ~0.85 with 17-18 pairs and joint purity ~0.53 on s28nsc.
+  That is parity with SEACells on its own metrics while beating it on joint
+  purity — the stated goal, which no scProto run has reached.
+
+  Versus today's best: +5 resolved states at equal DGE, +0.10 joint purity.
+
+
+HONEST CAVEATS
+--------------
+  · all the DGE evidence comes from Leiden, a HARD optimizer. One data point says
+    objectives transfer to scProto (Leiden-CPM 0.630 -> scProto-CPM 0.605).
+  · modularity has a resolution limit. Measured on bk02: 39% of SEACells' metacells
+    fall below the scale at resolution 1, but only 7.5% at 19.43.
+  · single seed throughout. Differences under ~0.1 DGE are not distinguishable.
+
+i also want you to monitor the new loss term numericaly maybe in few first epochs - with some usable metrics - so we know we are calcuitng in a right way 
+maybe even compare betch estimation withr eal graph values so we know our estimation is fine 

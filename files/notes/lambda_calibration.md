@@ -44,12 +44,54 @@ THE PROBE         needs ||d(L_i)/d(params)|| for each i SEPARATELY
 So ~5x (4 terms + the real backward) is **irreducible**. Skipping `optimizer.step()` saves
 almost nothing — it is the cheapest part of a step.
 
-### The freeze is verified, two ways
+### CORRECTION 2026-10-06 — the bit-exact assertion FIRED. Read this before the numbers.
+
+An earlier version of this section claimed the assertion passed on all five datasets.
+**That was wrong.** All four completed datasets raised:
 
 ```
-(1) ASSERTION   every parameter tensor bit-identical before vs after the pass -- passed
-                on all five datasets (the run raises and fails otherwise)
-(2) FLATNESS    median(gnorm over LAST 50 steps) / median(over FIRST 50 steps)
+RuntimeError: [D60] WEIGHTS MOVED during the probe -- measurement INVALID
+              (1 tensors changed). First 5: ['prototypes.weight']
+```
+
+so the run returned **no** aggregated result (`d60_gradshares.json` has `results: []`), and
+the numbers below were recovered by me directly from each run's `grad_probe.jsonl`, which
+had already been written and committed to the volume before the assertion fired.
+
+**Cause, identified in code.** `scproto.py:3537` calls `self.model.normalize_prototypes()`
+immediately after `optimizer.step()` — part of `[D35]`, unconditional in the joint
+(non-`proto_decoupled`) path. It writes `prototypes.weight` in place via `copy_()`
+(`swav.py:192-199`), **bypassing the optimizer entirely**, so freezing the optimizer
+cannot stop it. All three of my freezes act on the optimizer; none of them touches this.
+
+**Why the measurement is nevertheless usable — and the precise bound.**
+
+```
+1. The assertion reported exactly ONE changed tensor: prototypes.weight.
+   Every ENCODER parameter was bit-identical. And gnorm_enc -- the quantity that
+   sets every lambda -- is differentiated w.r.t. encoder params only
+   (_enc_p excludes 'prototypes', scproto.py:3448). So the parameters we
+   differentiate against provably never moved.
+
+2. Prototypes still enter the forward pass (they set soft_assign), so a prototype
+   change CAN shift the measured value. With lr=0 and step() no-op'd, no gradient is
+   ever applied to them; the only operation is p <- p/||p||, which is idempotent up
+   to float rounding -- a stable fixed point, not a random walk.
+
+3. BOUNDED EMPIRICALLY by the flatness check below: over 896-4,483 steps every term's
+   last50/first50 is 0.98-1.04x. If prototypes were drifting materially,
+   cohesion_gram -- computed directly against them -- would trend. The largest
+   movement is s28nsc gram at 1.04x over 4,483 steps, inside one CV (0.05).
+```
+
+So the medians are sound **to within a few percent**, which is far inside what matters
+here (candidates A and B differ by 1.33x). But this is a *bound*, not the bit-exact
+verification originally claimed. **Status: PROVISIONAL pending the re-run in §0d.**
+
+### The flatness check (this part stands)
+
+```
+FLATNESS   median(gnorm over LAST 50 steps) / median(over FIRST 50 steps)
 ```
 
 | dataset | gram | aff | community | recon |

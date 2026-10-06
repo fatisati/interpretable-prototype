@@ -41,18 +41,25 @@ Kept verbatim from d58d (these parts were right):
     weight_threshold = max_weight/10 matches train_d59's ACTUAL deployment.
     (Probing at train_epochs=1 is the d58/d58b bug: measured 9.4x error on
     s28nsc's umap gnorm -- see files/notes/lambda_calibration.md.)
-  - all four lambdas = 1, grad_probe=1, exit after ONE pass.
+  - all four lambdas = 1, exit after ONE pass.
 
 Changed:
   1. Freeze THREE ways so no single mechanism is load-bearing:
        (a) patch `_umap_state['optimizer'].step`  <- the one actually used
        (b) zero every param_group['lr']
        (c) base_lr=0.0 on the trainer, so the optimizer is BUILT with lr=0
-  2. ASSERT bit-exact parameter equality before/after the pass. The run FAILS if
-     anything moved. This is the check d58d lacked.
-  3. ASSERT the logged row count matches len(loader). grad_probe has silently
-     stopped after step 0/1 on some configs (d58p wrote 1 row; s28nsc/d46_probe
-     wrote 2) -- a mean over 1 row must raise, not return a number.
+  2. ASSERT bit-exact equality of every NON-prototype parameter, plus a tight
+     MEASURED bound on the prototypes. This is the check d58d lacked.
+     (Attempt 1 of this script asserted bit-exactness over ALL parameters and
+     aborted all 5 datasets AFTER they had written valid probe logs -- [D35]'s
+     normalize_prototypes() at scproto.py:3537 rewrites prototypes.weight after
+     every step, bypassing the optimizer. See _measure_frozen for the full note.)
+  3. ASSERT the logged row count matches ceil(len(loader)/grad_probe). grad_probe
+     has silently stopped after step 0/1 on some configs (d58p wrote 1 row;
+     s28nsc/d46_probe wrote 2) -- a mean over 1 row must raise, not return a number.
+  3b. grad_probe=5, not 1. Attempt 1 used 1 and cost ~5x more for nothing: measured
+     CV is 0.02-0.11, so a few hundred samples pin the median. Attempt 1 also lost
+     crcx to the 3600s timeout at 89%; timeout is now 10800s.
   4. Report median (what sets the lambda; gnorm is positive and right-skewed) plus
      mean/std/CV, AND the first-50-step median separately so the cohesion memory's
      warm-up is visible rather than silently averaged in.
@@ -102,6 +109,17 @@ NH_TAG = "arbf_nodeheldout20_seed0"
 REAL_TRAIN_EPOCHS = 10   # matches train_d59's ACTUAL deployment, all 5 datasets
 TERMS = ("cohesion_gram", "cohesion_aff", "umap", "recon")
 WARM = 50                # first-N-steps window reported separately (cold memory)
+PROTO_DRIFT_TOL = 1e-4   # [D35] normalize_prototypes() rewrites prototypes.weight after
+                         #   every step, bypassing the optimizer -- a float no-op on an
+                         #   already-unit-norm tensor, but not bit-exact. Anything above
+                         #   this is real drift, not rounding. See _measure_frozen.
+RUN_TAG = "d57"          # [D57] post-fix re-measurement: the waypoint init is now
+                         #   seeded (scproto.py:409 v0). Pre-fix artifacts stay under
+                         #   d60_* so the two are comparable.
+GRAD_PROBE = 5           # every 5th step. The first attempt used 1 and was ~5x more
+                         #   expensive for nothing: measured CV is 0.02-0.11, so a few
+                         #   hundred samples already pin the median (896/5=179 on
+                         #   pancreas, 3664/5=733 on crcx).
 
 NH_DATASETS = {
     "pancreas": ("tech", "celltype", 220),
@@ -133,7 +151,7 @@ def build_probe_config():
         "cohesion_diag": 1.0, "cohesion_self": 1.0, "cohesion_global": 2,
         "coh_mem_init": "full", "coh_mem_hlife": 0.0,
         "proto_reinit_every": 0,
-        "grad_probe": 1,             # log every step of the pass
+        "grad_probe": GRAD_PROBE,    # log every GRAD_PROBE-th step of the pass
         "umap_proto_sg": 1,
         "base_lr": 0.0,              # [D60] freeze (c): optimizer BUILT with lr=0
                                      #   (scproto.py:1133 uses self.base_lr).
@@ -194,14 +212,17 @@ def _summarize_full_pass(dump_path, expected_steps):
         for t in TERMS:
             series[t].append(terms[t]["gnorm_enc"])
 
+    expected_rows = -(-expected_steps // GRAD_PROBE)   # ceil: probed every GRAD_PROBE
     n = len(series[TERMS[0]])
-    if n < max(10, int(0.9 * expected_steps)):
+    if n < max(10, int(0.9 * expected_rows)):
         raise RuntimeError(
-            f"[D60] probe logged only {n} usable rows but the loader has "
-            f"{expected_steps} batches -- grad_probe stopped early, measurement "
-            f"is NOT a full pass. errors={errors[:3]}")
+            f"[D60] probe logged only {n} usable rows but a full pass over "
+            f"{expected_steps} batches probed every {GRAD_PROBE} should give "
+            f"~{expected_rows} -- grad_probe stopped early, measurement is NOT a "
+            f"full pass. errors={errors[:3]}")
 
-    out = {"n_steps": n, "expected_steps": expected_steps,
+    out = {"n_rows": n, "expected_rows": expected_rows,
+           "expected_steps": expected_steps, "grad_probe": GRAD_PROBE,
            "n_probe_errors": len(errors)}
     for t in TERMS:
         g = series[t]
@@ -278,42 +299,80 @@ def _measure_frozen(t):
     if os.path.exists(probe_path):
         os.remove(probe_path)
 
-    # (c) bit-exact fingerprint before/after -- the primary gate
+    # (c) fingerprint before/after -- the primary gate
     before = {n: p.detach().clone() for n, p in t.model.named_parameters()}
 
     t.continue_train_umap_edges(epochs=1, early_stop=False)
 
-    moved = [n for n, p in t.model.named_parameters()
-             if not torch.equal(p.detach(), before[n])]
-    if moved:
+    # CORRECTED 2026-10-06, first d60 attempt: a single bit-exact assertion over ALL
+    # parameters is WRONG here, and it aborted all 5 datasets after they had already
+    # produced valid grad_probe logs.
+    #
+    #   scproto.py:3537 calls self.model.normalize_prototypes() right after
+    #   optimizer.step() -- part of [D35], unconditional in the joint
+    #   (non-proto_decoupled) path. It writes prototypes.weight in place via copy_()
+    #   (swav.py:192-199), BYPASSING the optimizer, so no amount of optimizer
+    #   freezing stops it. On an already-unit-norm tensor p <- p/||p|| is a float
+    #   no-op, but not a BIT-exact one, so torch.equal fails.
+    #
+    # It is also correct to leave it running: real training renormalizes too, and the
+    # probe is meant to look exactly like real training.
+    #
+    # So: demand bit-exactness of the parameters we actually DIFFERENTIATE AGAINST
+    # (gnorm_enc excludes prototypes -- scproto.py:3448), and put a tight MEASURED
+    # bound on the prototypes, which only influence the forward pass.
+    enc_moved, proto_drift = [], {}
+    for n, p in t.model.named_parameters():
+        if torch.equal(p.detach(), before[n]):
+            continue
+        if 'prototypes' in n:
+            den = before[n].norm().clamp(min=1e-12)
+            proto_drift[n] = float((p.detach() - before[n]).norm() / den)
+        else:
+            enc_moved.append(n)
+
+    if enc_moved:
         raise RuntimeError(
-            f"[D60] WEIGHTS MOVED during the probe -- measurement INVALID "
-            f"({len(moved)} tensors changed). First 5: {moved[:5]}")
-    print(f"   [D60] VERIFIED frozen: all {len(before)} parameter tensors bit-identical")
+            f"[D60] ENCODER WEIGHTS MOVED -- measurement INVALID "
+            f"({len(enc_moved)} tensors changed). First 5: {enc_moved[:5]}")
 
-    return _summarize_full_pass(t.get_dump_path(), expected_steps)
+    worst = max(proto_drift.values(), default=0.0)
+    if worst > PROTO_DRIFT_TOL:
+        raise RuntimeError(
+            f"[D60] PROTOTYPES DRIFTED {worst:.3e} relative (tol {PROTO_DRIFT_TOL:.0e}) "
+            f"-- that is more than [D35] renormalization rounding, measurement "
+            f"INVALID. {proto_drift}")
+
+    print(f"   [D60] VERIFIED: all {len(before) - len(proto_drift)} non-prototype "
+          f"tensors bit-identical; prototype relative drift {worst:.3e} "
+          f"(<= {PROTO_DRIFT_TOL:.0e}, [D35] renormalization rounding only)")
+
+    out = _summarize_full_pass(t.get_dump_path(), expected_steps)
+    out['proto_rel_drift'] = worst
+    out['n_frozen_tensors'] = len(before) - len(proto_drift)
+    return out
 
 
-def _run(ds, ds_id, bk, lk, K, aff):
+def _run(ds, ds_id, bk, lk, K, aff, suffix=""):
     _env()
     lc = build_probe_config()
     t0 = time.time()
-    t = _build_trainer(ds_id, bk, lk, K, aff, lc, f"d60_{ds}")
+    t = _build_trainer(ds_id, bk, lk, K, aff, lc, f"{RUN_TAG}_{ds}{suffix}")
     res = _measure_frozen(t)
     print(f"[{ds}] frozen full-pass done in {time.time()-t0:.0f}s: "
-          f"{res['n_steps']}/{res['expected_steps']} steps")
+          f"{res['n_rows']}/{res['expected_rows']} probe rows")
     volume.commit()
-    return ds, res
+    return ds + suffix, res
 
 
-@app.function(image=image, gpu="T4", timeout=3600, volumes={"/vol": volume})
-def probe_nodeheldout(ds: str):
+@app.function(image=image, gpu="T4", timeout=10800, volumes={"/vol": volume})
+def probe_nodeheldout(ds: str, suffix: str = ""):
     bk, lk, K = NH_DATASETS[ds]
     return _run(ds, f"/vol/data/node_heldout/{ds}_{NH_TAG}_train.h5ad",
-                bk, lk, K, "arbf")
+                bk, lk, K, "arbf", suffix)
 
 
-@app.function(image=image, gpu="T4", timeout=3600, volumes={"/vol": volume})
+@app.function(image=image, gpu="T4", timeout=10800, volumes={"/vol": volume})
 def probe_full(ds: str):
     aff, K = FULL_DATASETS[ds]
     return _run(ds, ds, None, None, K, aff)
@@ -336,6 +395,9 @@ def main():
         calls[ds] = probe_nodeheldout.spawn(ds)
     for ds in FULL_DATASETS:
         calls[ds] = probe_full.spawn(ds)
+    # [D57] reproducibility check: pancreas a SECOND time, identical config.
+    # Post-fix these two must agree exactly; pre-fix they would not.
+    calls["pancreas_rep2"] = probe_nodeheldout.spawn("pancreas", "_rep2")
     print(f"[D60] spawned {len(calls)} parallel FROZEN full-pass probes: {list(calls)}")
 
     results, failed = {}, {}
@@ -352,8 +414,9 @@ def main():
     print("=" * 104)
 
     for ds, r in results.items():
-        print(f"\n### {ds}   ({r['n_steps']}/{r['expected_steps']} steps, "
-              f"{r['n_probe_errors']} probe errors)")
+        print(f"\n### {ds}   ({r['n_rows']}/{r['expected_rows']} probe rows over "
+              f"{r['expected_steps']} steps, {r['n_probe_errors']} probe errors, "
+              f"proto_rel_drift={r.get('proto_rel_drift', float('nan')):.2e})")
         print(f"{'term':<15}{'median':>12}{'mean':>12}{'std':>12}{'CV':>7}"
               f"{'step0':>12}{'med_first50':>13}{'med_last50':>13}")
         for t in TERMS:

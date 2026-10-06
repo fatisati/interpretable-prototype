@@ -1,0 +1,52 @@
+PANCREAS
+method       coh_aff     coh_gram    entropy(full)  entropy(test)  purity(full)  purity(test)  |  rare_homog  rare_f1  rare_purity  rare_coverage
+scProto      0.19±0.12   0.34±0.19   1.10±0.38      1.08±0.46      0.94±0.11     0.94±0.11     |  0.425        0.401    0.766        0.573
+scPoli-NH    0.16±0.12   0.28±0.16   1.30±0.44      1.20±0.46      0.97±0.08     0.97±0.08     |  0.452        0.328    0.745        0.396
+SEACells     0.18±0.11   0.36±0.18   0.19±0.30      0.16±0.28      0.97±0.08     0.97±0.08     |  0.421        0.371    0.823        0.427
+
+LUNG
+method       coh_aff     coh_gram    entropy(full)  entropy(test)  purity(full)  purity(test)  |  rare_homog  rare_f1  rare_purity  rare_coverage
+scProto      0.13±0.11   0.27±0.17   1.09±0.43      1.09±0.47      0.78±0.18     0.77±0.18     |  0.472        0.529    0.779        0.744
+scPoli-NH    0.10±0.10   0.20±0.14   1.47±0.54      1.41±0.59      0.84±0.19     0.84±0.20     |  0.565        0.620    0.826        0.794
+SEACells     0.14±0.10   0.30±0.16   0.41±0.47      0.38±0.45      0.90±0.15     0.90±0.15     |  0.472        0.420    0.902        0.522
+
+IMMUNE
+method       coh_aff     coh_gram    entropy(full)  entropy(test)  purity(full)  purity(test)  |  rare_homog  rare_f1  rare_purity  rare_coverage
+scProto      0.08±0.10   0.16±0.16   0.75±0.36      0.70±0.37      0.83±0.16     0.83±0.16     |  0.834        0.860    0.849        1.000
+scPoli-NH    0.06±0.06   0.11±0.11   0.93±0.40      0.88±0.43      0.87±0.14     0.87±0.14     |  0.775        0.821    0.852        1.000
+SEACells     0.10±0.10   0.21±0.17   0.16±0.24      0.15±0.25      0.88±0.14     0.88±0.15     |  0.855        0.880    0.928        1.000
+(rare metrics have no full/test split — they're already full-dataset per your last request; std for those four is across batches, e.g. lung has 16 batches so a std is meaningful there)
+
+A few patterns worth flagging directly:
+- Full vs. test purity/entropy are nearly identical everywhere (max gap ~0.07, most ≤0.03) — the held-out cells aren't behaving very differently from the training cells, which is a good sign the NH placement (frozen-encoder forward pass) isn't degenerate.
+- Batch entropy: scPoli-NH wins on all three datasets, by a clear margin. This is the flip side of the purity story — scPoli-NH mixes batches into metacells more (higher entropy) and does it more correctly (higher purity), while scProto mixes less and SEACells barely mixes at all (entropy 0.15-0.41 — SEACells isn't batch-correcting, so its "purity" advantage on lung/pancreas is partly just not attempting cross-batch integration in the first place).
+- Immune is scProto's best relative showing — wins 3 of 4 rare metrics outright and is competitive on purity/entropy, consistent with the significance tests from earlier (immune was the one dataset where scProto's purity deficit wasn't statistically significant).
+
+
+why cohesion?
+becasue we would like similar cells to go in cluster
+thus we can say we woudl like to update encoder and prototypes so that mean simailrity of cells assigned to ther cluster is minimized
+so we defin cohesion as follow
+also we set self sim = 1, as if a proto has only 1 cell - its mean sim to its proto is 1 - and this would prevent dead proto and push use of all capacity of proto for better more accuarte  
+
+
+also for memory:
+we calc cohesion score mean over eahc mini batch cells - but in order to calc each mini batch cell score - we need to knwo asisgment of all cells
+we save them in memory and wight them by age - so older less matter [brinf re ffor this]
+also say that as the cross batch non simialrity is basicaly no infor becasue of batch effect - we only calc on bio batch - and define bio batch [check the code]
+
+
+also i dont think starting from this The community loss above receives no gradien make sense does it?
+when we define cohesion - say sim can be either from affinity - or gram [and maybe refer to appendix and epxlain more - and in appendix say about what seacell does - and the fact the we set diag to 1]
+also in appendix say sim i i shodu be 1 so no dead proto 
+
+
+i feel we dont need recunstrion section at all - just in toal objective say we also include cvae loss in the objective and the batch emebddign iis freezed
+as here we dont want to learn any batch emebdding any more - just main goal is correct within batc sim - and let the decoder to recon new info
+but we need cvae so that we push the model to repsever cross batch alignment
+and all term has their lambda
+
+one thing not that clear to myself:
+why we need both community and cohesion? why cohesion alone is not enough?
+empricaly we saw cohesion alone not genralie over test set - while community alone collapse proto
+so we came up with this - but what is conceptua scitific eplxantion?

@@ -1,0 +1,4339 @@
+{
+ "generated": "2026-09-22 19:20:39",
+ "runs": [
+  {
+   "dataset": "pancreas",
+   "name": "cpmk_panc_gk042",
+   "cfg": "NP220 aff-arbf lpu0.1 lna1 nadl-cpm nadn-pair nagm0.04209",
+   "w_purity": 0.9710047613234037,
+   "w_niche": null,
+   "b_entropy": 1.6343822512299224,
+   "modularity": 0.682190924530728,
+   "coverage": 0.9285714285714286,
+   "dead": 0,
+   "k_live": 220,
+   "med_size": 2,
+   "mx_med": 878.0,
+   "complete": true
+  },
+  {
+   "dataset": "pancreas",
+   "name": "cpmk_panc_gk042_l200_uOFF",
+   "cfg": "NP220 aff-arbf lna200 nadl-cpm nadn-pair nagm0.04209",
+   "w_purity": 0.9475643999511659,
+   "w_niche": null,
+   "b_entropy": 1.5880641334876997,
+   "modularity": 0.39704035746524036,
+   "coverage": 0.8571428571428571,
+   "dead": 2,
+   "k_live": 218,
+   "med_size": 40,
+   "mx_med": 11.4,
+   "complete": true
+  },
+  {
+   "dataset": "pancreas",
+   "name": "cpmk_panc_gk042_l50_uOFF",
+   "cfg": "NP220 aff-arbf lna50 nadl-cpm nadn-pair nagm0.04209",
+   "w_purity": 0.9658771822732267,
+   "w_niche": null,
+   "b_entropy": 1.536640049551485,
+   "modularity": 0.46522420585675534,
+   "coverage": 0.9285714285714286,
+   "dead": 40,
+   "k_live": 180,
+   "med_size": 38,
+   "mx_med": 13.3,
+   "complete": true
+  },
+  {
+   "dataset": "pancreas",
+   "name": "modu_panc_r36_l10_uOFF",
+   "cfg": "NP220 aff-arbf lmod10.0 mres36.517",
+   "w_purity": 0.9727139543401294,
+   "w_niche": null,
+   "b_entropy": 0.2326115035727682,
+   "modularity": 0.5069750428605317,
+   "coverage": 0.7857142857142857,
+   "dead": 0,
+   "k_live": 220,
+   "med_size": 72,
+   "mx_med": 2.3,
+   "complete": true
+  },
+  {
+   "dataset": "pancreas",
+   "name": "modupb_panc_r1658_l02_uOFF_reinit",
+   "cfg": "NP220 aff-arbf lmod0.2 magg-pbch mrsp16.58 prie2",
+   "w_purity": 0.9670369918202906,
+   "w_niche": null,
+   "b_entropy": 1.5989875668887361,
+   "modularity": 0.7195451523824081,
+   "coverage": 0.7857142857142857,
+   "dead": 188,
+   "k_live": 32,
+   "med_size": 485,
+   "mx_med": 3.8,
+   "complete": true
+  },
+  {
+   "dataset": "pancreas",
+   "name": "repro_paper_LD20",
+   "cfg": "LD20 NP220 LD20 aff-arbf lpu0.1 lna1",
+   "w_purity": 0.9805884507386156,
+   "w_niche": null,
+   "b_entropy": 0.8319228059744936,
+   "modularity": 0.6993187845368538,
+   "coverage": 0.9285714285714286,
+   "dead": 0,
+   "k_live": 220,
+   "med_size": 5,
+   "mx_med": 243.4,
+   "complete": true
+  },
+  {
+   "dataset": "pancreas",
+   "name": "repro_paper_LDdef",
+   "cfg": "NP220 aff-arbf lpu0.1 lna1",
+   "w_purity": 0.9724087413014284,
+   "w_niche": null,
+   "b_entropy": 0.8640044045705918,
+   "modularity": 0.6924148963130563,
+   "coverage": 1.0,
+   "dead": 0,
+   "k_live": 220,
+   "med_size": 4,
+   "mx_med": 355.2,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "cod_A_self1_l1",
+   "cfg": "NP200 LD16 aff-bk02 lna1.0 naa10.0 naon-min prie2 lcoh1.0",
+   "w_purity": 0.7972202728377522,
+   "w_niche": 0.4419834654160177,
+   "b_entropy": -1.000000082690371e-10,
+   "modularity": 0.5943920393585234,
+   "coverage": 0.6666666666666666,
+   "dead": 13,
+   "k_live": 187,
+   "med_size": 13,
+   "mx_med": 275.2,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "cod_B_self0_l1",
+   "cfg": "NP200 LD16 aff-bk02 lna1.0 naa10.0 naon-min prie2 lcoh1.0",
+   "w_purity": 0.8239563185731646,
+   "w_niche": 0.4509354192698081,
+   "b_entropy": -1.000000082690371e-10,
+   "modularity": 0.5798780900669123,
+   "coverage": 0.8888888888888888,
+   "dead": 9,
+   "k_live": 191,
+   "med_size": 14,
+   "mx_med": 265.9,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "cod_C_self0_l10",
+   "cfg": "NP200 LD16 aff-bk02 lna1.0 naa10.0 naon-min prie2 lcoh10.0",
+   "w_purity": 0.8420998579326635,
+   "w_niche": 0.4668709241223491,
+   "b_entropy": -1.000000082690371e-10,
+   "modularity": 0.5577082186925222,
+   "coverage": 0.9444444444444444,
+   "dead": 8,
+   "k_live": 192,
+   "med_size": 15,
+   "mx_med": 213.9,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "coh_L16_l10_reinit",
+   "cfg": "NP200 LD16 aff-bk02 prie2 lcoh10.0",
+   "w_purity": 0.7822432945928829,
+   "w_niche": 0.4277596152200332,
+   "b_entropy": -1.0000000826903712e-10,
+   "modularity": 0.6705916992453643,
+   "coverage": null,
+   "dead": 163,
+   "k_live": 37,
+   "med_size": 641,
+   "mx_med": 8.8,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "coh_L16_l1_reinit",
+   "cfg": "NP200 LD16 aff-bk02 prie2 lcoh1.0",
+   "w_purity": 0.7498416719442685,
+   "w_niche": 0.4357016928264553,
+   "b_entropy": -1.000000082690371e-10,
+   "modularity": 0.628504261178639,
+   "coverage": 0.5555555555555556,
+   "dead": 174,
+   "k_live": 26,
+   "med_size": 1841,
+   "mx_med": 3.0,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "cpmk_L16_gk00686_uOFF",
+   "cfg": "NP200 LD16 aff-bk02 lna200 nadl-cpm nadn-pair nagm0.00686",
+   "w_purity": 0.8538760419697722,
+   "w_niche": 0.4833541584649881,
+   "b_entropy": -1.000000082690371e-10,
+   "modularity": 0.5279686523739141,
+   "coverage": null,
+   "dead": 5,
+   "k_live": 195,
+   "med_size": 42,
+   "mx_med": 45.9,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "fin_A_hinge_splt",
+   "cfg": "NP200 LD16 aff-bk02 lna1.0 naa10.0 naon-min prie2 lcoh5.0",
+   "w_purity": 0.8131557776902932,
+   "w_niche": 0.4428392927442959,
+   "b_entropy": -1.000000082690371e-10,
+   "modularity": 0.4631686242327026,
+   "coverage": 0.7777777777777778,
+   "dead": 6,
+   "k_live": 194,
+   "med_size": 86,
+   "mx_med": 40.6,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "fin_B_hinge_splt_use",
+   "cfg": "NP200 LD16 aff-bk02 lpu0.1 lna1.0 naa10.0 naon-min prie2 lcoh5.0",
+   "w_purity": 0.799394074251579,
+   "w_niche": 0.4415726682984441,
+   "b_entropy": -1.000000082690371e-10,
+   "modularity": 0.6002943093937773,
+   "coverage": 0.7777777777777778,
+   "dead": 1,
+   "k_live": 199,
+   "med_size": 11,
+   "mx_med": 403.3,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "fin_C_noOD_splt",
+   "cfg": "NP200 LD16 aff-bk02 naa0.0 naon-min prie2 lcoh5.0",
+   "w_purity": 0.766033924995293,
+   "w_niche": 0.4311658079865806,
+   "b_entropy": -1.000000082690371e-10,
+   "modularity": 0.43801850369504663,
+   "coverage": null,
+   "dead": 4,
+   "k_live": 196,
+   "med_size": 97,
+   "mx_med": 45.7,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "modu_L16_r19_l100_uOFF",
+   "cfg": "NP200 LD16 aff-bk02 lmod100.0 mres19.431",
+   "w_purity": 0.8507608304948394,
+   "w_niche": 0.4801533642572275,
+   "b_entropy": -1.000000082690371e-10,
+   "modularity": 0.27502244288323097,
+   "coverage": null,
+   "dead": 0,
+   "k_live": 200,
+   "med_size": 267,
+   "mx_med": 4.3,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "modu_L16_r19_l10_uOFF",
+   "cfg": "NP200 LD16 aff-bk02 lmod10.0 mres19.431",
+   "w_purity": 0.868596272016158,
+   "w_niche": 0.4939150676959417,
+   "b_entropy": -1.0000000826903709e-10,
+   "modularity": 0.30870889059978907,
+   "coverage": null,
+   "dead": 0,
+   "k_live": 200,
+   "med_size": 289,
+   "mx_med": 2.7,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "modu_L16_r19_l1_uOFF",
+   "cfg": "NP200 LD16 aff-bk02 lmod1.0 mres19.431",
+   "w_purity": 0.8473204046351608,
+   "w_niche": 0.4833370419184225,
+   "b_entropy": -1.000000082690371e-10,
+   "modularity": 0.3893359286087574,
+   "coverage": null,
+   "dead": 42,
+   "k_live": 158,
+   "med_size": 322,
+   "mx_med": 4.9,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "nao_A_alpha1_reinit",
+   "cfg": "NP200 LD16 aff-bk02 lna1.0 prie2",
+   "w_purity": 0.7833729866662102,
+   "w_niche": 0.43126850726597404,
+   "b_entropy": -1.0000000826903709e-10,
+   "modularity": 0.6188793782470392,
+   "coverage": 0.6666666666666666,
+   "dead": 169,
+   "k_live": 31,
+   "med_size": 1265,
+   "mx_med": 4.0,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "nao_C_alpha2000_min",
+   "cfg": "NP200 LD16 aff-bk02 lna1.0 naa2000.0 naon-min prie2",
+   "w_purity": 0.8286291357855639,
+   "w_niche": 0.45434161203635554,
+   "b_entropy": -1.000000082690371e-10,
+   "modularity": 0.5936185920561039,
+   "coverage": 0.9444444444444444,
+   "dead": 30,
+   "k_live": 170,
+   "med_size": 9,
+   "mx_med": 465.1,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "rat_A_l5",
+   "cfg": "NP200 LD16 aff-bk02 lna1.0 naa10.0 naon-min prie2 lcoh5.0",
+   "w_purity": 0.8162196395255293,
+   "w_niche": 0.4485562192971946,
+   "b_entropy": -1.000000082690371e-10,
+   "modularity": 0.5914965371113369,
+   "coverage": 0.7777777777777778,
+   "dead": 9,
+   "k_live": 191,
+   "med_size": 13,
+   "mx_med": 257.2,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "rat_B_l20",
+   "cfg": "NP200 LD16 aff-bk02 lna1.0 naa10.0 naon-min prie2 lcoh20.0",
+   "w_purity": 0.8214915358677233,
+   "w_niche": 0.4463139516971056,
+   "b_entropy": -1.000000082690371e-10,
+   "modularity": 0.5788746690576565,
+   "coverage": 0.8888888888888888,
+   "dead": 8,
+   "k_live": 192,
+   "med_size": 14,
+   "mx_med": 246.1,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "rt2_A_noOD",
+   "cfg": "NP200 LD16 aff-bk02 naa0.0 naon-min prie2 lcoh5.0",
+   "w_purity": 0.730979237629016,
+   "w_niche": 0.42647587422761585,
+   "b_entropy": -1.000000082690371e-10,
+   "modularity": 0.2919041386312641,
+   "coverage": null,
+   "dead": 2,
+   "k_live": 198,
+   "med_size": 136,
+   "mx_med": 25.9,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "rt2_B_weakOD",
+   "cfg": "NP200 LD16 aff-bk02 lna1.0 naa2.0 naon-min prie2 lcoh5.0",
+   "w_purity": 0.7974427879431046,
+   "w_niche": 0.42231655341218355,
+   "b_entropy": -1.000000082690371e-10,
+   "modularity": 0.6143953881117452,
+   "coverage": 0.7222222222222222,
+   "dead": 14,
+   "k_live": 186,
+   "med_size": 13,
+   "mx_med": 376.8,
+   "complete": true
+  },
+  {
+   "dataset": "s28nsc",
+   "name": "rt2_C_usageON",
+   "cfg": "NP200 LD16 aff-bk02 lpu0.1 lna1.0 naa10.0 naon-min prie2 lcoh5.0",
+   "w_purity": 0.8055731475617479,
+   "w_niche": 0.4251065505023706,
+   "b_entropy": -1.000000082690371e-10,
+   "modularity": 0.6091916035088075,
+   "coverage": null,
+   "dead": 3,
+   "k_live": 197,
+   "med_size": 12,
+   "mx_med": 333.5,
+   "complete": true
+  }
+ ],
+ "traces": {
+  "d26_A_gram": {
+   "arms": [
+    "d26_A_gram",
+    "d26_B_both"
+   ],
+   "epochs": [
+    {
+     "epoch": 1,
+     "loss": 32.8252,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 45.0635,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 32.4325,
+     "unused": 59
+    },
+    {
+     "epoch": 2,
+     "loss": 44.7002,
+     "unused": 73
+    },
+    {
+     "epoch": 3,
+     "loss": 32.4748,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 44.6822,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 32.3081,
+     "unused": 111
+    },
+    {
+     "epoch": 4,
+     "loss": 44.4828,
+     "unused": 93
+    },
+    {
+     "epoch": 5,
+     "loss": 32.3383,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 44.5209,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 32.2362,
+     "unused": 143
+    },
+    {
+     "epoch": 6,
+     "loss": 44.4215,
+     "unused": 153
+    },
+    {
+     "epoch": 7,
+     "loss": 32.3065,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 44.4667,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 32.216,
+     "unused": 132
+    },
+    {
+     "epoch": 8,
+     "loss": 44.3991,
+     "unused": 112
+    },
+    {
+     "epoch": 9,
+     "loss": 32.2541,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 44.4458,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 32.198,
+     "unused": 123
+    },
+    {
+     "epoch": 10,
+     "loss": 44.3844,
+     "unused": 149
+    },
+    {
+     "epoch": 11,
+     "loss": 32.2278,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 32.1902,
+     "unused": 121
+    }
+   ],
+   "reinit": [
+    167,
+    167,
+    170,
+    169,
+    170,
+    170,
+    170,
+    170,
+    170,
+    170,
+    170
+   ],
+   "cohesion": null,
+   "nassoc": null,
+   "log": "launch2.log"
+  },
+  "d27_B_gram_self": {
+   "arms": [
+    "d27_B_gram_self",
+    "d27_A_aff_self"
+   ],
+   "epochs": [
+    {
+     "epoch": 1,
+     "loss": 57.2162,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 32.8421,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 56.6858,
+     "unused": 4
+    },
+    {
+     "epoch": 2,
+     "loss": 32.387,
+     "unused": 27
+    },
+    {
+     "epoch": 3,
+     "loss": 56.7882,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 56.5412,
+     "unused": 28
+    },
+    {
+     "epoch": 3,
+     "loss": 32.3697,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 56.6066,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 32.192,
+     "unused": 33
+    },
+    {
+     "epoch": 6,
+     "loss": 56.4288,
+     "unused": 22
+    },
+    {
+     "epoch": 5,
+     "loss": 32.2285,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 56.6017,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 56.4464,
+     "unused": 22
+    },
+    {
+     "epoch": 6,
+     "loss": 32.1328,
+     "unused": 37
+    },
+    {
+     "epoch": 9,
+     "loss": 56.5276,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 56.3738,
+     "unused": 17
+    },
+    {
+     "epoch": 7,
+     "loss": 32.1756,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 32.0973,
+     "unused": 45
+    },
+    {
+     "epoch": 9,
+     "loss": 32.1434,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 32.0645,
+     "unused": 23
+    },
+    {
+     "epoch": 10,
+     "loss": 56.3995,
+     "unused": 14
+    },
+    {
+     "epoch": 11,
+     "loss": 32.1768,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 32.1028,
+     "unused": 38
+    },
+    {
+     "epoch": 13,
+     "loss": 32.1635,
+     "unused": 0
+    },
+    {
+     "epoch": 14,
+     "loss": 32.0918,
+     "unused": 53
+    }
+   ],
+   "reinit": [
+    161,
+    156,
+    145,
+    154,
+    144,
+    143,
+    154,
+    137,
+    152,
+    152,
+    142,
+    156,
+    156
+   ],
+   "cohesion": null,
+   "nassoc": null,
+   "log": "launch3.log"
+  },
+  "d27_C_both_self": {
+   "arms": [
+    "d27_C_both_self"
+   ],
+   "epochs": [
+    {
+     "epoch": 1,
+     "loss": 45.0822,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 44.6331,
+     "unused": 19
+    },
+    {
+     "epoch": 3,
+     "loss": 44.6113,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 44.3864,
+     "unused": 33
+    },
+    {
+     "epoch": 5,
+     "loss": 44.4008,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 44.263,
+     "unused": 28
+    },
+    {
+     "epoch": 7,
+     "loss": 44.3281,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 44.2197,
+     "unused": 35
+    },
+    {
+     "epoch": 9,
+     "loss": 44.2799,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 44.1813,
+     "unused": 11
+    }
+   ],
+   "reinit": [
+    165,
+    155,
+    152,
+    148,
+    147
+   ],
+   "cohesion": null,
+   "nassoc": null,
+   "log": "launch4.log"
+  },
+  "d28_A_aff": {
+   "arms": [
+    "d28_A_aff",
+    "d28_B_gram",
+    "d28_C_both"
+   ],
+   "epochs": [
+    {
+     "epoch": 1,
+     "loss": 57.4317,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 32.9799,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 45.1313,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 57.0425,
+     "unused": 66
+    },
+    {
+     "epoch": 2,
+     "loss": 32.5398,
+     "unused": 76
+    },
+    {
+     "epoch": 2,
+     "loss": 44.7003,
+     "unused": 56
+    },
+    {
+     "epoch": 3,
+     "loss": 57.0288,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 56.8521,
+     "unused": 80
+    },
+    {
+     "epoch": 3,
+     "loss": 32.5298,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 44.7165,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 56.9008,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 32.3301,
+     "unused": 84
+    },
+    {
+     "epoch": 4,
+     "loss": 44.5528,
+     "unused": 106
+    },
+    {
+     "epoch": 6,
+     "loss": 56.795,
+     "unused": 102
+    },
+    {
+     "epoch": 5,
+     "loss": 32.3743,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 44.5936,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 32.2827,
+     "unused": 134
+    },
+    {
+     "epoch": 6,
+     "loss": 44.5132,
+     "unused": 101
+    },
+    {
+     "epoch": 7,
+     "loss": 32.3285,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 32.2448,
+     "unused": 58
+    }
+   ],
+   "reinit": [
+    168,
+    167,
+    166,
+    162,
+    167,
+    169,
+    162,
+    168,
+    168,
+    166
+   ],
+   "cohesion": null,
+   "nassoc": null,
+   "log": "launch5.log"
+  },
+  "d29_B_gram": {
+   "arms": [
+    "d29_B_gram",
+    "d29_A_aff",
+    "d29_C_both",
+    "d29_B_gram"
+   ],
+   "epochs": [
+    {
+     "epoch": 1,
+     "loss": 57.7726,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 57.4404,
+     "unused": 90
+    },
+    {
+     "epoch": 3,
+     "loss": 57.5399,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 33.3015,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 57.3619,
+     "unused": 168
+    },
+    {
+     "epoch": 1,
+     "loss": 45.4708,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 57.4501,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 57.3295,
+     "unused": 116
+    },
+    {
+     "epoch": 7,
+     "loss": 57.3361,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 32.921,
+     "unused": 100
+    },
+    {
+     "epoch": 2,
+     "loss": 45.1273,
+     "unused": 96
+    },
+    {
+     "epoch": 8,
+     "loss": 57.2708,
+     "unused": 152
+    },
+    {
+     "epoch": 9,
+     "loss": 57.3201,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 57.2563,
+     "unused": 134
+    },
+    {
+     "epoch": 3,
+     "loss": 33.0738,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 45.2083,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 32.8853,
+     "unused": 146
+    },
+    {
+     "epoch": 4,
+     "loss": 45.0276,
+     "unused": 111
+    },
+    {
+     "epoch": 5,
+     "loss": 32.9254,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 45.0619,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 44.9617,
+     "unused": 163
+    },
+    {
+     "epoch": 1,
+     "loss": 33.2877,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 45.0041,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 44.9417,
+     "unused": 115
+    },
+    {
+     "epoch": 2,
+     "loss": 32.9418,
+     "unused": 97
+    },
+    {
+     "epoch": 9,
+     "loss": 44.9916,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 33.0624,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 44.9294,
+     "unused": 164
+    },
+    {
+     "epoch": 4,
+     "loss": 32.8973,
+     "unused": 156
+    },
+    {
+     "epoch": 5,
+     "loss": 32.925,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 32.8323,
+     "unused": 161
+    }
+   ],
+   "reinit": [
+    179,
+    176,
+    178,
+    176,
+    177,
+    178,
+    179,
+    177,
+    180,
+    179,
+    178,
+    176,
+    178,
+    181,
+    181
+   ],
+   "cohesion": null,
+   "nassoc": null,
+   "log": "launch6.log"
+  },
+  "d30_B_gram": {
+   "arms": [
+    "d30_B_gram",
+    "d30_A_aff",
+    "d30_C_both"
+   ],
+   "epochs": [
+    {
+     "epoch": 1,
+     "loss": 57.8094,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 57.4798,
+     "unused": 99
+    },
+    {
+     "epoch": 1,
+     "loss": 33.3238,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 57.5725,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 45.4292,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 57.3715,
+     "unused": 139
+    },
+    {
+     "epoch": 5,
+     "loss": 57.4212,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 57.3406,
+     "unused": 145
+    },
+    {
+     "epoch": 2,
+     "loss": 32.9726,
+     "unused": 79
+    },
+    {
+     "epoch": 2,
+     "loss": 45.1224,
+     "unused": 102
+    },
+    {
+     "epoch": 7,
+     "loss": 57.3704,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 57.3155,
+     "unused": 150
+    },
+    {
+     "epoch": 3,
+     "loss": 33.0501,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 45.2431,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 32.8832,
+     "unused": 137
+    },
+    {
+     "epoch": 4,
+     "loss": 45.0789,
+     "unused": 118
+    },
+    {
+     "epoch": 5,
+     "loss": 32.9822,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 45.1266,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 32.8452,
+     "unused": 149
+    },
+    {
+     "epoch": 6,
+     "loss": 45.0303,
+     "unused": 153
+    },
+    {
+     "epoch": 7,
+     "loss": 45.0923,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 45.0183,
+     "unused": 149
+    }
+   ],
+   "reinit": [
+    174,
+    176,
+    178,
+    170,
+    176,
+    178,
+    180,
+    178,
+    176,
+    180,
+    180
+   ],
+   "cohesion": null,
+   "nassoc": null,
+   "log": "launch7.log"
+  },
+  "abl_A_community_ON": {
+   "arms": [
+    "abl_A_community_ON",
+    "abl_B_community_OFF",
+    "abl_A_community_ON"
+   ],
+   "epochs": [
+    {
+     "epoch": 1,
+     "loss": 18.2058,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 17.8434,
+     "unused": 81
+    },
+    {
+     "epoch": 3,
+     "loss": 18.0398,
+     "unused": 1
+    },
+    {
+     "epoch": 4,
+     "loss": 17.8098,
+     "unused": 146
+    },
+    {
+     "epoch": 5,
+     "loss": 17.8546,
+     "unused": 1
+    },
+    {
+     "epoch": 6,
+     "loss": 17.7437,
+     "unused": 157
+    },
+    {
+     "epoch": 7,
+     "loss": 17.7796,
+     "unused": 1
+    },
+    {
+     "epoch": 8,
+     "loss": 17.715,
+     "unused": 136
+    },
+    {
+     "epoch": 9,
+     "loss": 17.7666,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 17.706,
+     "unused": 169
+    }
+   ],
+   "reinit": [
+    179,
+    176,
+    180,
+    179,
+    180
+   ],
+   "cohesion": 0.0021,
+   "nassoc": null,
+   "log": "abl.log"
+  },
+  "cod_A_self1_l1": {
+   "arms": [
+    "cod_A_self1_l1",
+    "cod_B_self0_l1",
+    "cod_C_self0_l10"
+   ],
+   "epochs": [
+    {
+     "epoch": 1,
+     "loss": 15.1385,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 15.0742,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 23.9601,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 14.3969,
+     "unused": 9
+    },
+    {
+     "epoch": 2,
+     "loss": 14.3489,
+     "unused": 1
+    },
+    {
+     "epoch": 2,
+     "loss": 23.3213,
+     "unused": 2
+    },
+    {
+     "epoch": 3,
+     "loss": 14.2907,
+     "unused": 2
+    },
+    {
+     "epoch": 3,
+     "loss": 14.1838,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 23.1406,
+     "unused": 1
+    },
+    {
+     "epoch": 4,
+     "loss": 14.1398,
+     "unused": 12
+    },
+    {
+     "epoch": 4,
+     "loss": 14.046,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 22.9661,
+     "unused": 5
+    },
+    {
+     "epoch": 5,
+     "loss": 14.0188,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 14.0176,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 22.8819,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 13.936,
+     "unused": 2
+    },
+    {
+     "epoch": 6,
+     "loss": 13.9601,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 22.8127,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 13.957,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 13.9707,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 22.7925,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 13.8981,
+     "unused": 4
+    },
+    {
+     "epoch": 8,
+     "loss": 13.9109,
+     "unused": 7
+    },
+    {
+     "epoch": 8,
+     "loss": 22.7409,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 13.9527,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 13.9415,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 22.7458,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 13.8919,
+     "unused": 2
+    },
+    {
+     "epoch": 10,
+     "loss": 13.8718,
+     "unused": 1
+    },
+    {
+     "epoch": 10,
+     "loss": 22.6996,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 13.9496,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 13.9127,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 13.8855,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 22.7187,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 13.8619,
+     "unused": 2
+    },
+    {
+     "epoch": 12,
+     "loss": 22.6822,
+     "unused": 0
+    },
+    {
+     "epoch": 13,
+     "loss": 22.7031,
+     "unused": 0
+    },
+    {
+     "epoch": 14,
+     "loss": 22.6679,
+     "unused": 0
+    }
+   ],
+   "reinit": [
+    161,
+    150,
+    107,
+    173,
+    155,
+    135,
+    174,
+    167,
+    140,
+    174,
+    167,
+    149,
+    174,
+    167,
+    151,
+    174,
+    167,
+    151,
+    151
+   ],
+   "cohesion": 0.0236,
+   "nassoc": {
+    "total": 0.2548,
+    "diag": 0.117,
+    "offdiag": 0.006
+   },
+   "log": "cod.log"
+  },
+  "coh_L16_l1_reinit": {
+   "arms": [
+    "coh_L16_l1_reinit",
+    "coh_L16_l10_reinit"
+   ],
+   "epochs": [
+    {
+     "epoch": 1,
+     "loss": 14.2153,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 23.0117,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 13.9127,
+     "unused": 101
+    },
+    {
+     "epoch": 2,
+     "loss": 22.6748,
+     "unused": 77
+    },
+    {
+     "epoch": 3,
+     "loss": 13.8568,
+     "unused": 73
+    },
+    {
+     "epoch": 3,
+     "loss": 22.6156,
+     "unused": 59
+    },
+    {
+     "epoch": 4,
+     "loss": 13.7668,
+     "unused": 143
+    },
+    {
+     "epoch": 4,
+     "loss": 22.546,
+     "unused": 87
+    },
+    {
+     "epoch": 5,
+     "loss": 13.759,
+     "unused": 121
+    },
+    {
+     "epoch": 5,
+     "loss": 22.5134,
+     "unused": 95
+    },
+    {
+     "epoch": 6,
+     "loss": 13.7359,
+     "unused": 151
+    },
+    {
+     "epoch": 6,
+     "loss": 22.4938,
+     "unused": 102
+    },
+    {
+     "epoch": 7,
+     "loss": 13.7326,
+     "unused": 132
+    },
+    {
+     "epoch": 7,
+     "loss": 22.4748,
+     "unused": 90
+    },
+    {
+     "epoch": 8,
+     "loss": 22.4411,
+     "unused": 101
+    },
+    {
+     "epoch": 8,
+     "loss": 13.7,
+     "unused": 152
+    }
+   ],
+   "reinit": [
+    19,
+    11,
+    8,
+    2,
+    25,
+    12,
+    34,
+    53
+   ],
+   "cohesion": 0.0222,
+   "nassoc": null,
+   "log": "coh.log"
+  },
+  "dnl_A_modu_degnorm": {
+   "arms": [
+    "dnl_A_modu_degnorm",
+    "dnl_B_modu_degnorm_coh5"
+   ],
+   "epochs": [
+    {
+     "epoch": 1,
+     "loss": 26.8225,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 24.9736,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 24.3038,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 23.9731,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 31.9551,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 23.8745,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 23.6618,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 23.5519,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 23.4122,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 29.6846,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 23.2709,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 23.1702,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 23.1319,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 23.0805,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 29.2189,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 28.9451,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 28.6599,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 28.488,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 28.3443,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 28.1845,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 28.1132,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 28.0222,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 27.9475,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 27.865,
+     "unused": 0
+    },
+    {
+     "epoch": 13,
+     "loss": 27.7763,
+     "unused": 0
+    },
+    {
+     "epoch": 14,
+     "loss": 27.7032,
+     "unused": 0
+    },
+    {
+     "epoch": 15,
+     "loss": 27.7401,
+     "unused": 0
+    },
+    {
+     "epoch": 16,
+     "loss": 27.5766,
+     "unused": 0
+    },
+    {
+     "epoch": 17,
+     "loss": 27.6074,
+     "unused": 0
+    },
+    {
+     "epoch": 18,
+     "loss": 27.5114,
+     "unused": 0
+    },
+    {
+     "epoch": 19,
+     "loss": 27.5515,
+     "unused": 0
+    },
+    {
+     "epoch": 20,
+     "loss": 27.4792,
+     "unused": 0
+    }
+   ],
+   "reinit": [],
+   "cohesion": 0.0159,
+   "nassoc": null,
+   "log": "dnl.log"
+  },
+  "fin_A_hinge_splt": {
+   "arms": [
+    "fin_A_hinge_splt",
+    "fin_B_hinge_splt_use",
+    "fin_C_noOD_splt"
+   ],
+   "epochs": [
+    {
+     "epoch": 1,
+     "loss": 18.6283,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 19.7825,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 18.0188,
+     "unused": 109
+    },
+    {
+     "epoch": 2,
+     "loss": 19.5083,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 18.1633,
+     "unused": 2
+    },
+    {
+     "epoch": 3,
+     "loss": 19.434,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 17.8155,
+     "unused": 147
+    },
+    {
+     "epoch": 1,
+     "loss": 18.1879,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 19.3755,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 18.1037,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 17.883,
+     "unused": 98
+    },
+    {
+     "epoch": 5,
+     "loss": 19.3367,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 17.9532,
+     "unused": 143
+    },
+    {
+     "epoch": 6,
+     "loss": 19.3021,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 18.193,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 18.0376,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 19.271,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 17.8753,
+     "unused": 170
+    },
+    {
+     "epoch": 8,
+     "loss": 17.7984,
+     "unused": 141
+    },
+    {
+     "epoch": 8,
+     "loss": 19.2552,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 18.0409,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 17.871,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 19.2292,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 17.8609,
+     "unused": 131
+    },
+    {
+     "epoch": 6,
+     "loss": 17.7526,
+     "unused": 165
+    },
+    {
+     "epoch": 10,
+     "loss": 19.2159,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 17.7715,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 19.2019,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 17.6906,
+     "unused": 153
+    },
+    {
+     "epoch": 12,
+     "loss": 19.1954,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 17.7357,
+     "unused": 0
+    },
+    {
+     "epoch": 13,
+     "loss": 19.1803,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 17.6738,
+     "unused": 170
+    },
+    {
+     "epoch": 14,
+     "loss": 19.1751,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 17.7161,
+     "unused": 0
+    },
+    {
+     "epoch": 15,
+     "loss": 19.1666,
+     "unused": 0
+    },
+    {
+     "epoch": 16,
+     "loss": 19.1581,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 17.6672,
+     "unused": 157
+    },
+    {
+     "epoch": 13,
+     "loss": 17.6917,
+     "unused": 0
+    },
+    {
+     "epoch": 14,
+     "loss": 17.6505,
+     "unused": 169
+    },
+    {
+     "epoch": 15,
+     "loss": 17.6906,
+     "unused": 0
+    },
+    {
+     "epoch": 16,
+     "loss": 17.6527,
+     "unused": 152
+    }
+   ],
+   "reinit": [
+    148,
+    159,
+    178,
+    149,
+    182,
+    152,
+    141,
+    180,
+    180,
+    180,
+    180,
+    180,
+    180
+   ],
+   "cohesion": 0.0065,
+   "nassoc": {
+    "total": 0.0791,
+    "diag": 0.085,
+    "offdiag": 0.007
+   },
+   "log": "fin.log"
+  },
+  "mch_A_modu_coh1": {
+   "arms": [
+    "mch_A_modu_coh1",
+    "mch_B_modu_coh5",
+    "mch_C_modu_coh20"
+   ],
+   "epochs": [
+    {
+     "epoch": 1,
+     "loss": 28.3844,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 32.4314,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 46.6501,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 26.4318,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 30.4196,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 44.6933,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 25.8739,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 29.6731,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 44.0454,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 29.3544,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 25.4741,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 43.7683,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 29.0876,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 25.2498,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 43.6058,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 28.9295,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 25.0796,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 28.7887,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 43.263,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 24.8809,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 28.6092,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 24.8179,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 43.05,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 28.519,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 24.6604,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 42.9189,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 28.3503,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 24.5192,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 42.8035,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 24.4383,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 28.4308,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 42.6961,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 24.3719,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 28.2246,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 42.5596,
+     "unused": 0
+    },
+    {
+     "epoch": 13,
+     "loss": 28.1485,
+     "unused": 0
+    },
+    {
+     "epoch": 13,
+     "loss": 24.3103,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 42.594,
+     "unused": 0
+    },
+    {
+     "epoch": 14,
+     "loss": 28.202,
+     "unused": 0
+    },
+    {
+     "epoch": 14,
+     "loss": 24.3315,
+     "unused": 0
+    },
+    {
+     "epoch": 13,
+     "loss": 42.4764,
+     "unused": 0
+    },
+    {
+     "epoch": 15,
+     "loss": 28.1071,
+     "unused": 0
+    },
+    {
+     "epoch": 15,
+     "loss": 24.1673,
+     "unused": 0
+    },
+    {
+     "epoch": 16,
+     "loss": 27.9941,
+     "unused": 0
+    },
+    {
+     "epoch": 16,
+     "loss": 24.1458,
+     "unused": 0
+    },
+    {
+     "epoch": 14,
+     "loss": 42.4464,
+     "unused": 0
+    },
+    {
+     "epoch": 17,
+     "loss": 28.0229,
+     "unused": 0
+    },
+    {
+     "epoch": 17,
+     "loss": 24.1057,
+     "unused": 0
+    },
+    {
+     "epoch": 15,
+     "loss": 42.3587,
+     "unused": 0
+    },
+    {
+     "epoch": 18,
+     "loss": 27.9567,
+     "unused": 0
+    },
+    {
+     "epoch": 18,
+     "loss": 24.1619,
+     "unused": 0
+    },
+    {
+     "epoch": 16,
+     "loss": 42.3295,
+     "unused": 0
+    },
+    {
+     "epoch": 19,
+     "loss": 27.9633,
+     "unused": 0
+    },
+    {
+     "epoch": 19,
+     "loss": 23.9912,
+     "unused": 0
+    },
+    {
+     "epoch": 17,
+     "loss": 42.346,
+     "unused": 0
+    },
+    {
+     "epoch": 20,
+     "loss": 27.8929,
+     "unused": 0
+    },
+    {
+     "epoch": 20,
+     "loss": 24.0459,
+     "unused": 0
+    },
+    {
+     "epoch": 18,
+     "loss": 42.2467,
+     "unused": 0
+    },
+    {
+     "epoch": 19,
+     "loss": 42.1891,
+     "unused": 0
+    },
+    {
+     "epoch": 20,
+     "loss": 42.2402,
+     "unused": 0
+    }
+   ],
+   "reinit": [],
+   "cohesion": 0.0159,
+   "nassoc": null,
+   "log": "mch.log"
+  },
+  "pcx_B_l20": {
+   "arms": [
+    "pcx_B_l20",
+    "pcx_A_l10"
+   ],
+   "epochs": [
+    {
+     "epoch": 1,
+     "loss": 46.4118,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 37.4422,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 44.7254,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 35.1054,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 44.1032,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 34.6758,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 43.7041,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 34.2408,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 43.4706,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 33.9994,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 43.2828,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 33.7443,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 43.1024,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 33.4439,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 42.9325,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 33.4381,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 42.7971,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 33.1877,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 42.8709,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 33.1364,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 42.5836,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 33.0498,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 42.6249,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 32.973,
+     "unused": 0
+    },
+    {
+     "epoch": 13,
+     "loss": 42.3844,
+     "unused": 0
+    },
+    {
+     "epoch": 14,
+     "loss": 42.5367,
+     "unused": 0
+    },
+    {
+     "epoch": 13,
+     "loss": 32.9389,
+     "unused": 0
+    },
+    {
+     "epoch": 15,
+     "loss": 42.3212,
+     "unused": 0
+    },
+    {
+     "epoch": 14,
+     "loss": 32.8822,
+     "unused": 0
+    },
+    {
+     "epoch": 16,
+     "loss": 42.4098,
+     "unused": 0
+    },
+    {
+     "epoch": 15,
+     "loss": 32.7386,
+     "unused": 0
+    },
+    {
+     "epoch": 17,
+     "loss": 42.2668,
+     "unused": 0
+    },
+    {
+     "epoch": 16,
+     "loss": 32.7634,
+     "unused": 0
+    },
+    {
+     "epoch": 18,
+     "loss": 42.2512,
+     "unused": 0
+    },
+    {
+     "epoch": 17,
+     "loss": 32.7066,
+     "unused": 0
+    },
+    {
+     "epoch": 19,
+     "loss": 42.221,
+     "unused": 0
+    },
+    {
+     "epoch": 20,
+     "loss": 42.1898,
+     "unused": 0
+    },
+    {
+     "epoch": 18,
+     "loss": 32.6234,
+     "unused": 0
+    },
+    {
+     "epoch": 19,
+     "loss": 32.5992,
+     "unused": 0
+    },
+    {
+     "epoch": 20,
+     "loss": 32.6471,
+     "unused": 0
+    }
+   ],
+   "reinit": [],
+   "cohesion": 0.0175,
+   "nassoc": null,
+   "log": "pcx.log"
+  },
+  "pub_A_published": {
+   "arms": [
+    "pub_A_published",
+    "pub_C_diagonal",
+    "pub_B_offdiag",
+    "pub_D_both"
+   ],
+   "epochs": [
+    {
+     "epoch": 1,
+     "loss": 15.6236,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 14.8597,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 14.9781,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 14.292,
+     "unused": 63
+    },
+    {
+     "epoch": 1,
+     "loss": 18.2148,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 14.7458,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 14.2226,
+     "unused": 12
+    },
+    {
+     "epoch": 4,
+     "loss": 14.6018,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 13.9968,
+     "unused": 111
+    },
+    {
+     "epoch": 5,
+     "loss": 14.4903,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 17.9454,
+     "unused": 90
+    },
+    {
+     "epoch": 1,
+     "loss": 18.9386,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 14.4337,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 14.0392,
+     "unused": 4
+    },
+    {
+     "epoch": 6,
+     "loss": 13.8824,
+     "unused": 120
+    },
+    {
+     "epoch": 7,
+     "loss": 13.9618,
+     "unused": 12
+    },
+    {
+     "epoch": 3,
+     "loss": 18.0388,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 13.8095,
+     "unused": 117
+    },
+    {
+     "epoch": 2,
+     "loss": 18.3729,
+     "unused": 61
+    },
+    {
+     "epoch": 9,
+     "loss": 13.8146,
+     "unused": 13
+    },
+    {
+     "epoch": 10,
+     "loss": 13.7141,
+     "unused": 108
+    },
+    {
+     "epoch": 4,
+     "loss": 17.7954,
+     "unused": 110
+    },
+    {
+     "epoch": 11,
+     "loss": 13.8787,
+     "unused": 3
+    },
+    {
+     "epoch": 3,
+     "loss": 18.2911,
+     "unused": 16
+    },
+    {
+     "epoch": 12,
+     "loss": 13.7493,
+     "unused": 111
+    },
+    {
+     "epoch": 5,
+     "loss": 17.8197,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 18.013,
+     "unused": 114
+    },
+    {
+     "epoch": 6,
+     "loss": 17.7317,
+     "unused": 151
+    },
+    {
+     "epoch": 5,
+     "loss": 18.0631,
+     "unused": 8
+    },
+    {
+     "epoch": 7,
+     "loss": 17.7904,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 17.7049,
+     "unused": 101
+    },
+    {
+     "epoch": 6,
+     "loss": 17.9175,
+     "unused": 117
+    },
+    {
+     "epoch": 7,
+     "loss": 17.9822,
+     "unused": 10
+    },
+    {
+     "epoch": 8,
+     "loss": 17.8787,
+     "unused": 129
+    },
+    {
+     "epoch": 9,
+     "loss": 18.0075,
+     "unused": 10
+    },
+    {
+     "epoch": 10,
+     "loss": 17.8727,
+     "unused": 131
+    }
+   ],
+   "reinit": [
+    116,
+    132,
+    175,
+    132,
+    135,
+    120,
+    137,
+    180,
+    142,
+    130,
+    181,
+    181,
+    135,
+    144,
+    143
+   ],
+   "cohesion": 0.0021,
+   "nassoc": {
+    "total": 0.0962,
+    "diag": 0.073,
+    "offdiag": 0.008
+   },
+   "log": "pub.log"
+  },
+  "rat_A_l5": {
+   "arms": [
+    "rat_A_l5",
+    "rat_B_l20"
+   ],
+   "epochs": [
+    {
+     "epoch": 1,
+     "loss": 18.981,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 33.9448,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 18.2754,
+     "unused": 4
+    },
+    {
+     "epoch": 2,
+     "loss": 33.2922,
+     "unused": 7
+    },
+    {
+     "epoch": 3,
+     "loss": 18.1161,
+     "unused": 1
+    },
+    {
+     "epoch": 3,
+     "loss": 33.0536,
+     "unused": 1
+    },
+    {
+     "epoch": 4,
+     "loss": 17.9688,
+     "unused": 10
+    },
+    {
+     "epoch": 4,
+     "loss": 32.8779,
+     "unused": 1
+    },
+    {
+     "epoch": 5,
+     "loss": 17.957,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 32.8583,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 17.8928,
+     "unused": 4
+    },
+    {
+     "epoch": 6,
+     "loss": 32.8024,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 17.9299,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 32.8138,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 17.871,
+     "unused": 6
+    },
+    {
+     "epoch": 8,
+     "loss": 32.7717,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 17.9062,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 32.7873,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 17.8533,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 32.7449,
+     "unused": 1
+    },
+    {
+     "epoch": 11,
+     "loss": 17.9016,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 32.775,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 17.8502,
+     "unused": 1
+    },
+    {
+     "epoch": 12,
+     "loss": 32.7346,
+     "unused": 0
+    }
+   ],
+   "reinit": [
+    159,
+    134,
+    171,
+    160,
+    172,
+    162,
+    171,
+    162,
+    172,
+    164,
+    172,
+    164
+   ],
+   "cohesion": 0.0064,
+   "nassoc": {
+    "total": 0.2008,
+    "diag": 0.094,
+    "offdiag": 0.006
+   },
+   "log": "rat.log"
+  },
+  "res_A_r30": {
+   "arms": [
+    "res_A_r30",
+    "res_B_r45",
+    "res_C_r60"
+   ],
+   "epochs": [
+    {
+     "epoch": 1,
+     "loss": 54.1749,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 73.1659,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 63.3207,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 51.3679,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 70.0188,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 60.7571,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 50.6879,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 68.594,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 59.488,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 50.2135,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 68.5235,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 59.3871,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 50.2207,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 67.758,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 49.7039,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 67.6416,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 49.4691,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 67.0258,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 49.4132,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 67.3367,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 49.1546,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 66.7199,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 49.0713,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 66.5823,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 49.0279,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 66.811,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 48.859,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 66.1608,
+     "unused": 0
+    },
+    {
+     "epoch": 13,
+     "loss": 48.7803,
+     "unused": 0
+    },
+    {
+     "epoch": 13,
+     "loss": 66.3744,
+     "unused": 0
+    },
+    {
+     "epoch": 14,
+     "loss": 48.7555,
+     "unused": 0
+    },
+    {
+     "epoch": 14,
+     "loss": 66.0618,
+     "unused": 0
+    },
+    {
+     "epoch": 15,
+     "loss": 48.6253,
+     "unused": 0
+    },
+    {
+     "epoch": 16,
+     "loss": 48.6195,
+     "unused": 0
+    },
+    {
+     "epoch": 17,
+     "loss": 48.4816,
+     "unused": 0
+    },
+    {
+     "epoch": 18,
+     "loss": 48.5311,
+     "unused": 0
+    },
+    {
+     "epoch": 19,
+     "loss": 48.3701,
+     "unused": 0
+    },
+    {
+     "epoch": 20,
+     "loss": 48.4037,
+     "unused": 0
+    }
+   ],
+   "reinit": [],
+   "cohesion": 0.0157,
+   "nassoc": null,
+   "log": "res.log"
+  },
+  "rt2_A_noOD": {
+   "arms": [
+    "rt2_A_noOD",
+    "rt2_B_weakOD",
+    "rt2_C_usageON"
+   ],
+   "epochs": [
+    {
+     "epoch": 1,
+     "loss": 18.4467,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 18.137,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 20.0347,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 17.9352,
+     "unused": 46
+    },
+    {
+     "epoch": 2,
+     "loss": 17.7943,
+     "unused": 100
+    },
+    {
+     "epoch": 2,
+     "loss": 19.9645,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 17.9669,
+     "unused": 1
+    },
+    {
+     "epoch": 3,
+     "loss": 18.0131,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 19.8499,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 17.8281,
+     "unused": 23
+    },
+    {
+     "epoch": 4,
+     "loss": 17.8152,
+     "unused": 124
+    },
+    {
+     "epoch": 4,
+     "loss": 19.8031,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 17.8353,
+     "unused": 4
+    },
+    {
+     "epoch": 5,
+     "loss": 17.822,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 19.7269,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 17.7836,
+     "unused": 35
+    },
+    {
+     "epoch": 6,
+     "loss": 17.7146,
+     "unused": 159
+    },
+    {
+     "epoch": 6,
+     "loss": 19.676,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 17.8127,
+     "unused": 2
+    },
+    {
+     "epoch": 7,
+     "loss": 17.7391,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 19.6386,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 17.7684,
+     "unused": 14
+    },
+    {
+     "epoch": 8,
+     "loss": 17.6672,
+     "unused": 143
+    },
+    {
+     "epoch": 8,
+     "loss": 19.6328,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 17.786,
+     "unused": 1
+    },
+    {
+     "epoch": 9,
+     "loss": 17.7211,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 19.6467,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 17.7502,
+     "unused": 12
+    },
+    {
+     "epoch": 10,
+     "loss": 17.6617,
+     "unused": 168
+    },
+    {
+     "epoch": 10,
+     "loss": 19.668,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 17.898,
+     "unused": 1
+    },
+    {
+     "epoch": 11,
+     "loss": 17.7021,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 17.771,
+     "unused": 11
+    },
+    {
+     "epoch": 11,
+     "loss": 19.6644,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 17.6512,
+     "unused": 137
+    },
+    {
+     "epoch": 12,
+     "loss": 19.6548,
+     "unused": 0
+    },
+    {
+     "epoch": 13,
+     "loss": 19.6124,
+     "unused": 0
+    },
+    {
+     "epoch": 14,
+     "loss": 19.5925,
+     "unused": 0
+    },
+    {
+     "epoch": 15,
+     "loss": 19.5882,
+     "unused": 0
+    },
+    {
+     "epoch": 16,
+     "loss": 19.5856,
+     "unused": 0
+    }
+   ],
+   "reinit": [
+    169,
+    173,
+    168,
+    177,
+    168,
+    177,
+    169,
+    179,
+    169,
+    179,
+    168,
+    179
+   ],
+   "cohesion": 0.0067,
+   "nassoc": {
+    "total": 0.1896,
+    "diag": 0.072,
+    "offdiag": 0.006
+   },
+   "log": "rt2.log"
+  },
+  "wrm_A_leid_modu": {
+   "arms": [
+    "wrm_A_leid_modu",
+    "wrm_B_leid_none"
+   ],
+   "epochs": [
+    {
+     "epoch": 1,
+     "loss": 25.7398,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 13.1334,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 24.5812,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 12.8117,
+     "unused": 148
+    },
+    {
+     "epoch": 3,
+     "loss": 24.2049,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 12.9289,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 24.0323,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 12.759,
+     "unused": 97
+    },
+    {
+     "epoch": 5,
+     "loss": 23.9074,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 12.8034,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 23.8845,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 12.7046,
+     "unused": 169
+    },
+    {
+     "epoch": 7,
+     "loss": 12.7644,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 12.6865,
+     "unused": 92
+    }
+   ],
+   "reinit": [
+    177,
+    179,
+    179,
+    179
+   ],
+   "cohesion": null,
+   "nassoc": null,
+   "log": "wrm.log"
+  },
+  "b0x3rzza1.output": {
+   "arms": [],
+   "epochs": [
+    {
+     "epoch": 1,
+     "loss": 15.4316,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 104.1593,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 83.5721,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 72.9953,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 66.9193,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 62.4052,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 59.3332,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 56.914,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 55.4143,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 53.7552,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 52.8829,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 52.181,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 51.3985,
+     "unused": 0
+    },
+    {
+     "epoch": 13,
+     "loss": 50.6541,
+     "unused": 0
+    },
+    {
+     "epoch": 14,
+     "loss": 50.4102,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 258.6344,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 239.6699,
+     "unused": 0
+    }
+   ],
+   "reinit": [],
+   "cohesion": null,
+   "nassoc": {
+    "total": 0.2252,
+    "diag": 0.009,
+    "offdiag": 0.004
+   },
+   "log": "b0x3rzza1.output"
+  },
+  "b5z5xnh8c.output": {
+   "arms": [],
+   "epochs": [
+    {
+     "epoch": 1,
+     "loss": 827.4794,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 810.9529,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 803.7183,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 797.6317,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 792.5847,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 788.135,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 784.4076,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 781.8949,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 779.586,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 777.8022,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 776.3838,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 774.6548,
+     "unused": 0
+    },
+    {
+     "epoch": 13,
+     "loss": 773.6306,
+     "unused": 0
+    },
+    {
+     "epoch": 14,
+     "loss": 772.7217,
+     "unused": 0
+    },
+    {
+     "epoch": 15,
+     "loss": 771.5885,
+     "unused": 0
+    },
+    {
+     "epoch": 16,
+     "loss": 770.8692,
+     "unused": 0
+    },
+    {
+     "epoch": 17,
+     "loss": 770.2241,
+     "unused": 0
+    },
+    {
+     "epoch": 18,
+     "loss": 769.4055,
+     "unused": 0
+    },
+    {
+     "epoch": 19,
+     "loss": 768.9411,
+     "unused": 0
+    },
+    {
+     "epoch": 20,
+     "loss": 768.3113,
+     "unused": 0
+    }
+   ],
+   "reinit": [],
+   "cohesion": null,
+   "nassoc": {
+    "total": 0.754,
+    "diag": 0.015,
+    "offdiag": 0.004
+   },
+   "log": "b5z5xnh8c.output"
+  },
+  "b9dwib641.output": {
+   "arms": [],
+   "epochs": [
+    {
+     "epoch": 1,
+     "loss": 78.9623,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 49.7872,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 38.0682,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 32.0252,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 28.6843,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 26.3745,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 24.1912,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 22.7186,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 21.479,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 20.546,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 20.0618,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 18.9438,
+     "unused": 0
+    },
+    {
+     "epoch": 13,
+     "loss": 18.7435,
+     "unused": 0
+    },
+    {
+     "epoch": 14,
+     "loss": 18.1018,
+     "unused": 0
+    },
+    {
+     "epoch": 15,
+     "loss": 17.4009,
+     "unused": 0
+    },
+    {
+     "epoch": 16,
+     "loss": 16.9547,
+     "unused": 0
+    },
+    {
+     "epoch": 17,
+     "loss": 16.4665,
+     "unused": 0
+    },
+    {
+     "epoch": 18,
+     "loss": 16.0288,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 119.0039,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 90.4242,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 77.6381,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 71.0616,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 67.1224,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 64.1181,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 61.8353,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 60.2761,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 58.8242,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 57.749,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 57.1969,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 56.1847,
+     "unused": 0
+    },
+    {
+     "epoch": 13,
+     "loss": 55.8754,
+     "unused": 0
+    },
+    {
+     "epoch": 14,
+     "loss": 55.1046,
+     "unused": 0
+    },
+    {
+     "epoch": 15,
+     "loss": 54.3067,
+     "unused": 0
+    },
+    {
+     "epoch": 16,
+     "loss": 53.7516,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 156.2516,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 129.8965,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 114.9852,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 107.2821,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 102.7858,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 99.9978,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 97.6282,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 95.8957,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 94.5905,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 93.7848,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 92.9834,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 92.3193,
+     "unused": 0
+    },
+    {
+     "epoch": 13,
+     "loss": 91.8162,
+     "unused": 0
+    },
+    {
+     "epoch": 14,
+     "loss": 91.1076,
+     "unused": 0
+    },
+    {
+     "epoch": 15,
+     "loss": 90.3585,
+     "unused": 0
+    },
+    {
+     "epoch": 16,
+     "loss": 89.9463,
+     "unused": 0
+    },
+    {
+     "epoch": 17,
+     "loss": 89.5918,
+     "unused": 0
+    },
+    {
+     "epoch": 18,
+     "loss": 88.8782,
+     "unused": 0
+    }
+   ],
+   "reinit": [],
+   "cohesion": null,
+   "nassoc": {
+    "total": 0.0749,
+    "diag": 0.016,
+    "offdiag": 0.004
+   },
+   "log": "b9dwib641.output"
+  },
+  "btmfxkgvg.output": {
+   "arms": [],
+   "epochs": [
+    {
+     "epoch": 1,
+     "loss": 25.0043,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 24.4943,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 24.2752,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 24.1455,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 24.0593,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 24.0031,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 23.9569,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 23.9317,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 23.9058,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 23.8905,
+     "unused": 0
+    },
+    {
+     "epoch": 11,
+     "loss": 23.8765,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 23.8645,
+     "unused": 0
+    },
+    {
+     "epoch": 13,
+     "loss": 23.8484,
+     "unused": 0
+    },
+    {
+     "epoch": 14,
+     "loss": 23.8398,
+     "unused": 0
+    },
+    {
+     "epoch": 15,
+     "loss": 23.8276,
+     "unused": 0
+    },
+    {
+     "epoch": 16,
+     "loss": 23.8189,
+     "unused": 0
+    },
+    {
+     "epoch": 17,
+     "loss": 23.8139,
+     "unused": 0
+    },
+    {
+     "epoch": 18,
+     "loss": 23.8081,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 45.582,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 45.0053,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 44.7461,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 44.5894,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 65.6296,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 65.1396,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 64.8797,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 64.7174,
+     "unused": 0
+    }
+   ],
+   "reinit": [],
+   "cohesion": null,
+   "nassoc": {
+    "total": 0.05,
+    "diag": 0.0,
+    "offdiag": 0.005
+   },
+   "log": "btmfxkgvg.output"
+  },
+  "b9g0eybpp.output": {
+   "arms": [],
+   "epochs": [
+    {
+     "epoch": 1,
+     "loss": 57.2162,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 32.8421,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 56.6858,
+     "unused": 4
+    },
+    {
+     "epoch": 2,
+     "loss": 32.387,
+     "unused": 27
+    },
+    {
+     "epoch": 3,
+     "loss": 56.7882,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 56.5412,
+     "unused": 28
+    },
+    {
+     "epoch": 3,
+     "loss": 32.3697,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 56.6066,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 32.192,
+     "unused": 33
+    },
+    {
+     "epoch": 6,
+     "loss": 56.4288,
+     "unused": 22
+    },
+    {
+     "epoch": 5,
+     "loss": 32.2285,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 56.6017,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 56.4464,
+     "unused": 22
+    },
+    {
+     "epoch": 6,
+     "loss": 32.1328,
+     "unused": 37
+    },
+    {
+     "epoch": 9,
+     "loss": 56.5276,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 56.3738,
+     "unused": 17
+    },
+    {
+     "epoch": 7,
+     "loss": 32.1756,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 32.0973,
+     "unused": 45
+    },
+    {
+     "epoch": 9,
+     "loss": 32.1434,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 32.0645,
+     "unused": 23
+    },
+    {
+     "epoch": 9,
+     "loss": 56.5459,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 56.3995,
+     "unused": 14
+    },
+    {
+     "epoch": 11,
+     "loss": 32.1768,
+     "unused": 0
+    }
+   ],
+   "reinit": [
+    161,
+    156,
+    145,
+    154,
+    144,
+    143,
+    154,
+    137,
+    152,
+    152,
+    142
+   ],
+   "cohesion": null,
+   "nassoc": null,
+   "log": "b9g0eybpp.output"
+  },
+  "ba18ocvdp.output": {
+   "arms": [],
+   "epochs": [
+    {
+     "epoch": 1,
+     "loss": 32.8252,
+     "unused": 0
+    },
+    {
+     "epoch": 1,
+     "loss": 45.0635,
+     "unused": 0
+    },
+    {
+     "epoch": 2,
+     "loss": 32.4325,
+     "unused": 59
+    },
+    {
+     "epoch": 2,
+     "loss": 44.7002,
+     "unused": 73
+    },
+    {
+     "epoch": 3,
+     "loss": 32.4748,
+     "unused": 0
+    },
+    {
+     "epoch": 3,
+     "loss": 44.6822,
+     "unused": 0
+    },
+    {
+     "epoch": 4,
+     "loss": 32.3081,
+     "unused": 111
+    },
+    {
+     "epoch": 4,
+     "loss": 44.4828,
+     "unused": 93
+    },
+    {
+     "epoch": 5,
+     "loss": 32.3383,
+     "unused": 0
+    },
+    {
+     "epoch": 5,
+     "loss": 44.5209,
+     "unused": 0
+    },
+    {
+     "epoch": 6,
+     "loss": 32.2362,
+     "unused": 143
+    },
+    {
+     "epoch": 6,
+     "loss": 44.4215,
+     "unused": 153
+    },
+    {
+     "epoch": 7,
+     "loss": 32.3065,
+     "unused": 0
+    },
+    {
+     "epoch": 7,
+     "loss": 44.4667,
+     "unused": 0
+    },
+    {
+     "epoch": 8,
+     "loss": 32.216,
+     "unused": 132
+    },
+    {
+     "epoch": 8,
+     "loss": 44.3991,
+     "unused": 112
+    },
+    {
+     "epoch": 9,
+     "loss": 32.2541,
+     "unused": 0
+    },
+    {
+     "epoch": 9,
+     "loss": 44.4458,
+     "unused": 0
+    },
+    {
+     "epoch": 10,
+     "loss": 32.198,
+     "unused": 123
+    },
+    {
+     "epoch": 10,
+     "loss": 44.3844,
+     "unused": 149
+    },
+    {
+     "epoch": 11,
+     "loss": 32.2278,
+     "unused": 0
+    },
+    {
+     "epoch": 12,
+     "loss": 32.1902,
+     "unused": 121
+    }
+   ],
+   "reinit": [
+    167,
+    167,
+    170,
+    169,
+    170,
+    170,
+    170,
+    170,
+    170,
+    170,
+    170
+   ],
+   "cohesion": null,
+   "nassoc": null,
+   "log": "ba18ocvdp.output"
+  },
+  "bmb1t0ajn.output": {
+   "arms": [],
+   "epochs": [
+    {
+     "epoch": 2,
+     "loss": 24.9469,
+     "unused": 145
+    },
+    {
+     "epoch": 3,
+     "loss": 24.8767,
+     "unused": 152
+    },
+    {
+     "epoch": 4,
+     "loss": 24.8291,
+     "unused": 151
+    },
+    {
+     "epoch": 5,
+     "loss": 24.8082,
+     "unused": 153
+    },
+    {
+     "epoch": 6,
+     "loss": 24.7795,
+     "unused": 157
+    }
+   ],
+   "reinit": [],
+   "cohesion": null,
+   "nassoc": null,
+   "log": "bmb1t0ajn.output"
+  }
+ }
+}

@@ -1,0 +1,19 @@
+use gradnorm and same share for all?
+if not same share what?
+and what is the inconsistency in the claude md and what we have in code? related to this grad share?
+
+
+che
+so i think what we shoudl do:
+consider same share for each subsytem - calc grad norm [maybe mean over all itration for full dataset, do not update i mean, isnt it standard practice so that people know what share?]
+then log gradnorms for each term in each dataset [mean, median, var]
+then use mean or median i dont know whatever make more snese for each datasets
+calc lambda base on the final gradshare each term shoud have
+and report lambda we will have for each term in each dataset
+
+this is the plan i have in my mind - so i can have the base lambdas -
+  then i will run the ablation-sweep for each term [0, 2x, 4x, ...] what do you think? is it best
+  practice?
+
+log all i asked in an md file - and try to be fast - also cost effective
+

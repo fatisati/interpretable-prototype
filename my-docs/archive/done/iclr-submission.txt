@@ -1,0 +1,100 @@
+where are we now
+we have milions of probelms feel very annoying
+for section 1 - i am not sure metrics good enoug or not - i mean for affinty yes we are clearly better and thats nice
+
+for section 2 - same problem as section 1 - i dont knw the results at all
+
+[this is shoud be the mian run focus now - we are somehow stucked h]
+
+[what i would do now]
+metrics to contnuesly check:
+
+cohesion [on heldout, both gram and aff], cell type purity / batch entropy 
+[on rare cell types defined in each batch]: mean homogeneity , covrage, f1, rare purity
+verify how we calc coevrage f1 rare_purity
+i would like to see all metric comparison between scproto, scpoli, seacell
+for now cell type purity stil we are a bit far - 
+
+so here a table i want to see
+
+cohesion [mean over heldout nodes, aff and gram], batch entropy / cell type purity [over all cells / over held out cells / i want to see both]
+for rare cells foudned per bio batch - but over all cells: homegenity [mean and std over rare cells] / f1 []  / coverage
+scproto best [if we have dos - comm - cohesion - cvae - nh], scpoli nh, seacell
+[so we need to verify our metrics are fine - what to check]
+over scpoli: better cohesion, comparable or better coverage / homogeneity / cell type purity / batch entropy - i expect better rare metrics overly
+over seacell: i expect better rare metrics - better batch entropy - comparable rest
+
+===for section 3===
+ i dont knwo exactly what i have to report - this is bad
+what is our claim: we want to say becasue scproto capture infor from gene expression - it preserve both cell type and niche pruity - somthign like this
+
+we can have 2 types of results:
+1. cell typepurity, joint purity, dge_pearson over sweep of lambda - compare seacell - scporoto - scpoli
+[somhow like line plots]
+2. simialr figrue we have for neuirp submission
+what else we can have?
+how shoud i bring the multi spatial batch datsaet? maybe we shoud train on one batch - and report metrics 
+i thin we may need 1 more spatial dataset as well - to show scproto preserev both cell type and niche purity
+
+but i assume 1 batch may make more sense - as the dge also easier to calc - also maybe we can discuss some founded genes as well
+so clearly what can we have?
+[check exmaple nicheflow paper]
+i think shoud be some minmal clear thign - which support our claim - and it the claim shoud be inetersting
+i feel the fact that we founded dge is inetersting - we can also provied some spatial map as well with small numbers - maybe niche and joint purity?
+or ct purities?
+also it depends on the resuts too
+how many datasets we need?
+
+=====
+current state:
+a better lambda tunes lung is beign run - so we will have complte good metrics
+for pancreas also we are training with hgher comm / cvae lambda
+for spatial - s28nsc / other ds is beign trained with new loss
+and next to do list as foolwo
+===
+
+
+the loss shoud be corrected in the methods
+
+correct the results text to support what tables shows
+
+corrcet what revwers in neurips rebuttle mentioend
+
+we need a full read path over the full text
+
+for main figure - i need to modify the loss things
+
+for figure 2 - i need to reproduce
+
+for figure 3 - need redesign and reproduce
+
+add missing figures
+======
+which baslines we need?
+
+scpoli [] + archtypal / leiden
+bknn / harmoney / combat + leiden / archetypal
+metaQ + leiden
+metacell2, supercell
+
+
+===
+section result
+scproto mean simialrity of cells in the metacells better than batch effect removel methods - compavke to metacell methods which does not remove batch effect
+scproto batch entropy combale to batch effect reve methods - better than metacekk ethods where does not remove batch effect and form metacells inside a batch 
+purity almost compaabt to batch effect removal methods - shwing it rpeserev cros sbatch aligment - also compable to metacell mehtods which work only in one batch 
+
+can find rare cell types better - becasue comparing to seacell - for within batch arre cells
+the batch does not have anough cells enough cells to form metacell for batc rare cell
+aslo batch effect removal methods may loose within batch simialriy and absorb rare cells to dens ones 
+
+comapring to seacell, supercell: better in pancrea, lung shom and f1 anc overage comparble in immune 
+comapring to batch effect removl methids: better in f1 coverag on pacnreas - better in homg and f1 on immune, but befind lung comring to spcoli while better tahn othe rbatch effect removal methods
+
+
+for section 3
+use banksy instead of mean spatial - in eval prototcol
+
+we would say scproto capture infor from genee expression - while seacell just parttion the graph no mtetr infor exist in gene expression or not
+as prrof we can see cell type purty get lowe as lambda in banksy aff
+then only if there is any known in litrture gene where scproto can find while seacell cant mention it

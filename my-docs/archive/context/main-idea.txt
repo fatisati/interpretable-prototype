@@ -1,0 +1,104 @@
+check the latex files of the method paper [G:\.shortcut-targets-by-id\1nUSrrvX0QPGoRflBV8uoFtis4P4zyk_3\codes\interpretable-prototype\neurips_manuscript]
+also the discussion for rebuttle
+
+the main idea:
+
+remove batch effect and find metacells jointly using deep cluster like methods
+stage 1: normal vae loss - remove batch effect - but maybe over correct
+
+stage 2: adjust encoder and proto - so that withi dataset simialrity satify - correcttion step
+
+input affinity graph: either from arbf on pca knn - or on banksy [banksy not in the method paper - will be in spatial paper, in method paper we have mean spatial pca instead] knn [so have spatial info as well]
+output: metacells - whihc cells among batches are from same cell state
+
+loss terms:
+community loss: the main driver - high affinity cells shoud have simialr clusters
+
+nassoc diag: say each cluster shoud be compact - if a cell is assigend to a cluster - the simialr cells to it shoud also be there
+
+nassoc off diog: the clusters shoudl be sperate they cnat share 
+
+  *** WHAT I EXPECT FROM THE LOSS -- this is the requirement, not a nice-to-have ***
+
+  If a cell state is really there in the gene expression, the loss must find it.
+
+  Concretely: if a (cell_type, niche) state has genes that are differentially
+  expressed in the REAL SINGLE CELLS, then that signal is present in the gene
+  expression matrix. The encoder reads the gene expression matrix. So the
+  information IS available to scProto. If scProto does not end up with metacells
+  for that state, that is a failure OF THE LOSS (or of the model), not a
+  missing-input problem. I should not need to hand the model spatial coordinates
+  as an extra input to recover a state whose signal is already in the expression.
+
+  This is the bar. Measured against it right now (s28nsc, bk02, K=200):
+      SEACells resolves 19 states, scProto 14, and the 5 scProto misses are REAL
+      (25-87 significantly DE genes each in single cells, pearson_r 0.85 when
+      SEACells resolves them). scProto finds NO state SEACells misses.
+      -> by my own criterion, the loss is not yet doing its job.
+
+  See the OPEN QUESTION section at the end of this file for the counter-argument
+  (that the 8-d latent may be dropping the signal before the loss ever sees it)
+  and for the cheap test that decides between them.
+
+
+also the covarge loss: which force the model all prototypes hsoud have at leats one assigned cell - so so the model cant collapse i guess 
+
+  [VERIFIED FROM CODE, 2026-09-14 -- your reading is CORRECT.]
+  This is `lambda_proto_usage`. The best run uses proto_usage_mode='ema'
+  (scproto.py:1516-1525). What it actually computes:
+
+      strongest_cell[p] = max over cells of assign[cell, p]   # MAX, not a sum
+      usage_loss        = -log( EMA(strongest_cell) ).mean() / (1 - alpha)
+
+  So it asks exactly one question: "does every prototype have at LEAST ONE cell
+  that strongly belongs to it?" -- which is what you guessed.
+
+  Two consequences worth remembering:
+
+  1. It SAYS NOTHING ABOUT SIZE. A prototype with 1 confident cell and a
+     prototype with 5000 cells both satisfy it equally.
+  2. It SATURATES. Once strongest_cell is near 1, -log(strongest_cell) is near 0
+     and there is no gradient left. It stops one prototype from dying; it does
+     not shape the size distribution at all.
+
+  WHAT THIS DOES *NOT* SETTLE: which force actually equalizes metacell sizes.
+  The code argument above only shows the usage loss has no DIRECT headcount term.
+  It can still change sizes INDIRECTLY, and no run so far separates it from gamma,
+  so nothing here is attributed. See context/EXPERIMENTS.md for the measurements and
+  the one run that would settle it.
+
+
+another key fact is that i dont want to pass spatial info to the encoder
+becasue as i said - i would like only capture any info exist in the gene expression - find those important genes
+
+for example if a niche in a cell type has effect in the cell state - here we want scproto cluster this niche in that cell type
+otherwise if there is no signal in gene expression i dont want seprate cluster
+thats why i dont want to pass any embedding like banksy to encoder 
+i knwo that seacell on banksy may work nice - but it may segment niches where dont have nay pattern in gene expression
+but in cases where the signiture is there - where we can realize by performin dge for each niche vs rest niches in cells of each cell type
+if there is some diffrentaly expressed genes in taht cell type - i think that shoud be reasnable expectation from the encoder where be able to capture that 
+if the loss is defined correctly - from good signals from spatial context affinity
+i think the encoder shoud be realized to consider those important genes - am i true?
+
+so if scproto can not find clusters for some niches in some cell types - where in single cell there exist diff expressed genes
+thats the loss fault not that the info is not in the gene expression
+
+and we know affinity has the signal if seacell can find it on same affinity
+
+====
+we have local push: community loss
+we need some global eval term [batch level global] [i think can be nassoc / cohesion]
+we need prevent collapase - all samples go to same proto [maybe above term can do it]
+some term say prototypes shoud carry disticnt cells - i think nassoc off diag is the only option -
+
+====
+
+goal:
+
+we need to beat seacell that would mean:
+
+--s28nsc--
+comparable joint purity - dead proto 0 - comparable number of covered state - and comparable cohesion [or any other graph metric]
+
+--pancreas--
+comparable ct purity - better rare metrics [check the rebuttle metrics] - better batch entropy

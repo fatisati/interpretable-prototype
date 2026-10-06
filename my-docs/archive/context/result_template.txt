@@ -1,0 +1,19 @@
+for table 1
+
+pancreas / lung / immune
+on held out node graph
+cohesion [aff, gram, only on heldout, mean std over cells] / bath entropy - 0.8896 [mc size mean weighted with prepr std over metacells / both on held out and full]
+scproto [best config - now coehsion both, community, cvae recon], scpoli base + leiden on latent [make sure nh], seacell
+
+
+for table 2
+pancreas / lung / immune
+[trained on held out dataset but metrics on full dataset]
+rare homogenity [mean std over cells] / rare f1 / coverage [as calcuted in the neurips submission] / rare purity
+
+for table 3
+s28nsc
+for this our main claim for now is that we have niche purtiy [or the correct version is joint purity?] and also ct purity
+[which is better / the violin plot we have now? better as i got my collge feedback on them right now]
+[but also i have a cool results on banksy lambda sweep showing we are more ]
+joint purtiy / ct purity / dge pearson / covered states / 

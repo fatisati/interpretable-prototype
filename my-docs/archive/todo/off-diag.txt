@@ -1,0 +1,7 @@
+overlap[p,q] = edges_between[p,q] / min( volume[p], volume[q] ): what we have now - if one volume is big - the overlap small while may not be correct
+so a rare prototype's leakage into a common one looks like almost nothing
+
+but what would be the meaning of the equation if we use min? and the min thing as evidence?
+
+we trained on banksy0.2
+same collapse happened - even worse
