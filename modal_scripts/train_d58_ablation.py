@@ -234,8 +234,18 @@ def run_arm(arm: str):
     test_mask = np.zeros(len(ad_full), bool)
     test_mask[ad_full.obs_names.get_indexer(test_ids)] = True
     dump = trainer.get_dump_path()
+    lab_full = combined.values.astype(int)
     np.savez(os.path.join(dump, "clusters_full.npz"),
-             labels=combined.values.astype(int), test_mask=test_mask)
+             labels=lab_full, test_mask=test_mask)
+    # ALSO write clusters.npz with the SAME full-length labels. score_all_baselines.
+    # load_labels() only ever looks for "clusters.npz" -- it does NOT know about
+    # clusters_full.npz -- so a run that saves only clusters_full.npz is SILENTLY
+    # skipped by the scorer ("no usable per-cell labels"). That is exactly why
+    # d59_v2 / d59_v3 never made it into the immune scoreboard despite holding
+    # correct 33,506-length labels. Overwriting is intended: the trainer's own
+    # clusters.npz holds TRAIN-ONLY assignments, and for an NH run the scorable
+    # artifact is the combined train+frozen-pass-placed-test labelling.
+    np.savez(os.path.join(dump, "clusters.npz"), labels=lab_full)
 
     summary = {"arm": arm, "config": checked, "train_seconds": round(train_s, 1),
                "gpu": GPU, "model_name": trainer.get_model_name(),
