@@ -1,0 +1,241 @@
+ABLATION / SWEEP PLAN  -- stage 1
+written 2026-10-06   updated 2026-10-06   status: NOT YET RUN, for review
+
+
+DECISION STILL OPEN AT THE TOP
+------------------------------
+Budget was "at most ~$5". This plan is immune, 11 arms, ~$7 on an L4.
+It is ~$2 over. The in-budget alternative is pancreas, 17 arms, ~$4-5, which
+buys FULL dose curves on all four terms but on a dataset with no prior anchor
+points and atypical preprocessing.
+Chosen here: immune, because you said twice it generalises better, and because
+it is the only dataset with existing arms to compare against.
+If $5 is hard, say so and I switch to pancreas.
+
+
+THE QUESTION
+------------
+4 loss terms. Does each earn its place, and at what weight?
+
+  cohesion_gram  "same 2-hop neighbourhood"   }  swept SEPARATELY, so we can see
+  cohesion_aff   "directly connected"         }  which kernel does the work
+  community      "does it generalise"
+  recon          "is z still about genes"
+
+One dose point at 0 per term = that term's ablation arm. We do not run the
+ablation as a separate experiment.
+
+
+BASE LAMBDAS  (pbmc-immune, share vector B, measured 2026-10-06, run tag d57)
+-----------------------------------------------------------------------------
+Share vector B = equal share per SUBSYSTEM, not per term:
+
+    cohesion_gram  1/6  }  cohesion  = 1/3
+    cohesion_aff   1/6  }
+    community      1/3
+    recon          1/3
+
+    lambda_i = share_i / median_gradnorm_i
+
+               gradnorm (median)    lambda
+    gram           0.043930         3.794
+    aff            0.026046         6.399
+    community      7.7399           0.04307
+    recon          16.325           0.02042
+
+Measured over ONE full pass, weights frozen and VERIFIED frozen, probed every
+5th step. Mean and median agreed to <1%. Reproducibility verified: a duplicate
+run matched on every printed digit.
+
+Note the base is computed per SUBSYSTEM (so cohesion gets 1/3 total, split
+evenly between its two kernels) but each of the four terms is then swept
+INDIVIDUALLY.
+
+
+THE 11 ARMS
+-----------
+Dataset: pbmc-immune, NH-heldout 80% split. train_epochs=10, seed 31 unless
+stated. Everything except the swept lambda is identical in every arm.
+
+  #    arm              lambda changed from base        what it answers
+  --   --------------   -----------------------------   ------------------------
+  1    base             (none) -- ratio 1 everywhere    the reference
+  2    base seed 32     (none)                          NOISE FLOOR
+  3    base seed 33     (none)                          NOISE FLOOR
+
+  4    gram 0           gram 3.794 -> 0                 effect of the gram kernel
+  5    aff 0            aff 6.399 -> 0                  effect of the aff kernel
+  6    cohesion 0       gram -> 0 AND aff -> 0          cohesion as a whole
+
+  7    community 0      community 0.04307 -> 0          ABLATION: no community
+  8    community 2x     community -> 0.08614            dose curve
+  9    community 4x     community -> 0.1723             dose curve
+
+  10   recon 0          recon 0.02042 -> 0              ABLATION: no recon
+  11   recon 2x         recon -> 0.04084                dose curve
+
+Curves, counting the base (#1) as the shared ratio-1 point:
+
+    gram        0    1x
+    aff         0    1x
+    community   0    1x    2x    4x
+    recon       0    1x    2x
+
+WHY community gets the longest curve: on immune, the best arm we already have
+(d59, community lambda 0.124) sits at 2.88x base B. So {0, 1, 2, 4} brackets a
+known-good point, with 4x = 0.1723 above it. There is no equivalent evidence
+for the other three terms, so they get shorter curves.
+
+RUN ORDER: arms 1-3 FIRST. Without the noise floor a 2% gap between dose
+points cannot be told from run-to-run variance.
+
+If budget allows 2 more arms (~$1.3): add gram 2x (7.588) and aff 2x (12.80)
+to turn the two kernel curves into real curves instead of on/off.
+
+
+WHAT WE EXPECT  (written BEFORE running -- do not edit afterwards)
+------------------------------------------------------------------
+  drop gram      -> test cohesion drops; rare metrics drop. gram is the 2-hop
+                    kernel, so losing it should hurt cells that share a
+                    neighbourhood without touching directly.
+
+  drop aff       -> test cohesion drops; rare metrics drop. aff is 1-hop, so
+                    losing it should hurt locally-tight groups.
+                    (D39 on s28nsc: gram+aff beat either alone, and gram-only
+                     left 5/200 dead prototypes while aff-only left 0. So if one
+                     kernel matters more, expect aff.)
+
+  drop cohesion  -> both of the above, larger. Rare metrics worst hit, because
+                    cohesion is scale-free: a 20-cell metacell scores like a
+                    2000-cell one, which is what protects rare types.
+
+  drop recon     -> batch entropy and cross-batch homogeneity drop; purity and
+                    rare metrics drop.
+                    (with recon off NOTHING pushes batch info out of z: the
+                     batch embedding has no other consumer, and the affinity
+                     graph is built from PCA of X, which is batch-confounded)
+
+  drop community -> held-out rare metrics and purity drop, and the HELD-OUT
+                    penalty is larger than the FULL-dataset penalty.
+                    (the discriminating test. Cohesion can lower itself by
+                     MOVING PROTOTYPES, which does nothing for an unseen cell.
+                     Community has prototypes detached, so the only thing it can
+                     change is the encoder's input->z map, which a new cell
+                     inherits. If dropping community costs nothing on held-out
+                     cells, it is not earning its place and we drop it. Clean
+                     result either way.)
+
+
+METRICS  (frozen before launch, nothing added later)
+----------------------------------------------------
+MAIN:
+  rare homogeneity         per rare cell, pooled across batches
+  rare F1                  per batch, then across batches
+  rare coverage            per batch, then across batches
+  cross-batch homogeneity  rare cell's mates from a DIFFERENT batch
+                           -- the most direct test of the recon prediction
+  batch entropy            per metacell, size-weighted
+  cell-type purity         per metacell, size-weighted -- report FULL and TEST
+  test cohesion            per cell, held-out only, full graph
+
+SECONDARY (reported, not a main metric):
+  test modularity          per-batch, edges touching a held-out cell
+                           -- demoted on purpose: not a headline claim. But it
+                           is still the most DIRECT probe of community's
+                           mechanism, so report it for the community arms.
+  n_unused_protos          health, not quality
+
+All from rare_metrics_paper() + score_nodeheldout(), same code for every arm.
+
+CAVEAT for the caption: cohesion is BOTH a training term and a reported metric,
+so "cohesion improves cohesion" is circular. The non-circular claims are (a) it
+is measured on HELD-OUT cells, so generalisation not fit, and (b) removing it
+hurts rare metrics and purity, which it does not optimise.
+
+
+HOW WE PICK THE WINNER  (declared before seeing any result)
+-----------------------------------------------------------
+  GATE       n_unused_protos == 0  -- an arm with dead prototypes is INVALID,
+                                      not "worse"
+  PRIMARY    rare homogeneity, held-out
+  GUARD      held-out purity must not fall more than 1 noise-floor std below
+             base -- so we cannot "win" on rare cells by wrecking everything
+  SECONDARY  rare F1, rare coverage, cross-batch homogeneity, batch entropy,
+             test cohesion, test modularity -- reported, NOT selected on
+  TIE-BREAK  within 1 noise-floor std on primary -> prefer higher batch entropy
+
+WHY rare homogeneity is primary and NOT rare F1 / coverage, despite all three
+being rare metrics. It is a precision argument, measured on immune:
+
+    metric                  std     across            SE of the mean
+    rare homogeneity        0.272    4,386 cells         0.0041   <- most precise
+    cell-type purity        0.180      300 metacells     0.0104
+    rare coverage           0.267        5 batches       0.1194   <- 29x noisier
+    rare F1                 0.267        5 batches       0.1194
+
+The +/-0.25-0.40 figures quoted in RESULTS.md are the SPREAD of the
+distribution, not the error on the mean. Divided by sqrt(n), rare homogeneity
+is the MOST precisely estimated metric in the whole set -- 2.5x better than
+purity. Coverage and F1 average over only 5 batches, so they cannot carry a
+selection decision; they are reported as the payoff.
+(The rare-cell count above used a <5% per-batch frequency proxy; the code's
+actual definition is rare_quantile=0.25, which selects MORE cells, so the SE is
+at most this and the conclusion only strengthens.)
+
+These are WITHIN-run standard errors. The real uncertainty is run-to-run, which
+arms 1-3 measure. If the 3-seed spread on rare homogeneity turns out larger than
+the base-vs-arm differences, we fall back to purity as primary -- declared NOW,
+not after seeing results.
+
+Every arm gets a verdict: works / fails / abandoned. No arm left inconclusive.
+
+
+COST AND TIME
+-------------
+  11 arms on pbmc-immune, 2001 steps/epoch, train_epochs=10
+  L4 ($0.80/h, ~2-2.5x faster than T4):  ~0.7 h/arm  ->  ~$0.6/arm  ->  ~$7
+  T4 ($0.59/h):                          ~1.7 h/arm  ->  ~$1.0/arm  ->  ~$11
+  run 6 at a time  ->  ~1.5-3 h wall clock
+
+  The L4 speedup is an ESTIMATE. The first arm measures it; if L4 is not at
+  least 1.35x faster than T4 it is not cheaper per arm and we switch back.
+
+
+DEFERRED TO STAGE 2  (only if stage 1 looks good)
+-------------------------------------------------
+  gram 2x and aff 2x                               2 arms  ~$1.3
+  transfer the winning share vector to pancreas,
+      lung, s28nsc, crcx                           4 arms  ~$3.0
+      ^ the generality claim: chosen on immune, applied UNCHANGED elsewhere
+
+
+KNOWN LIMITATIONS  (same in every arm, so they cannot confound the sweep)
+-------------------------------------------------------------------------
+  - one term at a time, so INTERACTIONS are unexplored. Say it in the caption.
+  - gram and aff get on/off only, not full dose curves, unless the 2 extra arms
+    are added. So stage 1 says WHETHER each kernel matters, not at what weight.
+  - coh_mem_hlife = 0.0 (no age decay). CLAUDE.md 9d says derive it as
+    c*N/uniq; no coh_mem_drift measurement exists yet, so d59 used 0 and we
+    match it.
+  - epsilon calibration FAILS on all 5 datasets and falls back to effk=5.0, a
+    constant nobody chose. Confirmed in the d57 log. Identical in every arm.
+  - in the "recon 0" arm, freeze_batch_embedding=True becomes a no-op, since
+    nothing else uses the batch embedding. So that arm is "no recon AND
+    effectively no batch mechanism".
+  - the three existing immune arms (d59 / d59_v2 / d59_v3) were run BEFORE the
+    D57 prototype-init fix, so they differ in prototype init as well as in
+    lambda. Use them to orient the grid, not as arms of this experiment.
+
+
+TO CONFIRM BEFORE LAUNCH
+------------------------
+  [x] rare F1 in the frozen set -- YES, included. It is produced by
+      rare_metrics_paper() as the harmonic mean of recall and precision,
+      averaged over each batch's rare types. Reported, but not selected on
+      (5 batches, SE 0.119).
+  [ ] immune at ~$7, or switch to pancreas at ~$4-5?
+  [ ] train_epochs = 10, not 20. d59's code passes 10, its docstring says 20,
+      CLAUDE.md 5 says 20. The lambdas above were calibrated against the
+      10-epoch edge threshold (weight_threshold = max_weight / n_epochs), and
+      10 keeps these arms comparable to the existing d59 rows. Using 20 means
+      recalibrating.

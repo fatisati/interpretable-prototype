@@ -4,7 +4,7 @@ base lambda: option b [same share between subsystems]
 for each term, ratio to base: 0, 0.5, 1, 2, 4
 
 metrics we do care about:
-test modularity / test cohesion / bacth entropy, cell type purity [on both full, and test only] [metacell size weighted]
+test cohesion / bacth entropy, cell type purity [on both full, and test only] [metacell size weighted] / will also consider test modularity too [but not main metric or not imprtant]
 rare homog / rare f1 / rare coverage
 
 
@@ -14,6 +14,8 @@ community: simialr as cohesion - but still i dont know why we shoud need it when
 
 
 questions:
-what metrics shoud be effected by cvae recon loss? i remember we had a probelm and thus we added this - and it seems it improved things - but not sure
-on modualirty - should cohesion terms help conceptualy? or not?
+on modualirty - should cohesion terms help conceptualy? or not? so yes overaly - i think over vae models it shoud work better maybe 
 what is the use of community loss when we have cohesion loss?
+what metrics shoud be effected by cvae recon loss? i remember we had a probelm and thus we added this - and it seems it improved things - but not sure
+
+what metrics shoudl we consider for spatial part?
