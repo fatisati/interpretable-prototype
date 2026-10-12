@@ -1,0 +1,5 @@
+arm,n_mc,coh_aff_TRAIN,coh_aff_TEST,within_TRAIN,within_TEST,cross_TRAIN,cross_TEST,pooled_TRAIN,pooled_TEST
+epoch0_no_stage2,300,0.0898,0.088,0.8883,0.8927,0.963,0.9541,0.8708,0.868
+scproto_base_10ep,300,0.1349,0.0816,0.899,0.8542,0.8555,0.8849,0.7834,0.7678
+scproto_protorecon,300,0.1365,0.076,0.901,0.8387,0.8654,0.8815,0.7869,0.7524
+scpoli_leiden,300,0.0591,0.0535,0.8675,0.8708,0.9665,0.9827,0.8533,0.8565

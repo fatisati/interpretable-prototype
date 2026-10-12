@@ -1,0 +1,98 @@
+{
+  "ok": {
+    "scpoli_leiden": {
+      "arm": "scpoli_leiden",
+      "K_found": 300,
+      "dump_path": "/vol/models/pbmc-immune/d59_leiden_ctb_K300"
+    },
+    "scproto_base": {
+      "arm": "scproto_base",
+      "config": {
+        "arm": "scproto_base",
+        "gram": 3.870568,
+        "aff": 6.745727,
+        "community": 0.046305,
+        "recon": 0.027667,
+        "proto_recon": 0.0,
+        "proto_recon_stopgrad": 0,
+        "seed": 31,
+        "train_epochs": 10
+      },
+      "train_seconds": 3666.9,
+      "metrics": {
+        "seed": 31,
+        "purity": 0.7728661201543302,
+        "niche_purity": null,
+        "batch_entropy": 0.8495330880625157,
+        "modularity": 0.31635687051042344,
+        "coverage": 0.9375,
+        "dge_rbo_avg": 0.07739302848869656,
+        "dge_kendall_avg": 0.16624263161008596,
+        "dge_jaccard_avg": 0.1157102494776439,
+        "scgraph_corr_avg": 0.6200770098798644,
+        "scgraph_corr_std": 0.1242040998126195,
+        "ct_niche_rbo_avg": null,
+        "n_dead": 0,
+        "coh_aff": 0.08418691458316716,
+        "coh_gram": 0.1533099326204482,
+        "aff_compactness_per_batch": {
+          "10X": 0.7600239263193198,
+          "Freytag": 0.07314173796786992,
+          "Oetjen": 0.31229622757474473,
+          "Sun": 0.24897492764504028,
+          "Villani": 0.07677787064101477
+        },
+        "aff_compactness_mean": 0.9788507728194776
+      }
+    },
+    "scproto_protorecon": {
+      "arm": "scproto_protorecon",
+      "config": {
+        "arm": "scproto_protorecon",
+        "gram": 3.870568,
+        "aff": 6.745727,
+        "community": 0.046305,
+        "recon": 0.0,
+        "proto_recon": 0.006425,
+        "proto_recon_stopgrad": 0,
+        "seed": 31,
+        "train_epochs": 10
+      },
+      "train_seconds": 4119.5,
+      "metrics": {
+        "seed": 31,
+        "purity": 0.7624400978750511,
+        "niche_purity": null,
+        "batch_entropy": 0.8622145406579883,
+        "modularity": 0.32096015090181923,
+        "coverage": 1.0,
+        "dge_rbo_avg": 0.08397380581236658,
+        "dge_kendall_avg": 0.10737650803306437,
+        "dge_jaccard_avg": 0.14445688533603415,
+        "scgraph_corr_avg": 0.7840604696709158,
+        "scgraph_corr_std": 0.07852744994406798,
+        "ct_niche_rbo_avg": null,
+        "n_dead": 0,
+        "coh_aff": 0.08650799350629462,
+        "coh_gram": 0.15742506678726173,
+        "aff_compactness_per_batch": {
+          "10X": 0.7666486071690538,
+          "Freytag": 0.07649955690981691,
+          "Oetjen": 0.28036044948676825,
+          "Sun": 0.11206116829860155,
+          "Villani": 0.015624258547373766
+        },
+        "aff_compactness_mean": 0.5511794295199819
+      }
+    }
+  },
+  "failed": {},
+  "gnorm": {
+    "cohesion_gram": 0.04306,
+    "cohesion_aff": 0.024707,
+    "umap": 7.1986,
+    "recon": 12.048,
+    "proto_recon": 51.881
+  },
+  "tag": "arbf_ctb20_seed0"
+}
