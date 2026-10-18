@@ -67,11 +67,15 @@ SEED = 31
 # FILL FROM THE PROBE OUTPUT -- the asserts refuse to run on placeholders.
 # ---------------------------------------------------------------------------
 GNORM = {
-    "cohesion_gram": None,
-    "cohesion_aff": None,
-    "umap": None,
-    "recon": None,
-    "gmkl": None,
+    # MEASURED 2026-10-18 by the D60 probe (coh_proto_sg=1, lambda_gmkl=1):
+    # 402/402 rows, 0 errors, weights VERIFIED frozen (drift 1.14e-08), and the
+    # ROUTING VERIFIED from the probe's own jsonl -- median gnorm_proto:
+    # gram 0.0, aff 0.0, umap 0.0, recon 0.0, gmkl 0.0553 (the only teacher).
+    "cohesion_gram": 0.04305,
+    "cohesion_aff":  0.024688,
+    "umap":          7.2616,
+    "recon":         11.857,
+    "gmkl":          11.221,   # CV 0.01 -- the most stable term measured
 }
 
 SHARE = {"kernel": 1 / 8, "recon": 1 / 4, "gmkl": 1 / 4, "community": 1 / 4}
