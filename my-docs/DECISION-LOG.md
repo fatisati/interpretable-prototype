@@ -54,6 +54,17 @@ decision gets a new ADR, and both lines stay here.
   predictions falsified.
   -> `adr/D58-ablate-each-loss-term-around-share-vector-B.md`
 
+- **D60** `proposed` 2026-10-18 — In the context of stage 2 measurably destroying
+  what stage 1 provides (sigma collapsed 130,000x; cross-batch 0.963->0.856; test
+  cohesion below the untrained init), we decided for a redesigned stage 2 — cohesion
+  with prototypes DETACHED, responsibility-weighted GM-KL (sigma=1) as the prototypes'
+  only teacher and the encoder's anti-collapse+margin term, recon kept as preservation
+  anchor; 3 arms (init x community) against same-init epoch-0 bars — over proto_recon
+  (redundant centroids), plain KL (the rare-merging pressure itself), and batch-mixing
+  terms (forbidden), to achieve test cohesion above the untrained init WITH the init's
+  cross-batch alignment, accepting one dataset, one seed per arm.
+  -> `adr/D60-gmkl-recipe-detached-protos-three-arms.md`
+
 <!-- new entries here, newest last -->
 
 ---

@@ -19,3 +19,110 @@ what is the use of community loss when we have cohesion loss?
 what metrics shoud be effected by cvae recon loss? i remember we had a probelm and thus we added this - and it seems it improved things - but not sure
 
 what metrics shoudl we consider for spatial part?
+---
+the concept i have in my min
+vae models - they are nice at cross batchh aligment - but they may distort within bio batch similarity
+for example rare cells get absorb to dense ones - and dont get their metacellls
+metacell methods - as the work in aff matrix - they are good at this - but they dont aggregate across batches
+scproto good at both
+pretrain so some initial state for cross batch aligment - but within each bio batch may distorted
+then in second phase - we run the cohesion / com along with recon - so that cells within each batch get close to each other
+while the recon loss shoud still be low - so cross batch aligment should also be good
+so rare cells within each batch form group - and these groups across batches attract each other [i expect recon do this]
+and then we have what we want - correct within batch and across batch
+but i dont know what we have now is doing what we want or not
+
+i feel we need to also report cross batch purity / within batch purity - so we know if each term is doing its job or not
+and do you think the recipe i have make sense? i mean the loss terms we have are correct for what i want?
+====
+i am investigating the ablation
+it seems cohesion terms improve within batch purity only on train set and not on test set 
+for cross batch purity - i dont know
+we shoud solve this
+maybe also proto recon help cross batch correctness better than recon only [or both maybe i dont know]
+====
+
+cohesion not on test [better straatify?]
+cross batch alignmetn [proto recon? anything detach?]
+
+knn voting from train?
+leiden on test - we encode cells - and then find k nearest neighbor cells in train - then maj vote for cluster
+in scproto - the model output the cluster [and why not working better? i mean i feel this shoud work well as above]
+====
+we have some loss and some metrics we expect improvment
+
+cohesions [aff, gram]: improve both train and test cohesion comparing to scpoli [i think we now have it yes? correct me if i am wrong]
+
+we now need some term to preserve cross batch aligment - does not let the model worsen the cross batch aligment
+we tried proto recon - recon - and community
+proto recon? what do we see? how does cross batch aligment work on train or test? [cross batch purity]
+how about recon? and how about community
+===
+if commuity is the best cross batch - what does this mean?
+does it mean the cross batch edges effect is this much high? feels wierd to me - why it shoud wokr better than recon or proto recon?
+and you are syaing proto recon has bad effect on within cohesion / purity yes? why?
+
+and i see your point - you say the scpoli has leiden on latent - while we start scproto prototypes with waypoint initi - which this may be what makes the cross batch aligment worsen
+so what if we init prototypes with leiden on latent [so start exactly where scpoli stage 1 is] - and then train and see if the model with our loss improves or not
+and then we should check effect of proto recon / recon / community on both preserving cross bach aligment and within batch correction
+
+
+also if we have both ingredients correctly
+we shoudl see the effect on the rare cell type metrics
+better withing batch simialrity [cohesion]: within batch cell types group together not mixed with more dense cells
+preserved cross batch aligment: group rare cells from diffrent batches together - specily now that they become close to each other - we expect them to form their nice bio meanigfull community
+
+====
+the cohesion loss is transductive not inductive - we need to add somthing else to our recipie
+curving [small change in input large change in output] happends near rare cells - becasue recon not effective that much on those places
+recon is not enough - its freq wighted and weak in rare regions
+cohesion - encoder only - proto detached + proto recon -> proto only encoder detached
+TAX THE WARPS: KL / anchor-to-init / Lipschitz-style smoothing
+
+---
+you mean we add same kl term we had in phase 1 in phase 2? then mean and var of all latents shoud follow normal dist? why this is helpfull?
+and doesnt it force mixing cell tyoes? and fight with prototypes? i feel this may fight with my prototype learng thing isnt it?
+cohesion - encoder only - proto detached + proto recon -> proto only encoder detached: can you again explain what would that mean? and if this would help or not?
+perturb the input (expression dropout, noise), require the SAME assignment.: the thing is that in single cell - we dont know if we change a gene a little - we go to another cell type or not
+so based on this affinity graph - i am somhow augmenting metacells - i am saying tht simalr cells are from same metacell - in rare cells the diffrence in the gene expr4ession maybe higher [sparse regions]
+and in dense types the difrences may be lower
+and i expect the model to generalize - but it seems its not enough - so i think we need somthign else along with it 
+
+----
+
+ok cool
+
+now here list of new ideas to test 
+
+the frequency problem - select nodes instead of edges
+
+
+
+[generalization problem]
+gmvae kl can help 
+sampling in cohesion can help? 
+for cohesion loss proto detach or not? [i feel detach same reason as before] / use z sampled from encoder out yes?
+
+in kl both z and proto are learnable which make sense - i think kl is a nice loss to form the proto - however i need to decide either the sigma learnbale or not?
+what do people do in lit? learnable sigma per guassian or not? when yes and when no?
+
+do we still need graph mixup or 2 changes above [kl + sampling for cohesion solve the problem?]
+
+[rare freq probelm]
+another problem: we said recon would merge rares as its freq weight_threshold
+and we said we gonna solve with cohesion [maybe + community] - however i think as we sample edges based on weights
+we still have freq problme - rare cells even though the affinity graphh is adoptive gussian kernel and the edge wieghts f rare cells are simialr to others
+but yet we do sample them less than common cells - speciy as we do sample edges
+do you think if we sample node would solve this? i feel it makes it better but may not enough
+howver maybe numeric loss for rare cells compensate this freq mismatch as maybe the cluster of common cells is correct while dense ones are not - so this may correct that
+what do you think? what is the right choice for me? 
+
+[cross batch aligment]
+waypoint init or leiden init? i feel waypoint init maybe push batch speration too much - while leiden init may does not let the within batch correction heppneds?
+and in our full recipe - we need somthing for cross batc haligment - we had that in first step - but for the second step while we are corrceting the within batch simialrities - we need sothing that automaticaly tell the encoder to put real cross batch bio things close to each other
+does recon do this automaticaly?
+
+
+cohesion [train - test - rare - common]
+ct purity [train/test, rare/common, cross-batch/within-batch/overal]
+rare metrics [homogeneity, f1, covrage]

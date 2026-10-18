@@ -1,0 +1,13 @@
+what terms we have
+cohesion 
+we want to push the enocder to learn correct rule - for a rare cell type look ar those important gene
+this is what  recon only loss lack
+but the cohesion we have now does not genealize
+proto moves with no encoder rule change -> we can detach proto: but we dont want fix partions - we want to find optimum latent and partions jointly - but how?
+
+proto recon - with encoder detached maybe - but is it good?
+guassian mixture kl? and update both proto and encoder?
+
+recon is not enough - on rare types
+
+cross batch purity is not being preserver
