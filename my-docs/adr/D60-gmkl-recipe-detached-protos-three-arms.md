@@ -162,6 +162,18 @@ coh_proto_sg: cohesion's gnorm_proto must read ~0, GM-KL's gnorm_proto > 0).
   which must be dumped and written here BEFORE arm 1 launches** (ordering
   requirement, so the bar always predates the run it judges).
 
+  **Arm-1 bars, measured 2026-10-18 from `d60_epoch0_leid`, BEFORE launch:**
+  ```
+  coh_aff  all  train 0.0806 / test 0.0784   rare test 0.1262   common test 0.0769
+  within        train 0.8790 / test 0.8886
+  pooled        train 0.8599 / test 0.8630
+  cross_agree   train 0.9577 / test 0.9545
+  ```
+  Side-finding, recorded before training: at epoch 0 the LEIDEN init is uniformly
+  WORSE than the waypoint init (test coh 0.0784 vs 0.0880; rare test 0.1262 vs
+  0.1540) — [D22] found 114 communities and padded to K=300. The Confirmation's
+  init question therefore starts with waypoint ahead BEFORE any training.
+
 - **Expect** (vs the SAME-INIT epoch-0 baseline, per arm):
   - **Cohesion improves on train AND test, all cells** — with the REAL effect in
     RARE cells (bar: rare test coh_aff > 0.1540; hold or beat the old recipe's
