@@ -155,6 +155,13 @@ coh_proto_sg: cohesion's gnorm_proto must read ~0, GM-KL's gnorm_proto > 0).
 > Written BEFORE the run. Never edited afterwards. (User's own expectations,
 > plus two refinements agreed in advance.)
 
+- **Baseline pairing (user decision 2026-10-18): each arm is judged against the
+  epoch-0 state of ITS OWN init** — arm 1 vs `d60_epoch0_leid`, arms 2-3 vs
+  `d59_epoch0` (waypoint). The numeric bars below are the WAYPOINT epoch-0
+  numbers and bind arms 2-3; **arm 1's bars = the `d60_epoch0_leid` measurement,
+  which must be dumped and written here BEFORE arm 1 launches** (ordering
+  requirement, so the bar always predates the run it judges).
+
 - **Expect** (vs the SAME-INIT epoch-0 baseline, per arm):
   - **Cohesion improves on train AND test, all cells** — with the REAL effect in
     RARE cells (bar: rare test coh_aff > 0.1540; hold or beat the old recipe's
