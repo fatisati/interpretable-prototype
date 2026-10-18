@@ -192,6 +192,8 @@ def get_defaults():
         'r1r2_log': 0,               # 0 = linear max, 1 = log(max) (penalizes dead protos more aggressively)
         'lambda_proto_attract': 0.0,  # dead-proto attraction to poorly-represented cells
         'lambda_proto_anchor': 0.0,   # soft MSE pull: prototype (still a free, gradient-trained param) toward soft_assign-column-normalized combination of this batch's cell embeddings — latent-space analogue of SEACells' B matrix, computed fresh per minibatch. Ignored if proto_decoupled=True (mutually exclusive — that already controls position via EMA). See files/proto_anchoring_vs_proto_usage.md (option A).
+        'lambda_gmkl': 0.0,          # [D60] responsibility-weighted GM-KL to unit-variance Gaussians at the prototypes (VaDE mixture term, categorical part dropped). Anti-collapse (-log sigma) + post-norm centroid pull. 0 = off, behavior-preserving.
+        'coh_proto_sg': 0,           # [D60] 1 = cohesion's assignment matrix uses DETACHED prototypes (encoder-only gradient, mirrors umap_proto_sg); the GM-KL is then the prototypes' only teacher. 0 = off, behavior-preserving.
         'two_sided': 0,
         # Edge-centric UMAP parameters
         'umap_min_dist': 0.5,      # UMAP min_dist (scanpy default=0.5, umap default=0.1)

@@ -24,7 +24,7 @@ import statistics as st
 
 import modal
 
-app = modal.App("scproto-ctb-probe")
+app = modal.App("scproto-d60-probe")
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
@@ -56,16 +56,15 @@ REAL_TRAIN_EPOCHS = 10
 GRAD_PROBE = 5
 WARM = 50
 PROTO_DRIFT_TOL = 1e-4
-TERMS = ("cohesion_gram", "cohesion_aff", "umap", "recon", "proto_recon")
+TERMS = ("cohesion_gram", "cohesion_aff", "umap", "recon", "gmkl")
 
 # share vectors to report lambdas for, both a priori
 SHARES = {
-    # B: equal share per SUBSYSTEM, CVAE recon (the D58 base, on the new split)
-    "B_recon": {"cohesion_gram": 1/6, "cohesion_aff": 1/6,
-                "umap": 1/3, "recon": 1/3, "proto_recon": 0.0},
-    # B with proto_recon REPLACING CVAE recon, same subsystem shares
-    "B_protorecon": {"cohesion_gram": 1/6, "cohesion_aff": 1/6,
-                     "umap": 1/3, "recon": 0.0, "proto_recon": 1/3},
+    # [D60] equal share per ACTIVE subsystem; arms differ ONLY in community
+    "D60_noc":  {"cohesion_gram": 1/8, "cohesion_aff": 1/8,
+                 "umap": 0.0, "recon": 1/4, "gmkl": 1/4},
+    "D60_comm": {"cohesion_gram": 1/8, "cohesion_aff": 1/8,
+                 "umap": 1/4, "recon": 1/4, "gmkl": 1/4},
 }
 
 
@@ -74,9 +73,11 @@ def build_probe_config():
     return dict(LAMBDA_PROTO_UMAP_PRECON) | {
         "lambda_cohesion": 1.0, "lambda_cohesion_aff": 1.0,
         "lambda_umap": 1.0, "lambda_recon": 1.0,
-        "lambda_proto_recon": 1.0,          # <- measured for the first time
-        "proto_recon_stopgrad": 0,          # <- deployment config; see docstring
-        "proto_recon_hard": False,
+        "lambda_proto_recon": 0.0,          # not part of the D60 design
+        "lambda_gmkl": 1.0,                 # [D60] measured for the first time
+        "coh_proto_sg": 1,                  # [D60] deployment routing: cohesion
+                                            #   sees DETACHED protos; the probe
+                                            #   VERIFIES this via gnorm_proto
         "lambda_nassoc": 0.0, "lambda_modularity": 0.0, "lambda_proto_usage": 0.0,
         "lambda_swav": 0.0, "lambda_kl": 0.0,
         "cohesion_sim": "gram", "cohesion_form": "perc", "cohesion_row_norm": "l2",
@@ -159,7 +160,7 @@ def probe():
     resolved = _resolve_ds_id(train_h5, batch_key=BATCH_KEY, label_key=LABEL_KEY,
                               niche_key=None, num_prototypes=K)
     t = get_trainer(
-        experiment_name="ctbprobe", cvae_epochs=50, affinity_type="arbf",
+        experiment_name="d60probe", cvae_epochs=50, affinity_type="arbf",
         dataset_id=resolved, l2norm=1, assignment_metric="dotp",
         batch_size=1024, umap_steps_per_epoch=None, umap_similarity="proto",
         freeze_batch_embedding=1, freeze_decoder=0,
@@ -174,8 +175,8 @@ def probe():
         t.pretrain_encoder(); t.init_prototypes(); t.save_pretrain_checkpoint()
     if hasattr(t.model, "freeze_batch_embedding"):
         t.model.freeze_batch_embedding()
-    assert getattr(t, "proto_recon_stopgrad", True) == 0, \
-        "proto_recon_stopgrad did not reach the trainer"
+    assert getattr(t, "coh_proto_sg", 0) == 1, "coh_proto_sg did not reach trainer"
+    assert getattr(t, "lambda_gmkl", 0.0) == 1.0, "lambda_gmkl did not reach trainer"
 
     t._setup_umap_edges(REAL_TRAIN_EPOCHS)
     s = t._umap_state
@@ -209,6 +210,27 @@ def probe():
     print(f"   [ctb-probe] VERIFIED frozen; prototype drift {worst:.3e}")
 
     res = _summarize(t.get_dump_path(), expected)
+
+    # [D60] ROUTING VERIFICATION from the probe's own jsonl: with coh_proto_sg=1
+    # and umap_proto_sg=1, cohesion and community must put ZERO gradient on the
+    # prototypes; gmkl (their only teacher) must put a REAL one.
+    import json as _json
+    import statistics as _st
+    gp = {t_: [] for t_ in TERMS}
+    with open(os.path.join(t.get_dump_path(), "grad_probe.jsonl")) as f:
+        for line in f:
+            row = _json.loads(line)
+            for t_ in TERMS:
+                if t_ in row and isinstance(row[t_], dict):
+                    gp[t_].append(row[t_]["gnorm_proto"])
+    routing = {t_: _st.median(v) for t_, v in gp.items() if v}
+    print(f"   [D60 ROUTING] median gnorm_proto: "
+          f"{ {k: float(f'{v:.3e}') for k, v in routing.items()} }")
+    assert routing.get("cohesion_gram", 1) == 0.0, "cohesion_gram leaks into protos!"
+    assert routing.get("cohesion_aff", 1) == 0.0, "cohesion_aff leaks into protos!"
+    assert routing.get("umap", 1) == 0.0, "community leaks into protos!"
+    assert routing.get("gmkl", 0) > 0.0, "gmkl puts NO gradient on protos!"
+    res["routing_gnorm_proto"] = routing
     volume.commit()
     return res
 
@@ -244,6 +266,6 @@ def main():
                 continue
             print(f"    {t:<16} share={sh[t]:.4f}  "
                   f"lambda = {_sig4(sh[t] / r[t]['median'])}")
-    with open("files/tables/gradnorm_calibration/ctb_gradshares.json", "w") as f:
+    with open("files/tables/gradnorm_calibration/d60_gradshares.json", "w") as f:
         json.dump({"result": r, "shares": SHARES, "tag": TAG}, f, indent=2)
-    print("\n[D59] wrote files/tables/gradnorm_calibration/ctb_gradshares.json")
+    print("\n[D59] wrote files/tables/gradnorm_calibration/d60_gradshares.json")

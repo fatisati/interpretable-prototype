@@ -1144,6 +1144,16 @@ class SCProtoTrainer(AdoptiveTrainer):
         if lambda_sim_recon > 0:
             params += list(self.model.sim_decoder_trunk.parameters()) + list(self.model.sim_decoder_out.parameters())
         params = [p for p in params if p.requires_grad]
+        # [D60] GM-KL needs the encoder's (mu, logvar), which scpoli's forward
+        # consumes internally. A forward hook on the encoder captures them LIVE
+        # (no detach -- the gradient must flow through both). The buffer is
+        # overwritten at every encoder call and read immediately after
+        # encoder_out() inside the same step, so there is no staleness window.
+        if getattr(self, 'lambda_gmkl', 0.0) > 0 and not hasattr(self, '_gmkl_hook'):
+            def _gmkl_capture(_m, _inp, _out):
+                self._gmkl_mulogvar = (_out[0], _out[1])
+            self._gmkl_hook = (self.model.scpoli_cvae.encoder
+                               .register_forward_hook(_gmkl_capture))
         optimizer = torch.optim.Adam(params, lr=self.base_lr)
 
         self._umap_state = {
@@ -1316,6 +1326,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         lambda_proto_attract = getattr(self, 'lambda_proto_attract', 0.0)
         lambda_proto_anchor = getattr(self, 'lambda_proto_anchor', 0.0)
         lambda_proto_usage = getattr(self, 'lambda_proto_usage', 0.0)
+        lambda_gmkl = getattr(self, 'lambda_gmkl', 0.0)
         proto_usage_mode   = getattr(self, 'proto_usage_mode', 'nk')
         lambda_nassoc = getattr(self, 'lambda_nassoc', 0.0)
         nassoc_alpha = getattr(self, 'nassoc_alpha', 1.0)
@@ -1788,6 +1799,31 @@ class SCProtoTrainer(AdoptiveTrainer):
             # reason to exist is gone. proto_usage_loss's own EMA branches above
             # are unaffected; they serve the usage LOSS, a separate mechanism.
 
+            # [D60] GM-KL: responsibility-weighted KL to unit-variance Gaussians at
+            # the prototypes -- the VaDE mixture term, categorical part dropped on
+            # purpose (no cluster-balance pressure). Since sum_k s_ik = 1 it splits:
+            #   0.5*(sigma^2 - log sigma^2 - 1)        ANTI-COLLAPSE (per cell, once)
+            #     -> the ONLY defense against the measured 130,000x sigma collapse
+            #   0.5*sum_k s_ik |mu - proto_k|^2        CENTROID PULL / MARGIN
+            #     computed POST-normalization: on the unit sphere |a-b|^2 = 2-2*dot,
+            #     the same currency as the assignment logits (recorded choice, D60).
+            # Prototypes are LIVE here -- this term is their ONLY teacher
+            # (coh_proto_sg detaches them from cohesion; umap_proto_sg from
+            # community). s_ik = the live soft assignment WITH gradient
+            # (VaDE-standard; watch effk for sharpening collapse).
+            gmkl_loss = torch.tensor(0.0, device=self.device)
+            if lambda_gmkl > 0 and use_proto_sim:
+                _gm_mu, _gm_lv = self._gmkl_mulogvar
+                assert _gm_mu.shape[0] == z_unique.shape[0], (
+                    f"gmkl buffer {tuple(_gm_mu.shape)} != batch "
+                    f"{tuple(z_unique.shape)} -- hook staleness")
+                _gm_anti = 0.5 * (_gm_lv.exp() - _gm_lv - 1.0).sum(dim=1).mean()
+                _gm_mun = F.normalize(_gm_mu, dim=1)
+                _gm_P = F.normalize(self.model.get_prototypes(), dim=1)
+                _gm_d2 = 2.0 - 2.0 * (_gm_mun @ _gm_P.t())
+                _gm_pull = 0.5 * (soft_assign * _gm_d2).sum(dim=1).mean()
+                gmkl_loss = _gm_anti + _gm_pull
+
             # DMoN collapse regularization (Tsitsulin et al., JMLR 2023, eq. 5):
             #   (sqrt(K)/n_cells) * ||soft_sizes||_2 - 1
             # soft_sizes always sums to n_cells, so under that fixed L1 budget the L2 norm is
@@ -1812,6 +1848,8 @@ class SCProtoTrainer(AdoptiveTrainer):
                 loss = loss + lambda_r1r2 * r1r2_loss
             if lambda_proto_usage > 0:
                 loss = loss + lambda_proto_usage * proto_usage_loss
+            if lambda_gmkl > 0:
+                loss = loss + lambda_gmkl * gmkl_loss
             if lambda_collapse > 0:
                 loss = loss + lambda_collapse * collapse_loss
                 total_metrics['collapse'] = total_metrics.get('collapse', 0) + collapse_loss.item()
@@ -2694,7 +2732,18 @@ class SCProtoTrainer(AdoptiveTrainer):
                               f"= {self._coh_scale:.5f}")
                     print(f"   [D14] cohesion: affinity cached, shape={self._coh_A.shape}, "
                           f"row_norm={cohesion_row_norm}, nnz={self._coh_A.nnz:,}")
-                _Sc = soft_assign
+                # [D60] coh_proto_sg: cohesion's assignment matrix is computed
+                # against DETACHED prototypes, so its gradient reaches the ENCODER
+                # only -- all structural improvement must flow through the map a
+                # NEW cell would also use (the rare-marker deployment argument).
+                # Mirrors [D48]'s umap_proto_sg. The GM-KL term is then the
+                # prototypes' only teacher.
+                if getattr(self, 'coh_proto_sg', 0):
+                    _Sc = F.softmax(
+                        F.linear(z_unique, self.model.get_prototypes().detach())
+                        / self.epsilon, dim=1)
+                else:
+                    _Sc = soft_assign
                 _csize = _Sc.sum(0)                            # (K,)
                 _Kp = _Sc.shape[1]
                 _Nall = self._coh_A.shape[0]
@@ -3482,6 +3531,7 @@ class SCProtoTrainer(AdoptiveTrainer):
                             'cohesion_gram': ('lambda_cohesion', 'cohesion_loss'),
                             'cohesion_aff': ('lambda_cohesion_aff',
                                              'cohesion_aff_loss'),
+                            'gmkl': ('lambda_gmkl', 'gmkl_loss'),
                             'nassoc': ('lambda_nassoc', 'nassoc_loss'),
                             'modularity': ('lambda_modularity',
                                            'modularity_loss'),
