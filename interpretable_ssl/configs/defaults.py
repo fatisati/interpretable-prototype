@@ -146,6 +146,9 @@ def get_defaults():
         
         "lambda_proto_recon": 0.0,
         "proto_recon_hard": False,
+        "proto_recon_form": 'agg',      # [D61] 'agg' = legacy decode-then-aggregate MSE (form 2); 'mix3' = responsibility-weighted per-proto MSE (mixture likelihood, form 3 -- the chimera charge). Values 4-char-distinct.
+        "proto_recon_stopgrad": True,   # pre-existed in code as getattr default True; registered for model naming ([D61] arms differ in it). True = scores detached in proto_recon (gradient via decode path only); False = scores live (gradient also through s_ik into encoder).
+        "proto_recon_dec_sg": 0,        # [D61] 1 = decoder params detached inside proto_recon (ruler, not student -- blocks e_b-conditional biology switching). 0 = legacy behavior.
         "lambda_umap": 1,
         'umap_similarity': 'embedding',
         'assignment_metric': 'dotp',

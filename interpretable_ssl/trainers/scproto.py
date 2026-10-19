@@ -1322,6 +1322,8 @@ class SCProtoTrainer(AdoptiveTrainer):
         lambda_kl = self.lambda_kl
         lambda_proto_recon = self.lambda_proto_recon
         proto_recon_hard = getattr(self, 'proto_recon_hard', False)
+        proto_recon_form = getattr(self, 'proto_recon_form', 'agg')
+        proto_recon_dec_sg = getattr(self, 'proto_recon_dec_sg', 0)
         lambda_r1r2 = self.lambda_r1r2
         lambda_proto_attract = getattr(self, 'lambda_proto_attract', 0.0)
         lambda_proto_anchor = getattr(self, 'lambda_proto_anchor', 0.0)
@@ -1731,27 +1733,79 @@ class SCProtoTrainer(AdoptiveTrainer):
                 n_unique_conds = unique_conds.size(0)
                 proto_expanded = protos.unsqueeze(0).expand(n_unique_conds, -1, -1).reshape(-1, protos.size(1))
                 cond_expanded = unique_conds.unsqueeze(1).expand(-1, K, -1).reshape(-1, unique_conds.size(1))
-                decoded_all = self.model.decode(proto_expanded, cond_expanded).view(n_unique_conds, K, n_genes)
-                recon_x_agg = torch.zeros(n_samples, n_genes, device=self.device)
-                if proto_recon_hard and not proto_decoupled:
+                if proto_recon_dec_sg:
+                    # [D61] decoder as RULER: its parameters are detached for this
+                    # term only (functional_call with detached params), so the term
+                    # cannot teach the decoder to legalize a chimeric prototype by
+                    # making e_b switch biology. Gradient still flows through the
+                    # decoder INTO the prototype input. The live decoder elsewhere
+                    # (lambda_recon) is untouched.
+                    _d61_dec = self.model.scpoli_cvae.decoder
+                    _d61_emb = torch.hstack(
+                        [self.model.scpoli_cvae.embeddings[i](cond_expanded[:, i])
+                         for i in range(cond_expanded.shape[1])])
+                    _d61_par = {_n: _p.detach()
+                                for _n, _p in _d61_dec.named_parameters()}
+                    decoded_all = torch.func.functional_call(
+                        _d61_dec, _d61_par, (proto_expanded, _d61_emb)
+                    )[0].view(n_unique_conds, K, n_genes)
+                else:
+                    decoded_all = self.model.decode(proto_expanded, cond_expanded).view(n_unique_conds, K, n_genes)
+                if proto_recon_form == 'mix3':
+                    # [D61] FORM 3 -- the mixture likelihood: per-proto MSE, then
+                    # responsibility-weighted sum (NOT MSE of the weighted-average
+                    # reconstruction, which is form 'agg' below and lets two wrong
+                    # programs average into a right one).
+                    #   L = mean_i sum_k s_ik * || x_i - Decoder(proto_k, b_i) ||^2
+                    # Expanded per cell (no K x genes materialization per cell):
+                    #   ||x_i||^2 - 2 * sum_k s_ik (x_i . d_k) + sum_k s_ik ||d_k||^2
+                    # This is the CHIMERA CHARGE: one latent vector = one biology;
+                    # a prototype holding different cell types in different batches
+                    # cannot decode well for both, and every misfit cell feels its
+                    # own residual through its own s_ik (per-cell, not population-
+                    # weighted). It cannot merge duplicated protos (zero charge on
+                    # a split -- that needs a separate attraction term).
+                    # proto_recon_stopgrad=True  -> scores DETACHED: gradient only
+                    #   through the decode path into the PROTOTYPES.
+                    # proto_recon_stopgrad=False -> scores LIVE: gradient also
+                    #   through s_ik into the ENCODER (reassign/move misfit cells).
+                    _pr3 = torch.zeros(n_samples, device=self.device)
+                    for c in range(n_unique_conds):
+                        cmask = inverse_idx == c
+                        if cmask.any():
+                            _d = decoded_all[c]                       # (K, genes)
+                            _xc = X_batch[cmask]
+                            _sc = scores[cmask]
+                            if getattr(self, 'proto_recon_stopgrad', True):
+                                _sc = _sc.detach()
+                            _cross = _xc @ _d.t()                     # (n_c, K)
+                            _dsq = (_d * _d).sum(dim=1)               # (K,)
+                            _pr3[cmask] = ((_xc * _xc).sum(dim=1)
+                                           - 2.0 * (_sc * _cross).sum(dim=1)
+                                           + _sc @ _dsq)
+                    proto_recon_loss = _pr3.mean()
+                else:
+                    recon_x_agg = torch.zeros(n_samples, n_genes, device=self.device)
+                if proto_recon_form != 'mix3' and proto_recon_hard and not proto_decoupled:
                     # soft scores with detached z — gradient flows to protos via score path, not encoder
                     soft_scores_det = F.softmax(F.linear(z_unique.detach(), protos) / self.epsilon, dim=1)
                     idx = soft_scores_det.argmax(dim=1)
                     one_hot = F.one_hot(idx, K).float()
                     # STE: hard forward, soft backward
                     st_scores = one_hot - soft_scores_det.detach() + soft_scores_det
-                for c in range(n_unique_conds):
-                    cmask = inverse_idx == c
-                    if cmask.any():
-                        if proto_decoupled:
-                            recon_x_agg[cmask] = scores[cmask] @ decoded_all[c]
-                        elif proto_recon_hard:
-                            recon_x_agg[cmask] = st_scores[cmask] @ decoded_all[c]
-                        elif getattr(self, 'proto_recon_stopgrad', True):
-                            recon_x_agg[cmask] = scores[cmask].detach() @ decoded_all[c]
-                        else:
-                            recon_x_agg[cmask] = scores[cmask] @ decoded_all[c]
-                proto_recon_loss = F.mse_loss(recon_x_agg, X_batch, reduction="none").sum(dim=-1).mean()
+                if proto_recon_form != 'mix3':
+                    for c in range(n_unique_conds):
+                        cmask = inverse_idx == c
+                        if cmask.any():
+                            if proto_decoupled:
+                                recon_x_agg[cmask] = scores[cmask] @ decoded_all[c]
+                            elif proto_recon_hard:
+                                recon_x_agg[cmask] = st_scores[cmask] @ decoded_all[c]
+                            elif getattr(self, 'proto_recon_stopgrad', True):
+                                recon_x_agg[cmask] = scores[cmask].detach() @ decoded_all[c]
+                            else:
+                                recon_x_agg[cmask] = scores[cmask] @ decoded_all[c]
+                    proto_recon_loss = F.mse_loss(recon_x_agg, X_batch, reduction="none").sum(dim=-1).mean()
 
             if lambda_r1r2 > 0:
                 r1r2_loss = self.calc_r1r2_loss(z_unique)

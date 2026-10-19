@@ -119,6 +119,9 @@ ABBREVIATIONS = {
     'graph_mode': 'grm',
     'lambda_proto_recon': 'lprec',
     'proto_recon_hard': 'prechrd',
+    'proto_recon_form': 'prfm',       # [D61] 'agg' / 'mix3' (4-char-distinct values)
+    'proto_recon_stopgrad': 'prsg',   # [D61] registered late -- key predates D61
+    'proto_recon_dec_sg': 'prds',     # [D61] decoder detached in proto_recon (numeric)
     'lambda_r1r2': 'lr1r2',
     'lambda_umap': 'lumap',
     'umap_similarity': 'usim',
