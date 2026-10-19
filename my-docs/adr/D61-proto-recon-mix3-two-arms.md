@@ -101,10 +101,73 @@ Also recorded in-run: post-training sigma median (anti-collapse guard, D60 was
 
 Probe 1x L4 frozen pass (~$1) + 2 arms L4 x ~1.5h (~$2). Within budget.
 
+## ADDENDUM 2026-10-19 (before any arm finished): user decision -> 2x2
+
+User: "i want trainbale decode - trainble prototypes - scores trainbale or node."
+Decision: decoder TRAINABLE inside the term too (her reasoning: the decoder must
+be able to learn to reconstruct the rare states stage-2 is forming — the stage-1
+decoder was population-weighted and may not express rare programs, making the
+charge misfire for rares). Prototypes were already live in the term. The two
+dec-detached arms were mid-run and are kept; two dec-live arms added:
+
+```
+                     scores DETACHED        scores LIVE
+decoder DETACHED     d61_pr3_sg (running)   d61_pr3_lv (running)
+decoder LIVE         d61_pr3_sgdec (new)    d61_pr3_lvdec (new)
+```
+
+Same lambda_proto_recon=0.004855 in all four (valid: decoder-param detachment
+does not change the ENCODER-path gradient the probe measured). The dec axis now
+tests, empirically, her hypothesis (live decoder helps rares: rare-proto
+residuals drop AND cross-batch agreement rises) against the registered cheat
+risk (decoder legalizes chimeras via e_b-conditional switching: mix3 loss falls
+while cross-batch agreement stays low/falls). The per-proto batch-vote view
+plus per-(proto,batch) residuals distinguish the two outcomes.
+
+## ADDENDUM 2 (2026-10-19, still before any arm finished): the recon axis
+
+User question: "do we need cvae loss any more at all? i feel now the decoder
+shoud only be trained via the proto recon loss." The dec-live launch was STOPPED
+before training to settle this first. During the discussion the user corrected
+two of my claims, both verified in code:
+- cohesion-aff: similarities are fixed graph weights — z-collapse buys nothing.
+- cohesion-GRAM too: scproto.py:2717-2771 builds the gram from the AFFINITY
+  rows (cos of closed-neighbourhood affinity vectors, normalized A@A^T 2-hop).
+  NO live z in either kernel's similarity; z enters cohesion only via the
+  assignment matrix. So: the only collapse-REWARDING term is the GM-KL pull,
+  the only collapse-RESISTING term is recon; everything scored uses fixed
+  data-side targets, so within-metacell z-contraction corrupts no metric.
+  The one scored quantity that depends on the encoder staying a sane function
+  of expression is HELD-OUT placement.
+Precedent recorded: DEC (Xie, Girshick & Farhadi, ICML 2016) trains encoder
+with clustering loss only; IDEC (Guo et al., IJCAI 2017) added recon back for
+structure preservation. Unlike DEC we keep two fixed-target cohesion anchors.
+
+DEPLOYED MATRIX (user: "run the 1*1 - make sure decoder is trainable for proto
+recon loss") — all dec-live (proto_recon_dec_sg=0), protos live, leiden init:
+
+```
+                        scores DETACHED        scores LIVE
+cvae recon ON           d61_pr3_sgdec          d61_pr3_lvdec
+cvae recon OFF          d61_pr3_sgdec_nr       d61_pr3_lvdec_nr
+```
+
+recon-off = lambda_recon=0, all other lambdas unchanged (D58 ablation
+convention). Predictions, pre-registered: USER — recon-off works; the decoder,
+taught only by mix3, learns the rare-state programs; chimeras drop. CLAUDE —
+recon-off shows within-metacell z-contraction (measure: within-cluster z
+variance vs epoch-0, from latent_z_full.npy) and risks a wider train->test
+purity gap (encoder carving without the per-cell information anchor). Both
+readable from saved artifacts; no new instrumentation needed.
+The two dec-DETACHED arms (d61_pr3_sg / d61_pr3_lv) completed/complete as
+decoder-axis reference only; the headline bars (P1-P3, M) now bind the 2x2.
+
 ## Verdict (TO FILL AFTER SCORING — works / fails / inconclusive-because)
 
-- [ ] P1:
+- [ ] P1 (per arm):
 - [ ] P2:
 - [ ] P3:
 - [ ] M (split vs reassign):
-- [ ] arm contrast:
+- [ ] scores axis:
+- [ ] recon axis (user hypothesis vs collapse/carving prediction):
+- [ ] dec axis (reference arms):

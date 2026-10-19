@@ -88,8 +88,11 @@ GNORM = {
     "umap":          7.2616,
     "recon":         11.857,
     "gmkl":          11.221,   # CV 0.01 -- the most stable term measured
-    # [D61] fill from measure_grad_shares_d61.py (mix3, dec_sg=1, scores live):
-    "proto_recon":   None,
+    # [D61] MEASURED 2026-10-19 by measure_grad_shares_d61.py (mix3, dec_sg=1,
+    # scores live, lambda=1): 402/402 rows, 0 errors, drift 1.14e-08, CV 0.08.
+    # ROUTING VERIFIED: gnorm_proto cohesion/umap/recon = 0.0, gmkl 0.0551,
+    # proto_recon 9.192 (decode path into protos works, decoder detached).
+    "proto_recon":   51.489,
 }
 
 SHARE = {"kernel": 1 / 8, "recon": 1 / 4, "gmkl": 1 / 4, "community": 1 / 4,
@@ -103,26 +106,36 @@ def _lam(term, share):
 
 
 ARMS = {
-    # arm -> proto_recon_stopgrad (the ONLY difference between arms)
-    "d61_pr3_sg": True,    # scores detached -> decode path into PROTOS only
-    "d61_pr3_lv": False,   # scores live     -> also through s_ik into ENCODER
+    # arm -> (proto_recon_stopgrad, proto_recon_dec_sg, cvae_recon_on)
+    # 2026-10-19 USER DECISIONS mid-run: (1) decoder TRAINABLE in the term
+    # ("so it can reconstruct the rare states we are finding"), prototypes
+    # trainable; (2) test whether the CVAE recon loss is needed AT ALL any
+    # more -> the deployed matrix is the dec-live 2x2 below. The two dec-
+    # DETACHED arms (sg/lv) ran first and are kept as the decoder-axis
+    # reference only.
+    "d61_pr3_sg": (True, 1, True),        # ran first: dec detached, recon on
+    "d61_pr3_lv": (False, 1, True),       # ran first: dec detached, recon on
+    "d61_pr3_sgdec": (True, 0, True),     # scores detached, dec LIVE, recon ON
+    "d61_pr3_lvdec": (False, 0, True),    # scores live,     dec LIVE, recon ON
+    "d61_pr3_sgdec_nr": (True, 0, False),   # scores detached, dec LIVE, recon OFF
+    "d61_pr3_lvdec_nr": (False, 0, False),  # scores live,     dec LIVE, recon OFF
 }
 
 ZERO_ALWAYS = ("lambda_nassoc", "lambda_modularity", "lambda_proto_usage",
                "lambda_swav", "lambda_kl")
 
 
-def build_config(stopgrad):
+def build_config(stopgrad, dec_sg, recon_on):
     from interpretable_ssl.experiments.tasks import LAMBDA_PROTO_UMAP_PRECON
     return dict(LAMBDA_PROTO_UMAP_PRECON) | {
         "prot_init": "leid",
         "lambda_proto_recon": _lam("proto_recon", SHARE["proto_recon"]),
         "proto_recon_form": "mix3",
-        "proto_recon_dec_sg": 1,
+        "proto_recon_dec_sg": dec_sg,
         "proto_recon_stopgrad": stopgrad,
         "lambda_cohesion": _lam("cohesion_gram", SHARE["kernel"]),
         "lambda_cohesion_aff": _lam("cohesion_aff", SHARE["kernel"]),
-        "lambda_recon": _lam("recon", SHARE["recon"]),
+        "lambda_recon": _lam("recon", SHARE["recon"]) if recon_on else 0.0,
         "lambda_gmkl": _lam("gmkl", SHARE["gmkl"]),
         "lambda_umap": 0.0,
         "coh_proto_sg": 1,
@@ -142,11 +155,12 @@ def validate(lc, arm):
     assert lc["coh_proto_sg"] == 1 and lc["umap_proto_sg"] == 1
     assert float(lc["lambda_gmkl"]) > 0, f"{arm}: gmkl is the protos' only teacher"
     assert float(lc["lambda_cohesion"]) > 0 and float(lc["lambda_cohesion_aff"]) > 0
-    assert float(lc["lambda_recon"]) > 0
+    assert float(lc["lambda_recon"]) >= 0   # 0 is a deliberate [D61] ablation arm
     assert float(lc["lambda_proto_recon"]) > 0 and lc["proto_recon_form"] == "mix3"
-    assert lc["proto_recon_dec_sg"] == 1
+    assert lc["proto_recon_dec_sg"] in (0, 1)
     assert lc["cohesion_self"] == 1.0 and lc["proto_reinit_every"] == 0
     return {"arm": arm, "prot_init": lc["prot_init"],
+            "pr_dec_sg": lc["proto_recon_dec_sg"],
             "gram": lc["lambda_cohesion"], "aff": lc["lambda_cohesion_aff"],
             "recon": lc["lambda_recon"], "gmkl": lc["lambda_gmkl"],
             "proto_recon": lc["lambda_proto_recon"],
@@ -187,7 +201,7 @@ def run_arm(arm: str):
     import torch
     from interpretable_ssl.experiments.tasks import run_mc_task
 
-    lc = build_config(ARMS[arm])
+    lc = build_config(*ARMS[arm])
     checked = validate(lc, arm)
     print(f"   [D61 CONFIG VERIFIED IN-RUN] {checked}")
 
@@ -206,8 +220,9 @@ def run_arm(arm: str):
     assert getattr(trainer, "coh_proto_sg", 0) == 1
     assert getattr(trainer, "lambda_gmkl", 0.0) > 0
     assert getattr(trainer, "proto_recon_form", "agg") == "mix3"
-    assert getattr(trainer, "proto_recon_dec_sg", 0) == 1
-    assert getattr(trainer, "proto_recon_stopgrad", None) == ARMS[arm]
+    assert getattr(trainer, "proto_recon_dec_sg", None) == ARMS[arm][1]
+    assert getattr(trainer, "proto_recon_stopgrad", None) == ARMS[arm][0]
+    assert (float(getattr(trainer, "lambda_recon", -1)) > 0) == ARMS[arm][2]
     print(f"[{arm}] trained in {train_s:.0f}s  n_dead={metrics.get('n_dead')}")
 
     # --- post-run sigma check (P1 of the pre-registration), in-run and free ---
@@ -270,8 +285,9 @@ def main(arms: str = "all"):
     assert not bad, f"unknown arms {bad}"
     print(f"[D61] {DS}/{TAG} epochs={TRAIN_EPOCHS} arms={sel}")
     for a in sel:
-        lc = build_config(ARMS[a])
-        print(f"  {a:<12} stopgrad={ARMS[a]!s:<6} gram={lc['lambda_cohesion']:g} "
+        lc = build_config(*ARMS[a])
+        print(f"  {a:<14} stopgrad={ARMS[a][0]!s:<6} dec_sg={ARMS[a][1]} "
+              f"gram={lc['lambda_cohesion']:g} "
               f"aff={lc['lambda_cohesion_aff']:g} recon={lc['lambda_recon']:g} "
               f"gmkl={lc['lambda_gmkl']:g} pr3={lc['lambda_proto_recon']:g}")
     calls = {a: run_arm.spawn(a) for a in sel}
