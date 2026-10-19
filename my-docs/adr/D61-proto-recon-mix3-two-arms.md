@@ -1,6 +1,6 @@
 # D61 — form-3 proto_recon (the chimera charge): two arms, scores detached vs live
 
-status: RUNNING (pre-registered before launch, 2026-10-19)
+status: CLOSED, FAILS its headline bar (P1) — scored 2026-10-19, all six arms
 dataset: pbmc-immune / arbf_ctb20_seed0 (same split, pretrain checkpoint, seed 31 as D60)
 decided by: Fatemeh (recipe and both expectations are hers; see "Decision before run")
 
@@ -162,12 +162,51 @@ readable from saved artifacts; no new instrumentation needed.
 The two dec-DETACHED arms (d61_pr3_sg / d61_pr3_lv) completed/complete as
 decoder-axis reference only; the headline bars (P1-P3, M) now bind the 2x2.
 
-## Verdict (TO FILL AFTER SCORING — works / fails / inconclusive-because)
+## Verdict (scored 2026-10-19; all six arms; scorer = score_d61_pr3.py,
+## batch-vote = view_proto_batch_labels.py, dispersion = normalized-z
+## within-metacell variance)
 
-- [ ] P1 (per arm):
-- [ ] P2:
-- [ ] P3:
-- [ ] M (split vs reassign):
-- [ ] scores axis:
-- [ ] recon axis (user hypothesis vs collapse/carving prediction):
-- [ ] dec axis (reference arms):
+```
+AGREE% (bar: >46.8 AND >=65.1)   sg 49.0  lv 56.4  sgdec 51.9  lvdec 55.2
+                                 sgdec_nr 41.0  lvdec_nr 46.5     ALL FAIL
+cross_train_all (d60_leid 0.8956): only lv 0.9083 / lvdec 0.9004 beat it
+coh_aff_test_all (e0 0.0784, d60_leid 0.0853): every d61 arm <= 0.0759
+within_test_rare (bar >= 0.5700): all pass; best lvdec_nr 0.6904
+pooled_test_all  (d60_leid 0.8160): every d61 arm below (0.746-0.811)
+n_dead: sg/sgdec 59/60, lv/lvdec 10/11, *_nr 3/0;  sigma 0.73-0.94 (healthy)
+```
+
+- [x] P1: **FAILS in every arm.** Best (lv 56.4%) beats d60_leid_noc's 46.8%
+      but stays well under the epoch-0 bar of 65.1%. The chimera charge as
+      dosed reduces but does not fix cross-batch misalignment.
+- [x] P2: **FAILS.** Test cohesion drops below even epoch-0 in all six arms
+      while TRAIN cohesion rises (+0.021..+0.047) — a train/test carving
+      signature that appears exactly when mix3 is added. mix3's per-cell
+      residual pressure pushes the encoder toward memorized boundaries.
+- [x] P3: passes everywhere; rare within-batch purity best in lvdec_nr
+      (+0.120 vs epoch-0, beats d60_leid_noc's +0.057).
+- [x] M: recon-ON arms resolve chimeras partly by SPLITTING/killing
+      (multi-batch protos 200-259 vs 295; n_dead up to 60). recon-OFF arms
+      keep all 300 alive and multi-batch (295-297) but fix nothing. Per the
+      pre-registration, split-dominant resolution makes the duplicate-MERGE
+      term the next mandatory step.
+- [x] scores axis: **LIVE wins decisively.** Scores-detached (proto-only
+      teaching) kills 59-60 protos and craters rare metrics (rare_f1 0.61 vs
+      0.78, pooled_test_rare 0.32-0.37 vs 0.49-0.54). The encoder/assignment
+      path is the active ingredient — user's reassignment hypothesis
+      confirmed on this axis.
+- [x] recon axis: **collapse prediction REFUTED** — within-metacell z
+      dispersion 0.100-0.122 vs epoch-0's 0.0866 (no contraction at 10
+      epochs; recon-off slightly lower than recon-on but nowhere near
+      collapse). User right on no-collapse. BUT recon-off arms are worst on
+      AGREE% (41.0/46.5) and pooled_test_all (0.746/0.774), with one bright
+      spot: lvdec_nr pooled_test_rare 0.5942 (+0.058 vs epoch-0, the only
+      positive pooled-rare delta in D61). CVAE recon still pays for
+      common/overall quality; question not closed but evidence says keep it.
+- [x] dec axis: near-null. sg~sgdec and lv~lvdec on every headline number —
+      decoder live vs detached barely matters at this dose/duration.
+
+**OVERALL: fails.** d60_leid_noc still dominates every d61 arm on pooled/
+cross/F1. Per the pre-registered rule: do NOT re-dose mix3 blindly; the
+measured next step is the duplicate-merge (signature twin-pull) direction,
+plus understanding P2's carving cost before any mix3 redeployment.

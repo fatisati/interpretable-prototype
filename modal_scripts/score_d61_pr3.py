@@ -46,6 +46,10 @@ ARMS = [
     ("d60_leid_noc", "d60_leid_noc", "d60_epoch0_leid"),
     ("d61_pr3_sg", "d61_pr3_sg", "d60_epoch0_leid"),
     ("d61_pr3_lv", "d61_pr3_lv", "d60_epoch0_leid"),
+    ("d61_pr3_sgdec", "d61_pr3_sgdec", "d60_epoch0_leid"),
+    ("d61_pr3_lvdec", "d61_pr3_lvdec", "d60_epoch0_leid"),
+    ("d61_pr3_sgdec_nr", "d61_pr3_sgdec_nr", "d60_epoch0_leid"),
+    ("d61_pr3_lvdec_nr", "d61_pr3_lvdec_nr", "d60_epoch0_leid"),
 ]
 
 
