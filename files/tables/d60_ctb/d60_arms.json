@@ -1,0 +1,15 @@
+{
+  "ok": {},
+  "failed": {
+    "d60_leid_noc": "ConnectionError: [Errno 10060] Connect call failed ('54.80.13.45', 443)",
+    "d60_wayp_noc": "ConnectionError: [Errno 10060] Connect call failed ('54.80.13.45', 443)",
+    "d60_wayp_comm": "ConnectionError: [Errno 11001] getaddrinfo failed"
+  },
+  "gnorm": {
+    "cohesion_gram": 0.04305,
+    "cohesion_aff": 0.024688,
+    "umap": 7.2616,
+    "recon": 11.857,
+    "gmkl": 11.221
+  }
+}

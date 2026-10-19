@@ -54,7 +54,7 @@ decision gets a new ADR, and both lines stay here.
   predictions falsified.
   -> `adr/D58-ablate-each-loss-term-around-share-vector-B.md`
 
-- **D60** `proposed` 2026-10-18 — In the context of stage 2 measurably destroying
+- **D60** `fails` 2026-10-18 — In the context of stage 2 measurably destroying
   what stage 1 provides (sigma collapsed 130,000x; cross-batch 0.963->0.856; test
   cohesion below the untrained init), we decided for a redesigned stage 2 — cohesion
   with prototypes DETACHED, responsibility-weighted GM-KL (sigma=1) as the prototypes'

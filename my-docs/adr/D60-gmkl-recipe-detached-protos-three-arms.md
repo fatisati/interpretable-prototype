@@ -1,9 +1,9 @@
 ---
 id:             D60
 title:          GM-KL recipe with detached protos: 3 arms (init x community) vs epoch-0
-status:         proposed
+status:         fails
 date_opened:    2026-10-18
-date_closed:
+date_closed:    2026-10-19
 supersedes:
 superseded_by:
 tags:           [gmvae, kl, sigma-collapse, carving, rare-cells, prototype-init]
@@ -224,11 +224,77 @@ coh_proto_sg: cohesion's gnorm_proto must read ~0, GM-KL's gnorm_proto > 0).
 
 ### Consequences
 
-*pending — filled from the scored table, never from memory*
+All from `files/tables/d60_ctb/pbmc-immune_d60_full.csv`. Gates: `n_dead = 0` in
+all arms. Training ~3,450-3,600 s/arm on L4.
+
+**Bar-by-bar, against the pre-registered Confirmation:**
+
+```
+P1 sigma alive          PASS, decisively. sigma median 0.90 / 0.90 / 0.90
+                        (stage-1: 0.35; broken regime: 0.0000027). The
+                        anti-collapse term does its job through full training.
+P2 cohesion > epoch-0
+   train, all arms      PASS  (+0.040 .. +0.050 -- comparable train gains to the
+                        broken recipe, now WITH the taxes on)
+   test all-cells       leid_noc PASS (+0.0070); wayp_noc FAIL (-0.0063);
+                        wayp_comm FAIL (-0.0032)
+   test RARE            PASS in ALL arms (+0.0084 .. +0.0117; wayp_comm reaches
+                        0.1657, above even the broken recipe's 0.1650) --
+                        the user's central expectation CONFIRMED
+   test common          leid +0.0068; wayp arms -0.004..-0.007 (user allowed
+                        "maybe no change"; these are ~2x the noise floor)
+P3 cross_TRAIN >= 0.95  FAIL in all arms: 0.8956 / 0.8648 / 0.8828.
+                        The PRE-REGISTERED FALSIFIER (<0.93 in all arms) FIRED:
+                        GM-KL + recon do NOT preserve the init's alignment.
+P4 within_TEST up       FAIL: -0.016 / -0.031 / -0.022; pooled down too.
+```
+
+**The redeeming comparison — against the BROKEN recipe (d59_scproto_base), the
+new recipe is better on essentially everything:**
+
+```
+                       d59 (broken)   d60_wayp_comm    epoch-0 (unbeaten)
+sigma median             0.0000027        0.90             0.35
+coh_aff test             0.0816           0.0848           0.0880
+coh_aff test RARE        0.1650           0.1657           0.1540
+cross train              0.856            0.883            0.963
+cross test               0.885            0.922            0.954
+within test              0.854            0.871            0.893
+pooled test              0.768            0.807            0.868
+```
+
+So the recipe strictly dominates the previous training, cuts the cross-batch
+destruction by ~25-42% (best: leid_noc, -0.062 vs the old -0.107), and finally
+delivers rare-cell cohesion gains on top of the strong init -- but epoch-0
+remains unbeaten on alignment and purity.
+
+- **Surprised me** — (1) the LEIDEN-init arm, despite starting from a uniformly
+  worse init, ends with the best test cohesion (0.0853) and the least cross-batch
+  destruction; training helps a weak init more than a strong one. (2) sigma
+  settled at ~0.9, ABOVE stage-1's 0.35 — the GM-KL's optimum (sigma=1) is wider
+  than the recon-KL equilibrium of stage 1. (3) rare coverage went UP in the
+  waypoint arms (+0.17/+0.23) while rare pooled purity fell — the rare cells
+  spread over more (batch,type)-covering metacells but with less homogeneity.
+- **Deviations from Confirmation** — none procedural; the falsifier fired and is
+  honoured as written.
 
 ## Verdict
 
-*pending*
+**fails** — on its pre-registered headline (P3/P4: preserve the init's
+cross-batch alignment and improve purity), by its own falsifier. What it
+ESTABLISHES on the way: the anti-collapse mechanism works (P1), the routing
+works (probe-verified 0-gradient), the recipe strictly dominates the previous
+training on every axis, and the user's rare-cohesion expectation held in all
+three arms. What it rules out: "sampling noise + derived prototypes + recon"
+as a SUFFICIENT preservation mechanism — the within-batch graph pull still
+reorganizes assignments across batches even when carving is taxed.
+
+Next, as pre-registered in the falsifier: **the anchor-to-init mechanism**
+(output-space distillation: KL(current assignment || epoch-0 assignment) on
+train cells) is now necessary, on top of this recipe — the recipe is the right
+base (it finally trains without destroying the latent), the anchor supplies the
+preservation the KL could not. Candidate second lever: leiden-init arm as the
+base, since it both passed P2-all and lost the least alignment.
 
 ## More Information
 
