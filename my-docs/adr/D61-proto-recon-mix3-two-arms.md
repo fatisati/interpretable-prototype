@@ -1,6 +1,12 @@
 # D61 — form-3 proto_recon (the chimera charge): two arms, scores detached vs live
 
-status: CLOSED, FAILS its headline bar (P1) — scored 2026-10-19, all six arms
+status: **INVALID — it never ran form 3.** See "ADDENDUM 3: THIS RUN TESTED THE
+WRONG CODE" at the bottom. The verdict section below is retained verbatim as
+written, but it describes proto_recon form **'agg'** (the pre-existing
+decode-then-aggregate MSE), not 'mix3'. Superseded by D62.
+
+(previous status line, now wrong: CLOSED, FAILS its headline bar (P1) — scored
+2026-10-19, all six arms)
 dataset: pbmc-immune / arbf_ctb20_seed0 (same split, pretrain checkpoint, seed 31 as D60)
 decided by: Fatemeh (recipe and both expectations are hers; see "Decision before run")
 
@@ -210,3 +216,97 @@ n_dead: sg/sgdec 59/60, lv/lvdec 10/11, *_nr 3/0;  sigma 0.73-0.94 (healthy)
 cross/F1. Per the pre-registered rule: do NOT re-dose mix3 blindly; the
 measured next step is the duplicate-merge (signature twin-pull) direction,
 plus understanding P2's carving cost before any mix3 redeployment.
+
+---
+
+## ADDENDUM 3 (2026-10-23): THIS RUN TESTED THE WRONG CODE
+
+**The library edits never reached the Modal volume.** `modal volume put` was
+called from Git Bash with a LEADING-SLASH remote path
+(`/code/interpretable_ssl/trainers/scproto.py`). MSYS path conversion rewrote
+it to a Windows path (`C:/Program Files/Git/code/...`), so the upload landed
+somewhere harmless and the volume kept the OLD `scproto.py`. The CLI printed a
+success line containing the mangled path (`Files/Git/code/...`) which read as
+normal output.
+
+Proof, 2026-10-23:
+```
+volume code/interpretable_ssl/trainers/scproto.py : 'mix3' x0, 'proto_recon_dec_sg' x0
+local  interpretable_ssl/trainers/scproto.py      : 'mix3' x3, 'proto_recon_dec_sg' x2
+volume code/interpretable_ssl/constants.py        : prfm/prsg/prds x0
+```
+Corroborating evidence available the whole time and missed: the D61 run-folder
+names contain NO `prfm`/`prsg`/`prds` tokens, while `lgmk`/`cpsg` (the D60 keys,
+uploaded in an earlier session with a working path) ARE present.
+
+**What the six arms therefore actually were:** proto_recon form **'agg'** at
+lambda 0.004855, with `proto_recon_stopgrad` honoured (that key predates D61)
+and `proto_recon_dec_sg` silently ignored (decoder always live in the term).
+So the "dec axis" was not an axis at all:
+
+```
+d61_pr3_sg   == d61_pr3_sgdec     (identical config)
+d61_pr3_lv   == d61_pr3_lvdec     (identical config)
+```
+which is exactly why that axis measured "a near-null" -- they were replicates.
+
+### What survives, and what does not
+
+Still valid (they are real contrasts, just of 'agg', not 'mix3'):
+- scores DETACHED vs LIVE: detached kills ~60 protos, live ~10. Real.
+- CVAE recon ON vs OFF: real.
+- All epoch-0 / d60_leid_noc baseline numbers: untouched by this bug.
+
+NOT valid:
+- every statement about "form 3", the mixture likelihood, the chimera charge,
+  or the decoder-as-ruler. None of it ran.
+- the dec axis conclusion (it compared a config against itself).
+
+### THE SILVER LINING: a measured run-to-run NOISE FLOOR (first one we have)
+
+The two accidental replicate pairs give |difference| between runs of an
+IDENTICAL configuration (GPU nondeterminism only):
+
+```
+metric                        sg|sgdec   lv|lvdec     max      verdict
+coh_aff_test_all               0.0012     0.0010    0.0012    STABLE
+coh_aff_train_all              0.0016     0.0008    0.0016    STABLE
+within_test_all                0.0008     0.0003    0.0008    STABLE
+pooled_test_all                0.0058     0.0018    0.0058    STABLE
+cross_train_all                0.0029     0.0079    0.0079    usable
+cross_test_all                 0.0020     0.0160    0.0160    usable
+coh_aff_test_rare              0.0030     0.0101    0.0101    usable
+pooled_test_rare               0.0564     0.0483    0.0564    NOISE
+within_test_rare               0.0100     0.0611    0.0611    NOISE
+rare_coverage_mean_test        0.0000     0.0667    0.0667    NOISE
+rare_homogeneity_mean_test     0.0057     0.0773    0.0773    NOISE
+rare_f1_mean_test              0.0078     0.0822    0.0822    NOISE
+n_mc                           4          3         4
+AGREE% (batch-vote view)       2.9 pts    1.2 pts   ~3 pts
+```
+Consistent with small-sample statistics: ~1,034 rare cells, ~207 in the test
+half, so 1 SD of a proportion near 0.6 is ~0.034 and 1 SD of a DIFFERENCE of
+two runs is ~0.048. The noise is real, not a bug.
+
+**Consequence for everything claimed so far: no single-run rare-metric
+difference below ~0.06 means anything.** Specifically retracted as
+"not established":
+- D60's headline "rare within-batch purity +0.057 over epoch-0"
+  (0.6269 vs 0.5700) -- BELOW the 0.061 floor.
+- "D61 lost rare_f1" (0.796 -> 0.777, diff 0.019 vs 0.082 floor).
+- any rare ranking between arms separated by less than ~0.06.
+Still established (differences far exceed their floors):
+- the chimera result: AGREE% 65.1 (epoch-0) -> 46.8 (d60_leid_noc), ~3 pt floor.
+- the test-cohesion loss in every proto_recon arm (floor 0.0012).
+- the overall pooled-purity drop (floor 0.0058).
+
+### Process fixes adopted
+1. Upload with a relative remote path (`code/...`), never leading-slash, from
+   Git Bash; or set `MSYS_NO_PATHCONV=1`.
+2. **Verify the upload by checksum, not by the CLI's success line**
+   (`modal volume get` the file back, compare md5 to local). Done for D62.
+3. **Verify the feature reached the RUN**, not just the trainer attribute:
+   assert a token of the new option appears in `trainer.get_model_name()`
+   (CLAUDE.md §9 step 3). The D61 probe printed the folder name but nothing
+   asserted on it, and no one read it. Make it an assert.
+4. Rare metrics: report against the measured noise floor, or run >=2 seeds.
