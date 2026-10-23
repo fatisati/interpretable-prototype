@@ -254,6 +254,18 @@ def run_arm(arm: str):
     assert getattr(trainer, "lambda_gmkl", 0.0) > 0
     assert getattr(trainer, "proto_recon_form", "agg") == "mix3"
     if arm in ARMS_D62:
+        # [D62] THE CHECK D61 LACKED: prove the new option reached the RUN, not
+        # just the trainer attribute. D61's uploads never landed on the volume
+        # (Git Bash mangled a leading-slash remote path), so it silently trained
+        # proto_recon form 'agg'. An attribute assert cannot catch that --
+        # init_attributes setattr's anything. These two can:
+        import inspect
+        from interpretable_ssl.trainers import scproto as _sp
+        assert "mix3" in inspect.getsource(_sp), (
+            "the scproto.py ON THIS CONTAINER has no mix3 branch -- stale volume copy")
+        _mn = trainer.get_model_name()
+        assert "prfm-mix3" in _mn, f"proto_recon_form missing from model name: {_mn}"
+        print(f"   [D62 VERIFIED] mix3 code present; model folder = {_mn}")
         assert getattr(trainer, "proto_recon_dec_sg", None) == 0
         assert getattr(trainer, "proto_recon_stopgrad", None) is False
         assert float(getattr(trainer, "lambda_recon", -1)) > 0

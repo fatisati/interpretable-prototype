@@ -186,6 +186,34 @@ other dataset starts. If time or Colab runs out we still have one reportable res
 instead of partial results everywhere. Say in the header which dataset is first and why.
 Remaining datasets then run one at a time, each saving before the next.
 
+## 6a. MEASURED run-to-run noise floor (pbmc-immune, K=300) — rare metrics are NOISE
+
+Two `[D61]` arms turned out to be accidental REPLICATES (identical config, only
+GPU nondeterminism between them). Their |difference| is the noise floor for a
+single-run comparison on this dataset:
+
+```
+STABLE, trust differences above ~2x these:
+  coh_aff_test_all   0.0012     within_test_all   0.0008
+  coh_aff_train_all  0.0016     pooled_test_all   0.0058
+  cross_train_all    0.0079     cross_test_all    0.0160
+  AGREE% (per-proto batch vote)  ~3 points
+
+NOISE, a single run says nothing below these:
+  coh_aff_test_rare  0.0101     within_test_rare  0.0611
+  pooled_test_rare   0.0564     rare_coverage     0.0667
+  rare_homogeneity   0.0773     rare_f1           0.0822
+```
+
+Not a bug — small-sample statistics. ~1,034 rare cells, ~207 in the test half,
+so 1 SD of a proportion near 0.6 is ~0.034 and 1 SD of the DIFFERENCE of two
+runs is ~0.048.
+
+**Consequence: never rank arms on a rare metric from one run each.** Either
+report the difference against this floor, or run >=2 seeds per arm and report
+mean±std across them. `[D60]`'s headline "rare within-batch purity +0.057" was
+retracted on exactly this basis (floor 0.0611).
+
 ## 7. Always report std
 
 - No bare means. Every metric gets its std.
@@ -207,6 +235,88 @@ Remaining datasets then run one at a time, each saving before the next.
   display name in `result_tables.py`. Columns already named `*_mean`/`*_std` are paired
   automatically.
 - If a value genuinely has no std, say so instead of printing a lone number.
+
+## 7a. Reproducing the NH scoreboard table (Coh/Entropy/Purity/Homog/F1/Coverage)
+
+This is the recipe behind the recurring per-dataset table (`coh_aff`, `coh_gram`,
+`entropy(test)`, `purity(test)` | `homog`, `f1`, `coverage`, one row per method).
+It mixes TWO protocols in one table — get the masking wrong and the numbers are
+silently not comparable to anything.
+
+**Rows (methods), one per dataset:**
+- **scProto** — that dataset's current best NH-trained arm (`clusters_full.npz`,
+  covers all N cells: train assignments + held-out cells placed by a frozen-
+  encoder forward pass). "Best" is a judgment call from held-out purity + rare
+  metrics, not a fixed rule — see §9d-1 for how the arm was actually configured.
+- **scPoli-NH** (`leiden_st1_nh_K<K>`) — Leiden on the Stage-1 CVAE latent,
+  trained on the SAME 80% split, held-out cells placed via frozen-encoder + 15-NN
+  majority. The fair, leak-free control.
+- **SEACells** (`seacell`) — fit on the COMPLETE dataset (no held-out concept).
+  Reported for context, not a matched comparison — say so in the caption.
+
+**Columns 1-4 (`coh_aff`, `coh_gram`, `entropy(test)`, `purity(test)`): NH
+protocol, held-out cells ONLY.**
+```python
+from modal_scripts.score_all_baselines import DATASETS, load_labels
+from modal_scripts.score_nodeheldout import test_mask_for, purity_entropy_on_mask
+from interpretable_ssl.evaluation.metacell_scoreboard import (
+    cohesion_per_cell, load_affinity, read_obs)
+
+n, h5, bk, lk, nk, K = DATASETS[ds]
+mask = test_mask_for(ds, h5_path, n)          # boolean, True = held-out cell
+A_full = load_affinity(f"graphs/affinity_{ds}{n}_ncomp50_kneighbors50_arbf.pkl")
+# ^ the FULL graph, not the train-only graph the model trained on -- held-out
+#   cells' true neighbours only exist in the full graph.
+lab = load_labels(run_dir, n)                 # clusters_full.npz or clusters.npz
+ca = cohesion_per_cell(lab, A_full, bcodes, sim='aff')[mask]   # mean/std OVER CELLS
+cg = cohesion_per_cell(lab, A_full, bcodes, sim='gram')[mask]
+pe = purity_entropy_on_mask(lab, cts, bts, mask)   # ct_purity_wmean/wstd,
+                                                    # batch_entropy_wmean/wstd
+                                                    # (size-weighted OVER METACELLS,
+                                                    # test-members only)
+```
+
+**Columns 5-7 (`homog`, `f1`, `coverage`): full-dataset protocol, pools train +
+held-out.** Same `lab` (already covers all N cells for the NH methods), but NO
+mask — rare types are identified from FULL per-batch frequency, not held-out-only:
+```python
+from interpretable_ssl.evaluation.metacell_scoreboard import rare_metrics_paper
+rare = rare_metrics_paper(lab, cts, bts)   # NO mask -- full cts/bts/lab
+# rare_homogeneity_mean/std   (per-cell score, pooled over ALL rare cells)
+# rare_f1_mean/std            (per-batch, then mean/std ACROSS BATCHES)
+# rare_coverage_mean/std      (per-batch, then mean/std ACROSS BATCHES)
+# rare_purity_mean/std exists too but is dropped from this table by request.
+```
+
+**Read the Drive-slowness warning in §11 before running any of this** — `A_full`
+and the dataset's `.h5ad` are large files on the Drive-mounted path; copy them
+to a local/scratch path first or `h5py`/`anndata` reads can take over a minute
+each or hang outright.
+
+Formatting: 2dp `mean±std`, bold = best in column (per dataset), underline =
+second-best. `cov_s`/`rare_coverage_std` is 0 whenever every batch hit full
+coverage (e.g. immune) — that's a real value, not a missing std.
+
+## 7b. Compiling the ICLR manuscript — use `build.ps1`, never ad hoc `pdflatex`
+
+`manuscripts/iclr/scproto_iclr2027/` has ONE correct build process, already
+written: `.\build.ps1` (PowerShell, run from that folder). It runs the real
+4-pass sequence (pdflatex → bibtex → pdflatex → pdflatex), keeps aux/log
+clutter in `build/`, and copies the result to **`scproto_iclr2027.pdf`** in
+that folder — that is THE canonical PDF, the only one that should exist there.
+Read `manuscripts/iclr/scproto_iclr2027/README.md` before touching this
+folder; it documents the full layout and known issues.
+
+**Do not run bare `pdflatex main.tex` in that folder.** It was done this way
+for most of a session (2026-09-26) before this note existed, producing a
+second, wrongly-named `main.pdf` that silently skipped bibtex entirely — every
+citation was unresolved the whole time, and nothing in pdflatex's own output
+made that obviously wrong (it just prints "undefined citations" warnings that
+are easy to dismiss as unrelated to whatever you're actually editing). Two
+PDFs with different names for the same paper is itself a bug to avoid, not
+just a citations issue — if you ever find more than one `*.pdf` in that
+folder, that means an ad hoc compile happened somewhere; delete the wrong one
+and rebuild with `build.ps1`.
 
 ## 8. What to save
 
@@ -327,8 +437,9 @@ metrics were plausible, and the loss decreased monotonically the whole time.
 Corollary for hyperparameters: a threshold parameter is only interpretable once the
 quantity it is compared against is on a known scale. Derive it from measured properties
 of the actual graph rather than sweeping blind, and re-derive it if the scaling of the
-underlying quantity changes. (`cohesion`'s span calibration is the live example — see
-§9d.)
+underlying quantity changes. (`cohesion`'s OLD span calibration used to be the example
+here; it is superseded by the unified gradient-share method, §9d/§9d-1 — cohesion is no
+longer calibrated differently from any other term.)
 
 **`nassoc_gamma` — NO LONGER RELEVANT.** We are on cohesion. `nassoc` is **off** in every
 current run (`lambda_nassoc = 0`), so gamma is not a parameter of anything we train and
@@ -370,22 +481,41 @@ If you need to reproduce a pre-2026-09-24 nassoc run, the settings are in
 `decisions.md` §15 and `EXPERIMENTS.md` §11a, and the run's own model-folder name
 records them.
 
-## 9d. THE config: COHESION ONLY. Every other loss term is 0.
+## 9d. THE loss: exactly FOUR active terms, ALL gradient-share calibrated.
+Every other term is genuinely 0. (Unified 2026-09-26, `decisions.md` [D55].)
 
-**This is the only config. Cohesion is the ONLY objective; everything else is zero.**
+**Cohesion-gram + cohesion-aff + community [routed, prototypes detached] +
+CVAE-recon.** These four, and only these four, are the design. Cohesion is no
+longer a privileged, externally-pinned anchor — `authority/span` (kept below
+for historical/interpretability reasons, and for reading any run that predates
+2026-09-26) is SUPERSEDED as the mechanism that sets its lambda. All four terms
+now get an explicit, USER-CHOSEN target share, and all four lambdas are solved
+the same way, from measured gradient norms (§9d-1):
 
 ```
-lambda_cohesion      > 0   gram, 2-hop   } the objective
-lambda_cohesion_aff  > 0   aff,  1-hop   }
+lambda_cohesion      > 0   gram, 2-hop   }  all four: user picks a target SHARE,
+lambda_cohesion_aff  > 0   aff,  1-hop   }  lambda solved from measured gradient
+lambda_umap          > 0   community [routed, umap_proto_sg=1]  }  norm, §9d-1.
+lambda_recon         > 0   CVAE-recon                            }  ONE snapshot,
+                                                                    no re-probing
+                                                                    mid-run (explicit
+                                                                    user decision).
 --------------------------------------------------------------------
-lambda_umap          = 0   community      OFF
-lambda_proto_recon   = 0                  OFF
+lambda_proto_recon   = 0                  OFF, genuinely -- not part of the design
 lambda_nassoc        = 0   (cohesion REPLACES nassoc — §9b)
-lambda_modularity    = 0                  OFF
-lambda_proto_usage   = 0                  OFF
-lambda_swav          = 0   lambda_kl = 0   lambda_recon = 0
+lambda_modularity    = 0                  OFF, genuinely -- not part of the design
+lambda_proto_usage   = 0                  OFF, genuinely -- not part of the design
+lambda_swav          = 0   lambda_kl = 0
 proto_reinit_every   = 0
 ```
+
+**Stage 2 (scProto fine-tuning, after CVAE pretraining) must freeze the batch
+embedding: `freeze_batch_embedding=True`.** Stage 1 already achieved batch/bio
+separation (z sheds batch info because the batch embedding + decoder carry it
+instead); without freezing, stage 2 has nothing stopping the encoder from
+drifting batch-specific structure back into z. This is what CVAE-recon's
+anchor role actually depends on -- recon without a frozen batch embedding is
+not testing the same mechanism as recon with one.
 
 Nothing may outvote the term the model is built around. **Assert this in the run
 script** — do not rely on having remembered to zero them, because
@@ -398,17 +528,32 @@ scripts in `modal_scripts/` still carry `cohesion_self: 0.5` and get copied.
 
 ```python
 lambda_config = dict(LAMBDA_PROTO_UMAP_PRECON) | {
-    'lambda_umap': 0.0, 'lambda_proto_recon': 0.0,   # community OFF
+    'lambda_umap':   <derive per §9d-1>,   # community -- NOT 0, NOT a guessed number.
+                                           #   s28nsc is the one dataset where this
+                                           #   derives to 0 (measured to fail there).
+    'umap_proto_sg': 1,                    # <- REQUIRED whenever lambda_umap > 0.
+                                           #   Detaches prototypes from community's
+                                           #   similarity computation -- its gradient
+                                           #   reaches the ENCODER ONLY, so cohesion
+                                           #   keeps sole ownership of the prototype
+                                           #   vectors ([D48]). Forgetting this silently
+                                           #   reverts to UNROUTED community, which [D39]
+                                           #   measured killing 125/200 prototypes.
+    'lambda_recon':  <derive per §9d-1>,   # CVAE-recon, gradient-share calibrated --
+                                           #   same caveat as lambda_umap above.
+    'lambda_proto_recon': 0.0,             # genuinely OFF -- not one of the 4 active terms
     'lambda_nassoc': 0.0, 'lambda_modularity': 0.0, 'lambda_proto_usage': 0.0,
-    'lambda_swav': 0.0, 'lambda_kl': 0.0, 'lambda_recon': 0.0,
-    'lambda_cohesion':     <gram>, # } 50/50 split of the authority 1.5403.
-    'lambda_cohesion_aff': <aff>,  # } MEASURE THESE PER DATASET -- spans are not
-                                   #   portable across graphs. lambda = authority/span,
-                                   #   span = value(leiden at K) - value(random at K)
-                                   #   on the graph training will actually see.
-                                   #   s28nsc/bk02 gave 10.0/22.3; every other dataset
-                                   #   differs (pancreas 4.04/11.99, lung 5.61/26.32,
-                                   #   immune 8.74/33.65 on the heldout-80% graphs).
+    'lambda_swav': 0.0, 'lambda_kl': 0.0,
+    'lambda_cohesion':     <derive per §9d-1>, # } gradient-share calibrated, same as
+    'lambda_cohesion_aff': <derive per §9d-1>, # } every other term -- NOT authority/span
+                                   #   any more (superseded 2026-09-26, [D55]). The OLD
+                                   #   authority/span numbers are kept here ONLY to
+                                   #   interpret pre-2026-09-26 runs: authority=1.5403,
+                                   #   lambda=authority/span, span=value(leiden at K)-
+                                   #   value(random at K) on the training graph.
+                                   #   s28nsc/bk02 gave 10.0/22.3; pancreas 4.04/11.99,
+                                   #   lung 5.61/26.32, immune 8.74/33.65 (heldout-80%
+                                   #   graphs). Do not use this formula for new runs.
     'cohesion_self':   1.0,   # <- ALWAYS 1.0. The self-pair counts like any other
                               #    member, sim(c,c)=1. This IS the plain formula:
                               #    "mean similarity to a prototype's members".
@@ -448,6 +593,12 @@ trainer, metrics, _ = run_mc_task(
     eval_freq=2, patience=4,     # required positionally; unused when early_stop=False
     lambda_config=lambda_config,
     trainer_kwargs={'experiment_name': <name>},
+    freeze_batch_embedding=True, # <- REQUIRED, default False <- wrong. Stage 1 already
+                                 #   pushed batch info OUT of z (into the batch
+                                 #   embedding + decoder); without freezing it in stage
+                                 #   2, nothing stops the encoder drifting batch
+                                 #   structure back into z, and CVAE-recon's anchor role
+                                 #   depends on this staying frozen. See §9d.
 )
 ```
 
@@ -547,28 +698,70 @@ from the numerator and must be absent from the denominator too. Full formulas in
 
 **Also settled with it ([D39], s28nsc/bk02/K=200, all with `cohesion_self=1.0`):**
 
-- **Community/UMAP loss OFF — at EVERY weight, not just the loud one.** Its design
-  intent was graph preservation, which cohesion already supplies without the merge bias;
-  it does NOT align batches (retracted, `decisions.md` 2026-09-23). Two weights are now
-  measured and both lose, so **do not re-run a community-lambda sweep**:
-
-  ```
-  arm                        dead  joint_pur  ct_pur   dge_r   n_cov   coh_aff
-  cohesion only                 0     0.4576  0.8681  0.8105     16    0.0289
-  + community, GRAD-BALANCED    1     0.4507  0.7946  0.7739     15    0.0285   [D46]
-  + community, inherited lam  125     0.3951  0.8235  0.3603     11    0.0126   [D39]
-  ```
-
-  At the inherited `lambda_umap=1` community pulled **23.8x** cohesion's gradient
-  (measured, [D45] probe) and destroyed the partition. [D46] rebalanced it to a measured
-  0.14-0.19x — the partition survives (1 dead), **and it still costs 4.5% of dge_r and
-  8.5% of ct_purity while cohesion itself stays flat.** Proto_recon likewise (ran at
-  0.08-0.17x cohesion, bought nothing). The gradient ratios were verified stable for the
-  whole run, so this is not a drift artifact. Verdict: FAILS, both terms stay 0.
 - **gram + aff beats either alone.** joint_purity 0.4576 / dge_r 0.8105 / 0 dead, against
   aff-only 0.4472 / 0.8006 / 0 and gram-only 0.4558 / 0.6538 / 5.
 - **No reinit needed.** With community off, `proto_reinit_every=0` gives 0 dead across
   every graph tested (lambda 0, 0.2, 0.4, 0.8).
+
+## 9d-1. Every term's lambda, COHESION INCLUDED: decide a SHARE, derive lambda
+from gradient norm. Never reuse a raw lambda value across datasets. (`decisions.md`
+[D55], 2026-09-26)
+
+`[D48]` routing (`umap_proto_sg=1`) detaches prototypes from community's similarity
+computation, so its gradient reaches the encoder only — cohesion keeps sole
+ownership of the prototypes. This is what makes community and CVAE-recon part
+of the 4-term design (§9d) beyond s28nsc, rather than each dataset's own
+one-off addition.
+
+**The standard method (static, single-snapshot GradNorm — see `decisions.md`
+[D55] for the full derivation; ONE snapshot, no re-probing mid-run, by explicit
+user decision). All FOUR terms now go through this, symmetrically — cohesion
+is no longer measured differently from the other three:**
+```
+1. Fix a target SHARE for EVERY term (cohesion-gram, cohesion-aff, community,
+   recon), summing to 1 — ONE shared vector of shares, used for every dataset,
+   not tuned per dataset.
+2. Measure each term's raw encoder-gradient norm at a TEMPORARY lambda=1
+   (grad_probe, one pass) -- encoder-only, matching [D48]'s routing (cohesion
+   is the only term allowed to touch prototypes directly, but its ENCODER-side
+   gradient is measured the same way as everything else now).
+3. lambda_i = share_i / gnorm_i     -- for all four terms. NO total-budget
+   constant needed. Training uses Adam/AdamW (`scproto.py`), which normalizes
+   each parameter's update by a running estimate of its own gradient magnitude
+   -- scaling every active term's gradient by the same overall constant leaves
+   the actual parameter updates almost unchanged, because that constant cancels
+   in Adam's update ratio. Only the RELATIVE proportions between terms (the
+   shares) actually shape training; an absolute total is not a real degree of
+   freedom worth tuning. (`authority=1.5403` used to quietly supply this role;
+   it is RETIRED now that cohesion is gradient-share calibrated like every
+   other term -- kept only to interpret runs that predate 2026-09-26.)
+```
+Still run the cheap 1-epoch dead-prototype check once before committing to a
+full run -- not to tune a total budget, but because Adam's normalization runs
+off a moving average that hasn't caught up yet at step 0, so an extreme share
+choice can still misbehave for the first few steps.
+Mechanics: set `grad_probe = N` (a positive int, e.g. 25) in `lambda_config` --
+every N steps it backward-passes each active term separately and appends
+`{lambda, value, gnorm_enc, gnorm_proto}` per term to `<dump>/grad_probe.jsonl`
+(`configs/defaults.py`, `[D45]`). **Reading OLD (pre-2026-09-26) probe files has
+one trap**: they measured cohesion at its REAL `authority/span`-deployed lambda,
+not at a temporary lambda=1 like community/recon — so an old file's cohesion
+`gnorm_enc` must be DIVIDED by its reported `lambda` to recover the per-unit
+value before it's comparable to the others. A FRESH probe run under this
+unified method should force cohesion's lambda to 1 too, for a direct reading
+with no back-conversion. Conflating these is exactly how `s28nsc`'s `cvA` recon
+lambda ended up ~11x too high (2026-09-26, this file).
+
+A dataset's numeric lambda is NEVER portable to another dataset — gradient
+scales differ per graph/dataset — but the SHARE vector is what should be portable.
+
+**VERDICT: not yet applied consistently, and not yet applied to cohesion at
+all.** Only s28nsc's community lambda was ever gradient-share derived (and
+still failed on the scoreboard — see `decisions.md` [D39]/[D46]). Every dataset's
+cohesion lambda still comes from the old `authority/span` formula (kept in the
+code block above for now, marked superseded). Nothing currently deployed
+should be read as validated by the unified method yet. See `decisions.md`
+[D55] for the current per-dataset numbers.
 
 ## 9e. What the defaults actually are — check before assuming
 
@@ -735,6 +928,37 @@ If you compute a new embedding (e.g. a BANKSY run at a lambda that isn't cached 
 `train_seacell`/`run_mc_task`, or it `KeyError`s looking for the obsm key on its own
 fresh copy. This is the same reason `bk08`'s branch in `graph_generator.py` checks
 `if 'X_bk08' in ad.obsm` against a file, not an object.
+
+**`modal volume put` from Git Bash SILENTLY UPLOADS NOWHERE if the remote path
+starts with `/`.** MSYS path conversion rewrites `/code/interpretable_ssl/x.py`
+into `C:/Program Files/Git/code/interpretable_ssl/x.py`, the CLI reports success
+(printing the mangled path, which reads as normal truncated output), and the
+volume keeps the OLD file. This cost a full experiment: `[D61]`'s six arms
+(2026-10-19, ~$6 of GPU) trained the PREVIOUS `scproto.py` and silently tested
+the wrong loss term; the whole ADR had to be invalidated. Always:
+
+```
+modal volume put <vol> <local> code/<path>      # RELATIVE remote path, no leading /
+                                                # (or export MSYS_NO_PATHCONV=1)
+modal volume get <vol> code/<path> /tmp/check   # then VERIFY BY CHECKSUM --
+md5sum <local> /tmp/check                       # the CLI's success line is NOT proof
+```
+
+**And verify the feature reached the RUN, not just the trainer attribute.**
+`init_attributes` setattr's any kwarg, so `assert getattr(t, 'my_new_flag') == 1`
+passes even when the container is running library code that has never heard of
+the flag. Two asserts that actually catch it, both cheap, both in-run:
+
+```python
+import inspect
+from interpretable_ssl.trainers import scproto as _sp
+assert "<a token from the new code>" in inspect.getsource(_sp)   # stale-copy check
+assert "<abbrev>-<value>" in trainer.get_model_name()            # §9 step 3, asserted
+```
+
+The second is CLAUDE.md §9 step 3 turned into a guard instead of a printout.
+`[D61]`'s probe DID print the folder name and nobody read it; the run folders
+visibly lacked the new `prfm`/`prsg`/`prds` tokens for days.
 
 **New `affinity_type` values for a lambda/parameter sweep don't need a code change.**
 `load_or_build_affinity` checks the cache (`get_affinity_path`) before ever calling
