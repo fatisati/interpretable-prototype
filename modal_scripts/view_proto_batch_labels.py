@@ -34,9 +34,8 @@ freq = pd.Series(cts).value_counts()
 qcut = np.quantile(freq.values, 0.25)
 rare_types = set(freq[freq <= qcut].index)
 
-ARMS = ["d60_epoch0_leid", "d60_leid_noc",
-        "d61_pr3_sg", "d61_pr3_lv", "d61_pr3_sgdec", "d61_pr3_lvdec",
-        "d61_pr3_sgdec_nr", "d61_pr3_lvdec_nr"]
+ARMS = ["d60_epoch0_leid", "d59_leiden_ctb", "d60_leid_noc",
+        "d61_pr3_lv", "d62_pr16", "d62_pr8"]
 
 for arm in ARMS:
     lab = load_labels(os.path.join(RUNS, arm), n)

@@ -20,7 +20,7 @@ obs=read_obs(os.path.join(os.environ["DATA_DIR"],h5),[bk,lk])
 cts=np.asarray(obs[lk]).astype(str); bts=np.asarray(obs[bk]).astype(str)
 freq=pd.Series(cts).value_counts()
 rare=set(freq[freq<=np.quantile(freq.values,0.25)].index)
-ARMS=["d60_epoch0_leid","d60_leid_noc","d61_pr3_lv","d61_pr3_lvdec","d61_pr3_lvdec_nr"]
+ARMS=["d60_epoch0_leid","d59_leiden_ctb","d60_leid_noc","d61_pr3_lv","d62_pr16","d62_pr8"]
 def ratios(lab):
     out={}
     for t in freq.index:

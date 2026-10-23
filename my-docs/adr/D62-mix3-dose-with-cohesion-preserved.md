@@ -123,11 +123,73 @@ Consequences:
 lambda updated to the true mix3 gnorm: share 1/16 -> 0.001236, 1/8 -> 0.002472
 (was 0.001214 / 0.002428 from the agg-derived norm).
 
-## Verdict (TO FILL)
+## Verdict — CLOSED, **FAILS. proto_recon should be OFF.** (scored 2026-10-23)
 
-- [ ] B1 chimeras:
-- [ ] B2 cohesion generalization (the dilution retest):
-- [ ] B3 no regression:
-- [ ] B4 rare within-batch:
-- [ ] B5 vs stage-1 co-assignment:
-- [ ] dose-response:
+All numbers judged against the §6a measured noise floor.
+
+```
+                 AGREE%  coh_tr  coh_te  coh_te_rare within_te_rare pooled_te pooled_te_rare rare_f1 n_mc n_dead
+epoch0_leid       65.1   0.0806  0.0784    0.1262       0.5700       0.8630      0.5362      0.8790  300   -
+leiden_st1        75.2   0.0591  0.0535    0.0674       0.3465       0.8565      0.3092      0.6662  300   -
+d60_leid_noc      46.8   0.1310  0.0853    0.1376       0.6269       0.8160      0.6039      0.7958  300    0
+d61_pr3_lv        56.4   0.1026  0.0749    0.1248       0.6734       0.8095      0.5362      0.7773  295   10
+d62_pr16 (7.7%)   53.0   0.1235  0.0738    0.1205       0.6263       0.7943      0.4348      0.7314  294    6
+d62_pr8 (14.3%)   52.3   0.1144  0.0684    0.1194       0.6766       0.7881      0.3527      0.7811  261   47
+noise floor       ~3.0   0.0016  0.0012    0.0101       0.0611       0.0058      0.0564      0.0822
+```
+
+- [x] **B1 chimeras: PARTIAL, fails the win condition.** 53.0 / 52.3 beats
+  d60_leid_noc's 46.8 by ~6 pts (above the ~3 pt floor, so real) but comes
+  nowhere near epoch-0's 65.1, and is beaten outright by plain Leiden at 75.2.
+- [x] **B2 cohesion generalization: FAILS — and this REFUTES the dilution
+  hypothesis, which was the whole point of the run.** At only 7.7% mix3 with
+  cohesion at 30.8% (vs D60's 33.3%), coh_aff_test_all still falls
+  0.0853 -> 0.0738, ~10x the noise floor. coh_aff_TRAIN also falls
+  (0.1310 -> 0.1235 -> 0.1144), so mix3 does not merely stop cohesion
+  generalizing -- it directly competes with it. Mechanistically consistent:
+  mix3 pulls each cell toward "the prototype that DECODES me best", cohesion
+  toward "the prototype my graph neighbours use"; when those disagree,
+  assignments move and cohesion loses.
+- [x] **B3 no regression: FAILS.** pooled_test_all 0.7943 / 0.7881 vs 0.8160.
+- [x] B4 rare within-batch: INCONCLUSIVE by construction -- 0.6263 / 0.6766 vs
+  0.6269 are all inside the 0.0611 floor. Do not rank these.
+- [x] B5 vs stage-1 co-assignment: PASSES marginally (weighted 0.330 / 0.330 vs
+  epoch-0's 0.319) but is far below Leiden's 0.609.
+- [x] **Dose-response: monotonically WORSE, with no compensating gain.** More
+  mix3 costs cohesion (0.0738->0.0684), pooled purity (0.7943->0.7881),
+  cross-batch (0.9079->0.8951) and prototypes (6->47 dead), while AGREE% does
+  NOT improve (53.0 -> 52.3, inside the floor). There is no dose at which this
+  term pays for itself.
+
+**DECISION: lambda_proto_recon = 0. Drop it from the recipe.** Across D61+D62,
+every form ('agg' and 'mix3'), every routing (scores detached/live, decoder
+detached/live), every dose (7.7%, 14.3%, 25%, 33%) and both recon settings made
+the scoreboard worse. The chimera benefit saturates at ~+6 points, which is far
+less than simply not training at all (65.1).
+
+## THE REAL HEADLINE OF THIS RUN: the honest baseline comparison
+
+Adding `leiden_st1` (Leiden ON the stage-1 latent, K=300, the user's requested
+"stage 1 + leiden" control) reframes everything:
+
+```
+                       leiden_st1   d60_leid_noc   gap        floor   verdict
+cohesion test            0.0535       0.0853      +0.032      0.0012  WE WIN BIG
+cohesion test rare       0.0674       0.1376      +0.070      0.0101  WE WIN BIG
+within_test_RARE         0.3465       0.6269      +0.280      0.0611  WE WIN BIG
+pooled_test_RARE         0.3092       0.6039      +0.295      0.0564  WE WIN BIG
+rare_f1 test             0.6662       0.7958      +0.130      0.0822  WE WIN
+--------------------------------------------------------------------------
+pooled_test_all          0.8565       0.8160      -0.041      0.0058  LEIDEN WINS
+cross_test_all           0.9827       0.9244      -0.058      0.0160  LEIDEN WINS
+AGREE% (batch vote)       75.2         46.8       -28.4       ~3.0    LEIDEN WINS
+co-assignment (weighted)  0.609        0.343      -0.266        --    LEIDEN WINS
+```
+
+Leiden is a batch-consistency machine and a rare-cell disaster; scProto is the
+reverse. Every rare-cell gap is 2-5x its noise floor, so the rare advantage is
+solid, not a fluctuation. This is the first clean statement of what the method
+actually buys, and it should shape the paper's claim: **scProto trades some
+overall purity and batch consistency for a large, measured gain in rare-cell
+resolution and graph cohesion.** The cross-batch chimera rate remains the
+method's real weakness and is NOT fixed by any reconstruction-based term.
