@@ -88,11 +88,16 @@ GNORM = {
     "umap":          7.2616,
     "recon":         11.857,
     "gmkl":          11.221,   # CV 0.01 -- the most stable term measured
-    # [D61] MEASURED 2026-10-19 by measure_grad_shares_d61.py (mix3, dec_sg=1,
-    # scores live, lambda=1): 402/402 rows, 0 errors, drift 1.14e-08, CV 0.08.
+    # [D62] MEASURED 2026-10-23 by measure_grad_shares_d62.py with the REAL
+    # mix3 code on the volume (verified by md5 AND by prfm-mix3/prsgFalse
+    # appearing in the probe run-folder name). 402/402 rows, 0 errors, CV 0.08.
     # ROUTING VERIFIED: gnorm_proto cohesion/umap/recon = 0.0, gmkl 0.0551,
-    # proto_recon 9.192 (decode path into protos works, decoder detached).
-    "proto_recon":   51.489,
+    # proto_recon 9.261.
+    # NOTE the D61 probe measured the OLD agg form and got 51.489 -- only 1.8%
+    # away, because at the calibrated epsilon the assignments are nearly
+    # one-hot, so mix3 - agg (the responsibility-weighted spread of the
+    # prototype decodings) is just 0.92 out of 383 = 0.24% of the value.
+    "proto_recon":   50.575,
 }
 
 SHARE = {"kernel": 1 / 8, "recon": 1 / 4, "gmkl": 1 / 4, "community": 1 / 4,

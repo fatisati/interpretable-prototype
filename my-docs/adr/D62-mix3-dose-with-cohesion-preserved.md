@@ -75,6 +75,54 @@ twin-pull" direction loses its only rare-type motivation on this dataset, and
 the DE ruler is validated (clean same/diff separation) should it be needed
 elsewhere.
 
+## ADDENDUM (2026-10-23): relaunched on verified code, and mix3 ~= agg HERE
+
+First launch of this ADR was killed before any arm finished: it inherited
+`[D61]`'s stale-volume bug (see that ADR's Addendum 3). Volume re-uploaded with
+relative paths and verified by md5; `train_d62_dose.py` now asserts
+`inspect.getsource(scproto)` contains "mix3" and that `prfm-mix3` appears in
+`get_model_name()`. Relaunched 2026-10-23.
+
+**Fresh probe on the REAL mix3 code (`measure_grad_shares_d62.py`), and a
+finding that reinterprets D61:**
+
+```
+                       median VALUE   median gnorm_enc
+D61 probe (agg code)      382.8968         51.4895
+D62 probe (mix3 code)     383.8208         50.5753      <- same seed, same
+                                                           frozen init, same data
+difference                  +0.9240  (0.24%)   -1.8%
+```
+Both probes are frozen passes from the same checkpoint, so the value difference
+IS the extra term, exactly:
+
+```
+mix3 - agg = mean over cells of  sum_k s_ik * || d_k - dbar_i ||^2
+             (responsibility-weighted SPREAD of the prototype decodings a cell
+              mixes over;  dbar_i = sum_k s_ik d_k)
+           = 0.92  out of  383   =  0.24%
+```
+
+**Interpretation: at the calibrated epsilon the soft assignments are nearly
+one-hot, so each cell effectively mixes over ONE prototype and there is almost
+nothing to average.** Form 3's conceptual advantage over form 2 -- "two wrong
+programs cannot average into a right one" -- only bites when assignments are
+SOFT. Here the two forms are numerically the same term to within 0.24%.
+
+Consequences:
+- `[D61]`'s six arms, though they ran form 'agg', are a close numerical proxy
+  for what mix3 would have done (value within 0.24%, encoder gnorm within 1.8%).
+  Its PROCESS invalidation stands and the dec axis was genuinely void, but its
+  substantive readings about proto_recon's effect are unlikely to move much.
+- Therefore the form is NOT where the leverage is. The open question this ADR
+  actually tests -- was D61's cohesion-generalization loss DILUTION or the term
+  itself -- is the right one.
+- A real test of form 3 as a distinct mechanism would need SOFTER assignments
+  (larger epsilon / higher umap_proto_effk). Logged as a future option, not run.
+
+lambda updated to the true mix3 gnorm: share 1/16 -> 0.001236, 1/8 -> 0.002472
+(was 0.001214 / 0.002428 from the agg-derived norm).
+
 ## Verdict (TO FILL)
 
 - [ ] B1 chimeras:
