@@ -114,3 +114,33 @@ appear in the folder name — the arm name states the routing explicitly.
 - [ ] P3 cross-batch (matched AGREE%, r_cross):
 - [ ] recon axis:
 - [ ] NB axis:
+
+## NB AXIS BLOCKED (2026-10-24) — a fourth bug on the NB path
+
+The NB probe died before producing any rows:
+
+```
+RuntimeError: The expanded size of the tensor (1) must match the existing size
+(300) at non-singleton dimension 0.  Target sizes: [1, 4000].
+Tensor sizes: [300, 1]
+```
+
+That shape signature is the `sizefactor.unsqueeze(1).expand(dec_mean_gamma.size(0),
+dec_mean_gamma.size(1))` line, which exists both in our
+`models/swav.py:nb_decode` and inside scArches' own trVAE negative-binomial
+forward. The decoded tensor has ONE row where 300 size factors are supplied, so
+the NB forward is collapsing its batch dimension. It fires during the fresh NB
+PRETRAIN (the MSE checkpoint is no longer reused -- see fix 1 above), i.e.
+before any D63 code runs.
+
+Not fixed, deliberately: it is inside the scPoli/trVAE NB forward, it cannot be
+reproduced locally (scarches is a Modal-only dependency here), and patching
+library internals blind is exactly what produced the D61 invalidation. Needs an
+interactive session with the package installed.
+
+**So D63 runs its MSE arms only.** The NB question stays open. Note the three
+NB-path bugs already found and FIXED above (pretrain keying, abbreviation
+collision, and the ~1e3 proto_recon scale mismatch) are real prerequisites that
+will still be needed whenever the NB forward is repaired -- the "check the whole
+path, don't trust one flag" instruction was correct: the one flag was the least
+of it.

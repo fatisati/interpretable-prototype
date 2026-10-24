@@ -80,7 +80,12 @@ GNORM_ENC = {
 # come from the DETACHED probe (measure_grad_shares_d63.py), because detaching
 # the scores removes one of the two gradient paths into the prototypes.
 GNORM_PROTO = {
-    "mse": {"gmkl": None, "proto_recon": None},
+    # MEASURED 2026-10-24, measure_grad_shares_d63.py, scores DETACHED,
+    # 402/402 rows, 0 errors, weights verified frozen. Routing verified:
+    # cohesion/umap/recon put exactly 0 on the prototypes.
+    # (with scores LIVE the D62 probe read 9.261 -- detaching removes one of
+    #  the two gradient paths into the prototypes, hence the lower value.)
+    "mse": {"gmkl": 0.055115, "proto_recon": 5.6654},
     "nb":  {"gmkl": None, "proto_recon": None},
 }
 
