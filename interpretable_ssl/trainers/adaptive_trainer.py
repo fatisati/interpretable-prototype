@@ -65,11 +65,16 @@ class AdoptiveTrainer(Trainer):
     PRETRAIN_PARAM_KEYS = [
         'dataset_id', 'cvae_epochs', 'batch_size',
         'latent_dims', 'l2norm', 'model_type', 'beta', 'num_prototypes',
+        # [D63] recon_loss CHANGES THE PRETRAINED WEIGHTS: 'nb' decodes a rate
+        # that is multiplied by a size factor and scored by an NB likelihood on
+        # RAW COUNTS, 'mse' decodes log-normalised means. Without this key an NB
+        # run silently loads the MSE checkpoint.
+        'recon_loss',
     ]
     PRETRAIN_ABBREVIATIONS = {
         'dataset_id': 'ds', 'cvae_epochs': 'cvae_e', 'batch_size': 'BS',
         'latent_dims': 'LD', 'l2norm': 'l2norm', 'model_type': 'model',
-        'beta': 'beta', 'num_prototypes': 'NP',
+        'beta': 'beta', 'num_prototypes': 'NP', 'recon_loss': 'rlss',
     }
 
     def _get_pretrain_param_default(self, key, defaults):

@@ -500,7 +500,7 @@ def _umap_panel(ax, cells_df, protos_df, color_col, title,
         return {}
 
     categories = sorted(cells_df[color_col].dropna().unique(), key=str)
-    cmap = plt.cm.get_cmap('tab20', len(categories))
+    cmap = plt.get_cmap('tab20', len(categories))
     cat_to_color = {c: cmap(i) for i, c in enumerate(categories)}
 
     for cat in categories:

@@ -1769,6 +1769,24 @@ class SCProtoTrainer(AdoptiveTrainer):
                     #   through the decode path into the PROTOTYPES.
                     # proto_recon_stopgrad=False -> scores LIVE: gradient also
                     #   through s_ik into the ENCODER (reassign/move misfit cells).
+                    # [D63] SCALE FIX FOR recon_loss='nb'. Under NB the dataset
+                    # feeds RAW COUNTS as X and self.model.decode() returns the
+                    # decoder's normalised RATE (gamma), which nb_decode later
+                    # multiplies by the cell's size factor
+                    # (= counts.sum(1), see models/swav.py:nb_decode). Comparing
+                    # counts to a rate directly is a ~1e3 scale mismatch -- the
+                    # exact class of bug CLAUDE.md 9b exists to catch. Rescale
+                    # the decoded rate per cell before the comparison:
+                    #     ||x_i - sf_i*d_k||^2
+                    #        = ||x_i||^2 - 2*sf_i*(x_i.d_k) + sf_i^2*||d_k||^2
+                    # still a pure matmul, no (cells x K x genes) tensor.
+                    # NOTE honestly recorded: this makes proto_recon SCALE-correct
+                    # under NB, it is still an MSE and NOT an NB likelihood --
+                    # scPoli's per-condition dispersion (theta/combined_batch) is
+                    # not exposed in the stage-2 loop. The CVAE recon term IS a
+                    # true NB likelihood (scPoli computes it internally).
+                    _pr_nb = str(getattr(self, 'recon_loss', 'mse')) == 'nb'
+                    _sf_all = (X_batch.sum(dim=1) if _pr_nb else None)
                     _pr3 = torch.zeros(n_samples, device=self.device)
                     for c in range(n_unique_conds):
                         cmask = inverse_idx == c
@@ -1780,10 +1798,32 @@ class SCProtoTrainer(AdoptiveTrainer):
                                 _sc = _sc.detach()
                             _cross = _xc @ _d.t()                     # (n_c, K)
                             _dsq = (_d * _d).sum(dim=1)               # (K,)
-                            _pr3[cmask] = ((_xc * _xc).sum(dim=1)
-                                           - 2.0 * (_sc * _cross).sum(dim=1)
-                                           + _sc @ _dsq)
+                            if _pr_nb:
+                                _sf = _sf_all[cmask]                  # (n_c,)
+                                _pr3[cmask] = ((_xc * _xc).sum(dim=1)
+                                               - 2.0 * _sf * (_sc * _cross).sum(dim=1)
+                                               + (_sf ** 2) * (_sc @ _dsq))
+                            else:
+                                _pr3[cmask] = ((_xc * _xc).sum(dim=1)
+                                               - 2.0 * (_sc * _cross).sum(dim=1)
+                                               + _sc @ _dsq)
                     proto_recon_loss = _pr3.mean()
+                    if not hasattr(self, '_pr3_scale_checked'):
+                        # [9b] print the pieces ONCE and assert the decoded mean
+                        # really is on the same scale as the data it is compared to.
+                        with torch.no_grad():
+                            _c0 = inverse_idx == 0
+                            _dd = decoded_all[0]
+                            _pred = (_dd * _sf_all[_c0].max()) if _pr_nb else _dd
+                            print(f"   [D63 9b] proto_recon form=mix3 lik="
+                                  f"{'nb' if _pr_nb else 'mse'}  X range "
+                                  f"[{X_batch.min():.3g},{X_batch.max():.3g}]  "
+                                  f"decoded*sf range [{_pred.min():.3g},"
+                                  f"{_pred.max():.3g}]  loss={proto_recon_loss:.4g}")
+                            _r = float(_pred.max()) / float(X_batch.max().clamp(min=1e-8))
+                            assert 1e-3 < _r < 1e3, (
+                                f"proto_recon scale mismatch: decoded/data = {_r:.3g}")
+                        self._pr3_scale_checked = True
                 else:
                     recon_x_agg = torch.zeros(n_samples, n_genes, device=self.device)
                 if proto_recon_form != 'mix3' and proto_recon_hard and not proto_decoupled:

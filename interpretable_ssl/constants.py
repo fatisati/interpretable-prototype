@@ -66,7 +66,7 @@ ABBREVIATIONS = {
     "batch_sinkhorn": "bsink",
     "weighted_batch": "wb",
     "knn_similarity": 'knnsim',
-    "recon_loss": 'recon',
+    "recon_loss": 'rlss',            # [D63] was 'recon' -- COLLIDED with lambda_recon
     "no_sinkhorn": 'nosink',
     "mask_probability": 'mask-prob',
     "default_dispertion": 'disp',
