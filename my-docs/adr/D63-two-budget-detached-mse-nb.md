@@ -1,6 +1,6 @@
 # D63 — two-budget calibration, scores detached, MSE vs NB, recon on/off
 
-status: RUNNING (pre-registered 2026-10-24, before any arm launched)
+status: CLOSED 2026-10-24 (MSE arms). P1 confirmed; term harmless but useless; keep CVAE recon. NB axis blocked.
 dataset: pbmc-immune / arbf_ctb20_seed0, same split + seed 31
 decided by: Fatemeh (4 arms, two-budget calibration, NB axis — all hers)
 
@@ -107,13 +107,70 @@ budgets, plus the routing flags and the outcome.
 Note `proto_recon_stopgrad=True` is the library default and therefore does NOT
 appear in the folder name — the arm name states the routing explicitly.
 
-## Verdict (TO FILL)
+## Verdict — CLOSED (scored 2026-10-24). **P1 CONFIRMED; the term is now
+## harmless but still buys nothing. Keep the CVAE recon.**
 
-- [ ] P1 collapse / dead prototypes:
-- [ ] P2 cohesion:
-- [ ] P3 cross-batch (matched AGREE%, r_cross):
-- [ ] recon axis:
-- [ ] NB axis:
+```
+                     dead  med_nn_cos  frac>.99 | coh_tr  coh_te  coh_te_rare
+d60_leid_noc (no pr)    0     0.8101     0.0%   | 0.1310  0.0853    0.1376
+d61_pr3_sg             52     0.9666     2.6%   | 0.1026  0.0617    0.1010
+d62_pr16                6     0.9997     1.0%   | 0.1235  0.0738    0.1205
+d63_mse-rec             0     0.8268     0.0%   | 0.1305  0.0773    0.1319
+d63_mse-norec           0     0.8056     0.0%   | 0.1289  0.0784    0.1217
+
+                   within_te_rare pooled_te pooled_te_rare rare_f1  AGREE>=10  r_cross(>=40c)
+d60_leid_noc           0.6269      0.8160     0.6039       0.7958     66.0%     0.733
+d62_pr16               0.6263      0.7943     0.4348       0.7314     62.4%     0.696
+d63_mse-rec            0.6436      0.7889     0.6135       0.7605     61.8%     0.740
+d63_mse-norec          0.5980      0.7628     0.4686       0.5531     65.2%     0.697
+noise floor            0.0611      0.0058     0.0564       0.0822     ~3 pts
+```
+
+- [x] **P1: CONFIRMED — the collapse was entirely a DOSING error.** At the
+  two-budget 50/50 dose, `median_nn_cos` is 0.8268 / 0.8056 (the no-proto_recon
+  baseline is 0.8101), **0.0%** of pairs above 0.99, and **0 dead prototypes** in
+  both arms — against D62's 0.9997 / 1.0% / 6 and D61's 0.9666 / 2.6% / 52.
+  Train cohesion is also fully restored (0.1305 vs d60's 0.1310, was 0.1235).
+  Every lambda before this was set from the ENCODER gradient, which is
+  structurally zero for a detached-score term, so proto_recon's pull on the
+  prototypes had never been calibrated at all — it was running 5.7-18.6x GM-KL,
+  the only force holding a prototype at its members' centroid.
+  **Methodological consequence: any future term that touches the prototypes
+  must be calibrated on the PROTOTYPE-path gradient, not the encoder one.**
+- [x] **P2: FAILS, but narrowly and for a different reason than before.** Train
+  cohesion is now identical to d60 (0.1305 vs 0.1310); only HELD-OUT cohesion
+  lags (0.0773 / 0.0784 vs the 0.0853 bar, ~7x the 0.0012 floor). So
+  proto_recon no longer *fights* cohesion during training; it costs a little
+  generalization. Test-rare cohesion is essentially recovered (0.1319 vs 0.1376,
+  and above epoch-0's 0.1262).
+- [x] **P3: FAILS.** Matched AGREE%>=10 is 61.8 / 65.2 vs d60's 66.0; r_cross
+  0.581 / 0.578 vs 0.603 (though size-matched on >=40-cell groups d63_mse-rec
+  is 0.740 vs 0.733, marginally better). Rare-prototype r_cross is restored to
+  d60's level (0.427 vs 0.431) from D62's 0.361. Net: cross-batch is PRESERVED,
+  not improved. Nothing recon-based has yet improved it.
+- [x] **recon axis: KEEP THE CVAE RECON — this settles the question.** With
+  everything else identical, recon-ON beats recon-OFF on pooled purity
+  (0.7889 vs 0.7628, 4x floor), pooled rare purity (0.6135 vs 0.4686, 2.6x
+  floor), rare F1 (0.7605 vs 0.5531, 2.5x floor), rare test cohesion
+  (0.1319 vs 0.1217) and cross-batch test purity (0.9091 vs 0.8848).
+  recon-OFF wins only on matched AGREE% (65.2 vs 61.8) and overall test
+  cohesion (0.0784 vs 0.0773, ~9x floor but tiny). Note the earlier
+  recon-off evidence came from the COLLAPSED regime; at a correct dose the
+  deaths vanish in both arms (0 vs 0), so the old "recon causes deaths"
+  argument no longer applies either way.
+- [x] NB axis: BLOCKED (see below). Not run.
+
+**OVERALL: d60_leid_noc -- no proto_recon at all -- is still the best arm.**
+Correct dosing made proto_recon harmless (no collapse, no deaths, train
+cohesion intact) but did not make it useful: it still costs ~0.008 held-out
+cohesion and ~0.027 pooled purity while improving nothing above its noise
+floor. Across D61+D62+D63 the term has now been tested in both forms, both
+routings, two likelihood scales, five doses spanning 100x, and with recon on
+and off. **Recommendation: lambda_proto_recon = 0.**
+
+The durable wins from this run are methodological: the two-budget calibration,
+and the fact that the D62 "collapse" has a named, fixable cause rather than
+being an intrinsic property of reconstruction-based prototype terms.
 
 ## NB AXIS BLOCKED (2026-10-24) — a fourth bug on the NB path
 

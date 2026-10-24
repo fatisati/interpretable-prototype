@@ -14,7 +14,7 @@ DS="pbmc-immune"; RUNS=os.path.join(REPO,"files","volume_runs",DS)
 n,h5,bk,lk,nk,K=DATASETS[DS]
 obs=read_obs(os.path.join(os.environ["DATA_DIR"],h5),[bk,lk])
 cts=np.asarray(obs[lk]).astype(str); bts=np.asarray(obs[bk]).astype(str)
-ARMS=["d60_epoch0_leid","d60_leid_noc","d61_pr3_lv","d62_pr16","d62_pr8"]
+ARMS=["d60_epoch0_leid","d59_leiden_ctb","d60_leid_noc","d62_pr16","d63_mse-rec","d63_mse-norec"]
 def agree(lab, minc):
     a=d=0
     for mc in np.unique(lab):

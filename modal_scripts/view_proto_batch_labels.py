@@ -35,7 +35,7 @@ qcut = np.quantile(freq.values, 0.25)
 rare_types = set(freq[freq <= qcut].index)
 
 ARMS = ["d60_epoch0_leid", "d59_leiden_ctb", "d60_leid_noc",
-        "d61_pr3_lv", "d62_pr16", "d62_pr8"]
+        "d62_pr16", "d63_mse-rec", "d63_mse-norec"]
 
 for arm in ARMS:
     lab = load_labels(os.path.join(RUNS, arm), n)
