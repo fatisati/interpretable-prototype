@@ -929,6 +929,29 @@ If you compute a new embedding (e.g. a BANKSY run at a lambda that isn't cached 
 fresh copy. This is the same reason `bk08`'s branch in `graph_generator.py` checks
 `if 'X_bk08' in ad.obsm` against a file, not an object.
 
+**The scArches source is checked out locally at `F:\codes\scarches` — READ IT
+instead of guessing.** Modal installs `scarches` from PyPI and that resolves to
+**0.6.1, the same version as this checkout** (verified 2026-10-25 by
+`modal_scripts/check_scarches_version.py`, which prints the installed version
+and the scPoli NB branch source — rerun it if you ever suspect a version skew).
+`scarches` is NOT importable locally in this environment, so for anything
+behavioural use the checkout to read code and a Modal smoke test to run it.
+
+The three files worth knowing:
+```
+scarches/models/scpoli/scpoli.py          forward(): the mse / nb / zinb branches,
+                                          the Decoder (its NB head is
+                                          Linear -> Softmax OVER GENES, so the
+                                          output is a COMPOSITION summing to 1),
+                                          and theta = nn.Parameter(n_genes,
+                                          n_conditions_combined)
+scarches/models/trvae/losses.py           nb() -- the exact likelihood we mirror
+scarches/dataset/scpoli/anndata.py        size_factors = adata.X.sum(1) and
+                                          conditions_combined; our MultiCropsDataset
+                                          INHERITS these, so read them off the
+                                          dataset, never recompute them
+```
+
 **`modal volume put` from Git Bash SILENTLY UPLOADS NOWHERE if the remote path
 starts with `/`.** MSYS path conversion rewrites `/code/interpretable_ssl/x.py`
 into `C:/Program Files/Git/code/interpretable_ssl/x.py`, the CLI reports success

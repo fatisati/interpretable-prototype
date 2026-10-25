@@ -186,7 +186,8 @@ def probe():
         t.model.freeze_batch_embedding()
     assert getattr(t, "coh_proto_sg", 0) == 1, "coh_proto_sg did not reach trainer"
     assert getattr(t, "recon_loss", "mse") == "nb", "recon_loss did not reach trainer"
-    assert getattr(t.train_ds, "use_counts", False), "NB probe is NOT using raw counts"
+    # [D64] do NOT assert on a use_counts flag -- it is consumed in the dataset
+    # __init__ and not stored under that name. Check the DATA instead.
     _x = t.train_ds.adata.X
     _mx = float(_x[:200].toarray().max() if hasattr(_x, "toarray") else _x[:200].max())
     print(f"   [D63nb] X max over first 200 cells = {_mx:.1f} (expect >>30 = counts)")
