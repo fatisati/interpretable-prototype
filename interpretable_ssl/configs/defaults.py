@@ -197,6 +197,8 @@ def get_defaults():
         'lambda_proto_anchor': 0.0,   # soft MSE pull: prototype (still a free, gradient-trained param) toward soft_assign-column-normalized combination of this batch's cell embeddings — latent-space analogue of SEACells' B matrix, computed fresh per minibatch. Ignored if proto_decoupled=True (mutually exclusive — that already controls position via EMA). See files/proto_anchoring_vs_proto_usage.md (option A).
         'lambda_gmkl': 0.0,          # [D60] responsibility-weighted GM-KL to unit-variance Gaussians at the prototypes (VaDE mixture term, categorical part dropped). Anti-collapse (-log sigma) + post-norm centroid pull. 0 = off, behavior-preserving.
         'coh_proto_sg': 0,           # [D60] 1 = cohesion's assignment matrix uses DETACHED prototypes (encoder-only gradient, mirrors umap_proto_sg); the GM-KL is then the prototypes' only teacher. 0 = off, behavior-preserving.
+        'proto_recon_topm': 8,       # [D64] NB form-3 sums over each cell's TOP-M prototypes (assignments are near one-hot); captured mass is asserted at runtime.
+        'proto_recon_chunk': 512,    # [D64] cells per chunk in the NB form-3 likelihood; bounds the (cells x M x genes) tensor.
         'two_sided': 0,
         # Edge-centric UMAP parameters
         'umap_min_dist': 0.5,      # UMAP min_dist (scanpy default=0.5, umap default=0.1)

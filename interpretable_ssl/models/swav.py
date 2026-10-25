@@ -508,6 +508,19 @@ class scProtoGMVAE(SwAVModel):
             z = z[:bs]
             batch = batch[:bs]
             x = x[:bs]
+            # [D64] sizefactor and combined_batch are PER-CELL and must be sliced
+            # with everything else. They were not, so under recon_loss='nb' the
+            # decoded mean had `bs` rows while sizefactor still had the full batch
+            # length, and scPoli's
+            #     sizefactor.unsqueeze(1).expand(dec.size(0), dec.size(1))
+            # raised "expanded size of the tensor (1) must match the existing size
+            # (N)". It fired hardest in encode(), which calls forward(bs=1, ...) --
+            # so ANY inference pass (encode_adata -> waypoint prototype init)
+            # crashed the moment recon_loss was 'nb'. The MSE path never saw it
+            # because mse_recon takes no per-cell kwargs at all.
+            for _k in ("sizefactor", "combined_batch"):
+                if kwargs.get(_k) is not None:
+                    kwargs[_k] = kwargs[_k][:bs]
         if self.recon_loss == "nb":
             return self.nb_recon(z, batch, x=x, **kwargs)
         else:  # mse

@@ -1027,6 +1027,27 @@ class SCProtoTrainer(AdoptiveTrainer):
             coords[idx_b, :k] = vecs
         return coords
 
+    def _nb_batch_extras(self, idx):
+        """[D64] Under recon_loss='nb', scPoli's forward REQUIRES per-cell
+        `sizefactor` and `combined_batch`; with them missing it does
+        `None.unsqueeze(1)`. Stage 2 builds its own minibatches by index and had
+        never supplied them, so every NB run died the moment it reached the
+        stage-2 loop. Both tensors already exist on the dataset, computed by
+        scarches itself (MultiConditionAnnotatedDataset: size_factors =
+        adata.X.sum(1); conditions_combined encoded with the MODEL's own
+        conditions_combined_encoder) -- so read them, never recompute, or the
+        integer codes could disagree with `theta`'s rows.
+        """
+        if str(getattr(self, 'recon_loss', 'mse')) != 'nb':
+            return {}
+        import torch as _t
+        ds = self.train_ds
+        i = idx.detach().cpu() if _t.is_tensor(idx) else _t.as_tensor(idx)
+        sf = ds.size_factors[i].to(self.device).float()
+        cb = ds.conditions_combined[i].to(self.device).long()
+        assert sf.shape[0] == cb.shape[0], "sizefactor/combined_batch length mismatch"
+        return {'sizefactor': sf, 'combined_batch': cb}
+
     def _setup_umap_edges(self, epochs: int = None, init_prototypes: bool = True, skip_calibration: bool = False):
         """Build and cache all objects needed for edge-centric UMAP training."""
         epochs = epochs or getattr(self, 'umap_edge_epochs', 200)
@@ -1496,7 +1517,9 @@ class SCProtoTrainer(AdoptiveTrainer):
                 n_conds = len(self.model.scpoli_cvae.n_conditions)
                 batch_cond = torch.zeros(n_samples, n_conds, dtype=torch.long, device=self.device)
 
-            z_unique, recon_loss, kl_loss = self.model.encoder_out({'x': X_batch, 'batch': batch_cond})
+            _nb_extras = self._nb_batch_extras(unique_idx)
+            z_unique, recon_loss, kl_loss = self.model.encoder_out(
+                {'x': X_batch, 'batch': batch_cond, **_nb_extras})
 
             # torch.unique returns sorted output, so searchsorted gives O(log n) vectorized lookup
             def _gather(indices):
@@ -1786,9 +1809,104 @@ class SCProtoTrainer(AdoptiveTrainer):
                     # not exposed in the stage-2 loop. The CVAE recon term IS a
                     # true NB likelihood (scPoli computes it internally).
                     _pr_nb = str(getattr(self, 'recon_loss', 'mse')) == 'nb'
-                    _sf_all = (X_batch.sum(dim=1) if _pr_nb else None)
+                    _sf_all = (_nb_extras['sizefactor'] if _pr_nb else None)
                     _pr3 = torch.zeros(n_samples, device=self.device)
-                    for c in range(n_unique_conds):
+                    if _pr_nb:
+                        # [D64] TRUE NB likelihood for form 3, decided 2026-10-25.
+                        #   mu_ik = decode(p_k, b_i) * sf_i      <- PER-CELL sf
+                        #   L     = mean_i sum_k s_ik * (-log NB(x_i | mu_ik, theta_i))
+                        # Per-cell sf because the decoder head is a SOFTMAX, so a
+                        # prototype's program is depth-free by construction and
+                        # sum_genes(mu) must equal the cell's own total or the
+                        # likelihood charges a technical shortfall across all
+                        # genes. theta depends on the BATCH only, so every
+                        # prototype shares one theta row per cell.
+                        # Exact in the responsibilities it keeps: the sum is
+                        # restricted to each cell's TOP-M prototypes (assignments
+                        # are near one-hot -- mix3 minus agg was 0.24% of the
+                        # value) and the captured mass is asserted below.
+                        from scarches.models.trvae.losses import nb as _nb_ll
+                        from scarches.models.trvae._utils import one_hot_encoder as _ohe
+                        _M = int(getattr(self, 'proto_recon_topm', 8))
+                        _CH = int(getattr(self, 'proto_recon_chunk', 512))
+                        _EPS = 1e-8
+                        _cvae = self.model.scpoli_cvae
+                        _disp = torch.exp(F.linear(
+                            _ohe(_nb_extras['combined_batch'],
+                                 _cvae.n_conditions_combined), _cvae.theta))
+                        _sc_full = (scores.detach()
+                                    if getattr(self, 'proto_recon_stopgrad', True)
+                                    else scores)
+                        _topv, _topi = _sc_full.topk(_M, dim=1)
+                        _mass = _topv.sum(dim=1)
+                        _topv = _topv / _topv.sum(dim=1, keepdim=True).clamp(min=1e-12)
+                        # [D64] FACTORISED NB log-likelihood. The reference
+                        # scarches nb() evaluates THREE lgamma() calls on the full
+                        # (cells x M x genes) tensor, which roughly doubles step
+                        # time. Rewriting
+                        #   logP = th*log(th) + x*log(mu) - (th+x)*log(th+mu)
+                        #          + lgamma(x+th) - lgamma(th) - lgamma(x+1)
+                        # shows every lgamma term, and th*log(th), depend on x and
+                        # theta ONLY -- not on the prototype k. So they are computed
+                        # once per cell on (cells x genes) [term A], the x*log(mu)
+                        # part factorises into a matmul because mu = rho_k * sf_i
+                        # and log(mu) = log(rho_k) + log(sf_i) [term B], and only
+                        # -(th+x)*log(th+mu) genuinely needs the big tensor [term C].
+                        # Verified against the reference below on the first chunk.
+                        _ref_chk = not hasattr(self, '_pr3_scale_checked')
+                        for c in range(n_unique_conds):
+                            _cm = (inverse_idx == c).nonzero(as_tuple=True)[0]
+                            if _cm.numel() == 0:
+                                continue
+                            _d = decoded_all[c]                        # (K, G) rate
+                            _logrho = torch.log(_d + _EPS)             # (K, G), once
+                            for _a in range(0, _cm.numel(), _CH):
+                                _ix = _cm[_a:_a + _CH]
+                                _x = X_batch[_ix]                      # (n, G)
+                                _th = _disp[_ix]                       # (n, G)
+                                _sf = _sf_all[_ix]                     # (n,)
+                                _ti = _topi[_ix]                       # (n, M)
+                                # A: k-independent, (n, G) -> (n,)
+                                _A = (_th * torch.log(_th + _EPS)
+                                      + torch.lgamma(_x + _th) - torch.lgamma(_th)
+                                      - torch.lgamma(_x + 1.0)).sum(dim=1)
+                                # B: x.log(mu) via matmul, (n, K) -> gather (n, M)
+                                _B = (_x @ _logrho.t()).gather(1, _ti)                                      + (_x.sum(dim=1) * torch.log(_sf + _EPS)).unsqueeze(1)
+                                # C: the one irreducible (n, M, G) term
+                                _mu = _d[_ti] * _sf.view(-1, 1, 1)
+                                _C = ((_th + _x).unsqueeze(1)
+                                      * torch.log(_th.unsqueeze(1) + _mu + _EPS)
+                                      ).sum(dim=-1)
+                                _logP = _A.unsqueeze(1) + _B - _C      # (n, M)
+                                if _ref_chk:
+                                    with torch.no_grad():
+                                        _r = _nb_ll(x=_x.unsqueeze(1), mu=_mu,
+                                                    theta=_th.unsqueeze(1)).sum(dim=-1)
+                                        _den = _r.abs().clamp(min=1.0)
+                                        _rel = ((_logP - _r).abs() / _den).max()
+                                        print(f"   [D64] factorised NB vs scarches nb(): "
+                                              f"max rel diff {_rel:.3e} "
+                                              f"(ref {_r.mean():.4g}, fast {_logP.mean():.4g})")
+                                        assert _rel < 1e-3, (
+                                            f"factorised NB disagrees with the reference "
+                                            f"by {_rel:.3e} -- do not trust this loss")
+                                    _ref_chk = False
+                                _pr3[_ix] = (_topv[_ix] * (-_logP)).sum(dim=1)
+                        proto_recon_loss = _pr3.mean()
+                        if not hasattr(self, '_pr3_scale_checked'):
+                            with torch.no_grad():
+                                print(f"   [D64 9b] proto_recon=NB-likelihood(V1, "
+                                      f"per-cell sizefactor)  top{_M} captured mass "
+                                      f"median={_mass.median():.4f}  sf range "
+                                      f"[{_sf_all.min():.0f},{_sf_all.max():.0f}]  "
+                                      f"theta range [{_disp.min():.3g},"
+                                      f"{_disp.max():.3g}]  loss={proto_recon_loss:.4g}")
+                                assert _mass.median() > 0.9, (
+                                    f"top-{_M} captures only {_mass.median():.3f} of the "
+                                    f"responsibility mass -- raise proto_recon_topm")
+                            self._pr3_scale_checked = True
+                    for c in range(0 if not _pr_nb else n_unique_conds,
+                                   n_unique_conds):
                         cmask = inverse_idx == c
                         if cmask.any():
                             _d = decoded_all[c]                       # (K, genes)
@@ -5588,7 +5706,9 @@ class SCProtoTrainer(AdoptiveTrainer):
             batch_cond = torch.zeros(len(all_idx), n_conds, dtype=torch.long, device=self.device)
 
         self.model.eval()
-        z_all, _, _ = self.model.encoder_out({'x': X_batch, 'batch': batch_cond})
+        z_all, _, _ = self.model.encoder_out(
+            {'x': X_batch, 'batch': batch_cond,
+             **self._nb_batch_extras(all_idx)})
         idx_map = {int(v): i for i, v in enumerate(all_idx)}
         def _map(arr):
             return torch.tensor([idx_map[int(x)] for x in arr], device=self.device)
