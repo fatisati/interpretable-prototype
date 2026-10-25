@@ -71,37 +71,42 @@ build/                     generated; safe to delete
 | section labels | none | added `\label{sec:method}`, `\label{sec:experiments}` so the reproducibility statement can cross-reference them |
 
 Everything else in `sections/` and `appendix/` is byte-identical to the NeurIPS
-source apart from those two added `\label` lines and the two `\missingfig`
-swaps described next.
+source apart from those two added `\label` lines.
+
+`figures/pancreas_aff.png` (Fig. 4, affinity-graph UMAP showing batch structure)
+now exists and renders normally. The spatial-affinity-comparison figure that
+used to sit at `figures/nsclc_affinity_comparison.png` (old Fig. 5) has been
+**removed** along with its Appendix~\ref{app:spatial_affinity} paragraph
+(`appendix/training.tex`) --- it was the only place in the paper that
+referenced it, so no other cross-reference needed updating. The unused
+`\missingfig` macro is kept in `main.tex` as a fallback for a future figure
+whose source file goes missing again.
 
 ## Known issues to fix before submitting
 
-1. **Two figure files do not exist anywhere in the repo.** `appendix/training.tex`
-   references `figures/pancreas_aff.png` (Fig. 4, the affinity-graph UMAP showing
-   batch structure) and `figures/nsclc_affinity_comparison.png` (Fig. 5,
-   transcriptomic vs. spatial affinity). The NeurIPS source therefore cannot
-   compile as-is. They are currently rendered by the `\missingfig` macro defined
-   in `main.tex`, which draws a red-outlined "MISSING FIGURE FILE" box so that
-   `\label`/`
-ef` numbering stays correct and the gap is visible in the PDF.
-   Once the files are regenerated, drop them into `figures/` and replace each
-   `\missingfig{...}` with `\includegraphics[width=	extwidth]{...}`.
+1. ~~Main text is over the 9-page limit.~~ **FIXED as of 2026-09-26.** ICLR 2027
+   allows 9 pages of main text at submission (10 during rebuttal / camera-ready)
+   and papers over the limit are **desk-rejected** (verified against the official
+   [Author Guidelines](https://iclr.cc/Conferences/2027/AuthorGuidelines), which
+   also confirms references, the AI-use/ethics/reproducibility statements, and
+   the appendix are all explicitly excluded from the count). Rebuilding after
+   the latest edits to `sections/method.tex` and `sections/results.tex`: main
+   text (Introduction through Discussion and Conclusion) now ends mid-page-9,
+   with the AI Use Statement starting immediately after on the same page --
+   confirmed via `pdftotext -layout` on `build/scproto_iclr2027.pdf` (21 pages
+   total). This is an exact fit with no slack: any added sentence, wider table,
+   or caption can push Discussion back onto page 10. Re-check page count after
+   every edit to Sections 1--5 rather than assuming it still fits.
 
-2. **Main text is over the 9-page limit.** ICLR 2027 allows 9 pages of main text
-   at submission (10 during rebuttal / camera-ready) and papers over the limit
-   are **desk-rejected**. In the current build the Discussion spills onto page 10.
-   Roughly half a page has to come out of Sections 1--5. (References, the three
-   statements, and the appendix do *not* count toward the limit.)
-
-3. ~~`references.bib` has an empty `year`~~ **FIXED** --- and the whole
+2. ~~`references.bib` has an empty `year`~~ **FIXED** --- and the whole
    bibliography has now been verified, see "Reference checking" below.
 
-4. **`statements/*.tex` are drafts**, each marked with a red
+3. **`statements/*.tex` are drafts**, each marked with a red
    `[DRAFT --- review and finalise before submission]` in the PDF. The AI use
    statement is *required* by ICLR and must be accurate about actual AI use. The
    reproducibility statement still needs an anonymised code link.
 
-5. **Content is still the NeurIPS version.** None of the rebuttal experiments,
+4. **Content is still the NeurIPS version.** None of the rebuttal experiments,
    the reviewer-driven edits, or the new CPM/`nassoc` loss results are in here
    yet --- see `../plan.txt` and `../../../my-tasks/doing/iclr.txt`.
 

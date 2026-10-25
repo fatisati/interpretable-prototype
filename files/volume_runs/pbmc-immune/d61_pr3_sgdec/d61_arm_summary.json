@@ -1,0 +1,46 @@
+{
+  "arm": "d61_pr3_sgdec",
+  "config": {
+    "arm": "d61_pr3_sgdec",
+    "prot_init": "leid",
+    "pr_dec_sg": 0,
+    "gram": 2.9036,
+    "aff": 5.063189,
+    "recon": 0.021085,
+    "gmkl": 0.02228,
+    "proto_recon": 0.004855,
+    "pr_stopgrad": true,
+    "coh_proto_sg": 1,
+    "seed": 31,
+    "train_epochs": 10
+  },
+  "train_seconds": 4051.2,
+  "sigma_median_postrun": 0.7271109819412231,
+  "model_name": "d61_pr3_sgdec_ds-pbmc_prtInit-leid_frzbe1_aff-arbf_recon0.021085_lprec0.004855_lumap0.0_usim-prot_cvae_e50_lgmk0.02228_cpsg1_ecal1_pum-ema_nagg-max_lcoh2.9036_upsg1_gprb25_cglb2_cmini-full_cdia1.0_lcha5.063189_upm-dotp_v31",
+  "dump_path": "/vol/models//pbmc-immune_arbf_ctb20_seed0_train/d61_pr3_sgdec_ds-pbmc_prtInit-leid_frzbe1_aff-arbf_recon0.021085_lprec0.004855_lumap0.0_usim-prot_cvae_e50_lgmk0.02228_cpsg1_ecal1_pum-ema_nagg-max_lcoh2.9036_upsg1_gprb25_cglb2_cmini-full_cdia1.0_lcha5.063189_upm-dotp_v31",
+  "metrics": {
+    "seed": 31,
+    "purity": 0.8133904576453403,
+    "niche_purity": null,
+    "batch_entropy": 0.8454356640142222,
+    "modularity": 0.3356481809541951,
+    "coverage": 1.0,
+    "dge_rbo_avg": 0.07311443782866091,
+    "dge_kendall_avg": 0.1420996119547451,
+    "dge_jaccard_avg": 0.14638804868140332,
+    "scgraph_corr_avg": 0.44470729625201855,
+    "scgraph_corr_std": 0.3629057435103619,
+    "ct_niche_rbo_avg": null,
+    "n_dead": 60,
+    "coh_aff": 0.06341090902823733,
+    "coh_gram": 0.12269452879580245,
+    "aff_compactness_per_batch": {
+      "10X": 1.1502332184388306,
+      "Freytag": 0.09933074384761421,
+      "Oetjen": 0.536157342562903,
+      "Sun": 1.030551705155252,
+      "Villani": 0.07410874069932487
+    },
+    "aff_compactness_mean": 1.1256422384591394
+  }
+}

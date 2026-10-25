@@ -17,7 +17,7 @@ This confirms that the input graph is not batch-free, and motivates the batch-co
 
 \begin{figure}[h]
 \centering
-\missingfig{figures/pancreas_aff.png}
+\includegraphics[width=\textwidth]{figures/pancreas_aff.png}
 \caption{
 UMAP of the precomputed RBF affinity graph on the Pancreas dataset.
 Left: colored by cell type. Right: colored by batch label.
@@ -31,38 +31,27 @@ The batch-conditional encoder disentangles these signals during training.
 \section{Spatial Affinity Construction}
 \label{app:spatial_affinity}
 
-For spatial experiments, the cell--cell affinity is computed from spatially aggregated features rather than individual cell transcriptomes.
-Concretely, for each cell $i$ we identify all cells within a fixed spatial radius $r$ (in physical coordinates) and compute the average of their PCA embeddings:
-\[
-\tilde{x}_i = \frac{1}{|\mathcal{N}_r(i)|} \sum_{j \in \mathcal{N}_r(i)} \mathrm{PCA}(x_j),
-\]
-where $\mathcal{N}_r(i) = \{j : \|p_i - p_j\|_2 \leq r\}$ and $p_i$ denotes the physical coordinates of cell $i$.
-This contextual feature vector $\tilde{x}_i$ encodes the local microenvironmental composition of cell $i$ by averaging the transcriptomic profiles of its spatial neighbors.
-The same adaptive Gaussian (RBF) kernel used for transcriptomic affinity is then applied to these aggregated features to construct the spatial affinity graph.
+For spatial experiments, the cell--cell affinity is built with a BANKSY-style feature augmentation~\citep{banksy} rather than from individual cell transcriptomes alone.
+Concretely, for each cell $i$ we compute a spatial context vector $\tilde{x}_i$, the distance-weighted mean of its spatial neighbors' PCA embeddings, and concatenate it with the cell's own PCA embedding:
+\begin{equation}
+x_i^{\text{aug}} = \big[\, \sqrt{1-\lambda^2}\cdot \mathrm{PCA}(x_i),\ \ \lambda \cdot \tilde{x}_i \,\big],
+\end{equation}
+where the spatial weight $\lambda \in [0,1]$ sets the target fraction of feature variance contributed by spatial context; the two concatenation coefficients are then derived from $\lambda$ together with the empirical total variance of each block ($V_{\text{pca}}$, the variance of the PCA block, and $V_{\text{ctx}}$, the variance of the context block), so that the realized variance split matches $\lambda$ regardless of the two blocks' raw scales.
+The same adaptive Gaussian (RBF) kernel used for transcriptomic affinity is then applied to $x_i^{\text{aug}}$ to construct the spatial affinity graph.
+At $\lambda=0$ this reduces exactly to the transcriptomic-only affinity; Section~\ref{sec:experiments} sweeps $\lambda \in \{0, 0.2, 0.4, 0.8\}$.
 
-The key property of this construction is that cells in similar spatial microenvironments receive high affinity---regardless of their individual transcriptomic state.
-Because the model receives only the cell's own gene expression as input, the community-preserving objective forces the encoder to identify gene expression patterns that correlate with microenvironmental context, while the reconstruction objective keeps prototypes faithful to overall gene expression, preventing spatial context from overriding cell-type identity.
-
-This construction is intentionally simple and serves as a proof of concept that scProto's affinity framework generalizes beyond transcriptomic similarity.
-More principled affinities---for example, based on ligand--receptor interaction scores or cell-type composition of the local neighborhood---are natural extensions left for future work.
-
-Figure~\ref{fig:affinity_comparison} compares the transcriptomic RBF affinity and the spatial affinity on the NSCLC dataset~\citep{pentimalli2025combining}.
-Using spatial affinity yields substantially better niche separation, at the cost of slightly increased mixing of cell types within niches---consistent with the fact that cells in the same niche can belong to different cell types.
-
-\begin{figure}[h]
-\centering
-\missingfig{figures/nsclc_affinity_comparison.png}
-\caption{
-UMAP of the two affinity graphs on the NSCLC dataset, colored by cell type (left) and niche label (right).
-Top: transcriptomic RBF affinity. Bottom: spatial affinity (RBF on neighborhood-averaged PCA).
-Spatial affinity produces substantially cleaner niche separation, while the transcriptomic affinity preserves sharper cell-type boundaries.
-}
-\label{fig:affinity_comparison}
-\end{figure}
+As $\lambda$ increases, affinity increasingly reflects shared local microenvironment over individual transcriptomic similarity, while the cell's own expression (the first block) still contributes at every $\lambda>0$.
+Because the model receives only the cell's own gene expression as input, the community-preserving objective forces the encoder to identify gene expression patterns that correlate with microenvironmental context, while the reconstruction objective keeps the encoder's latent space $z$ faithful to overall gene expression, preventing spatial context from overriding cell-type identity there. Prototypes, which the cohesion objective places among real cells in that same $z$-space (main text), inherit this grounding rather than being anchored to gene expression directly.
 
 
 \section{Training Details and Hyperparameters}
 \label{app:training}
+
+\paragraph{Prototype initialization (Stage 2).}
+Waypoint initialization~\citep{seacells} selects $K$ cells by greedy MaxMin in diffusion map space and uses their pretrained encoder embeddings as initial prototype vectors. From Stage 2 onward we drop the KL term, since Stage-1 pretraining already regularized the latent space.
+
+\paragraph{Why community cannot be allowed to move the prototypes.}
+We measured what happens if $\mathcal{L}_{\text{community}}$ is allowed to update $\{c_k\}$ directly, i.e.\ using the live $s_i$ rather than the frozen $\hat{s}_i$ in $q_{ij}$ (main text): at full strength, this loss's negative-sampling repulsion accounted for 89\% of the gradient reaching the prototypes and killed most of them (14--16 of 200 dead in our runs). This is a structural property of the objective, not a tuning artifact: negative pairs push dissimilar cells' prototypes apart far more strongly than positive pairs pull similar cells' prototypes together, so while this objective's optimum for the \emph{encoder} is exactly what we want, its optimum for the \emph{prototypes} is degenerate. Routing $q_{ij}$ through a stop-gradient copy of the prototypes removes this failure mode while leaving the encoder signal untouched.
 
 \paragraph{Architecture.}
 The encoder and decoder follow the scPoli architecture~\citep{scpoli} with default settings: hidden dimension 64, latent dimension 8, and 50 PCA components as input features.
@@ -84,19 +73,20 @@ Stage 1 (cVAE pretraining) runs for 50 epochs.
 Stage 2 (joint prototype learning) uses early stopping based on modularity, evaluated every few epochs, with a minimum improvement threshold of 0.005 and 1000 gradient steps per epoch.
 
 \paragraph{Loss weights.}
-The total objective is
-\[
-\mathcal{L} = \mathcal{L}_{\text{community}} + \lambda\,\mathcal{L}_{\text{rec}} + \lambda_n\,\mathcal{L}_{\text{nassoc}} + \lambda_u\,\mathcal{L}_{\text{usage}},
-\]
-with $\lambda = 0.01$, $\lambda_n = 1.0$, and $\lambda_u = 0.1$.
-The normalized association loss uses element-wise max aggregation across batches ($\alpha = 1.0$).
-These values were chosen to balance community structure preservation against reconstruction fidelity, and were not tuned per dataset.
+The total objective (main text, and Appendix~\ref{app:cohesion} for the two cohesion similarities) has four active terms: community, cVAE reconstruction, and the two cohesion variants (affinity-based and Gram-based). $\lambda_{\text{coh}}$ (for each cohesion variant) is set directly from the training graph: we measure a \emph{span} --- the gap between a well-clustered partition's cohesion score and a random partition's, on that graph --- and set $\lambda = \text{authority}/\text{span}$, where authority is a fixed reference value carried across datasets and span is measured per dataset, so the same relative emphasis on cohesion is preserved even though graphs differ substantially in scale.
 
-\paragraph{Gradient flow in $\mathcal{L}_{\text{rec}}$.}
-Although the soft assignments $s_{ik}$ depend on the encoder output $z_i$, we stop the gradient through $s_{ik}$ when backpropagating $\mathcal{L}_{\text{rec}}$.
-Reconstruction gradients therefore reach only the decoder $g_\phi$ and the prototype vectors $\{c_k\}$ (via their role as decoder inputs); the encoder $f_\theta$ receives no gradient from $\mathcal{L}_{\text{rec}}$.
-The motivation is to keep the two objectives from pulling the encoder in conflicting directions: $\mathcal{L}_{\text{community}}$ encourages encoder outputs to reflect affinity-graph structure, while an unconstrained $\mathcal{L}_{\text{rec}}$ gradient could push the encoder toward assignments that minimise reconstruction error regardless of graph proximity.
-By stopping the gradient, the encoder receives no gradient from $\mathcal{L}_{\text{rec}}$, preventing reconstruction from conflicting with the affinity-based objectives; the prototypes are jointly regularised by all objectives: they must sit at the centre of well-connected cell communities \emph{and} be decodable to meaningful gene-expression profiles.
+$\lambda_{\text{comm}}$ and $\lambda_{\text{cvae}}$ are tuned per dataset. We first measure each term's own encoder-gradient norm on a single mini-batch at the start of training (temporarily setting its weight to 1), which anchors a sensible numeric range for that term on that dataset's graph, since raw gradient scales are not portable across graphs~\citep{chen2018gradnorm}. Within that range, we run a short sweep and select the weight that maximizes held-out purity subject to a hard constraint: every prototype must remain populated (zero dead prototypes) throughout training.
+
+\paragraph{Gradient routing summary.}
+Each of the three joint-training terms is deliberately routed to a different subset of parameters, so that no two terms compete for the same update:
+\begin{equation}
+\begin{array}{lll}
+\mathcal{L}_{\text{community}} & \to & f_\theta \text{ only (prototypes detached, main text)} \\
+\mathcal{L}_{\text{cohesion}}  & \to & f_\theta \text{ and } \{c_k\} \text{ (live assignments, main text)} \\
+\mathcal{L}_{\text{cVAE}}      & \to & f_\theta \text{ and } g_\phi \text{ (no prototype involved at all)}
+\end{array}
+\end{equation}
+$\mathcal{L}_{\text{cohesion}}$ is therefore the only term that shapes $\{c_k\}$ directly; $\mathcal{L}_{\text{community}}$ and $\mathcal{L}_{\text{cVAE}}$ both shape the encoder, from two different signals (affinity-graph structure and decodability, respectively), and never see the prototypes. A prototype's own gene-expression profile, when one is needed for interpretation, is read out by decoding $c_k$ through the already-trained decoder, $g_\phi(c_k, b)$ --- this is a post-hoc readout of a shared decoder trained entirely on real cells, not a training objective of its own, and no loss term ever compares its output against anything.
 
 \paragraph{Number of prototypes $K$.}
 Following SEACells~\citep{seacells}, we set $K \approx N / 75$, where $N$ is the total number of cells.
@@ -109,6 +99,31 @@ The affinity graph uses an adaptive Gaussian (RBF) kernel in 50-dimensional PCA 
 All graph hyperparameters are kept at their SEACells defaults across all experiments.
 For spatial experiments, see Appendix~\ref{app:spatial_affinity}.
 
+\section{Cohesion: Similarity Choices and Assignment Memory}
+\label{app:cohesion}
+
+\paragraph{Two choices of similarity.}
+The cohesion objective (main text) is defined for a generic cell--cell similarity $\mathrm{sim}(i,j)$. We use two concrete instantiations simultaneously, each as its own copy of $\mathcal{L}_{\text{cohesion}}$ with its own weight:
+
+\emph{Direct affinity.} $\mathrm{sim}_{\text{aff}}(i,j) = P_{ij}$, the raw affinity graph itself. This is a \emph{1-hop} notion of similarity: it asks whether $i$ and $j$ are directly connected in the graph. Under this choice, $\mathcal{L}_{\text{cohesion}}$ reduces to a ratio-association objective: for each prototype, the average affinity among its own members.
+
+\emph{Gram similarity.} $\mathrm{sim}_{\text{gram}}(i,j) = \cos(v_i, v_j)$, the cosine similarity between rows $i$ and $j$ of the affinity graph, treating each row $P_{i,:}$ as a vector of $i$'s connections to every other cell. This is a \emph{2-hop} notion --- \emph{structural equivalence}: two cells score high not because they are connected to each other, but because they are connected to the \emph{same} other cells, i.e.\ they occupy the same neighborhood. Two cells can be structurally equivalent without being adjacent at all (e.g.\ two cells on opposite sides of the same hub), which is exactly the case the direct-affinity similarity above cannot see, and the two are combined for that reason: proximity ($\mathrm{sim}_{\text{aff}}$) and structural equivalence ($\mathrm{sim}_{\text{gram}}$) are a classical non-redundant pair, and neither alone catches the failure mode of the other.
+
+One subtlety in constructing $v_i$: $P$ has a zero diagonal by convention (self-loops are removed for the graph-cut style computations elsewhere in the pipeline), even though the affinity kernel itself would naturally assign $P_{ii}=1$. Computing the cosine directly on these zero-diagonal rows makes two cells that are directly adjacent, but otherwise share no neighbors, score \emph{exactly} 0 --- an artifact of the missing self-loop, not a real absence of similarity. We correct this by closing the neighborhood before normalizing: $v_i = P_{i,:} + \delta \, e_i$ (adding back a self-weight $\delta$ on the diagonal), then $\mathrm{sim}_{\text{gram}}(i,j) = v_i^\top v_j / (\|v_i\|\,\|v_j\|)$. We use $\delta = 1$, matching the kernel's natural self-similarity and giving $\mathrm{sim}_{\text{gram}}(i,i)=1$, consistent with the $\mathrm{sim}(i,i):=1$ convention used throughout. This is also not a new convention we invented: SEACells~\citep{seacells} sets the diagonal of its own $k$NN graph to 1 explicitly, to "include self as a neighbour," and its RBF kernel gives $\exp(0)=1$ on the diagonal by construction --- we are matching an existing, working convention, not introducing one.
+
+\paragraph{Why $\mathrm{sim}(i,i):=1$ everywhere.}
+This convention is not only used inside the Gram construction above --- it applies to every similarity we use, and it is what avoids dead prototypes and lets training use the full $K$ slots (main text). An empty prototype scores exactly 0. Without fixing $\mathrm{sim}(i,i):=1$, a prototype that has only just recruited its first member would score 0 too --- its founding member's only pair is itself, and that pair would contribute nothing --- so the objective could not tell a barely-started prototype from an empty one, and would never reward the model for growing it further. Fixing $\mathrm{sim}(i,i):=1$ gives that prototype a score of 1 instead, enough of a foothold to keep recruiting rather than being abandoned.
+
+\paragraph{Assignment memory.}
+As described in the main text, cohesion needs a full-dataset $\mathrm{size}_k$ and $\overline{\mathrm{sim}}(i,k)$, so we keep a memory $S^{\text{mem}}$ of every cell's last-computed assignment and overwrite only the current mini-batch's rows at each step. Two further details:
+
+\emph{Initialization.} Before the first step, $S^{\text{mem}}$ can either start uniform ($1/K$ in every entry, carrying no information until a cell's first visit) or be filled once with a real forward pass of the pretrained encoder over all $N$ cells. We use the latter, so that prototype sizes and similarities are informative from step 0 rather than only after a full epoch of mini-batches has passed through the memory.
+
+\emph{Age discount (optional).} A memory row is only as fresh as the last mini-batch that contained that cell, so far-apart revisits mean some rows are stale. We can down-weight a row by $0.5^{\,\Delta t/h}$, where $\Delta t$ is the number of steps since that cell was last seen and $h$ is a half-life, applied identically to both the numerator ($\overline{\mathrm{sim}}$) and denominator ($\mathrm{size}_k$) so that the discount does not bias the ratio. In our runs, the measured drift between a cell's remembered and freshly recomputed assignment across a typical revisit interval was small, indicating the discount is unnecessary at our batch sizes and dataset scales; we report this as a diagnostic rather than always enabling it.
+
+\paragraph{Batch restriction.}
+The affinity graph $P$ is not exactly block-diagonal by batch --- some cross-batch edges exist --- but cross-batch similarity is dominated by the batch effect rather than real biological similarity (Appendix~\ref{app:graph_structure}), so we do not want a cross-batch \emph{absence} of an edge to count as evidence of dissimilarity either way. We handle this by scoring a cell in batch $b$ only against $V(b)$, the set of cells that are either in $b$ or directly connected to it, and restrict \emph{both} $\mathrm{size}_k$ and the numerator of $\overline{\mathrm{sim}}(i,k)$ to $V(b)$ when computing cohesion for that cell --- not just one of the two. Restricting only the numerator (scoring against $V(b)$ but dividing by the true, dataset-wide $\mathrm{size}_k$) would systematically score a batch-pure prototype far below an otherwise identical batch-mixed one, purely because a batch-pure prototype's members are a strict subset of what a batch-mixed prototype's members would be under the same global denominator; restricting both sides removes this bias. With a single batch, $V(b)$ is every cell and this reduces to the unrestricted formula exactly.
+
 \section{Temperature Calibration}
 \label{app:calibration}
 
@@ -116,25 +131,25 @@ The temperature $\tau$ in the soft assignment formula controls the sharpness of 
 
 \paragraph{Effective number of prototypes.}
 We characterize assignment sharpness through the effective number of prototypes per cell,
-\[
+\begin{equation}
 \mathrm{effk}_i = \frac{1}{\displaystyle\sum_{k} s_{ik}^2},
-\]
+\end{equation}
 which equals 1 when a cell is assigned entirely to one prototype and $K$ when assignments are perfectly uniform.
 
 \paragraph{Default calibration: affinity-matching.}
 For dot-product similarity ($q_{ij} = s_i^\top s_j$), we calibrate $\tau$ so that the expected assignment similarity on positive edges matches the expected affinity weight:
-\[
+\begin{equation}
 \mathbb{E}_{(i,j) \sim P}\bigl[s_i^\top s_j\bigr] = \mathbb{E}_{(i,j) \sim P}\bigl[P_{ij}\bigr].
-\]
+\end{equation}
 Intuitively, this sets the temperature so that the degree of overlap between prototype assignments on truly connected cell pairs mirrors the strength of their affinity. We solve for $\tau$ via binary search, holding the encoder logits fixed.
 
 If the target is unreachable (i.e., even at the sharpest feasible $\tau$ the left-hand side cannot reach the right-hand side), or if the resulting mean effective number of prototypes falls below 3 (indicating over-collapse), we fall back to effective-$k$ alignment.
 
 \paragraph{Fallback: effective-$k$ alignment.}
 We binary-search for $\tau$ such that the mean effective number of prototypes per cell equals a target $K_\mathrm{eff}$:
-\[
+\begin{equation}
 \mathrm{mean}_i\,\mathrm{effk}_i = K_\mathrm{eff}.
-\]
+\end{equation}
 The target $K_\mathrm{eff}$ is derived from the median effective number of neighbors in the affinity graph, $\mathrm{effk}_i^{\mathrm{aff}} = 1/\sum_j P_{ij}^2$. This alignment ensures that assignment sharpness is commensurate with the local neighborhood structure of the data. This fallback is also the default for non-dot-product similarity metrics, for which the affinity-matching criterion is not meaningful.
 
 Calibration runs once on the full dataset immediately after prototype initialization and before joint optimization begins.
@@ -142,21 +157,25 @@ Calibration runs once on the full dataset immediately after prototype initializa
 \section{Evaluation Metrics}
 \label{app:metrics}
 
-\paragraph{Modularity.}
-We compute modularity of the metacell assignments with respect to the per-batch affinity subgraph (all edges incident to at least one cell in the batch). Mean and standard deviation are reported across batches.
+\paragraph{Cohesion.}
+For a cell $i$ assigned to metacell $m(i)$, cohesion is $i$'s mean similarity to the other members of $m(i)$ under a chosen cell--cell similarity $\mathrm{sim}(\cdot,\cdot)$, with $\mathrm{sim}(i,i):=1$ by the same convention used in training (main text):
+\begin{equation}
+\mathrm{coh}(i) = \frac{1}{|m(i)|}\sum_{j \in m(i)} \mathrm{sim}(i,j).
+\end{equation}
+We report this under the two similarity choices used in training (Appendix~\ref{app:cohesion}): \textbf{Coh(aff)}, using the affinity graph directly, and \textbf{Coh(gram)}, using the Gram/structural-equivalence similarity. Under the node-holdout protocol (Table~\ref{tab:graph_batch}), cohesion is computed only for held-out cells, against the full (train~+~held-out) affinity graph, with mean and standard deviation reported across held-out cells; the multi-batch restriction to $V(b)$ (Appendix~\ref{app:cohesion}) applies identically at evaluation time.
 
 \paragraph{Batch entropy.}
 For each metacell $m$, batch entropy is the Shannon entropy of its batch label distribution:
-\[
+\begin{equation}
 H(m) = -\sum_b p_b \log p_b,
-\]
+\end{equation}
 where $p_b$ is the fraction of cells in $m$ from batch $b$. Higher values indicate more uniform mixing across batches.
 
 \paragraph{Cell-type purity.}
 Purity measures the fraction of cells in a metacell belonging to its most frequent cell type:
-\[
+\begin{equation}
 \text{purity}(m) = \frac{1}{|m|} \max_{c} \sum_{i \in m} \mathbf{1}[y_i = c].
-\]
+\end{equation}
 
 \paragraph{Rare cell type metrics.}
 All rare-cell metrics identify rare cell types \emph{within each batch separately}.
@@ -168,53 +187,37 @@ All per-batch scores are aggregated as mean~$\pm$~std across batches.
 \textbf{Coverage} (per batch) is the fraction of locally-rare cell types for which at least one cell of that type in the current batch is assigned to a metacell whose majority label is that cell type.
 
 For each cell $i$ with a locally-rare label $c$ in batch $b$, the \textbf{homogeneity score} is the fraction of cells in $i$'s metacell $m(i)$ that share label $c$ (across all batches):
-\[
+\begin{equation}
 h_i = \frac{1}{|m(i)|}\sum_{j \in m(i)} \mathbf{1}[y_j = c].
-\]
+\end{equation}
 The per-batch \textbf{homogeneity} is the mean of $h_i$ over all locally-rare cells in batch $b$.
 Unlike coverage, which only checks whether a dedicated metacell exists, homogeneity measures how coherently each rare cell is grouped---a method can achieve full coverage while assigning rare cells to large, impure metacells, which homogeneity captures.
+
+For each locally-rare type $c$ in batch $b$, define its \emph{recall} as the fraction of $c$'s cells in batch $b$ that sit in a metacell whose majority label is $c$, and its \emph{precision} as the purity of the metacells majority-labelled $c$, size-weighted, computed once over the \emph{complete} dataset (not per batch) since a type's dedicated metacells can draw members from every batch:
+\begin{equation}
+\mathrm{recall}(c,b) = \frac{1}{|\{i : y_i=c,\, b_i=b\}|}\sum_{i:\,y_i=c,\,b_i=b} \mathbf{1}\bigl[\mathrm{majority}(m(i))=c\bigr],
+\qquad
+\mathrm{precision}(c) = \sum_{m:\,\mathrm{majority}(m)=c} \frac{|m|}{\sum_{m':\,\mathrm{majority}(m')=c}|m'|}\,\mathrm{purity}(m).
+\end{equation}
+\textbf{F1} for batch $b$ is the harmonic mean of precision and recall, averaged over $b$'s locally-rare types:
+\begin{equation}
+\mathrm{F1}(b) = \frac{1}{|\mathrm{rare}(b)|}\sum_{c \in \mathrm{rare}(b)} \frac{2\,\mathrm{precision}(c)\,\mathrm{recall}(c,b)}{\mathrm{precision}(c)+\mathrm{recall}(c,b)}.
+\end{equation}
+Recall is batch-local; precision is not --- a type's precision is the same number in every batch where it appears as locally rare, since it depends only on that type's dedicated metacells dataset-wide, not on which batch is being scored.
 
 \paragraph{Niche purity.}
 Analogous to cell-type purity but computed with respect to spatial niche labels: each metacell is assigned a majority niche label, and niche purity is the fraction of its member cells sharing that label.
 Unlike cell-type purity and batch entropy, niche purity is computed without size weighting, treating each metacell as an equal spatial unit.
 This is appropriate because niche-driven expression changes can be subtle, and the metacells capturing them tend to be small; size-weighting would suppress exactly these rare and spatially specific structures.
 
-\section{Additional Results}
-\label{app:results}
-
-\begin{figure*}[h]
-\centering
-\includegraphics[width=\textwidth]{figures/heatmap.png}
-\caption{
-Cell-type- and niche-specific breakdown of niche purity and cell-type purity for six key cell types in the NSCLC tumor microenvironment, selected for visual clarity.
-Each entry shows mean $\pm$ standard deviation across metacells assigned to that cell type (unweighted; see Appendix~\ref{app:metrics}).
-scProto consistently achieves higher niche purity than SEACells (transcriptomic) while maintaining higher cell-type purity than SEACells (spatial).
-}
-\label{fig:spatial_heatmap}
-\end{figure*}
-
-\begin{figure*}[h]
-\centering
-\includegraphics[width=\textwidth]{figures/pancreas_fig1.png}
-\caption{
-Per-metacell analysis of purity and batch mixing on the Pancreas dataset.
-Left: Cell-type purity vs. batch entropy (point size proportional to metacell size).
-Middle: Distribution of cell-type purity (size-weighted violin).
-Right: Distribution of batch entropy (size-weighted violin).
-scProto achieves higher batch entropy while maintaining comparable purity to SEACells.
-}
-\label{fig:purity_entropy}
-\end{figure*}
-
-\begin{figure*}[h]
-\centering
-\includegraphics[width=\textwidth]{figures/spatial.png}
-\caption{
-Spatial visualization of cell types, niches, and metacell assignments across methods.
-Columns correspond to selected cell types (fibroblasts, macrophages, cytotoxic T cells), and rows show cell-type annotations, niche annotations, scProto metacells (trained on spatial affinity), and SEACells metacells (trained on the same affinity).
-In the annotation rows, each cell is colored by its ground-truth niche label; in the metacell rows, each cell is colored by the majority niche label of its assigned metacell.
-scProto produces spatially coherent patterns aligned with niche structure, while SEACells exhibits more fragmented patterns.
-}
-\label{fig:spatial}
-\end{figure*}
+\paragraph{Niche-program recovery (DGE).}
+While niche purity checks whether a metacell's members share a niche label, it says nothing about whether the metacell's \emph{expression profile} recovers the transcriptional program that actually defines that niche. We measure this directly against a single-cell ground truth.
+For each (cell type, niche) pair, we first establish ground-truth differential expression: within that cell type's real single cells, a niche-vs-rest Wilcoxon test gives every gene a single-cell log fold-change $\mathrm{logFC}^{\mathrm{sc}}_g$; we keep genes significant at $\mathrm{padj}<0.05$ (top 100 by $|\mathrm{logFC}^{\mathrm{sc}}|$).
+On the metacell side, we build one pseudobulk profile per metacell by summing real member cells' raw counts (CPM-normalized), then split metacells of the target cell type into \emph{positive} (majority niche label matches) and \emph{control} (it does not). The metacell-level fold-change for each ground-truth gene $g$ is
+\begin{equation}
+\mathrm{logFC}^{\mathrm{mc}}_g = \log_2\!\left(\frac{\overline{\mathrm{cpm}}^{\mathrm{pos}}_g + 1}{\overline{\mathrm{cpm}}^{\mathrm{ctrl}}_g + 1}\right),
+\end{equation}
+where $\overline{\mathrm{cpm}}^{\mathrm{pos}}_g$ and $\overline{\mathrm{cpm}}^{\mathrm{ctrl}}_g$ are gene $g$'s mean CPM across positive and control metacells, respectively.
+\textbf{DGE} for a (cell type, niche) pair is the Pearson correlation between $\mathrm{logFC}^{\mathrm{mc}}$ and $\mathrm{logFC}^{\mathrm{sc}}$ across the ground-truth genes; we report it macro-averaged, first across niches within a cell type, then across cell types --- the same two-level averaging used for purity.
+A pair is only scored if it clears a minimum-support gate (at least 2 positive and 2 control metacells, at least 5 ground-truth genes); Fig.~\ref{fig:spatial_tradeoff} (main text) reports this average as the spatial weight $\lambda$ varies.
 

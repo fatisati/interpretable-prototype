@@ -1,46 +1,44 @@
 \section{Method}
 \label{sec:method}
 
-We consider a dataset of cells $\{x_i\}_{i=1}^N$ with $B \geq 1$ batches, where $x_i \in \mathbb{R}^G$ denotes gene expression and $b_i \in \{1, \dots, B\}$ is the batch label. The model consists of a batch-conditional encoder mapping cells to a shared latent space, a set of learnable prototypes representing metacells, and a batch-conditional decoder reconstructing gene expression from prototypes, so that batch-specific variation is handled at decoding rather than absorbed into shared prototypes.
+We consider a dataset of cells $\{x_i\}_{i=1}^N$ with $B \geq 1$ batches, where $x_i \in \mathbb{R}^G$ denotes gene expression and $b_i \in \{1, \dots, B\}$ is the batch label. The model consists of a batch-conditional encoder mapping cells to a shared latent space, a set of learnable prototypes representing metacells, and a batch-conditional decoder that reconstructs each cell directly from its own encoding, so that batch-specific variation is handled at decoding rather than absorbed into shared prototypes.
 
 \subsection{Model Components}
 
 \paragraph{Input.}
-We assume gene expression profiles $x_i \in \mathbb{R}^G$ with batch labels $b_i$, and a precomputed cell--cell similarity graph $P \in \mathbb{R}^{N \times N}$. By default, $P$ is an adaptive Gaussian (RBF) kernel on PCA embeddings~\citep{seacells}, which corrects for local density variations to ensure rare cell types form well-connected communities.
-If the affinity is computed per batch, the resulting graphs can simply be concatenated to form a block-diagonal $P$; even when computed globally across all cells, batch effects make cross-batch similarities negligible, so $P$ is approximately block-diagonal in either case (see Appendix~\ref{app:graph_structure}).
-Since the affinity is constructed in PCA space, it reflects both biological variation and technical batch effects; disentangling these signals is delegated to the batch-conditional encoder during training.
-More broadly, the affinity can encode any biologically meaningful similarity---including spatial context---allowing the model to capture microenvironmental structure while remaining grounded in gene expression via the reconstruction objective (see Appendix~\ref{app:spatial_affinity}).
+We assume gene expression profiles $x_i \in \mathbb{R}^G$ with batch labels $b_i$, and a precomputed, sparse cell--cell similarity matrix (graph) $P \in \mathbb{R}^{N \times N}$, approximately block-diagonal by batch (construction and reasoning in Appendix~\ref{app:graph_structure}). By default $P$ is an adaptive Gaussian (RBF) kernel on PCA embeddings~\citep{seacells}, correcting for local density so rare cell types stay well-connected; disentangling the biological and batch-driven variation this mixes together is delegated to the batch-conditional encoder during training. More broadly, $P$ can encode any biologically meaningful similarity---including spatial context---while the reconstruction objective keeps the model grounded in gene expression (Appendix~\ref{app:spatial_affinity}).
 
 \paragraph{Encoder.}
 A conditional encoder maps each cell to latent space:
-\[
+\begin{equation}
 z_i = f_\theta(x_i, b_i) \in \mathbb{R}^d.
-\]
+\end{equation}
 
 \paragraph{Prototypes.}
 We introduce $K$ learnable prototypes $\{c_k\}_{k=1}^K$, $c_k \in \mathbb{R}^d$, representing metacells in the latent space.
 
 \paragraph{Soft Assignment.}
 Each cell is represented as a soft mixture of prototypes:
-\[
+\begin{equation}
 s_{ik} =
 \frac{\exp\left( \frac{z_i^\top c_k}{\tau} \right)}
 {\sum_{k'} \exp\left( \frac{z_i^\top c_{k'}}{\tau} \right)},
-\]
+\end{equation}
 where $\tau > 0$ is a temperature parameter controlling assignment sharpness, and both $z_i$ and $c_k$ are $\ell_2$-normalized (see Appendix~\ref{app:training}). Rather than treating $\tau$ as a fixed hyperparameter, we calibrate it from data after pretraining and prototype initialization (see Appendix~\ref{app:calibration}).
 
 The assignment vector $s_i \in \mathbb{R}^K$ encodes the soft membership of cell $i$ across all $K$ prototypes. This representation is used to preserve similarity structure by mapping highly connected cells to similar assignment vectors.
 
 \paragraph{Community Structure Preservation.}
-To preserve local similarity structure, we define similarity between cells based on prototype assignments:
-\[
-q_{ij} = s_i^\top s_j.
-\]
-
-Since $s_i$ is a probability vector (softmax outputs are non-negative and sum to one), $q_{ij} \in [0,1]$, making it a natural similarity for binary cross-entropy.
-
-We match this similarity to the input graph using a binary cross-entropy objective:
-\[
+The idea is simple: cells the affinity graph calls related should end up with similar prototype assignments, and cells it calls unrelated should end up with dissimilar ones. We measure assignment similarity on a stop-gradient copy of the prototypes,
+\begin{equation}
+\hat{s}_{ik} =
+\frac{\exp\left( z_i^\top \mathrm{sg}(c_k) / \tau \right)}
+{\sum_{k'} \exp\left( z_i^\top \mathrm{sg}(c_{k'}) / \tau \right)},
+\qquad
+q_{ij} = \hat{s}_i^\top \hat{s}_j \in [0,1],
+\end{equation}
+where $\mathrm{sg}(\cdot)$ denotes a stop-gradient, so this loss can only move the encoder and never the prototypes directly (letting it move $\{c_k\}$ instead collapses most of them --- Appendix~\ref{app:training}). We match $q_{ij}$ to the graph with binary cross-entropy:
+\begin{equation}
 \mathcal{L}_{\text{community}}
 =
 -\sum_{i,j}
@@ -49,112 +47,52 @@ P_{ij}\log \tilde q_{ij}
 +
 (1-P_{ij})\log(1-\tilde q_{ij})
 \Big],
-\]
-where $\tilde q_{ij}$ clips $q_{ij}$ away from 0 and 1 to avoid $\log(0)$.
+\end{equation}
+with $\tilde q_{ij}$ clipped away from 0 and 1. We sample positive pairs from $P_{ij}$'s real edges, and negative pairs uniformly within the same batch only. Cross-batch alignment is handled instead by $\mathcal{L}_{\text{cVAE}}$ (Total Objective below).
 
-This objective encourages cells strongly connected in the affinity graph to share prototype assignments. In practice, we optimize stochastically, sampling positive edges from $P_{ij}$ and negative pairs within each batch; since both operate within individual datasets, no assumption is made about cross-batch similarity or dissimilarity, and cross-batch alignment is delegated to the encoder via the reconstruction objective.
+\paragraph{Cohesion.}
+We want similar cells to end up sharing a prototype. Concretely, we update the encoder and the prototypes jointly so that a cell's mean similarity to the other members of its own prototype is as high as possible. Since neither $\mathcal{L}_{\text{community}}$ nor $\mathcal{L}_{\text{cVAE}}$ touches the prototypes (previous paragraph; Total Objective below), this is the only term that shapes $\{c_k\}$ directly. We take the objective itself from the classical clustering literature rather than inventing a new one: it is the standard notion of cluster cohesion~\citep{tan2005data}, equivalent to weighted kernel $k$-means / normalized association~\citep{dhillon2004kernel} once membership is soft. It uses the live assignment $s_i$ (not the frozen $\hat{s}_i$ above), so its gradient reaches both the encoder and the prototypes.
 
-\paragraph{Decoder and Reconstruction.}
-Each prototype is decoded into gene expression space:
-\[
-\hat{x}_k^{(b)} = g_\phi(c_k,\, b),
-\]
-and each cell is reconstructed as:
-\[
-\tilde{x}_i = \sum_{k=1}^K s_{ik}\, \hat{x}_k^{(b_i)}.
-\]
+Let $\mathrm{sim}(i,j)$ denote a similarity between cells $i$ and $j$, with $\mathrm{sim}(i,i) := 1$ by convention. We use two such similarities in practice: the affinity graph directly, and a Gram-style similarity built from affinity rows that captures shared neighborhoods rather than direct connections (Appendix~\ref{app:cohesion} defines both precisely). For prototype $k$, define its size and the average similarity a cell $i$ has to $k$'s current members:
+\begin{equation}
+\mathrm{size}_k = \sum_i s_{ik}, \qquad
+\overline{\mathrm{sim}}(i,k) = \frac{\sum_j s_{jk}\, \mathrm{sim}(i,j)}{\mathrm{size}_k}.
+\end{equation}
+Cohesion is the assignment-weighted average of this quantity over all cells:
+\begin{equation}
+\mathrm{cohesion} = \frac{1}{N}\sum_i \sum_k s_{ik}\, \overline{\mathrm{sim}}(i,k),
+\qquad
+\mathcal{L}_{\text{cohesion}} = 1 - \mathrm{cohesion},
+\end{equation}
+so minimizing $\mathcal{L}_{\text{cohesion}}$ is exactly maximizing that mean similarity. Fixing $\mathrm{sim}(i,i):=1$ is what avoids dead prototypes and lets the model use its full capacity. An empty prototype scores exactly 0; without a self term, a prototype that has only just recruited its first member would score 0 too --- indistinguishable from empty, and with no reason for the model to ever grow it further. With $\mathrm{sim}(i,i):=1$, that same prototype scores 1 instead, giving it a foothold to keep recruiting rather than being abandoned outright.
 
-We optimize:
-\[
-\mathcal{L}_{\text{rec}} = \frac{1}{N} \sum_i \|x_i - \tilde{x}_i\|_2^2.
-\]
-
-In practice, we stop the gradient through $s_{ik}$ when optimizing $\mathcal{L}_{\text{rec}}$, so the encoder receives no gradient from $\mathcal{L}_{\text{rec}}$, preventing reconstruction from conflicting with the affinity-based objectives (see Appendix~\ref{app:training}).
-
-\paragraph{Prototype Regularization.}
-
-\textbf{Batch-aware normalized association.}
-
-Let $S \in \mathbb{R}^{N \times K}$ denote the assignment matrix.
-For each batch $b$, we define a batch-specific edge matrix:
-\[
-W^{(b)}_{ij} =
-\begin{cases}
-P_{ij} & \text{if } b_i = b \;\text{or}\; b_j = b, \\0 & \text{otherwise}.
-\end{cases}
-\]
-
-Let $d^{(b)}$ denote the corresponding degree vector, where
-\[
-d^{(b)}_i = \sum_j W^{(b)}_{ij}.
-\]
-
-We then compute:
-\[
-A^{(b)} = S^\top W^{(b)} S, \quad
-\mathrm{vol}^{(b)} = S^\top d^{(b)},
-\]
-\[
-M^{(b)}_{kj} =
-\frac{A^{(b)}_{kj}}
-{\sqrt{\mathrm{vol}^{(b)}_k \, \mathrm{vol}^{(b)}_j}}.
-\]
-
-Diagonal terms $M^{(b)}_{kk} \in [0,1]$ measure within-batch prototype compactness (1 = tight, well-connected community); off-diagonal terms $M^{(b)}_{kj}$ measure inter-prototype connectivity (0 = distinct, non-overlapping).
-
-To aggregate across batches, we use:
-\[
-M_{kj} = \max_b M^{(b)}_{kj}.
-\]
-
-For diagonal terms, a prototype is considered compact if it forms a tight community in at least one batch; for off-diagonal terms, minimizing the maximum ensures no batch exhibits strong mixing between prototypes.
-
-The loss is:
-\[
-\mathcal{L}_{\text{nassoc}} =
-\frac{1}{K} \sum_k (M_{kk} - 1)^2
-+
-\alpha \cdot \frac{1}{K(K-1)} \sum_{k \neq j} M_{kj}^2.
-\]
-
-\textbf{Prototype usage.}
-To prevent inactive prototypes, we penalize those with low maximum assignment weight.
-Rather than using a noisy per-mini-batch estimate, we maintain a scalar exponential moving average (EMA) $u_k \in \mathbb{R}$ across mini-batches with momentum $m \in (0,1)$:
-\[
-u_k \leftarrow m\, u_k + (1-m)\, \max_i s_{ik},
-\]
-and penalize underused prototypes:
-\[
-\mathcal{L}_{\text{usage}} = \frac{1}{K} \sum_k -\log(u_k).
-\]
-
-Together with the normalized association objective, this ensures that each prototype represents a distinct and meaningful community.
+\paragraph{Estimating cohesion from a mini-batch.}
+Scoring even one mini-batch cell against $\overline{\mathrm{sim}}(i,k)$ requires $\mathrm{size}_k$ and every other cell's current assignment --- the full column of $s$, not just the mini-batch's. We keep this in a memory: an $N \times K$ table $S^{\text{mem}}$ holding every cell's most recently computed assignment. At each step, the mini-batch's own rows are live (gradient-carrying); every other row is read from the memory as-is. Because a cell can go several steps between visits, we can optionally discount its remembered row by age --- how long it has been since it last appeared in a mini-batch --- so a long-unseen cell counts for less than one just computed (Appendix~\ref{app:cohesion} gives the exact discount and why we leave it off in practice); a cell that reappears simply overwrites its old row with a fresh one. For multi-batch data, cohesion for a cell in batch $b$ is restricted to $V(b)$, the cells either in $b$ or directly connected to it, rather than all $N$ cells (Appendix~\ref{app:cohesion}).
 
 \paragraph{Total Objective.}
-\[
+\begin{equation}
 \mathcal{L} =
-\mathcal{L}_{\text{community}}
+\lambda_{\text{comm}}\, \mathcal{L}_{\text{community}}
 +
-\lambda \mathcal{L}_{\text{rec}}
+\lambda_{\text{cvae}}\, \mathcal{L}_{\text{cVAE}}
 +
-\lambda_n \mathcal{L}_{\text{nassoc}}
-+
-\lambda_u \mathcal{L}_{\text{usage}}.
-\]
+\lambda_{\text{coh}}\, \mathcal{L}_{\text{cohesion}},
+\end{equation}
+where $\mathcal{L}_{\text{cVAE}}$ is the same per-cell reconstruction loss used to pretrain the encoder and decoder (Stage~1 below); we keep optimizing it during joint training, with the batch-embedding parameters learned in Stage~1 frozen. At this point we do not want the model to learn any new batch structure --- the goal is for $\mathcal{L}_{\text{community}}$ and $\mathcal{L}_{\text{cohesion}}$ to shape the encoder and prototypes around correct \emph{within-batch} similarity --- but the decoder still needs $z_i$ to carry enough information to reconstruct real gene expression, so $\mathcal{L}_{\text{cVAE}}$ stays in the objective specifically to preserve the cross-batch alignment Stage~1 already achieved, rather than to teach the encoder anything new about batches. In practice we include two instances of $\mathcal{L}_{\text{cohesion}}$, one for each choice of $\mathrm{sim}$ in Appendix~\ref{app:cohesion}; every term above has its own weight; see Appendix~\ref{app:training} for training details.
 
 \paragraph{Training Procedure.}
 
 \textbf{Stage 1: Pretraining.}
 We pretrain the encoder and decoder using scPoli~\citep{scpoli}, a cVAE-based architecture for single-cell data that encodes batch identity via trainable batch embeddings rather than fixed one-hot vectors, enabling effective batch effect correction.
-We optimize a per-cell MSE reconstruction loss on log-normalized gene expression:
-\[
+The reconstruction part of pretraining is a per-cell MSE loss on log-normalized gene expression:
+\begin{equation}
 \mathcal{L}_{\text{cVAE}} =
 \frac{1}{N}\sum_i \|x_i - g_\phi(z_i, b_i)\|_2^2,
-\]
-where $z_i = f_\theta(x_i, b_i)$. This stage trains the encoder and batch embeddings before prototypes are introduced (see Appendix~\ref{app:training} for architecture and hyperparameter details).
+\end{equation}
+where $z_i = f_\theta(x_i, b_i)$. Like any VAE, pretraining also includes a KL term pulling the encoder's approximate posterior toward a standard normal prior, weighted by scPoli's own default schedule. This stage trains the encoder and batch embeddings before prototypes are introduced (see Appendix~\ref{app:training} for architecture and hyperparameter details).
 
 \textbf{Stage 2: Prototype initialization and learning.}
-Prototypes are initialized via waypoint initialization~\citep{seacells}: $K$ cells selected by greedy MaxMin in diffusion map space, with pretrained encoder embeddings as initial prototype vectors. The temperature $\tau$ is calibrated before joint optimization (Appendix~\ref{app:calibration}), and the KL term is omitted since pretraining already regularizes the latent space.
+Prototypes are initialized via waypoint initialization~\citep{seacells} from the pretrained encoder embeddings, with temperature $\tau$ calibrated before joint optimization (Appendix~\ref{app:calibration}); batch-embedding parameters from Stage~1 are frozen for the remainder of training (initialization and KL-term details in Appendix~\ref{app:training}).
 
 This two-stage procedure stabilizes training and yields prototypes that preserve within-batch structure, align shared cell states across batches, and represent compact, distinct communities.
 Full hyperparameter details, loss weights, and guidance on selecting $K$ are provided in Appendix~\ref{app:training}.

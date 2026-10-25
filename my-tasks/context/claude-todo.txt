@@ -1,9 +1,0 @@
----published neurips on s28nsc - off diag min(vol)---
-the off diag should prevent merge - althogh diag would prefer merge
-[when good]: no dead proto - highe coverage - high joint purity
-[worth try?]: 
-ass diag and off diag would fight for merge - i feel it shoud not solve the problem 
-but as its the most simialr version to neruips may worth try
-
-
-

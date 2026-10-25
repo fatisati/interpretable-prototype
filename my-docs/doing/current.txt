@@ -126,3 +126,43 @@ does recon do this automaticaly?
 cohesion [train - test - rare - common]
 ct purity [train/test, rare/common, cross-batch/within-batch/overal]
 rare metrics [homogeneity, f1, covrage]
+
+maybe cross batch edges from leiden sim
+the proto recon can help or not?
+
+why rare metrics even in our best model is not improved at all? is it becaseu of bad cross batch aligment?
+
+
+nothing tell the model cells of different batch that assign to same proto shoud have same biolgy
+so as second step go through - each batch consider a proto a different cell type - which definitly lead to miss aligment in cross batch cells
+no we add proto recon - but this time sij * mse(decode(protok), xi) - and we run both s detach and not
+we expect same cohesion improvment - solved cross batch aligment
+but maybe split - batch specific prototypes maybe we dont know
+do we still need cvae loss? maybe yes as if not the gmkl all cells may collpase to their proto 
+====
+[within batch works - cross batch not]
+so now the within batch force works and generalize - but cross batch force not working
+and i dont know exactly why
+one cool way we measured it - for each gene in each group we get mean f gene in the grou subtracted mean of gene in the whole study 
+and this would be group signiture = batch removed - then we can compare the correlation of the gene signiture vctor across aligned groupes somthing like this
+now we need to solve the cross batch force
+
+one idea - each proto sig for each batch shoud be similar - this is really a cool loss to be honest
+we need a running memory as well - but i think overaly feels cool
+for each prototype k that spans >= 2 batches:
+    sig(k,b) = mean expression of k's batch-b members
+             - mean expression of all batch-b cells          (batch effect cancels)
+    penalty  = sum over batch pairs of ( 1 - r( sig(k,b1), sig(k,b2) ) )
+the problem is that this is an invented loss - which may have many unknonw problems - and i need to analyse that
+
+proto recon - score s not detached: we expect to move cells for the proto that best recon them - and for rare cell regions where we know more sparse 
+it would fight with cohesion - because in gene exression space recutrign them with same prototype push the loss up
+[s detached] so we shoudl either run with s detached [so the cells just go for improved cohesion - only proto and decoder move for recon]
+[use nb loss instead of mse] i dont know exactly how it wors but maybe better in sparse regions
+[use r like loss] the loss looks cool as it compare sig across batches - i think not affected by sparse regions [need validation]
+but it feels totaly new loss and feels risky to test it - but 
+
+i set up run - s detached [as i realized we dont want encoder move for recon as it would figt with cohesion i assume] - nb/mse - cvae on / off
+i expect as s detached -  cohesion easily improved - no more dead proto - and becasue of nb loss better recon specialized
+just need to re-think with nb loss any point in not detaching s?
+and think of using r loss too

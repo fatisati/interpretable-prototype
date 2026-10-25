@@ -73,8 +73,11 @@ SEED = 31
 GNORM_ENC = {
     "mse": {"cohesion_gram": 0.043067, "cohesion_aff": 0.02464,
             "recon": 11.834, "gmkl": 11.223},
-    "nb":  {"cohesion_gram": None, "cohesion_aff": None,
-            "recon": None, "gmkl": None},
+    # [D64] MEASURED 2026-10-25, measure_grad_shares_d63nb.py (recon_loss='nb',
+    # mix3, scores DETACHED, lambda=1): 402/402 rows, 0 errors, weights verified
+    # frozen. CVs 0.00-0.09.
+    "nb":  {"cohesion_gram": 0.042662, "cohesion_aff": 0.030624,
+            "recon": 16.478, "gmkl": 13.681},
 }
 # PROTOTYPE-path gradient norms -- the second budget. proto_recon's value MUST
 # come from the DETACHED probe (measure_grad_shares_d63.py), because detaching
@@ -86,7 +89,9 @@ GNORM_PROTO = {
     # (with scores LIVE the D62 probe read 9.261 -- detaching removes one of
     #  the two gradient paths into the prototypes, hence the lower value.)
     "mse": {"gmkl": 0.055115, "proto_recon": 5.6654},
-    "nb":  {"gmkl": None, "proto_recon": None},
+    # [D64] same probe, PROTOTYPE path. Routing verified: cohesion/umap/recon
+    # put exactly 0 on the prototypes.
+    "nb":  {"gmkl": 0.050154, "proto_recon": 8.7688},
 }
 
 # encoder budget: unchanged from D60 (its relative proportions are what worked)
