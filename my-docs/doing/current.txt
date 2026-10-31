@@ -166,3 +166,8 @@ i set up run - s detached [as i realized we dont want encoder move for recon as 
 i expect as s detached -  cohesion easily improved - no more dead proto - and becasue of nb loss better recon specialized
 just need to re-think with nb loss any point in not detaching s?
 and think of using r loss too
+===
+
+[design the cross batch loss]
+i dont undetnd step 1 - is it fine not to use it? just use lognorm and thats it - simple mean (ognorm k cell) - mean lognorm batch cell 
+why suggested new share small? why not same as others?

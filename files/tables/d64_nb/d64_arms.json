@@ -1,0 +1,30 @@
+{
+  "ok": {},
+  "failed": {
+    "d64_wayp-norec": "RemoteError: "
+  },
+  "gnorm_enc": {
+    "mse": {
+      "cohesion_gram": 0.043067,
+      "cohesion_aff": 0.02464,
+      "recon": 11.834,
+      "gmkl": 11.223
+    },
+    "nb": {
+      "cohesion_gram": 0.042662,
+      "cohesion_aff": 0.030624,
+      "recon": 16.478,
+      "gmkl": 13.681
+    }
+  },
+  "gnorm_proto": {
+    "mse": {
+      "gmkl": 0.055115,
+      "proto_recon": 5.6654
+    },
+    "nb": {
+      "gmkl": 0.050154,
+      "proto_recon": 8.7688
+    }
+  }
+}
