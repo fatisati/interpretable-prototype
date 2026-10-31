@@ -291,12 +291,14 @@ class SwavBase(nn.Module):
 
         return overall_avg_distance
 
-    def get_all_batch_embeddings(self, device="cuda"):
+    def get_all_batch_embeddings(self, device=None):
         """
         Generate all possible batch embeddings by iterating through every combination of indices.
         Returns:
             Tensor of shape (num_combinations, embedding_dim), where embedding_dim is the sum of embedding dimensions.
         """
+        if device is None:
+            device = next(self.scpoli_cvae.parameters()).device
         # Generate all possible indices for each embedding layer
         all_indices = [
             torch.arange(emb.num_embeddings, device=device)

@@ -450,6 +450,7 @@ def get_scproto_mc_adata(
     if model is None:
         model = t.load_model()
     protos = model.get_prototypes().detach()
+    device = protos.device
 
     if use_mean:
         old_emb = model.scpoli_cvae.embeddings[0]  # nn.Embedding(14, 10, max_norm=1.0)
@@ -464,7 +465,6 @@ def get_scproto_mc_adata(
         # number of embeddings in the layer
         last_idx = model.scpoli_cvae.embeddings[0].num_embeddings - 1
         batch = np.full((protos.shape[0], 1), last_idx)
-        device = torch.device("cuda")
         model.scpoli_cvae.embeddings[0] = model.scpoli_cvae.embeddings[0].to(device)
     elif use_max:
         max_bid = adata.obs[bk].value_counts().idxmax()
@@ -472,7 +472,7 @@ def get_scproto_mc_adata(
         batch = np.full((protos.shape[0], 1), max_bidx)
     else:
         batch = np.zeros((protos.shape[0], 1))
-    batch = torch.as_tensor(batch, dtype=torch.long, device="cuda")
+    batch = torch.as_tensor(batch, dtype=torch.long, device=device)
 
     if t.recon_loss == "nb":
         sf = np.ravel(adata.layers.get("counts").sum(1))
@@ -481,7 +481,7 @@ def get_scproto_mc_adata(
         # but within the batch which yu are decoding
         print("decoding protos using avg sizefactor: ", sf)
         sizefactor = np.full((protos.shape[0],), sf)
-        sizefactor = torch.as_tensor(sizefactor, dtype=torch.float, device="cuda")
+        sizefactor = torch.as_tensor(sizefactor, dtype=torch.float, device=device)
         metacells = model.nb_decode(protos, batch, sizefactor)
     else:
         metacells = model.decode(protos, batch)

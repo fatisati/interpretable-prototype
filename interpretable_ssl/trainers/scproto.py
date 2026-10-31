@@ -39,9 +39,11 @@ logger = getLogger()
 
 
 def get_gpu_type_torch():
-    if not torch.cuda.is_available():
-        return "No GPU available"
-    return [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())]
+    if torch.cuda.is_available():
+        return [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())]
+    if getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
+        return "Apple MPS available (enabled only if USE_MPS=1)"
+    return "No GPU available"
 
 
 def affinity_report(A):
@@ -299,7 +301,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         if self.ft_epochs > 0 and self.full_dataset_mode == 0:
             model = self.adapt_model(model, self.query.adata)
         checkpoint_path = self.get_model_path()
-        checkpoint = torch.load(checkpoint_path)
+        checkpoint = torch.load(checkpoint_path, map_location=self.device)
         model.load_state_dict(checkpoint["state_dict"])
         model.to(self.device)
 
@@ -776,7 +778,7 @@ class SCProtoTrainer(AdoptiveTrainer):
 
     def build_model(self):
         self.model = self.get_model()
-        self.model = self.model.cuda()
+        self.model = self.model.to(self.device)
         # logger.info(self.model)
         logger.info(
             f"=======>Building model done. max value for adata fed to scpoli_wrapper: {self.model.scpoli_wrapper.adata.X.max()}"
@@ -3066,13 +3068,24 @@ class SCProtoTrainer(AdoptiveTrainer):
                                        device=self.device).unsqueeze(1)          # (nb,1)
                 _scl = float(getattr(self, '_coh_scale', 1.0) or 1.0)
 
+                # Apple MPS has no sparse-tensor kernels, so on that device the CSR
+                # operands stay on CPU and _spmm does the sparse product there, moving
+                # only the (nb, K) dense result to the GPU. Same arithmetic, same
+                # autograd graph (.cpu()/.to() are differentiable); device-only change.
+                _sp_dev = torch.device('cpu') if str(self.device).startswith('mps') else self.device
+
                 def _to_t(_sp):
                     _sp = _sp.tocsr()
                     return torch.sparse_csr_tensor(
                         torch.from_numpy(_sp.indptr.astype(np.int64)),
                         torch.from_numpy(_sp.indices.astype(np.int64)),
                         torch.from_numpy(_sp.data.astype(np.float32)),
-                        size=_sp.shape, device=self.device)
+                        size=_sp.shape, device=_sp_dev)
+
+                def _spmm(_A, _D):
+                    if _A.device.type != _D.device.type:
+                        return torch.sparse.mm(_A, _D.to(_A.device)).to(_D.device)
+                    return torch.sparse.mm(_A, _D)
 
                 # 1-hop block: the within-batch affinity. Used by lambda_cohesion_aff and
                 # by the zero-weight diagnostics; both want RAW affinity, never the norm.
@@ -3182,10 +3195,10 @@ class SCProtoTrainer(AdoptiveTrainer):
 
                 _AffB = self._coh_A_aff[_cidx][:, _cidx]
                 _AffT = _to_t(_AffB)
-                _GS_aff_raw = torch.sparse.mm(_AffT, _Sc)                # (nb, K), diag 0
+                _GS_aff_raw = _spmm(_AffT, _Sc)                # (nb, K), diag 0
                 if cohesion_global == 2:
                     # against ALL cells, not just the batch's
-                    _GS_aff_raw = torch.sparse.mm(_to_t(self._coh_A_aff[_cidx]), _S_eff)
+                    _GS_aff_raw = _spmm(_to_t(self._coh_A_aff[_cidx]), _S_eff)
                 _deg_b = torch.as_tensor(np.asarray(_AffB.sum(axis=1)).ravel(),
                                          dtype=torch.float32, device=self.device)
                 # [D27] self-similarity for the 1-HOP term too. A cell is maximally
@@ -3235,23 +3248,23 @@ class SCProtoTrainer(AdoptiveTrainer):
                                                    device=self.device)
                             for _b in torch.unique(_cell_b).tolist():
                                 _sel = (_cell_b == _b)
-                                _PV_b = torch.sparse.mm(
+                                _PV_b = _spmm(
                                     _BT_full,
                                     (_S_eff * self._coh_inV[_b].unsqueeze(1))
                                     / _rall)
                                 _idx_b = _cidx[_sel.detach().cpu().numpy()]
-                                _rows = torch.sparse.mm(
+                                _rows = _spmm(
                                     _to_t(self._coh_B[_idx_b]), _PV_b)
                                 _GS_gram[_sel] = _rows / (_rnb[_sel] * _scl)
                         else:
-                            _PV = torch.sparse.mm(_to_t(self._coh_B.T),
+                            _PV = _spmm(_to_t(self._coh_B.T),
                                                   _S_eff / _rall)
-                            _GS_gram = torch.sparse.mm(_Bt, _PV) / (_rnb * _scl)
+                            _GS_gram = _spmm(_Bt, _PV) / (_rnb * _scl)
                     else:
                         _BtT = _to_t(_Bb.T)
                         _S1 = _Sc / _rnb                                 # D^-1 S
-                        _GS_gram = torch.sparse.mm(
-                            _Bt, torch.sparse.mm(_BtT, _S1)) / (_rnb * _scl)
+                        _GS_gram = _spmm(
+                            _Bt, _spmm(_BtT, _S1)) / (_rnb * _scl)
                     _dg_gram = torch.as_tensor(self._coh_dg_np[_cidx], dtype=torch.float32,
                                                device=self.device) / _scl
 
@@ -3412,7 +3425,7 @@ class SCProtoTrainer(AdoptiveTrainer):
                         with torch.no_grad():
                             if not hasattr(self, '_coh_A_aff_t'):
                                 self._coh_A_aff_t = _to_t(self._coh_A_aff)
-                            _num_full = torch.sparse.mm(self._coh_A_aff_t, _S_eff)
+                            _num_full = _spmm(self._coh_A_aff_t, _S_eff)
                             _num_full = ((_num_full * _S_eff).sum(0)
                                         + cohesion_diag * _S_eff.pow(2).sum(0))
                             _true_coh_aff = float((_num_full / _size_g).sum() / _Nall)
