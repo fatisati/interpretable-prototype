@@ -4,6 +4,8 @@ TRAIN_EPOCHS epochs with early_stop=False, places held-out cells with the frozen
 and writes clusters_full.npz / latent / prototypes / RECIPE.md like modal_scripts/train_d64_nb.py.
 
 env: ARM=d63_mse-rec|d63_mse-norec   EPOCHS=10   USE_MPS=1 (optional)
+     RUN_TAG=<name>  output folder + experiment name (default ARM); use it for a device/seed replicate
+                     so it never overwrites another run of the same arm
 """
 import os, sys, json, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -15,10 +17,11 @@ from interpretable_ssl.experiments.tasks import get_trainer, _resolve_ds_id, _re
 
 ARM = os.environ.get("ARM", "d63_mse-rec")
 EPOCHS = int(os.environ.get("EPOCHS", "10"))
+RUN_TAG = os.environ.get("RUN_TAG", ARM)
 LIK = "nb" if "nb" in ARM else "mse"
 recon_on = not ARM.endswith("norec")
 prot_init = "waypoint" if "wayp" in ARM else "leid"
-OUT = os.path.join(ROOT, "notebooks", "pbmc_immune_local", "tables", ARM)
+OUT = os.path.join(ROOT, "notebooks", "pbmc_immune_local", "tables", RUN_TAG)
 os.makedirs(OUT, exist_ok=True)
 
 lc = arm_config(prot_init, recon_on, LIK)
@@ -27,7 +30,7 @@ print(f"[{ARM}] device={get_device()} epochs={EPOCHS} lambdas:",
       {k: lc[k] for k in ("lambda_cohesion", "lambda_cohesion_aff", "lambda_recon", "lambda_gmkl", "lambda_proto_recon")})
 
 resolved = _resolve_ds_id(TRAIN_H5, batch_key=BATCH_KEY, label_key=LABEL_KEY, niche_key=None, num_prototypes=K)
-t = get_trainer(experiment_name=ARM + "_local", cvae_epochs=50, affinity_type="arbf", dataset_id=resolved,
+t = get_trainer(experiment_name=RUN_TAG + "_local", cvae_epochs=50, affinity_type="arbf", dataset_id=resolved,
                 l2norm=1, assignment_metric="dotp", batch_size=1024, umap_steps_per_epoch=None,
                 umap_similarity="proto", freeze_batch_embedding=1, freeze_decoder=0,
                 num_prototypes=_resolve_num_prototypes(K, resolved),
@@ -83,7 +86,7 @@ t.continue_train_umap_edges(epochs=EPOCHS, early_stop=False)
 train_s = time.time() - t1
 t.save_umap_checkpoint(); t.save_clusters()
 col = place_all("final")
-summary = {"arm": ARM, "epochs": EPOCHS, "device": get_device(), "lambdas": {k: lc[k] for k in lc if k.startswith("lambda_")},
+summary = {"arm": ARM, "run_tag": RUN_TAG, "epochs": EPOCHS, "device": get_device(), "lambdas": {k: lc[k] for k in lc if k.startswith("lambda_")},
            "train_seconds": round(train_s, 1), "collapse_epoch0": col0, "collapse_final": col, "model_name": mn,
            "dump_path": t.get_dump_path()}
 json.dump(summary, open(os.path.join(OUT, "arm_summary.json"), "w"), indent=2, default=str)

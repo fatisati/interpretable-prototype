@@ -1039,3 +1039,42 @@ remind me these - if you thaught i am forgeting:
 each run should have a decision before running - what do you expect? how would effect your decision
 every run should end with verdict [works / fails / inconclusive-because- / abandoned, not worth the time.] - and incoclusive should be changed to some final state
 freeze scoreboard [metrics / baselines]
+## 12. Running locally on Apple Silicon (no CUDA) — MPS works, after two fixes
+
+Validated 2026-10-31 on a Mac Studio M3 Ultra (`notebooks/pbmc_immune_local/`, conda env
+`interpretable-ssl`, torch 2.15). Device selection is `utils.get_device()`: cuda > mps >
+cpu, with MPS **opt-in via `USE_MPS=1`**. Per-step cost of the D63 arm on pbmc-immune
+(2,003 steps/epoch): CPU 1.55 s, MPS **0.19 s** -- the same speed as Modal's L4. Scoring
+and SEACells graph building stay on CPU (scipy).
+
+Two things made MPS usable; both are device-only changes with the arithmetic unchanged:
+
+- **MPS has no CSR sparse kernels, but COO `torch.sparse.mm` exists and is fast** (9 ms vs
+  320 ms CPU for the full 2M-edge product at K=300). The cohesion operands now live on
+  the device as COO tensors in `interpretable_ssl/cohesion_sparse.py`; row subsets are
+  formed from CSR row pointers on the device, so a step never slices scipy or copies
+  host->GPU. The multi-batch gram profile is ONE product against an `(N, n_bio*K)` block
+  instead of one full-graph product per bio batch. Proof of equality with the legacy
+  scipy/CSR path: `interpretable_ssl/tests/test_cohesion_sparse.py` (values + grads, cpu
+  and mps, rel err < 2e-7).
+- **Never write rows with `tensor[idx] = rows` on MPS.** That `index_put_` took 1.8 s per
+  call for 6k x 300 rows; `tensor.index_copy_(0, idx, rows)` takes 0.1 ms and is the same
+  op (gradient included). The membership memory now uses `index_copy_` / `index_fill_`
+  (`cohesion_memory.assemble_membership`, the `_coh_Sfull` update). If a new term is slow
+  only on MPS, look for this pattern first -- `notebooks/pbmc_immune_local/tmp/`-style
+  section timers with `torch.mps.synchronize()` find it in minutes; cProfile only shows
+  time inside `.item()`.
+
+Whole-step check: `notebooks/pbmc_immune_local/check_device_equivalence.py` runs one
+identical step on mps and cpu (same weights, memory, epsilon, batch; dropout off and the
+reparameterisation sample replaced by its mean) -- every metric agrees to ~1e-6. Two
+devices still produce DIFFERENT runs end-to-end because their random streams differ
+(dropout masks, CVAE sampling noise, `calibrate_eps` lands ~1% apart, Leiden-init ties):
+that is the same replicate noise as CLAUDE.md 6a, not a port error.
+
+Other local gotchas, all handled in `notebooks/pbmc_immune_local/_local_env.py` or
+`interpretable_ssl/__init__.py`: `Data_Handler`'s Islander json files are optional
+(`{}` when absent); current scanpy returns sparse *arrays* that SEACells' rbf cannot slice,
+so `sc.pp.neighbors` is wrapped to return `csr_matrix`; scipy must be 1.13.x for scanpy
+1.11; the legacy Task-2 eval (`find_metacells`) segfaults in libomp after training (four
+bundled libomp copies) -- the D63 scorer does not call it.
