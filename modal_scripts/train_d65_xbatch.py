@@ -102,9 +102,16 @@ GNORM_ENC = {
     "mse": {"cohesion_gram": 0.0531847, "cohesion_aff": 0.0300136,
             "recon": 13.3565, "gmkl": 10.6492,
             "xbatch": 0.0216031, "xbatch_off": 0.0417084},
-    "nb":  {"cohesion_gram": None, "cohesion_aff": None,
-            "recon": None, "gmkl": None,
-            "xbatch": None, "xbatch_off": None},
+    # MEASURED 2026-11-01, measure_grad_shares_d65.py --lik nb (fresh NB
+    # pretrain -- recon_loss keys the checkpoint). 402/402 rows, 0 errors,
+    # CV 0.00-0.11. Same routing verification: only gmkl (0.02753) touches
+    # the prototypes. Cross-check that the term is likelihood-independent as
+    # designed: xbatch's VALUE is -0.1192 here vs -0.1155 under mse (it reads
+    # layers['lognorm'] in both; the small gap is the different pretrain's
+    # latent, not the term).
+    "nb":  {"cohesion_gram": 0.0513594, "cohesion_aff": 0.0347355,
+            "recon": 16.6334, "gmkl": 13.6526,
+            "xbatch": 0.025611, "xbatch_off": 0.0443404},
 }
 
 # [D65] user decision 2026-11-01: cross-batch takes 1/8; the other four keep
