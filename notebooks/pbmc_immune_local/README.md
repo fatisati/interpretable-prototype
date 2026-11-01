@@ -40,3 +40,6 @@ Known differences from the Modal runs (2026-10-31):
   Result (2026-10-31): CPU 9.6 h vs MPS 44 min, both 0 dead; held-out within-batch purity
   0.858 vs 0.861, coh_aff_test 0.103 vs 0.101 (Modal 0.854 / 0.101). Verdict WORKS, and the
   three replicates give the cross-machine floor recorded in that note.
+- D64 NB arm `d64_leid-rec` on MPS (2026-11-01, `notes/d64_leid-rec_mps_expectation.md`): 97 min,
+  0 dead, no collapse; held-out within-batch purity 0.815 vs 0.861 for the MSE arm, rare F1
+  0.61 vs 0.76. Verdict fails (one seed). Needs `LIK=nb` probe first (creates the NB pretrain).
