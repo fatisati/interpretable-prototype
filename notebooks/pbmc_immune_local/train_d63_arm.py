@@ -18,7 +18,7 @@ from interpretable_ssl.experiments.tasks import get_trainer, _resolve_ds_id, _re
 ARM = os.environ.get("ARM", "d63_mse-rec")
 EPOCHS = int(os.environ.get("EPOCHS", "10"))
 RUN_TAG = os.environ.get("RUN_TAG", ARM)
-LIK = "nb" if "nb" in ARM else "mse"
+LIK = "nb" if (ARM.startswith("d64") or "nb" in ARM) else "mse"   # every D64 arm is NB (train_d64_nb.py)
 recon_on = not ARM.endswith("norec")
 prot_init = "waypoint" if "wayp" in ARM else "leid"
 OUT = os.path.join(ROOT, "notebooks", "pbmc_immune_local", "tables", RUN_TAG)
