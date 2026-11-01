@@ -39,7 +39,19 @@ def log_time(class_name):
 
 # @log_time('get device')
 def get_device():
-    return "cuda" if torch.cuda.is_available() else "cpu"
+    """Pick the torch device: cuda > mps > cpu.
+
+    Apple MPS is opt-in (set USE_MPS=1) because scArches' own scPoli trainer
+    and a few ops still fall back to CPU, so MPS is not always a win.
+    """
+    import os
+    if torch.cuda.is_available():
+        return "cuda"
+    if (getattr(torch.backends, "mps", None) is not None
+            and torch.backends.mps.is_available()
+            and os.environ.get("USE_MPS", "0") == "1"):
+        return "mps"
+    return "cpu"
 
 
 # get_home() is now imported from interpretable_ssl.configs.paths

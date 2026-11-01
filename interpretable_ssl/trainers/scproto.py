@@ -39,9 +39,11 @@ logger = getLogger()
 
 
 def get_gpu_type_torch():
-    if not torch.cuda.is_available():
-        return "No GPU available"
-    return [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())]
+    if torch.cuda.is_available():
+        return [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())]
+    if getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
+        return "Apple MPS available (enabled only if USE_MPS=1)"
+    return "No GPU available"
 
 
 def affinity_report(A):
@@ -299,7 +301,7 @@ class SCProtoTrainer(AdoptiveTrainer):
         if self.ft_epochs > 0 and self.full_dataset_mode == 0:
             model = self.adapt_model(model, self.query.adata)
         checkpoint_path = self.get_model_path()
-        checkpoint = torch.load(checkpoint_path)
+        checkpoint = torch.load(checkpoint_path, map_location=self.device)
         model.load_state_dict(checkpoint["state_dict"])
         model.to(self.device)
 
@@ -776,7 +778,7 @@ class SCProtoTrainer(AdoptiveTrainer):
 
     def build_model(self):
         self.model = self.get_model()
-        self.model = self.model.cuda()
+        self.model = self.model.to(self.device)
         # logger.info(self.model)
         logger.info(
             f"=======>Building model done. max value for adata fed to scpoli_wrapper: {self.model.scpoli_wrapper.adata.X.max()}"
@@ -2944,6 +2946,17 @@ class SCProtoTrainer(AdoptiveTrainer):
                               f"= {self._coh_scale:.5f}")
                     print(f"   [D14] cohesion: affinity cached, shape={self._coh_A.shape}, "
                           f"row_norm={cohesion_row_norm}, nnz={self._coh_A.nnz:,}")
+                    # [2026-10-31] device-resident COO copies of A_aff and B. Every
+                    # per-step sparse product below goes through this object: row
+                    # subsets are formed on the device from CSR row pointers, so no
+                    # scipy slicing or host->device copy happens inside a step, and
+                    # it runs on Apple MPS (COO kernels exist there, CSR ones do not).
+                    # Arithmetic is identical to the old scipy/CSR path -- see
+                    # interpretable_ssl/tests/test_cohesion_sparse.py (values + grads).
+                    from interpretable_ssl.cohesion_sparse import CohesionGraph
+                    self._coh_g = CohesionGraph(self._coh_A_aff, self._coh_B,
+                                                self._coh_rn, self._coh_dg_np,
+                                                self.device)
                 # [D60] coh_proto_sg: cohesion's assignment matrix is computed
                 # against DETACHED prototypes, so its gradient reaches the ENCODER
                 # only -- all structural improvement must flow through the map a
@@ -3061,18 +3074,8 @@ class SCProtoTrainer(AdoptiveTrainer):
                 # Note GS depends on S, which is what is being learned -- so nothing
                 # downstream of S is cacheable, and the batch is resampled every step, so
                 # a cached slice would miss essentially always. B is the cacheable part.
-                _cidx = unique_idx.cpu().numpy()
-                _rnb = torch.as_tensor(self._coh_rn[_cidx], dtype=torch.float32,
-                                       device=self.device).unsqueeze(1)          # (nb,1)
+                _rnb = self._coh_g.rn[unique_idx].unsqueeze(1)                   # (nb,1)
                 _scl = float(getattr(self, '_coh_scale', 1.0) or 1.0)
-
-                def _to_t(_sp):
-                    _sp = _sp.tocsr()
-                    return torch.sparse_csr_tensor(
-                        torch.from_numpy(_sp.indptr.astype(np.int64)),
-                        torch.from_numpy(_sp.indices.astype(np.int64)),
-                        torch.from_numpy(_sp.data.astype(np.float32)),
-                        size=_sp.shape, device=self.device)
 
                 # 1-hop block: the within-batch affinity. Used by lambda_cohesion_aff and
                 # by the zero-weight diagnostics; both want RAW affinity, never the norm.
@@ -3176,18 +3179,20 @@ class SCProtoTrainer(AdoptiveTrainer):
                         _size_cell = _den_bp[self._coh_bcode[unique_idx]].clamp(
                             min=1e-8)
                     with torch.no_grad():                   # remember for later steps
-                        self._coh_Sfull[unique_idx] = _Sc.detach()
-                        self._coh_seen[unique_idx] = self._coh_mem_step
+                        # index_copy_/index_fill_ rather than tensor[idx] = ...: the
+                        # index_put_ write costs ~1.8 s per call on Apple MPS
+                        # (cohesion_memory.assemble_membership has the measurement).
+                        self._coh_Sfull.index_copy_(0, unique_idx, _Sc.detach())
+                        self._coh_seen.index_fill_(0, unique_idx, self._coh_mem_step)
                     self._coh_mem_step += 1
 
-                _AffB = self._coh_A_aff[_cidx][:, _cidx]
-                _AffT = _to_t(_AffB)
-                _GS_aff_raw = torch.sparse.mm(_AffT, _Sc)                # (nb, K), diag 0
+                # _deg_b = within-batch degree, A[cidx][:, cidx].sum(1) -- diagnostics only.
                 if cohesion_global == 2:
-                    # against ALL cells, not just the batch's
-                    _GS_aff_raw = torch.sparse.mm(_to_t(self._coh_A_aff[_cidx]), _S_eff)
-                _deg_b = torch.as_tensor(np.asarray(_AffB.sum(axis=1)).ravel(),
-                                         dtype=torch.float32, device=self.device)
+                    # against ALL cells, not just the batch's:  (A[cidx] @ S_eff)
+                    _GS_aff_raw, _deg_b = self._coh_g.aff_rows_mm(unique_idx, _S_eff,
+                                                                  want_degree=True)
+                else:
+                    _GS_aff_raw, _deg_b = self._coh_g.aff_within_mm(unique_idx, _Sc)  # (nb, K), diag 0
                 # [D27] self-similarity for the 1-HOP term too. A cell is maximally
                 # similar to itself in EITHER mode; the gram descriptor already gets this
                 # from cohesion_diag (its cosine diagonal is then exactly 1), but the raw
@@ -3202,58 +3207,30 @@ class SCProtoTrainer(AdoptiveTrainer):
 
                 _GS_gram = _dg_gram = None
                 if cohesion_sim != 'aff' and lambda_cohesion > 0:
-                    _Bb = self._coh_B[_cidx]                             # (nb, N) sparse
-                    _Bt = _to_t(_Bb)
                     if cohesion_global == 2:
                         # profile[k] = sum over ALL cells j of assign[j][k]*R[j], then one
                         # dot product per (cell, prototype). R = D^-1 B, so the row norms
-                        # divide on both sides exactly as in the batch-only path.
-                        _rall = torch.as_tensor(self._coh_rn, dtype=torch.float32,
-                                                device=self.device).unsqueeze(1)
+                        # divide on both sides exactly as in the batch-only path:
+                        #     GS = B[cidx] @ (B^T @ (S_eff / rn)) / (rn[cidx] * scale)
                         if self._coh_multi:
-                            # [D41] The GRAM numerator must be restricted to V[b]
-                            # EXPLICITLY. For 'aff' the restriction is automatic --
-                            # sim[c][j] is nonzero only for c's neighbours, and c is
-                            # in b, so every edge incident to c has an endpoint in b
-                            # and every such j is already in V[b]. For 'gram' that
-                            # argument FAILS: a 2-hop neighbour j (one that merely
-                            # shares a neighbour with c) need not touch batch b at
-                            # all, so it can have a nonzero gram similarity to c
-                            # while sitting OUTSIDE V[b]. Summing it in would be a
-                            # different objective from the one specified.
-                            #
-                            # So build one prototype profile per batch, from that
-                            # batch's V[b] only:
-                            #   PV_b[j][k] = sum over i in V[b] of assign[i][k]*R[i]
-                            # and use it for exactly the minibatch cells in b. Only
-                            # one PV_b is alive at a time, so the memory cost is one
-                            # (n_cells, K) block, not n_batches of them.
-                            _BT_full = _to_t(self._coh_B.T)
-                            _cell_b = self._coh_bcode[unique_idx]
-                            _GS_gram = torch.zeros(_Sc.shape[0], _Kp,
-                                                   dtype=_Sc.dtype,
-                                                   device=self.device)
-                            for _b in torch.unique(_cell_b).tolist():
-                                _sel = (_cell_b == _b)
-                                _PV_b = torch.sparse.mm(
-                                    _BT_full,
-                                    (_S_eff * self._coh_inV[_b].unsqueeze(1))
-                                    / _rall)
-                                _idx_b = _cidx[_sel.detach().cpu().numpy()]
-                                _rows = torch.sparse.mm(
-                                    _to_t(self._coh_B[_idx_b]), _PV_b)
-                                _GS_gram[_sel] = _rows / (_rnb[_sel] * _scl)
+                            # [D41] the profile a cell is scored against is built from
+                            # ITS OWN bio-batch node set V[b] only:
+                            #     PV_b  = B^T @ ((S_eff * inV[b]) / rn)
+                            #     GS[c] = B[c] @ PV_{bio(c)} / (rn[c] * scale)
+                            # Using the global profile here would reward a cell for
+                            # similarity to members its denominator never counts -- a
+                            # different objective from the one specified. All n_bio
+                            # profiles are computed in ONE product against an
+                            # (N, n_bio*K) block and gathered per cell (cohesion_sparse).
+                            _GS_gram = self._coh_g.gram_rows_global_multi(
+                                unique_idx, _S_eff, self._coh_inV,
+                                self._coh_bcode[unique_idx], _scl)
                         else:
-                            _PV = torch.sparse.mm(_to_t(self._coh_B.T),
-                                                  _S_eff / _rall)
-                            _GS_gram = torch.sparse.mm(_Bt, _PV) / (_rnb * _scl)
+                            _GS_gram = self._coh_g.gram_rows_global(unique_idx, _S_eff, _scl)
                     else:
-                        _BtT = _to_t(_Bb.T)
-                        _S1 = _Sc / _rnb                                 # D^-1 S
-                        _GS_gram = torch.sparse.mm(
-                            _Bt, torch.sparse.mm(_BtT, _S1)) / (_rnb * _scl)
-                    _dg_gram = torch.as_tensor(self._coh_dg_np[_cidx], dtype=torch.float32,
-                                               device=self.device) / _scl
+                        # batch-only:  B[cidx] @ (B[cidx]^T @ (D^-1 S)) / (rn[cidx] * scale)
+                        _GS_gram = self._coh_g.gram_rows_batch(unique_idx, _Sc, _scl)
+                    _dg_gram = self._coh_g.dg[unique_idx] / _scl
 
                 _diag_n = int(getattr(self, 'coh_diag_every', 50) or 0)
                 self._coh_step = getattr(self, '_coh_step', 0) + 1
@@ -3410,9 +3387,7 @@ class SCProtoTrainer(AdoptiveTrainer):
                             allow_unused=True)[0]
                         _gn = float(_grad.norm().item()) if _grad is not None else -1.0
                         with torch.no_grad():
-                            if not hasattr(self, '_coh_A_aff_t'):
-                                self._coh_A_aff_t = _to_t(self._coh_A_aff)
-                            _num_full = torch.sparse.mm(self._coh_A_aff_t, _S_eff)
+                            _num_full = self._coh_g.aff_full_mm(_S_eff)
                             _num_full = ((_num_full * _S_eff).sum(0)
                                         + cohesion_diag * _S_eff.pow(2).sum(0))
                             _true_coh_aff = float((_num_full / _size_g).sum() / _Nall)

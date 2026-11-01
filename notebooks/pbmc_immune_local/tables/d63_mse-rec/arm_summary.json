@@ -1,0 +1,33 @@
+{
+  "arm": "d63_mse-rec",
+  "epochs": 10,
+  "device": "cpu",
+  "lambdas": {
+    "lambda_umap": 0.0,
+    "lambda_swav": 0.0,
+    "lambda_kl": 0.0,
+    "lambda_recon": 0.020137,
+    "lambda_proto_recon": 0.00019542,
+    "lambda_nassoc": 0.0,
+    "lambda_proto_usage": 0.0,
+    "lambda_modularity": 0.0,
+    "lambda_cohesion": 3.138053,
+    "lambda_cohesion_aff": 5.612829,
+    "lambda_gmkl": 0.022091
+  },
+  "train_seconds": 34419.5,
+  "collapse_epoch0": {
+    "median_nn_cos": 0.962856113910675,
+    "frac_pairs_gt_0.99": 0.0003567447045707915,
+    "max_nn_cos": 0.9967837333679199,
+    "n_dead": 0
+  },
+  "collapse_final": {
+    "median_nn_cos": 0.8087676763534546,
+    "frac_pairs_gt_0.99": 0.0,
+    "max_nn_cos": 0.9542795419692993,
+    "n_dead": 0
+  },
+  "model_name": "d63_mse-rec_local_ds-pbmc_prtInit-leid_frzbe1_aff-arbf_recon0.020137_lprec0.00019542_prfm-mix3_lumap0.0_usim-prot_cvae_e50_lgmk0.022091_cpsg1_ecal1_pum-ema_nagg-max_lcoh3.138053_upsg1_gprb5_cglb2_cmini-full_cdia1.0_lcha5.612829_upm-dotp_v31",
+  "dump_path": "/Users/mghandi/CDS/research/interpretable-prototype/models//pbmc-immune_arbf_ctb20_seed0_train/d63_mse-rec_local_ds-pbmc_prtInit-leid_frzbe1_aff-arbf_recon0.020137_lprec0.00019542_prfm-mix3_lumap0.0_usim-prot_cvae_e50_lgmk0.022091_cpsg1_ecal1_pum-ema_nagg-max_lcoh3.138053_upsg1_gprb5_cglb2_cmini-full_cdia1.0_lcha5.612829_upm-dotp_v31"
+}
