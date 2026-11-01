@@ -3,7 +3,7 @@ Saves the epoch-0 (post-init, pre-training) labels as the same-init baseline, th
 TRAIN_EPOCHS epochs with early_stop=False, places held-out cells with the frozen encoder,
 and writes clusters_full.npz / latent / prototypes / RECIPE.md like modal_scripts/train_d64_nb.py.
 
-env: ARM=d63_mse-rec|d63_mse-norec   EPOCHS=10   USE_MPS=1 (optional)
+env: ARM=d63_mse-rec|d63_mse-norec|d64_leid-rec|d64_leid-norec|d64_wayp-rec|d64_wayp-norec   EPOCHS=10   USE_MPS=1 (optional)
      RUN_TAG=<name>  output folder + experiment name (default ARM); use it for a device/seed replicate
                      so it never overwrites another run of the same arm
 """
@@ -41,6 +41,12 @@ t.load_pretrain_checkpoint()
 t.model.freeze_batch_embedding()
 mn = t.get_model_name(); print(f"[{ARM}] model folder = {mn}")
 assert "prfm-mix3" in mn and "frzbe1" in mn
+if LIK == "nb":   # [D64] same guard as modal_scripts/train_d64_nb.py: the NB arm must see raw counts
+    assert "rlss-nb" in mn, f"recon_loss missing from model name: {mn}"
+    _xa = t.train_ds.adata.X
+    _mx = float(_xa[:200].toarray().max() if hasattr(_xa, "toarray") else _xa[:200].max())
+    assert _mx > 30, f"NB arm: X max {_mx:.1f} does not look like raw counts"
+    print(f"[{ARM}] NB arm confirmed on raw counts (X[:200] max {_mx:.0f})")
 
 # ---- full data + held-out ids, for placement ----
 from interpretable_ssl.evaluation.batch_correct_baselines import get_preprocessed_adata

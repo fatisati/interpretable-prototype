@@ -115,11 +115,39 @@ class AdoptiveTrainer(Trainer):
 
     def pretrain_encoder(self, scpoli_train_kwargs=None):
         kwargs = scpoli_train_kwargs or {}
-        self.extract_scpoli(self.model, True).train(
-            n_epochs=self.cvae_epochs,
-            pretraining_epochs=self.cvae_epochs,
-            **kwargs
-        )
+        # [local-mac] scarches' scPoliTrainer.__init__ hardcodes
+        # `device = cuda if available else cpu`, so on Apple MPS it moves every
+        # batch to CPU while our model sits on the GPU ("Passed CPU tensor to
+        # MPS op"). Pin its device to ours for the duration of the call. On
+        # cuda/cpu the pin is a no-op, so Modal/Colab pretraining is unchanged.
+        import torch
+        dev = getattr(self, 'device', None)
+        patch = dev is not None and torch.device(dev).type == 'mps'
+        if patch:
+            from scarches.trainers.scpoli import trainer as _sct
+            _orig_init = _sct.scPoliTrainer.__init__
+
+            def _pinned_init(tr, *a, **k):
+                _orig_init(tr, *a, **k)
+                tr.device = torch.device(dev)
+                tr.model.to(tr.device)
+                # size_factors = adata.X.sum(1) and labeled_vector = np.zeros(...)
+                # are float64 tensors; MPS has no float64.
+                for ds_ in (tr.train_data, tr.valid_data):
+                    for attr in ('size_factors', 'labeled_vector'):
+                        v = getattr(ds_, attr, None) if ds_ is not None else None
+                        if v is not None and v.dtype == torch.float64:
+                            setattr(ds_, attr, v.float())
+            _sct.scPoliTrainer.__init__ = _pinned_init
+        try:
+            self.extract_scpoli(self.model, True).train(
+                n_epochs=self.cvae_epochs,
+                pretraining_epochs=self.cvae_epochs,
+                **kwargs
+            )
+        finally:
+            if patch:
+                _sct.scPoliTrainer.__init__ = _orig_init
 
     def save_pretrain_checkpoint(self, path=None):
         import torch, os
