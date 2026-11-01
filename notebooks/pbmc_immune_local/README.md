@@ -37,3 +37,6 @@ Known differences from the Modal runs (2026-10-31):
   (worst rel diff 2e-6) once dropout and the reparameterisation sample are held fixed;
   `bench_device.py` times 40 real steps (`USE_MPS=0|1 STEPS=40`). Full MPS replicate of the
   arm: `RUN_TAG=d63_mse-rec_mps` (pre-registered in `notes/d63_mse-rec_mps_expectation.md`).
+  Result (2026-10-31): CPU 9.6 h vs MPS 44 min, both 0 dead; held-out within-batch purity
+  0.858 vs 0.861, coh_aff_test 0.103 vs 0.101 (Modal 0.854 / 0.101). Verdict WORKS, and the
+  three replicates give the cross-machine floor recorded in that note.

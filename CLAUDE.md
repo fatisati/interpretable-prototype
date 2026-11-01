@@ -1071,6 +1071,10 @@ reparameterisation sample replaced by its mean) -- every metric agrees to ~1e-6.
 devices still produce DIFFERENT runs end-to-end because their random streams differ
 (dropout masks, CVAE sampling noise, `calibrate_eps` lands ~1% apart, Leiden-init ties):
 that is the same replicate noise as CLAUDE.md 6a, not a port error.
+Measured on the full D63 arm (Modal L4 vs local CPU vs local MPS, 3 replicates): max pairwise
+spread coh_aff_test_all 0.0025, within_test_all 0.0069, pooled_test_all 0.0085,
+cross_test_all 0.0129 -- 2-8x the 6a single-pair floor. Use these when a local run is compared
+to a Modal run (`notebooks/pbmc_immune_local/notes/d63_mse-rec_mps_expectation.md`).
 
 Other local gotchas, all handled in `notebooks/pbmc_immune_local/_local_env.py` or
 `interpretable_ssl/__init__.py`: `Data_Handler`'s Islander json files are optional
