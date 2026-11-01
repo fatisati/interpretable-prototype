@@ -1474,6 +1474,8 @@ class SCProtoTrainer(AdoptiveTrainer):
             'proto_recon': 0, 'r1r2': 0, 'proto_attract': 0, 'proto_anchor': 0, 'nassoc': 0, 'proto_usage': 0, 'n_unused_protos': 0,
             'nassoc_diag_val': 0, 'nassoc_offdiag_val': 0, 'sim_recon': 0,
             'cohesion_term': 0,
+            'xbatch_r': 0,               # [D65] mean cross-batch signature
+            'xbatch_off': 0,             #       correlation, and the hinge value
             'cohesion_aff_term': 0,      # [D26] the 1-hop companion term
             'coh_redund_mean': 0,        # [D26] prototype-prototype leakage diagnostics,
             'coh_redund_top20': 0,       #       computed at ZERO weight -- see the block
