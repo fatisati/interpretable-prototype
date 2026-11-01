@@ -1076,6 +1076,17 @@ spread coh_aff_test_all 0.0025, within_test_all 0.0069, pooled_test_all 0.0085,
 cross_test_all 0.0129 -- 2-8x the 6a single-pair floor. Use these when a local run is compared
 to a Modal run (`notebooks/pbmc_immune_local/notes/d63_mse-rec_mps_expectation.md`).
 
+**Comparing runs across machines (Modal / local CPU / local MPS).** The split is committed:
+`files/splits/<ds>_<tag>_test_ids.txt` (held-out obs_names; `prepare_pbmc_immune.py` loads it
+and only falls back to the seeded draw when absent). Every run writes `provenance.json` next to
+its `arm_summary.json` (`interpretable_ssl/provenance.py::write_provenance`): md5 of the data
+h5ad, split, affinity pickle and pretrain checkpoint, affinity summary stats (nnz, degree,
+within-batch edge fraction), package versions, git commit, device. Before putting two runs in
+one table, run `compare_provenance(a, b)`: `split` must be `same`; `affinity_pkl` and
+`pretrain_ckpt` differ across machines by construction (rebuilt locally) and are then a
+replicate axis, not a bug; `data_h5ad` differing means the HVG/normalisation recipe differs and
+the lambdas must be re-measured (they were, locally). Call the same function from Modal scripts.
+
 Other local gotchas, all handled in `notebooks/pbmc_immune_local/_local_env.py` or
 `interpretable_ssl/__init__.py`: `Data_Handler`'s Islander json files are optional
 (`{}` when absent); current scanpy returns sparse *arrays* that SEACells' rbf cannot slice,

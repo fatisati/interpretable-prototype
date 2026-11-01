@@ -96,4 +96,19 @@ summary = {"arm": ARM, "run_tag": RUN_TAG, "epochs": EPOCHS, "device": get_devic
            "train_seconds": round(train_s, 1), "collapse_epoch0": col0, "collapse_final": col, "model_name": mn,
            "dump_path": t.get_dump_path()}
 json.dump(summary, open(os.path.join(OUT, "arm_summary.json"), "w"), indent=2, default=str)
+
+# ---- provenance: the inputs that must agree before this run is compared to another machine's ----
+from interpretable_ssl.provenance import write_provenance
+from interpretable_ssl.configs.paths import get_affinity_path
+_aff_pkl = get_affinity_path(f"{DS}_{TAG}_train", t.train_ds.adata.n_obs, affinity_type="arbf",
+                             graph_dir=os.path.join(ROOT, "graphs"))
+assert os.path.exists(_aff_pkl), f"affinity pickle not where expected: {_aff_pkl}"
+_bc = pd.factorize(np.asarray(t.train_ds.adata.obs[BATCH_KEY]).astype(str))[0]
+_pp = write_provenance(OUT, files={"data_h5ad": HVG_H5, "train_h5ad": TRAIN_H5, "split_npz": SPLIT_NPZ,
+                                   "split_committed": os.path.join(ROOT, "files", "splits", f"{DS}_{TAG}_test_ids.txt"),
+                                   "affinity_pkl": _aff_pkl, "pretrain_ckpt": ck, "gradshares_json": GNORM_JSON},
+                       affinity=getattr(t, "_coh_A_aff", None), batch_codes=_bc, device=str(t.device),
+                       extra={"arm": ARM, "run_tag": RUN_TAG, "model_name": mn, "seed": lc.get("seed"),
+                              "epsilon_calibrated": float(getattr(t, "epsilon", float("nan")))})
+print(f"[{ARM}] provenance -> {_pp}")
 print(f"[{ARM}] trained {EPOCHS} epochs in {train_s:.0f}s ({train_s/EPOCHS:.0f}s/epoch); total {time.time()-t0:.0f}s")

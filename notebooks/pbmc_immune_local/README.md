@@ -14,7 +14,7 @@ python notebooks/pbmc_immune_local/score_local.py            # local arms + pull
 ```
 
 Inputs: `data/raw_figshare/Immune_ALL_human.h5ad` (figshare 12420968, file 25717328).
-Outputs: `tables/<arm>/{epoch0,final}/clusters_full.npz ...`, `tables/scoreboard_local.csv`,
+Outputs: `tables/<arm>/{epoch0,final}/clusters_full.npz ...`, `tables/<arm>/provenance.json` (input checksums, package versions, git commit, device -- see CLAUDE.md 12), `tables/scoreboard_local.csv`,
 run checkpoints under `models/pbmc-immune_arbf_ctb20_seed0_train/`.
 
 Known differences from the Modal runs (2026-10-31):

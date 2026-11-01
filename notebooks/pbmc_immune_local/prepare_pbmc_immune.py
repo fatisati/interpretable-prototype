@@ -69,6 +69,17 @@ else:
         rows.append({"cell_type": key[0], "batch": key[1], "n": m, "n_test": k, "n_train": m - k})
     test_idx = np.sort(np.concatenate(test_idx))
     test_mask = np.zeros(n, bool); test_mask[test_idx] = True
+    # The committed split (files/splits/) is the reference. If present, it must equal the
+    # seeded draw above; if the draw ever disagrees, the committed file wins and we say so.
+    COMMITTED = os.path.join(ROOT, 'files', 'splits', f"{DS}_{TAG}_test_ids.txt")
+    if os.path.exists(COMMITTED):
+        ref = set(open(COMMITTED).read().split())
+        ref_mask = np.array([nm in ref for nm in names])
+        if (ref_mask != test_mask).any():
+            print(f"[2] WARNING: seeded draw differs from committed split in {(ref_mask != test_mask).sum()} cells; using the committed file")
+            test_mask = ref_mask
+        else:
+            print(f"[2] seeded draw reproduces the committed split {COMMITTED}")
     df = pd.DataFrame(rows).sort_values(["cell_type", "batch"])
     big = df[df.n >= MIN_FOR_TEST]
     assert (big.n_test >= 1).all() and (big.n_train >= 1).all()
