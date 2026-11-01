@@ -171,6 +171,16 @@ ABBREVIATIONS = {
     'lambda_gmkl': 'lgmk',            # [D60] GM-KL weight (numeric, safe)
     'coh_proto_sg': 'cpsg',           # [D60] cohesion sees detached prototypes
     'proto_recon_topm': 'prtm',       # [D64] top-M prototypes in the NB form-3 sum
+    # [D65] cross-batch signature alignment. All numeric -> not truncated, so no
+    # 4-char collision risk; the abbreviations are still kept mutually distinct.
+    'lambda_xbatch': 'lxb',           # [D65] diagonal pull  (same prototype, across batches)
+    'lambda_xbatch_off': 'lxbof',     # [D65] off-diagonal push (different prototypes)
+    'xbatch_margin': 'xbmg',          # [D65] hinge threshold for the off-diagonal term
+    'xbatch_mem_hlife': 'xbmh',       # [D65] EMA signature memory half-life, IN STEPS
+    'xbatch_mem_mix': 'xbmx',         # [D65] weight of the remembered signature
+    'xbatch_proto_sg': 'xbsg',        # [D65] detach prototypes (encoder-only gradient)
+    'xbatch_min_size': 'xbms',        # [D65] minimum soft mass for a group to count
+    'xbatch_weight_sg': 'xbwg',       # [D65] detach the min(size,size) reliability weight
     'epoch_dump_assign': 'edas',      # [D49] per-epoch hard-assignment dump for live local monitoring
     'modularity_diag': 'mdia',        # [D51] self-pair weight in the modularity reward (numeric)
     'cohesion_global': 'cglb',        # [D28] full-graph scale estimate

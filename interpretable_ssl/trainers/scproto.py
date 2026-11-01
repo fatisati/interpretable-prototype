@@ -1391,6 +1391,16 @@ class SCProtoTrainer(AdoptiveTrainer):
         lambda_cohesion_aff = float(getattr(self, 'lambda_cohesion_aff', 0.0))  # [D26]
         cohesion_global = int(getattr(self, 'cohesion_global', 0))       # [D28]
         coh_mem_hlife = float(getattr(self, 'coh_mem_hlife', 0.0) or 0.0)  # [D31]
+        # [D65] cross-batch signature alignment (CIDER-style DE signature, correlated
+        # across batches). See configs/defaults.py for the full rationale.
+        lambda_xbatch = float(getattr(self, 'lambda_xbatch', 0.0) or 0.0)
+        lambda_xbatch_off = float(getattr(self, 'lambda_xbatch_off', 0.0) or 0.0)
+        xbatch_margin = float(getattr(self, 'xbatch_margin', 0.5))
+        xbatch_mem_hlife = float(getattr(self, 'xbatch_mem_hlife', 0.0) or 0.0)
+        xbatch_mem_mix = float(getattr(self, 'xbatch_mem_mix', 0.0) or 0.0)
+        xbatch_proto_sg = int(getattr(self, 'xbatch_proto_sg', 1))
+        xbatch_min_size = float(getattr(self, 'xbatch_min_size', 1.0))
+        xbatch_weight_sg = int(getattr(self, 'xbatch_weight_sg', 1))
         lambda_mod_mem = float(getattr(self, 'lambda_mod_mem', 0.0))       # [D47]
         modularity_res = float(getattr(self, 'modularity_res', 1.0))
         modularity_agg = str(getattr(self, 'modularity_agg', 'glob'))
@@ -3543,6 +3553,203 @@ class SCProtoTrainer(AdoptiveTrainer):
                               f"{_redund['q']:.4f}   (both at ZERO weight)")
                     self._coh_checked = True
 
+            # ===== [D65] CROSS-BATCH SIGNATURE ALIGNMENT ========================
+            # The FIRST term in this loss that evaluates a CROSS-BATCH pair. See
+            # configs/defaults.py 'lambda_xbatch' for the full derivation. Measure
+            # is CIDER/IDER (Hu, Ahmed & Yau, Genome Biology 2021); memory is
+            # MSTN's moving-average centroid (Xie et al., ICML 2018).
+            xbatch_loss = None
+            xbatch_off_loss = None
+            if (lambda_xbatch > 0 or lambda_xbatch_off > 0) and use_proto_sim:
+                # ---------- one-time setup -----------------------------------
+                if not hasattr(self, '_xb_X'):
+                    import scipy.sparse as _xsp
+                    _xad = self.train_ds.adata
+                    # ALWAYS lognorm, NEVER counts. Under recon_loss='nb' the dataset
+                    # swaps adata.X to raw counts (datasets/dataset.py read_adata),
+                    # but a signature built on counts is dominated by library size --
+                    # the size factor is not biology, the relative gene ratios are.
+                    # read_adata() writes layers['lognorm'] on BOTH paths, so this
+                    # term is bit-identical under recon_loss='mse' and 'nb'.
+                    assert 'lognorm' in _xad.layers, (
+                        "[D65] adata.layers['lognorm'] is missing -- the cross-batch "
+                        "signature must be computed on LOG-NORMALIZED expression, "
+                        "never on raw counts.")
+                    _Xl = _xad.layers['lognorm']
+                    _Xl = (_Xl.toarray() if _xsp.issparse(_Xl)
+                           else np.asarray(_Xl)).astype(np.float32)
+                    self._xb_X = torch.as_tensor(_Xl, device=self.device)
+                    self._xb_N = int(_Xl.shape[0])
+                    _G = int(_Xl.shape[1])
+
+                    _xbk = getattr(self.train_ds, 'batch_key', None)
+                    _xobs = _xad.obs
+                    assert _xbk is not None and _xbk in _xobs, (
+                        "[D65] cross-batch alignment needs a batch key in adata.obs; "
+                        f"batch_key={_xbk!r} is not usable.")
+                    _, _xbc = np.unique(np.asarray(_xobs[_xbk].astype(str)),
+                                        return_inverse=True)
+                    _xnb = int(_xbc.max()) + 1
+                    assert _xnb > 1, (
+                        "[D65] cross-batch alignment is meaningless with 1 batch: "
+                        "there is no batch PAIR to correlate.")
+                    self._xb_bcode = torch.as_tensor(_xbc.astype(np.int64),
+                                                     device=self.device)
+                    self._xb_nbio = _xnb
+                    # batch background: mean over ALL cells of batch b, FULL dataset,
+                    # not the minibatch. Subtracting it is what cancels the batch
+                    # effect (CIDER Fig 1B: expression = cluster + batch + patient,
+                    # with batch constant within a batch).
+                    self._xb_bg = torch.stack([
+                        self._xb_X[self._xb_bcode == _b].mean(0)
+                        for _b in range(_xnb)])                       # (n_bio, G)
+                    _Kx = int(self.model.get_prototypes().shape[0])
+                    self._xb_mem = torch.zeros((_xnb, _Kx, _G), device=self.device)
+                    self._xb_seen = torch.zeros((_xnb, _Kx), dtype=torch.bool,
+                                                device=self.device)
+                    self._xb_step = 0
+                    self._xb_decay = (0.5 ** (1.0 / xbatch_mem_hlife)
+                                      if xbatch_mem_hlife > 0 else 0.0)
+                    print(f"   [D65] cross-batch signature alignment ON: "
+                          f"{_xnb} batches, K={_Kx}, {_G} genes (lognorm). "
+                          f"X {self._xb_X.numel() * 4 / 1e6:.0f} MB, "
+                          f"mem {self._xb_mem.numel() * 4 / 1e6:.0f} MB. "
+                          f"mem_hlife={xbatch_mem_hlife} steps -> decay="
+                          f"{self._xb_decay:.4f}, mix={xbatch_mem_mix}, "
+                          f"proto_sg={xbatch_proto_sg}, weight_sg={xbatch_weight_sg}")
+
+                _xnb = self._xb_nbio
+                # Mirrors coh_proto_sg / umap_proto_sg: with proto_sg the assignment
+                # is computed against DETACHED prototypes, so this term's gradient
+                # reaches the ENCODER ONLY and GM-KL keeps sole ownership of the
+                # prototype vectors. [D63]: a prototype-touching term calibrated on
+                # the encoder gradient is not calibrated at all.
+                if xbatch_proto_sg:
+                    _Sx = F.softmax(
+                        F.linear(z_unique, self.model.get_prototypes().detach())
+                        / self.epsilon, dim=1)
+                else:
+                    _Sx = soft_assign
+                _xcells = unique_idx
+                _xXb = self._xb_X[_xcells]                         # (nb, G)
+                _xbc_b = self._xb_bcode[_xcells]                   # (nb,)
+                # one-hot batch mask for this minibatch's cells
+                _xM = F.one_hot(_xbc_b, num_classes=_xnb).to(_Sx.dtype)  # (nb, n_bio)
+
+                _xsize = _xM.t() @ _Sx                             # (n_bio, K)
+                # weighted_sum[b][k] = sum over cells i of batch b of s[i][k]*x[i]
+                _xws = torch.stack([
+                    (_Sx * _xM[:, _b].unsqueeze(1)).t() @ _xXb
+                    for _b in range(_xnb)])                        # (n_bio, K, G)
+                _xsig_now = (_xws / _xsize.unsqueeze(-1).clamp(min=1e-6)
+                             - self._xb_bg.unsqueeze(1))           # (n_bio, K, G)
+
+                # EMA memory: a (prototype, batch) group gets a MEDIAN OF 2 CELLS in
+                # one minibatch, where the signature's split-half reliability is
+                # below 0.34 -- the per-step estimate alone is noise. The remembered
+                # half is DETACHED, so gradient only ever flows through this step's
+                # cells; the memory supplies context the minibatch cannot see.
+                if xbatch_mem_mix > 0 and self._xb_decay > 0:
+                    _xmix = xbatch_mem_mix * self._xb_seen.to(_xsig_now.dtype)
+                    _xmix = _xmix.unsqueeze(-1)                    # 0 until first seen
+                    _xsig = _xmix * self._xb_mem.detach() + (1.0 - _xmix) * _xsig_now
+                else:
+                    _xsig = _xsig_now
+
+                # center + L2 normalize once -> every correlation is a dot product
+                _xc = _xsig - _xsig.mean(dim=-1, keepdim=True)
+                _xu = _xc / _xc.norm(dim=-1, keepdim=True).clamp(min=1e-8)
+                _xvalid = _xsize >= xbatch_min_size                # (n_bio, K) bool
+
+                # ---------- DIAGONAL: pull, same prototype across batches -----
+                if lambda_xbatch > 0:
+                    _xrew = torch.zeros((), device=self.device)
+                    _xrs, _xrn = 0.0, 0
+                    for _b1 in range(_xnb):
+                        for _b2 in range(_b1 + 1, _xnb):
+                            _v = _xvalid[_b1] & _xvalid[_b2]
+                            if not bool(_v.any()):
+                                continue
+                            _w = torch.minimum(_xsize[_b1], _xsize[_b2])
+                            if xbatch_weight_sg:
+                                _w = _w.detach()
+                            _r = (_xu[_b1] * _xu[_b2]).sum(-1)     # (K,)
+                            _vf = _v.to(_r.dtype)
+                            _xrew = _xrew + (_w * _r * _vf).sum()
+                            _xrs += float((_r * _vf).sum().item())
+                            _xrn += int(_v.sum().item())
+                    xbatch_loss = -_xrew / float(self._xb_N)
+                    loss = loss + lambda_xbatch * xbatch_loss
+                    total_metrics['xbatch_r'] += (_xrs / _xrn) if _xrn else 0.0
+
+                # ---------- OFF-DIAGONAL: push different prototypes apart -----
+                # HINGE above a margin, never push-to-zero: with K=300 and ~16 cell
+                # types, ~19 prototypes share each cell type, so most "different
+                # prototype" negatives are the SAME cell type and genuinely
+                # correlate. Measured: different cell types median r=-0.019 but
+                # 75th pct +0.12, and the paper reports CD4/CD8 T and the monocyte
+                # subsets sharing high similarity.
+                if lambda_xbatch_off > 0:
+                    _Kx = _xu.shape[1]
+                    _xflat = _xu.reshape(_xnb * _Kx, -1)
+                    _xMm = _xflat @ _xflat.t()                     # (n_bio*K, n_bio*K)
+                    _bidx = (torch.arange(_xnb, device=self.device)
+                             .repeat_interleave(_Kx))
+                    _kidx = torch.arange(_Kx, device=self.device).repeat(_xnb)
+                    _vflat = _xvalid.reshape(-1)
+                    _msk = ((_bidx.unsqueeze(0) != _bidx.unsqueeze(1))
+                            & (_kidx.unsqueeze(0) != _kidx.unsqueeze(1))
+                            & _vflat.unsqueeze(0) & _vflat.unsqueeze(1))
+                    if bool(_msk.any()):
+                        xbatch_off_loss = F.relu(
+                            _xMm[_msk] - xbatch_margin).mean()
+                        loss = loss + lambda_xbatch_off * xbatch_off_loss
+                        total_metrics['xbatch_off'] += float(
+                            xbatch_off_loss.item())
+
+                # ---------- memory update + drift log -------------------------
+                with torch.no_grad():
+                    _upd = _xvalid.unsqueeze(-1).to(_xsig_now.dtype)
+                    _new = _xsig_now.detach()
+                    if self._xb_decay > 0:
+                        _blend = (self._xb_decay * self._xb_mem
+                                  + (1.0 - self._xb_decay) * _new)
+                    else:
+                        _blend = _new
+                    # a group never seen before takes the fresh value outright,
+                    # otherwise the first blend would halve it toward zero
+                    _fresh = (~self._xb_seen).unsqueeze(-1).to(_xsig_now.dtype)
+                    _blend = _fresh * _new + (1.0 - _fresh) * _blend
+                    self._xb_mem = _upd * _blend + (1.0 - _upd) * self._xb_mem
+                    self._xb_seen = self._xb_seen | _xvalid
+                    self._xb_step += 1
+
+                # [CLAUDE.md 9b] FIRST-STEP RANGE CHECK. A correlation is bounded,
+                # so a value outside [-1, 1] means the normalization is wrong; and
+                # the diagonal loss is bounded by (n_batches-1)/2 after the 1/N.
+                if not hasattr(self, '_xb_checked'):
+                    with torch.no_grad():
+                        _rmin, _rmax = float('nan'), float('nan')
+                        if lambda_xbatch > 0 and _xnb > 1:
+                            _rr = (_xu[0] * _xu[1]).sum(-1)
+                            _rmin, _rmax = float(_rr.min()), float(_rr.max())
+                        _bnd = (_xnb - 1) / 2.0
+                        _dv = (float(xbatch_loss.item())
+                               if xbatch_loss is not None else 0.0)
+                        _ov = (float(xbatch_off_loss.item())
+                               if xbatch_off_loss is not None else 0.0)
+                        print(f"   [D65 9b] r in [{_rmin:.4f}, {_rmax:.4f}] "
+                              f"(must be within [-1,1]);  xbatch_loss={_dv:.6f} "
+                              f"(|.| must be <= {_bnd:.2f});  off_loss={_ov:.6f} "
+                              f"(must be in [0, {1 - xbatch_margin:.2f}]);  "
+                              f"valid groups={int(_xvalid.sum().item())}/"
+                              f"{_xvalid.numel()};  cells this step={_Sx.shape[0]}")
+                        assert -1.001 <= _rmin and _rmax <= 1.001, (
+                            f"[D65] correlation out of range: [{_rmin}, {_rmax}]")
+                        assert abs(_dv) <= _bnd + 1e-3, (
+                            f"[D65] xbatch_loss {_dv} exceeds its bound {_bnd}")
+                    self._xb_checked = True
+
             sim_recon_loss = torch.tensor(0.0, device=self.device)
             if lambda_sim_recon > 0 and use_proto_sim:
                 # Gives scProto the cell-level resolution pressure nassoc lacks.
@@ -3744,6 +3951,11 @@ class SCProtoTrainer(AdoptiveTrainer):
                             'cohesion_aff': ('lambda_cohesion_aff',
                                              'cohesion_aff_loss'),
                             'gmkl': ('lambda_gmkl', 'gmkl_loss'),
+                            # [D65] both cross-batch terms, so share -> lambda is
+                            # solved the same way as every other term (9d-1).
+                            'xbatch': ('lambda_xbatch', 'xbatch_loss'),
+                            'xbatch_off': ('lambda_xbatch_off',
+                                           'xbatch_off_loss'),
                             'nassoc': ('lambda_nassoc', 'nassoc_loss'),
                             'modularity': ('lambda_modularity',
                                            'modularity_loss'),
