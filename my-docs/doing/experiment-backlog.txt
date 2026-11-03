@@ -1,0 +1,107 @@
+[legend]
+status: measured / planned / idea / open-question / abandoned
+tests: the one hypothesis -- not a wishlist
+decided-by: what result = works / fails / inconclusive-because-X
+flag: risk you called out yourself -- not smoothed over
+rule: no run without a decision written first; nothing stays
+"inconclusive" forever.
+
+
+[ablation-sweep]
+status: planned
+tests: lambda ratio {0, 0.5, 1, 2, 4} per term (cohesion-gram, cohesion-aff,
+  community, recon), base = equal share.
+metrics: test cohesion, batch entropy, ct purity (full + test-only, size-
+  weighted), test modularity (context only), rare homog/f1/coverage.
+expect: cohesion -> cohesion+rare. recon -> batch entropy+rare.
+  community -> similar to cohesion (why needed at all, if so? open).
+open: does cohesion help or fight modularity? spatial-part metrics undefined.
+
+
+[generalization-gap]  <- central open bug, drives most items below
+status: MEASURED
+tests: does cohesion's within-batch purity gain hold on test, not just train?
+result: train yes, test no. cross-batch purity on test: not measured yet.
+
+
+[cross-batch-term-comparison]
+status: planned
+tests: proto-recon vs recon vs community -- which preserves cross-batch
+  alignment once cohesion pulls cells together within-batch? does recon
+  alone already do it, with no dedicated term?
+open: if community wins, why (counter-intuitive, unexplained)?
+open: if proto-recon (not detached) hurts cohesion, is it fighting it in
+  gene-expression space?
+
+
+[proto-init-ablation]
+status: idea
+tests: waypoint init vs leiden-on-latent init for prototypes.
+hypothesis: waypoint pushes batch separation too hard -> damages cross-batch
+  alignment once stage 2 starts. leiden init = same start as scpoli stage 1.
+decided-by: re-run cross-batch purity (train/test) under leiden init,
+  compare to existing waypoint numbers.
+
+
+[test-time-assignment-check]
+status: open-question
+tests: model's own test-cell assignment vs encode+knn-majority-vote from
+  train (scpoli-style). does knn-vote beat the model's own output?
+decided-by: if yes -> confirms generalization-gap is a real assignment
+  problem, not just a metric artifact.
+
+
+[smoothness-regularizer]  ("tax the warps")
+status: idea
+tests: is the gap caused by encoder instability near rare cells (small input
+  change -> large output change, since recon is weak there)? candidates,
+  undecided: KL anchor-to-init / Lipschitz smoothing / perturb-input-same-
+  assignment.
+flag: perturb-consistency assumes small gene changes don't flip cell type --
+  likely true in dense regions, unchecked in rare/sparse ones.
+decided-by: not defined yet -- needs a concrete run first.
+
+
+[rare-sampling]
+status: open-question
+tests: edge-sampling under-samples rare cells even with adaptive kernel
+  weights (fewer edges touch them). fix: sample NODES not edges.
+open: would node sampling be enough alone, or does the loss already partly
+  compensate (common clusters correct, rare ones not yet)?
+
+
+[gmvae-kl]
+status: open-question
+tests: does adding phase-1-style KL (z + proto both learnable gaussians)
+  help the gap, without re-mixing cell types cohesion just separated?
+open (lit, unverified -- check before answering): learnable sigma per
+  gaussian vs fixed -- when is each standard?
+open: does this interact with cohesion-sampling (z sampled, not just mean)?
+
+
+[proto-recon-design]
+status: planned run, already set up
+tests: s DETACHED (cells move for cohesion only; proto+decoder move for
+  recon) x {mse, nb} x {cvae on/off}.
+expect: detached -> cleaner cohesion, fewer dead protos. nb -> better in
+  sparse regions (unconfirmed).
+decided-by: read cohesion / dead-proto-count / rare metrics off each grid
+  cell.
+open: with nb loss, any remaining reason to NOT detach s?
+
+
+[cross-batch-signature-loss]
+status: idea -- FLAGGED BY YOU AS RISKY/UNVALIDATED, not a known-good loss
+tests:
+  sig(k,b) = mean_lognorm(k's members in batch b) - mean_lognorm(all cells
+             in batch b)                    # cancels batch effect
+  penalty  = sum over batch pairs (1 - corr(sig(k,b1), sig(k,b2)))
+  needs a running memory, same mechanism as cohesion's coh_mem (§9d).
+open: is plain mean-centering enough, or is there a missing "step 1" you
+  half-recalled -- re-derive or drop explicitly.
+open: why a SMALL lambda share vs the other 3 (equal-share, §9d-1)? no
+  reason given yet.
+decided-by: not run. per §9b -- before trusting any output: print sig(k,b)'s
+  own range, print it beside the other 3 active terms for scale, check
+  correlation's denominator (undefined if a batch's member set is tiny/
+  constant).

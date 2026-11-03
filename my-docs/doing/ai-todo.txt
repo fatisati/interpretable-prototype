@@ -1,0 +1,19 @@
+[reproducableity]
+the train test split of immune [whihc i thik is the main daatset we are working on]
+shoud be on git - not full data but some metadata - so anyone can reproduce our results
+also the lambdas for latest tests - and some metrics
+and something show that what is the latest challeneg and how to reproduce it and what are important metrics
+implement all of above and push to git
+
+
+[merge daii work]
+is there any merge req - summerize what changed and ask me to confirm for merge
+
+[re write code]
+i think the code is too messy - maybe read complete code
+then make a new branch and fully re write - then use test data and check if we can reproduce latest results or not
+write code clean and readbale follow clean code best practice
+minimal code - readbale var names so the code logic ocmplelty udnetanble from var names
+i think best practice say we dont need seprate comments - the code itself shoud explain itself by choosing right var names
+and 
+also in this branch i want to change interpretable prototype name to scproto - the real project 

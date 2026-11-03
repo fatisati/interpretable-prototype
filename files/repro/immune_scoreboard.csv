@@ -1,0 +1,2 @@
+arm,n_mc,coh_aff_train_all,coh_gram_train_all,coh_aff_test_all,coh_gram_test_all,within_train_all,within_test_all,cross_train_all,cross_test_all,rare_homogeneity_mean_train,rare_f1_mean_train,rare_coverage_mean_train,rare_homogeneity_mean_test,rare_f1_mean_test,rare_coverage_mean_test
+d63_mse-rec,300,0.1304864765756196,0.22358671482546913,0.07726380643294527,0.14942999250484687,0.8959555067912678,0.8536625245258339,0.8750331050660209,0.9090909090909091,0.6918652731031294,0.7808006593792409,1.0,0.6597534894867036,0.7604837203278659,1.0

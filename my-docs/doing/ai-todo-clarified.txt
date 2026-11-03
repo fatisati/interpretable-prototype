@@ -1,0 +1,90 @@
+[how to use this file]
+this is your todo list rewritten with the vague spots turned into questions.
+fill in answers (or just delete a question if the default is fine), then tell me to go.
+
+
+[1. reproducibility] -- same session, low risk, can do now once answered
+
+goal: anyone (or future you) can redo the train/test split, the latest lambda
+config, and see the latest metrics, from git alone -- no need to re-run
+anything to understand what we have.
+
+open questions (pick one or write your own):
+  - "metadata" for the immune train/test split -- which of:
+      (a) just the seed + the function/call that generates it (smallest, but
+          only reproducible if the split code never changes)
+      (b) the actual list of cell IDs in train vs test (exact, survives code
+          changes, bigger file but still small -- just IDs, not expression data)
+    default: (b), saved as a small csv/json of cell ids + split label. - yes b
+
+  - "lambdas for latest tests" -- which run is "latest"? the D65 cross-batch
+    arms (4 arms, currently running per git status)? or the D64 NB arms?
+    default: whichever of these has actually finished and has a verdict --
+    tell me which if both finished. - the one with cvae loss - proto recon - cohesions - gmkl - all same ratio - mse is defautl not nb
+
+  - "some metrics" -- the full metrics.json per arm, or just the scoreboard
+    table (coh_aff, coh_gram, purity, rare_f1 etc, §7a style)?
+    default: the scoreboard table (small, readable), not raw metrics.json. yes scoreboeard
+
+  - where should this live? CLAUDE.md's own layout says shared artifacts go
+    under files/<type>/, so e.g. files/repro/immune_split.csv,
+    files/repro/immune_latest_lambdas.json, files/repro/README.md.
+    default: that. somthign that another agent easily can find it - also a human reader
+
+  - "what is the latest challenge and how to reproduce it" -- this means a
+    short README: 1-2 lines on what D65 is testing, what "works/fails" would
+    look like, and the exact command/notebook cell to rerun it. confirm this
+    is what you mean, or say more.: what i have in mind: with gmkl - the genralization works but cross batch aligment not - somthing to eprodce this
+
+
+[2. check for merge work] -- same session, quick, do now
+
+goal: find out if there's unmerged/uncommitted work anywhere (other branches,
+open PRs) that should be merged, summarize it, and ask you before touching
+anything. from mghandi
+
+no open questions -- this is just "go look and report." nothing to clarify.
+note: no `gh` (GitHub CLI) installed here, so "PRs" will be checked via git
+branches/log instead, unless you want me to check PRs on github.com directly.
+
+
+[3. rewrite the code] -- NOT ready to hand off as one big task. separate
+session/branch, done in checkpoints, not "go for hours and come back."
+re write the latest version reproducable - not with all capablities - i think in new branch you can write from scratch using clean code best practices
+somehing that just repridce atest version the on ei menations above
+
+why not one shot:
+  - CLAUDE.md records several numerical bugs that took real debugging to find
+    (cohesion formula, gradient-share lambdas, an nassoc denominator bug that
+    silently killed prototypes for weeks). a from-scratch rewrite can look
+    clean and still reintroduce one of these -- it won't error, it'll just be
+    wrong, and the only way to catch that is checking real run output against
+    known numbers.
+  - "clean code" and "reproduces the same results" are two different checks.
+    passing the first doesn't mean passing the second.
+
+how i'd split it instead -- each step is its own short handoff you review
+before the next starts:
+  step a: read the current code, propose a module layout + the
+          interpretable-prototype -> scproto rename, as a plan only (no
+          code changes). you review the plan.
+  step b: rewrite one module, run it against saved test-data output, report
+          match or mismatch. you review.
+  step c: repeat b per module until done.
+yes do these stpes i like them
+open questions:
+  - which module first? (scGraph.py and trainers/scproto.py are the two files
+    you've touched most recently per git status -- natural starting point,
+    or pick another.) i dont knwo now -if you dont know maybe do not do this task yet
+  - "use test data and check if we can reproduce latest results" -- reproduce
+    to what tolerance? CLAUDE.md §6a already measured run-to-run noise on
+    this exact dataset (e.g. coh_aff_test_all noise floor ~0.0012) -- do you
+    want "matches within that noise floor" as the pass bar? default: yes.
+  - new branch name -- `scproto-rewrite` ok, or you have one in mind?ok
+  - do you want this as a background agent (runs while you do something else,
+    pings you when a step is done) or a separate interactive session where
+    you're present for each step? background works for step a (just reading
+    + a plan), but steps b/c need you to look at the match/mismatch report
+    before the next module starts -- so it's "background between checkpoints,"
+    not "background for the whole rewrite." i think mayeb we shoud do this task later - maybe just do the investigate part and write a minaml redable txt plan so i can check
+    

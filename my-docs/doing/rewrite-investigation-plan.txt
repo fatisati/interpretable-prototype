@@ -1,0 +1,81 @@
+[scope of this file]
+investigate-only, per your instruction. no branch created, no code written,
+no rename done. just: how big is this really, what are the natural module
+boundaries, and a rename-impact count -- so you can decide if/when to start.
+
+[reality check on size -- read this before deciding to do the rewrite at all]
+interpretable_ssl/ is 42,275 lines across ~70 files. for comparison, a
+single file -- trainers/scproto.py -- is 7,248 lines, ~17% of the whole
+package by itself. two more files top 5,000/3,700 lines
+(evaluation/paper_figures.py, evaluation/visualization.py).
+82 files under modal_scripts/ import from interpretable_ssl (172 import
+lines total) -- every one of those would need its imports checked after any
+rename or module split.
+"fully rewrite from scratch" at this size is weeks of work, not a side
+task -- flagging this so the scope is a decision, not a surprise later.
+
+[current module boundaries -- mostly already sensible, a few problems]
+good, keep as-is:
+  trainers/      training loops (scproto.py, trainer.py, cvae_trainer.py, ...)
+  datasets/      data loading per dataset type
+  augmenters/    graph/affinity construction (graph_generator.py is 1,974
+                 lines -- the one file in here worth splitting)
+  evaluation/    metrics + scoreboards + figures (this is actually the
+                 BIGGEST chunk of the whole package once you add it up --
+                 metrics.py, paper_figures.py, visualization.py,
+                 batch_correct_baselines.py, spatial_immune_task.py,
+                 metric_helpers/* -- probably 15k+ of the 42k lines)
+  models/        network definitions (swav.py, scvi_backbone.py, gmvae_loss.py)
+  experiments/   run_mc_task and friends (tasks.py)
+  configs/       defaults.py, paths.py, larc.py, constants.py
+
+problems found (not fixed, just noted):
+  - 12 files sit loose directly in interpretable_ssl/ instead of in any
+    subfolder: Data_Handler.py, Utils_Handler.py, scGraph.py, gmvae.py,
+    loss_manager.py, model_name.py, swav_utils.py, train_utils.py, utils.py,
+    cohesion_memory.py, scproto_metacells.py, constants.py. inconsistent
+    with everything else being organized into subpackages.
+  - CLAUDE.md already documents a real bug here: there is ALSO a
+    constants.py at the repo ROOT (outside interpretable_ssl/), stale and
+    missing recent abbreviations, that looks like the real one but isn't
+    imported by anything. a rewrite is the natural time to just delete the
+    stale root copy -- it's dead code, not a design decision.
+  - trainers/scproto.py at 7,248 lines is doing too much to rewrite as one
+    unit even within the "rewrite one module" plan -- it would need its own
+    internal split (e.g. loss terms / forward pass / training loop / eval
+    hooks as separate files) BEFORE being called "done," or "rewritten
+    scproto.py" just becomes a second 7,248-line file.
+
+[rename impact: interpretable-prototype / interpretable_ssl -> scproto]
+  - repo folder name: interpretable-prototype (cosmetic, only matters if
+    you rename the Drive folder itself -- separate decision from the code)
+  - pyproject.toml: project name "interpretable-ssl", and
+    [tool.setuptools.packages.find] include = ["interpretable_ssl*"]
+  - the package itself: interpretable_ssl/ (the python import name)
+  - 82 files under modal_scripts/ alone do `from interpretable_ssl...` or
+    `import interpretable_ssl` (172 matching lines) -- every one needs its
+    import statements updated if the package is renamed, even if no logic
+    changes
+  - not yet checked: notebooks/, neurips_manuscript/, tests/ for the same
+    import pattern (skipped to keep this investigation short -- same
+    grep, just more directories, before this plan is acted on)
+
+[recommendation on "which module first" -- you said you don't know; here's
+a concrete answer now that the structure is read]
+safest first step, if/when you restart this: configs/ (defaults.py +
+constants.py, including deleting the stale root-level constants.py noted
+above). it's small, self-contained, has no numerical/training logic to
+silently break, and proves out the whole workflow (new branch, rename,
+clean-code pass, test-reproduce check) before touching anything that could
+silently corrupt a result.
+NOT recommended first: trainers/scproto.py. it's the biggest file, the one
+with the most documented numerical-correctness history (CLAUDE.md
+§9b/§9d), and the one most likely to look "cleanly rewritten" while quietly
+reproducing an old bug. do it last, after the workflow is proven on
+something low-risk.
+
+[not done in this pass -- still open]
+  - no new branch created
+  - no rename performed
+  - no code rewritten
+  - notebooks/ and neurips_manuscript/ import-count not checked yet
