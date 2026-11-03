@@ -56,9 +56,14 @@ problems found (not fixed, just noted):
     `import interpretable_ssl` (172 matching lines) -- every one needs its
     import statements updated if the package is renamed, even if no logic
     changes
-  - not yet checked: notebooks/, neurips_manuscript/, tests/ for the same
-    import pattern (skipped to keep this investigation short -- same
-    grep, just more directories, before this plan is acted on)
+  - repo-wide (not just modal_scripts/): 191 files reference
+    interpretable_ssl in some form -- so ~109 more files outside
+    modal_scripts/ (notebooks/, tests/, manuscripts/, etc.) also need their
+    imports checked on a rename, on top of the 82 counted above.
+  - also found at repo root while checking this: constants.py (the STALE
+    duplicate CLAUDE.md §9 already warns about -- dead weight, safe to
+    delete, not a design decision) and a stray desktop.ini (OneDrive/Drive
+    artifact, unrelated to the code, harmless but worth not committing).
 
 [recommendation on "which module first" -- you said you don't know; here's
 a concrete answer now that the structure is read]
