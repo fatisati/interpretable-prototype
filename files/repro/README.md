@@ -62,29 +62,39 @@ PYTHONIOENCODING=utf-8 PYTHONUTF8=1 modal run --detach \
 - `rare_homogeneity` / `rare_f1` / `rare_coverage` — same idea restricted to
   rare cell types only (bottom quartile by frequency).
 
-## measured values for this run
+## measured values: current arm vs the baseline it has to beat
 
-| metric | train | test |
+`immune_scoreboard.csv` has two rows: `leiden_st1` (the baseline — Leiden
+clustering on the Stage-1 CVAE latent, i.e. what scPoli's own pretraining
+gives you for free, before any of scProto's cohesion/gmkl/proto_recon loss
+touches it) and `d63_mse-rec` (the current arm).
+
+| metric | leiden_st1 (baseline) | d63_mse-rec (current) |
 |---|---|---|
-| coh_aff | 0.1305 | 0.0773 |
-| coh_gram | 0.2236 | 0.1494 |
-| within (purity) | 0.8960 | 0.8537 |
-| cross (cross-batch agreement) | 0.8750 | **0.9091** |
-| rare_homogeneity | 0.6919 | 0.6598 |
-| rare_f1 | 0.7808 | 0.7605 |
-| rare_coverage | 1.0 | 1.0 |
+| coh_aff (train / test) | 0.0591 / 0.0535 | 0.1305 / 0.0773 |
+| coh_gram (train / test) | 0.1106 / 0.1049 | 0.2236 / 0.1494 |
+| within (train / test) | 0.8675 / 0.8708 | 0.8960 / 0.8537 |
+| **cross (train / test)** | **0.9665 / 0.9827** | **0.8750 / 0.9091** |
+| rare_f1 (train / test) | 0.6214 / 0.6662 | 0.7808 / 0.7605 |
 
-## the challenge — flagging a discrepancy, not papering over it
+## the challenge
 
-You described the current challenge as: "with gmkl, generalization works
-but cross-batch alignment does not." What's actually measured on THIS run
-doesn't match that framing: `cross` (the cross-batch agreement column) is
-*higher* on test than train (0.909 vs 0.875) — it generalizes fine here.
-What DOES drop train-to-test is cohesion itself (`coh_aff` 0.130→0.077,
-`coh_gram` 0.224→0.149) and, to a smaller extent, `within` (0.896→0.854).
+**Cross-batch alignment (the `cross` row) is worse than the baseline, on
+both train and test** — 0.9665→0.8750 (train, −0.091) and 0.9827→0.9091
+(test, −0.074). That's the real problem: adding scProto's loss (cohesion +
+gmkl + proto_recon + cvae-recon) buys a large cohesion gain and a large
+rare-f1 gain over plain scpoli-stage-1 Leiden, but it costs cross-batch
+alignment relative to that same baseline. (Earlier draft of this section
+compared this arm's own train vs test numbers to each other instead of to
+this baseline, and read the `cross` row as fine — that was the wrong
+comparison; corrected here.)
 
-So on this specific run, the gap is in cohesion/within-batch purity
-generalizing, not in cross-batch alignment. If "cross-batch alignment
-failing" is based on a different run, a different metric, or a visual/DGE
-check rather than this `cross` column, say which — I don't want to guess
-and silently build the rest of this doc on the wrong problem statement.
+This matches the ADR's own verdict for this arm
+(`my-docs/adr/D63-two-budget-detached-mse-nb.md`, P3): cross-batch "FAILS...
+preserved, not improved" against its own chosen baseline
+(`d60_leid_noc`) — same direction of result, measured a different way.
+
+reproduce the comparison: run
+`modal_scripts/score_d63_budgets.py` (or re-read
+`files/tables/d63_budgets/pbmc-immune_d63_full.csv`, rows `leiden_st1` and
+`d63_mse-rec`) — both already include everything above.
