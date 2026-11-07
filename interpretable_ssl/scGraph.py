@@ -43,9 +43,39 @@ class scGraph:
                 continue
 
             # NOTE: make sure the adata.X is log1p transformed, otherwise do it here
-            # sc.pp.normalize_per_cell(adata_batch, counts_per_cell_after=1e4)
-            # sc.pp.log1p(adata_batch)
-            
+            #
+            # [D65] This NOTE is now ENFORCED instead of advisory, because the
+            # advisory version silently cost two full experiments. Under
+            # recon_loss='nb' the dataset serves RAW COUNTS in .X
+            # (datasets/dataset.py read_adata swaps X to layers['counts']), and
+            # scanpy's highly_variable_genes(flavor='seurat', the default) calls
+            # expm1(X) internally because it ASSUMES log1p input. expm1(2584)
+            # overflows to +inf, and pd.cut then raises
+            #     ValueError: cannot specify integer `bins` when input data
+            #                 contains infinity
+            # This killed EVERY NB arm of [D64] and [D65] -- in EVAL, after
+            # training had already finished and been paid for. The MSE path
+            # never saw it because there .X is already lognorm.
+            #
+            # Threshold 30 matches the project's own lognorm test in
+            # datasets/dataset.py ("if self.adata.X.max() < 30").
+            _Xb = adata_batch.X
+            _mx = float(_Xb.max())
+            if _mx > 30:
+                if "lognorm" in adata_batch.layers:
+                    adata_batch.X = adata_batch.layers["lognorm"].copy()
+                    _src = "layers['lognorm']"
+                else:
+                    sc.pp.normalize_total(adata_batch, target_sum=1e4)
+                    sc.pp.log1p(adata_batch)
+                    _src = "normalize_total(1e4) + log1p"
+                if not getattr(self, "_scg_lognorm_warned", False):
+                    print(f"   [D65] scGraph: .X max {_mx:.0f} is NOT log1p "
+                          f"(raw counts, e.g. recon_loss='nb'). Using {_src} "
+                          f"for HVG/PCA -- scanpy's seurat flavor would expm1() "
+                          f"this and overflow to inf.")
+                    self._scg_lognorm_warned = True
+
             sc.pp.highly_variable_genes(adata_batch, n_top_genes=1000)
             sc.pp.pca(adata_batch, n_comps=10, use_highly_variable=True)
 

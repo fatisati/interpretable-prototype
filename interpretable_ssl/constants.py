@@ -181,6 +181,7 @@ ABBREVIATIONS = {
     'xbatch_proto_sg': 'xbsg',        # [D65] detach prototypes (encoder-only gradient)
     'xbatch_min_size': 'xbms',        # [D65] minimum soft mass for a group to count
     'xbatch_weight_sg': 'xbwg',       # [D65] detach the min(size,size) reliability weight
+    'grad_cos': 'gcos',               # [D65] pairwise term-gradient cosine in the probe (numeric)
     'epoch_dump_assign': 'edas',      # [D49] per-epoch hard-assignment dump for live local monitoring
     'modularity_diag': 'mdia',        # [D51] self-pair weight in the modularity reward (numeric)
     'cohesion_global': 'cglb',        # [D28] full-graph scale estimate

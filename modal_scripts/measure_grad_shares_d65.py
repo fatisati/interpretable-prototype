@@ -100,6 +100,7 @@ def build_probe_config(lik):
         "xbatch_proto_sg": 1,        # encoder-only; ASSERTED below
         "xbatch_min_size": 1.0,
         "xbatch_weight_sg": 1,
+        "grad_cos": 1,               # [D65] log pairwise term-gradient cosines
         # [D63] CLOSED at 0 after 5 doses spanning 100x, both forms, both
         # routings, recon on and off. Not revived here.
         "lambda_proto_recon": 0.0,
@@ -189,6 +190,20 @@ def _summarize(dump_path, expected_steps):
         f"probe logged {n} rows, expected ~{exp_rows} -- not a full pass "
         f"(errors={errors})")
     out = {"n_rows": n, "expected_rows": exp_rows, "n_probe_errors": errors}
+    # [D65] pairwise cosine between term gradients on the shared encoder.
+    # PCGrad: negative = CONFLICT (no weight gives both), ~0 = independent
+    # (the losing term is simply too small), positive = aligned.
+    cos = {}
+    for line in open(p):
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        for k, v in (row.get("cos_enc") or {}).items():
+            cos.setdefault(k, []).append(v)
+    out["cos_enc"] = {k: {"median": st.median(v), "mean": st.mean(v),
+                          "std": st.pstdev(v), "frac_negative":
+                          sum(1 for x in v if x < 0) / len(v), "n": len(v)}
+                      for k, v in cos.items() if v}
     for t in TERMS:
         g = series[t]
         if len(g) < 10:

@@ -3974,6 +3974,56 @@ class SCProtoTrainer(AdoptiveTrainer):
                                 'gnorm_enc': _gnorm(_t, _enc_p),
                                 'gnorm_proto': _gnorm(_t, _pro_p),
                             }
+                        # [D65] PAIRWISE COSINE between term gradients on the
+                        # SHARED encoder. PCGrad (Yu et al., NeurIPS 2020)
+                        # defines two terms as CONFLICTING when their gradients
+                        # have negative cosine, and is explicit that direction
+                        # and magnitude are SEPARATE failure modes. Our share
+                        # system balances magnitudes and says nothing about
+                        # direction, so without this we cannot tell
+                        #   "this term is too small"      (cosine ~ 0)
+                        # from
+                        #   "this term fights another"    (cosine < 0),
+                        # and those need opposite fixes: raise the weight, vs
+                        # change the formulation. Measured need: [D65]'s
+                        # signature term's own quantity FELL every epoch
+                        # (0.574 -> 0.449) while cohesion rose, which is
+                        # consistent with either.
+                        # Off by default (one extra flattened gradient vector
+                        # per term); set grad_cos=1 in lambda_config.
+                        if int(getattr(self, 'grad_cos', 0)):
+                            try:
+                                _vecs = {}
+                                for _nm, (_ln, _tn) in _term_map.items():
+                                    _t = _loc.get(_tn)
+                                    if (_t is None or not torch.is_tensor(_t)
+                                            or not _t.requires_grad):
+                                        continue
+                                    _gs = torch.autograd.grad(
+                                        _t, _enc_p, retain_graph=True,
+                                        allow_unused=True)
+                                    _v = torch.cat([
+                                        (g if g is not None
+                                         else torch.zeros_like(p)).reshape(-1)
+                                        for g, p in zip(_gs, _enc_p)])
+                                    _n = float(_v.norm().item())
+                                    if _n > 0:
+                                        _vecs[_nm] = (_v / _n, _n)
+                                _names = sorted(_vecs)
+                                _cos = {}
+                                for _i in range(len(_names)):
+                                    for _j in range(_i + 1, len(_names)):
+                                        _a, _b = _names[_i], _names[_j]
+                                        _cos[f"{_a}|{_b}"] = float(
+                                            (_vecs[_a][0] * _vecs[_b][0]
+                                             ).sum().item())
+                                _row['cos_enc'] = _cos
+                                _row['gnorm_enc_raw'] = {
+                                    k: v[1] for k, v in _vecs.items()}
+                                del _vecs
+                            except Exception as _ce:
+                                _row['cos_error'] = f"{type(_ce).__name__}: {_ce}"
+
                         import json as _json
                         _pp = os.path.join(self.get_dump_path(),
                                            'grad_probe.jsonl')
@@ -4546,7 +4596,28 @@ class SCProtoTrainer(AdoptiveTrainer):
         self._umap_state['epoch'] = checkpoint['epoch']
 
         if checkpoint.get('optimizer_state_dict') is not None:
-            self._umap_state['optimizer'].load_state_dict(checkpoint['optimizer_state_dict'])
+            # [D65] NON-FATAL. The MODEL weights (step 3 above) are what an
+            # eval-only reload needs; the optimizer state only matters if
+            # training is actually resumed, and `load_umap=True` means "skip
+            # training, load the checkpoint" (CLAUDE.md 4/9e). A hard crash
+            # here throws away a run that already finished and was paid for:
+            # both [D65] NB arms trained for ~90 min on T4, saved
+            # umap_checkpoint.pth, then died in EVAL -- and the reload meant to
+            # recover them died HERE instead, on
+            #     ValueError: loaded state dict contains a parameter group that
+            #                 doesn't match the size of optimizer's group
+            # (the optimizer is rebuilt by _setup_umap_edges, and its param
+            # groups depend on what freeze_batch_embedding froze at the time).
+            # Warn loudly rather than silently, because resuming TRAINING
+            # without the saved Adam moments is a real behaviour change.
+            try:
+                self._umap_state['optimizer'].load_state_dict(
+                    checkpoint['optimizer_state_dict'])
+            except ValueError as _e:
+                print(f"   [D65] WARNING: optimizer state NOT restored from "
+                      f"{path}: {_e}. Model weights WERE restored, so eval and "
+                      f"inference are exact. DO NOT resume training from this "
+                      f"state without checking -- Adam's moments are reset.")
 
         print(f"Loaded UMAP checkpoint from {path} (epoch {checkpoint['epoch']})")
 

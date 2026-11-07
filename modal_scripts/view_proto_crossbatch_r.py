@@ -41,7 +41,8 @@ def r(a,b):
     d_=np.linalg.norm(a)*np.linalg.norm(b)
     return float((a@b)/d_) if d_>0 else np.nan
 
-ARMS=["d60_epoch0_leid","d59_leiden_ctb","d60_leid_noc","d62_pr16","d63_mse-rec","d63_mse-norec"]
+ARMS=["d60_epoch0_leid","d59_leiden_ctb","d60_leid_noc","d62_pr16","d63_mse-rec",
+      "d63_mse-norec","d65_diag-mse","d65_both-mse","d65_diag-nb","d65_both-nb"]
 rng=np.random.RandomState(0)
 print(f"prototype CROSS-BATCH signature coherence; (proto,batch) groups need "
       f">={MINC} cells\n")
