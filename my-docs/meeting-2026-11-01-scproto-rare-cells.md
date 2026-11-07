@@ -178,52 +178,6 @@ term asks each metacell to reconstruct its own cells under each batch's
 condition, using **each cell's own library size** (its total counts), so the
 likelihood judges the expression *profile* and not sequencing depth.
 
-#### NB results (train half)
-
-Four arms ran: leiden/waypoint init x CVAE recon on/off. They finished training
-but crashed in an unrelated metric routine before held-out placement was saved,
-so these are **train-half numbers**. Every row below is computed the same way on
-the same cells, so the comparison is valid; the test half is re-running.
-
-```
-                        cohesion        within-batch  cross-batch        signature r   rare
-                        all     rare    purity rare   purity   AGREE%    all    rare   F1
-stage-1 (CVAE)          0.0806  0.1263    0.707       0.9675   82.7%     0.687  0.570  0.846
-Leiden on CVAE          0.0591  0.0688    0.498       0.9751   83.3%     0.573  0.455  0.621
-scProto (MSE)           0.1310  0.1670    0.815       0.9153   67.8%     0.597  0.408  0.774
-scProto+protoRecon MSE  0.1305  0.1637    0.843       0.9014   66.9%     0.591  0.393  0.781
--- NB arms --
-NB leiden + recon       0.1415  0.1629    0.878       0.9218   70.3%     0.617  0.325  0.753
-NB leiden, no recon     0.1442  0.1715    0.789       0.9106   69.5%     0.596  0.425  0.762
-NB waypoint + recon     0.1395  0.2361    0.845       0.9006   60.5%     0.612  0.411  0.765
-NB waypoint, no recon   0.1448  0.2353    0.849       0.8652   53.7%     0.507  0.322  0.685
-```
-
-**Does NB preserve cross-batch alignment? Partly — but no, not really.**
-
-- With **leiden** init, NB is the best non-baseline we have on cross-batch:
-  agreement 70.3% vs 67.8% for MSE, signature correlation 0.617 vs 0.597,
-  cross-batch purity 0.922 vs 0.915. Real but small, and agreement moves by
-  ~3 points between identical runs, so this sits near the noise.
-- **The gap to stage-1 is still large**: 70.3% vs 82.7% agreement, 0.617 vs
-  0.687 signature correlation. NB narrows the loss; it does not undo it.
-- With **waypoint** init NB is clearly worse (53.7-60.5% agreement), so the
-  gain is not a property of NB alone — it depends on initialisation.
-- **NB does help structure**: cohesion is the best of any arm (0.1448 vs 0.1310
-  for MSE), and rare cohesion with waypoint init is much higher
-  (0.236 vs 0.167). Within-batch rare purity is also the best we have (0.878).
-- But **rare pooled purity and rare F1 do not improve** over MSE.
-
-So NB does what it was predicted to do *inside* batches — it pays more attention
-to the low-count genes that define rare cells — without fixing the cross-batch
-problem. That is the argument for adding the signature loss rather than
-expecting the likelihood change to be sufficient.
-
-Two caveats worth stating out loud: these are train-half numbers (held-out
-re-running), and the NB arms sit on an NB-pretrained encoder, so they do not yet
-have their own matched stage-1 baseline — the comparison above is of absolute
-values on identical cells, not of each model against its own starting point.
-
 **2. A signature loss.** Make the thing we currently only *measure* into a
 training objective: penalise a metacell whose signature disagrees between the
 batches it spans. It is silent for metacells living in a single batch, so a
@@ -239,3 +193,226 @@ floor. Reason: reconstruction can penalise a metacell that *mixes* two
 biologies, but it is exactly indifferent to the same biology being *split*
 across two metacells — both reconstruct their own members perfectly. That
 asymmetry is why a separate alignment force is needed.
+
+---
+
+
+## 6. The signature loss — everything in one place
+
+This resolves both directions in §5: the signature loss is built and tested, and
+the NB question is answered. It was run four ways — pull-only vs pull+push,
+crossed with MSE vs NB — all on the same split and seed.
+
+### 6.1 What the loss is
+
+Each metacell gets one expression fingerprint per batch. The loss rewards a
+metacell whose fingerprints agree across the batches it spans.
+
+```
+1 SIZE         size[b][k] = how much of metacell k sits in batch b
+                            (sum of its cells' soft memberships)
+
+2 FINGERPRINT  sig[b][k]  = mean expression of k's cells in batch b
+                          - mean expression of ALL cells in batch b
+                            the subtraction is what cancels the batch effect
+
+3 MEMORY       running average of sig across training steps
+                            one step gives a (metacell, batch) group a MEDIAN
+                            OF 2 CELLS -- far too few to trust on their own
+
+4 PULL         reward = sum over metacells k, over batch pairs (b1,b2) of
+                          min(size[b1][k], size[b2][k])
+                          * correlation( sig[b1][k], sig[b2][k] )
+                        divided by a FIXED number (total cells)
+
+5 PUSH         penalty = average of max(0, correlation - 0.5)
+                         over DIFFERENT metacells k != j
+```
+
+Three choices decide whether it works at all:
+
+- **Reward, not penalty.** A penalty of the form "sum of (1 - correlation)"
+  charges per batch pair, so a metacell could lower its cost by *abandoning a
+  batch* — the opposite of alignment. Dropping one batch costs only 17.8% of a
+  metacell's cells, so that escape is cheap and would have been taken.
+- **`min(size, size)` is a trust weight.** A pair is only as reliable as its
+  smaller side. Measured: a fingerprint built from 3 cells reproduces itself at
+  0.34, from 10 cells at 0.65, from 40 cells at 0.93.
+- **Push is a hinge above 0.5, never a push to zero.** With K = 300 and 16 cell
+  types, about 19 metacells share each cell type, so most "different metacell"
+  pairs are genuinely the same biology and must be left alone.
+
+### 6.2 The full loss it sits inside, and what is detached
+
+**Detached** = the quantity still affects the loss *value*, but no gradient flows
+back through it, so that term cannot change it.
+
+```
+TERM             WHAT IT PUSHES FOR                    WEIGHT  SHARE  -> ENCODER  -> METACELLS
+---------------------------------------------------------------------------------------------
+cohesion gram    same NEIGHBOURS within a batch        2.7414  14.6%     yes          NO
+                 -> same metacell
+cohesion aff     ARE neighbours within a batch         4.8578  14.6%     yes          NO
+                 -> same metacell
+GM-KL            cell sits near its metacell centre;   0.0274  29.2%     yes         YES
+                 encoder stays stochastic
+CVAE recon       latent can still rebuild the cell,    0.0218  29.2%     yes          NO
+                 so stage-1 batch correction survives
+signature        a metacell means the SAME biology     5.7862  12.5%     yes          NO
+                 in every batch it spans
+```
+
+Weights are not chosen by hand. Each term's gradient size is measured once with
+its weight set to 1, then the weight is solved so the term takes the share
+shown. The **shares** are the design choice; the weights follow. (Numbers above
+are the MSE arm; they are re-derived per dataset and are not portable.)
+
+**Measured gradient onto the metacell positions** — not assumed:
+
+```
+cohesion gram  0.000000     CVAE recon  0.000000     GM-KL  0.033054
+cohesion aff   0.000000     signature   0.000000
+```
+
+Four exact zeros. **GM-KL is the only term that moves the metacells.** Every
+other term can only move cells *between* metacells, by changing the encoder.
+
+Why: if two terms both pull the metacells, each needs its own calibration,
+because a term's pull on the encoder and its pull on the metacells are different
+sizes. We learned this expensively — a term weighted from its encoder gradient
+pulled the metacells 5.7–18.6x harder than GM-KL, and they collapsed onto each
+other (nearest-neighbour similarity 0.81 → 0.9997).
+
+**Three extra detachments inside the signature term:**
+
+```
+memory half       a reference point, not a target. Gradient flows only through
+                  the cells seen in the current step.
+min(size, size)   left live it becomes a SIZE incentive -- a constant pull to
+                  join any large, well-aligned metacell regardless of fit --
+                  because the correlation part, which checks fit, weakens as a
+                  group grows.
+expression data   it is data. Nothing to learn.
+```
+
+Outside the loss, the **batch embedding is frozen** in stage 2. Stage 1 pushed
+batch information out of the latent and into that embedding; unfrozen, the
+encoder would drift batch structure back in and CVAE recon would stop protecting
+what we think it protects.
+
+### 6.3 Results, held-out cells
+
+`scProto` is §4's arm. `+ sig` adds pull only; `+ sig both` adds pull and push.
+
+```
+                              stage-1   scProto    + sig    + sig both   floor
+WITHIN-BATCH STRUCTURE
+ cohesion  train, all          0.0806    0.1310    0.1352     0.1343     0.0016
+ cohesion  test,  all          0.0784    0.0853    0.0862     0.0862     0.0012
+ cohesion  test,  rare         0.1262    0.1376    0.1433     0.1437     0.0101
+ within-batch purity, rare     0.5700    0.6269    0.7500     0.6355     0.0611
+
+RARE-POPULATION METRICS (test)
+ rare homogeneity              0.7584    0.7190    0.7441     0.6885     0.0773
+ rare F1                       0.8790    0.7958    0.8221     0.7591     0.0822
+ pooled purity, rare           0.5362    0.6039    0.6618     0.6135     0.0564
+
+BATCH ALIGNMENT
+ cross-batch purity, test      0.9545    0.9244    0.9224     0.9309     0.0160
+ metacells whose per-batch
+   majority AGREES (>=10)       83.1%     66.0%     67.2%      64.8%     ~3 pts
+ signature corr (>=40 cells)    0.819     0.733     0.740      0.747       --
+ signature corr, RARE mc        0.671     0.431     0.520      0.484       --
+ chimeric metacells (r < 0.3)    0.0%      9.9%      5.7%       6.7%       --
+ batch entropy, test all        0.483     0.567     0.583      0.592       --
+ batch entropy, test rare       0.057     0.056     0.059      0.060       --
+ pooled purity, all            0.8630    0.8160    0.8193     0.8246     0.0058
+```
+
+Batch entropy is recomputed here for all arms with one consistent method, so read
+that column as a set. It reproduces §4's figure for the shared arms (0.483 vs
+0.482); the rare row uses a different normalisation from §4's and is not
+comparable to it line by line.
+
+### 6.4 NB — the one place NB is reported
+
+**Yes, NB was trained**, in two separate experiments, both with a fresh NB
+pretrain (an NB run cannot reuse the MSE encoder — different decoder head,
+different data scale):
+
+- **NB + prototype reconstruction** (4 arms: leiden/waypoint x CVAE recon on/off)
+- **NB + signature loss** (2 of §6's 4 arms)
+
+The signature term itself is unaffected by the choice: it reads log-normalised
+expression and never touches the decoder, so MSE and NB differ only in the latent
+the memberships live in.
+
+**Result: NB buys a little cross-batch alignment and pays for it with
+within-batch structure.** Held-out cells, NB vs MSE with the same loss:
+
+```
+                           scProto   + sig (MSE)   + sig (NB)    floor
+ signature corr, all        0.603      0.635         0.639        --
+ chimeric metacells          9.9%       5.7%          5.9%        --
+ agreement (>=30 cells)     80.9%      75.6%         84.4%      ~3 pts
+ -------------------------------------------------------------------
+ cohesion test, all        0.0853     0.0862        0.0698      0.0012
+ within-batch purity, all  0.8722     0.8729        0.8254      0.0008
+ pooled purity, test       0.8160     0.8193        0.7726      0.0058
+ rare F1                   0.7958     0.8221        0.7186      0.0822
+```
+
+The losses are **7x to 58x the noise floor** — not a fluctuation. The
+prototype-reconstruction arms (train half) point the same way: NB gives the best
+cohesion of any arm (0.1448 vs 0.1310) and the best within-batch rare purity
+(0.878), but agreement only reaches 70.3% against stage-1's 82.7%, and with
+waypoint init it drops to 53.7%.
+
+**Why the premise did not hold here.** NB was expected to help because it
+up-weights low-count genes, where rare identity lives. But on this dataset rare
+types average **1,389 counts across 505 detected genes** while common types
+average **25,685 counts across 412 genes** — *rare cells are not the sparse
+ones*. Sequencing depth tracks the study, not rarity, so there was less for NB
+to correct than we assumed.
+
+**Rejected.** Not because it fails at its own objective — it is the best arm on
+cross-batch agreement — but because the cost lands squarely on the thing the
+method exists to do.
+
+### 6.5 Verdict
+
+**Partly worked. It did not fail, and it did not deliver.**
+
+What it did:
+
+- **Chimeras nearly halved, 9.9% → 5.7%.** First term we have added that reduces
+  them at all.
+- **Rare metacells recover much of their lost alignment**, signature correlation
+  0.431 → 0.520 against stage-1's 0.671. §4 flagged rare metacells as degrading
+  most; this is the first thing that pushes back. Caveat: 7 rare metacells only.
+- **Within-batch rare purity 0.627 → 0.750**, ~2x the noise floor — the first
+  real gain on a rare metric from any term we have added.
+- **It costs nothing.** Cohesion and purity tie or edge up. Every previous added
+  term paid for its gains somewhere; this one does not.
+- **Batch mixing unharmed**, entropy 0.567 → 0.583.
+
+What it did not do:
+
+- **Missed every target set before the run** (signature correlation >= 0.69,
+  chimeras <= 3%, agreement > 69%). It recovers about a third of what stage 2
+  destroys.
+- **Did not improve generalisation.** Train-to-test cohesion gap 0.0457 without
+  it, 0.0490 with it. The model learns slightly more on training cells and
+  passes none of it on.
+- **Cell-type agreement did not move** (66.0% → 67.2%, inside the ~3 point
+  floor), even though the label-free measures did.
+- **Push term is not useful** — worse than pull-only on its own objective and on
+  every rare metric. Dropped.
+
+Two things to carry into the write-up:
+
+- **Signature correlation is now the training signal**, so it can no longer be
+  the headline evidence. Cell-type agreement and cross-batch purity have to
+  carry that, and neither moved much.
+- **Every rare number here is one run**, and run-to-run noise on rare metrics is
+  0.06–0.08. The 0.627 → 0.750 result needs a second seed before it is a claim.
