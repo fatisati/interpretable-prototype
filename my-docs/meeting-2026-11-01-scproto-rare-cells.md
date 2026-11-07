@@ -336,48 +336,48 @@ comparable to it line by line.
 
 ### 6.4 NB — the one place NB is reported
 
-**Yes, NB was trained**, in two separate experiments, both with a fresh NB
-pretrain (an NB run cannot reuse the MSE encoder — different decoder head,
-different data scale):
+**Yes, NB was trained**, in two experiments, both on a fresh NB pretrain (an NB
+run cannot reuse the MSE encoder — different decoder head, different data scale):
+NB + prototype reconstruction (4 arms: leiden/waypoint x CVAE recon on/off), and
+NB + signature loss (2 of §6's arms).
 
-- **NB + prototype reconstruction** (4 arms: leiden/waypoint x CVAE recon on/off)
-- **NB + signature loss** (2 of §6's 4 arms)
-
-The signature term itself is unaffected by the choice: it reads log-normalised
-expression and never touches the decoder, so MSE and NB differ only in the latent
-the memberships live in.
-
-**Result: NB buys a little cross-batch alignment and pays for it with
-within-batch structure.** Held-out cells, NB vs MSE with the same loss:
+**Held-out cells. NB is worse than MSE on every axis.**
 
 ```
-                           scProto   + sig (MSE)   + sig (NB)    floor
- signature corr, all        0.603      0.635         0.639        --
- chimeric metacells          9.9%       5.7%          5.9%        --
- agreement (>=30 cells)     80.9%      75.6%         84.4%      ~3 pts
- -------------------------------------------------------------------
- cohesion test, all        0.0853     0.0862        0.0698      0.0012
- within-batch purity, all  0.8722     0.8729        0.8254      0.0008
- pooled purity, test       0.8160     0.8193        0.7726      0.0058
- rare F1                   0.7958     0.8221        0.7186      0.0822
+                       coh      coh      coh    within   cross   pooled   rare
+                      TRAIN    test   test rare   test    test     test     F1
+stage-1 (CVAE)        0.0806  0.0784   0.1262   0.8886  0.9545   0.8630  0.8790
+scProto (MSE)         0.1310  0.0853   0.1376   0.8722  0.9244   0.8160  0.7958
+NB leiden + recon     0.1251  0.0678   0.1194   0.8217  0.8868   0.7636  0.5756
+NB leiden, no recon   0.1263  0.0654   0.0966   0.7501  0.8403   0.6702  0.4335
+NB waypoint + recon   0.1233  0.0647   0.1275   0.8039  0.8679   0.7169  0.7249
+NB waypoint, no recon 0.1267  0.0619   0.1182   0.7350  0.7880   0.6334  0.6031
+noise floor           0.0016  0.0012   0.0101   0.0008  0.0160   0.0058  0.0822
 ```
 
-The losses are **7x to 58x the noise floor** — not a fluctuation. The
-prototype-reconstruction arms (train half) point the same way: NB gives the best
-cohesion of any arm (0.1448 vs 0.1310) and the best within-batch rare purity
-(0.878), but agreement only reaches 70.3% against stage-1's 82.7%, and with
-waypoint init it drops to 53.7%.
+**The decisive observation is the train/test split in that table.** On TRAIN
+cells NB looked like the better model — cohesion 0.125–0.127 against MSE's
+0.131, and higher batch-vote agreement (70.3% vs 67.8%). On HELD-OUT cells it
+reverses: cohesion 0.062–0.068 against MSE's 0.0853, roughly **15x the noise
+floor in the wrong direction**, and cross-batch purity 0.788–0.887 against
+0.9244. NB fits the cells it was trained on and **generalises worse**. Train-only
+numbers would have given the opposite conclusion — which is why the held-out
+split is the one that counts.
+
+The separate NB + signature-loss arms agree: NB wins the cross-batch objective
+(agreement 84.4% vs 75.6%) and loses cohesion, within-batch purity, pooled purity
+and rare F1 by 7x–58x the noise floor.
 
 **Why the premise did not hold here.** NB was expected to help because it
 up-weights low-count genes, where rare identity lives. But on this dataset rare
 types average **1,389 counts across 505 detected genes** while common types
 average **25,685 counts across 412 genes** — *rare cells are not the sparse
-ones*. Sequencing depth tracks the study, not rarity, so there was less for NB
-to correct than we assumed.
+ones*. Depth tracks the study, not rarity, so there was less for NB to correct
+than assumed.
 
-**Rejected.** Not because it fails at its own objective — it is the best arm on
-cross-batch agreement — but because the cost lands squarely on the thing the
-method exists to do.
+**Rejected.** Prototype health was never the problem (0–3 dead metacells, no
+collapse); the cost lands on generalisation, which is the whole point of the
+method.
 
 ### 6.5 Verdict
 

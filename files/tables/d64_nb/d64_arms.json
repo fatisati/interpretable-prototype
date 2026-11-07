@@ -1,7 +1,7 @@
 {
   "ok": {},
   "failed": {
-    "d64_leid-rec": "ValueError: cannot specify integer `bins` when input data contains infinity"
+    "d64_wayp-norec": "RemoteError: "
   },
   "gnorm_enc": {
     "mse": {

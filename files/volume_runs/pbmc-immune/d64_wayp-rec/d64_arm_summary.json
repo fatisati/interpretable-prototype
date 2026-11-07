@@ -1,0 +1,10 @@
+{
+  "arm": "d64_wayp-rec",
+  "prot_init": "waypoint",
+  "cvae_recon_on": true,
+  "recon_loss": "nb",
+  "n_dead": 3,
+  "median_nn_cos": 0.8276621699333191,
+  "frac_pairs_gt_0.99": 0.0002452619843924192,
+  "model_name": "d64_wayp-rec_ds-pbmc_prtInit-wayp_frzbe1_rlss-nb_aff-arbf_recon0.015172_lprec0.00010452_prfm-mix3_lumap0.0_usim-prot_cvae_e50_lgmk0.018274_cpsg1_ecal1_pum-ema_nagg-max_lcoh2.930008_upsg1_gprb25_cglb2_cmini-full_cdia1.0_lcha4.081766_upm-dotp_v31"
+}
