@@ -164,9 +164,10 @@ and not only annotations.
 
 ---
 
-## 5. What we are testing now
+## 5. The two directions we tried
 
-Two directions, both aimed at the cross-batch half:
+Two directions, both aimed at the cross-batch half. **Both are now
+resolved** -- results in §6, diagnosis in §7.
 
 **1. NB likelihood + prototype reconstruction.** Replace MSE with a negative
 binomial likelihood. MSE treats every gene's error equally, so a housekeeping
@@ -381,7 +382,7 @@ method.
 
 ### 6.5 Verdict
 
-**Partly worked. It did not fail, and it did not deliver.**
+**Partly worked. It did not fail, and it did not deliver.** §7 measures *why*.
 
 What it did:
 
@@ -416,3 +417,171 @@ Two things to carry into the write-up:
   carry that, and neither moved much.
 - **Every rare number here is one run**, and run-to-run noise on rare metrics is
   0.06–0.08. The 0.627 → 0.750 result needs a second seed before it is a claim.
+
+---
+
+## 7. Why it under-delivered — the diagnosis
+
+§6 left one question open. The signature loss moved every number the right way
+but missed every target, and **its own quantity fell every epoch** while
+cohesion rose:
+
+```
+epoch 1    signature correlation 0.574    cohesion 0.208
+epoch 10   signature correlation 0.449    cohesion 0.266
+```
+
+The total loss went down; this term's share of it went up. It was being traded
+away. Two opposite explanations fit that, and they need opposite fixes:
+
+```
+(a) the term is TOO SMALL   -> raise its weight
+(b) the term CONFLICTS      -> no weight works, redesign it
+```
+
+A weight sweep in full training costs ~90 minutes and ~$1.50 per point. Two
+cheaper measurements separate (a) from (b) directly.
+
+### 7.1 Gradient directions — the answer is (b), conflict
+
+Every loss term wants to move the weights in some direction. The optimizer
+**adds** those directions, so opposite ones cancel. The cosine measures the
+angle between two terms' directions:
+
+```
+cos      angle    combined push (out of 2.0)    cancelled
++1.0       0°            2.00                      0%
+ 0.0      90°            1.41                     29%
+-0.667   132°            0.82                     59%
+-0.712   135°            0.76                     62%
+```
+
+Measured over 402 steps, on the shared encoder, at the deployed routing:
+
+```
+  term pair                      median cos   steps negative
+  signature | push half            -0.712          100%
+  cohesion gram | GM-KL            -0.667          100%
+  cohesion aff  | GM-KL            -0.527          100%
+  cohesion aff  | signature        -0.292          100%
+  cohesion gram | signature        -0.133           95%
+  CVAE recon    | signature        -0.070           95%
+  GM-KL         | signature        +0.085            3%
+  cohesion aff  | cohesion gram    +0.903            0%
+```
+
+**The signature term conflicts with cohesion on 100% of steps.** That is not
+noise and not a dosing artifact. Raising its weight cannot fix it — it only
+moves along the trade-off, buying alignment by selling cohesion.
+
+The conflict is *partial* though, −0.29 rather than −1, so about 96% of the
+signature term's effort is in a direction cohesion does not care about. The
+exchange rate therefore matters, which is what §7.2 measures.
+
+**Why nobody had seen this.** Our weights are set by a gradient-share system
+that balances how *big* each term's push is. It says nothing about which
+*direction* each push points. Direction had never been measured.
+
+### 7.2 The trade-off curve — no weight is a good weight
+
+This test deletes the encoder. The assignment matrix becomes a plain table of
+numbers, 33,506 cells × 300 metacells, optimized directly. That separates two
+questions the real runs cannot:
+
+```
+"is the OBJECTIVE itself bad?"            <- only this test can answer
+"can the ENCODER achieve the objective?"  <- only real training can answer
+```
+
+Validated first: initialised from the stage-1 assignment it reproduces the
+known stage-1 numbers exactly (0.6944 vs 0.702, rare 0.6711 vs 0.671, 201 vs
+201 spanning metacells, 0.0% chimeras).
+
+```
+   weight   cohesion   signature corr   chimeras   metacells used   sharpness
+  (start)     0.0425        0.6944         0.0%         300            1.4
+     0.00     0.1068        0.5231        17.7%         300            4.0
+     0.10     0.0386        0.6297        16.5%         228           31.6
+     0.25     0.0199        0.5940        18.0%         222           41.0
+     0.50     0.0142        0.5211        27.4%         215           44.4
+     1.00     0.0107        0.5361        29.5%         216           46.3
+```
+
+Three things, all bad for the term:
+
+- **No weight beats doing nothing.** Alignment peaks at weight 0.10 (0.630) and
+  is still below the untouched starting point (0.694), then falls again.
+- **Cohesion collapses immediately.** At weight 0.10 it has already lost 64%.
+- **The term is degenerate.** As its weight rises, assignments go diffuse
+  (sharpness 4 → 46) and metacells die (300 → 216). Its reward grows with group
+  size, so pushed hard it prefers a few large blurry groups.
+
+*(5 of 8 planned weights; the run was interrupted. The trend is established but
+the two largest weights are not measured.)*
+
+### 7.3 The finding that matters most
+
+Look at the **weight 0.00** row above: cohesion alone, signature term switched
+off, no encoder, no learning, no held-out cells.
+
+```
+                                       signature corr   chimeras
+start (stage-1 assignment)                 0.694          0.0%
+real training, full model                  0.603          9.9%
+cohesion alone, no encoder                 0.523         17.7%
+```
+
+Optimizing cohesion by itself destroys cross-batch alignment **by more than
+real training does.** That rules out both explanations we had been assuming:
+
+```
+"the encoder cannot generalise the structure"  -> ruled out, no encoder here
+"it is a held-out / unseen-cell problem"       -> ruled out, these are train cells
+```
+
+What remains is the uncomfortable one: **cohesion's own best answer is a
+chimeric partition.** Cohesion is not failing. It is succeeding, and a
+partition where metacells mean different things in different studies is what
+succeeding looks like for it. Cohesion scores each cell only against its own
+batch's neighbourhood, so a metacell can be perfectly cohesive in every batch
+separately while meaning something different in each.
+
+That is why no cross-batch term bolted on afterwards could fully work. It was
+patching over what the main objective actively wants.
+
+### 7.4 Three findings that were not the question
+
+**The push half fights the pull half** (−0.712, 62% cancellation). With 300
+metacells and 16 cell types, about 19 metacells hold each cell type, so "make
+metacell 7 look different from metacell 23" usually means "make 7 stop looking
+like a T cell" — exactly what the pull half is building. This fully explains
+why the pull+push arm lost to pull-only on every metric. It was not useless; it
+was undoing the other half.
+
+**Cohesion and GM-KL already conflicted** (−0.667, 100% of steps, 59%
+cancellation), since D60 and predating this work. Some tension between terms is
+normal; this much, consistently, is worth knowing and nobody did.
+
+**The two cohesion terms are nearly the same direction** (+0.903). They were
+justified as non-redundant — gram measures structural equivalence, aff measures
+proximity — but on this dataset their gradients largely agree, and they are
+being paid two separate shares (14.6% + 14.6%) for close to one direction.
+
+### 7.5 What this changes
+
+```
+DEAD END   raising the signature term's weight. Measured, not guessed.
+DEAD END   the push/off-diagonal half. Keep it at 0.
+OPEN       gradient surgery -- remove the conflicting component rather than
+           pick a weight. This is the textbook response to a measured negative
+           cosine, and it is cheap to try.
+OPEN       the root cause: cohesion's optimum is chimeric. The real fix is to
+           change what cohesion wants, not to add a counterweight.
+OPEN       fix the term's size degeneracy by capping the trust weight at ~40
+           cells -- the size CIDER itself downsamples to, and the point where
+           our own reliability measurement reaches 0.93.
+```
+
+The honest summary for the paper is unchanged, but we now know *why*: the
+cross-batch cost is not an implementation weakness, it is a property of the
+objective that produces the rare-cell gain.
