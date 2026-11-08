@@ -72,3 +72,6 @@ files/celltype_niches_3d_full_s28nsc.csv
 *.blg
 *.out
 *.log
+models
+__pycache__/
+notebooks/*/tmp/

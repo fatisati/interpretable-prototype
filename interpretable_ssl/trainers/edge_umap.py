@@ -266,7 +266,7 @@ class EdgeUMAPTrainer:
         batch_size: int = 1024,
         negative_sample_rate: int = 5,
         lr: float = 1e-3,
-        device: str = 'cuda',
+        device: str = None,
     ):
         """
         Args:
@@ -281,6 +281,9 @@ class EdgeUMAPTrainer:
             lr: Learning rate
             device: Device to train on
         """
+        if device is None:
+            from interpretable_ssl.utils import get_device
+            device = get_device()
         self.encoder = encoder.to(device)
         self.X = X.to(device)
         self.device = device

@@ -1,0 +1,52 @@
+cell_type,batch,n,n_test,n_train
+CD10+ B cells,Oetjen,207,41,166
+CD14+ Monocytes,10X,3388,678,2710
+CD14+ Monocytes,Freytag,452,90,362
+CD14+ Monocytes,Oetjen,997,199,798
+CD14+ Monocytes,Sun,1501,300,1201
+CD14+ Monocytes,Villani,145,29,116
+CD16+ Monocytes,10X,364,73,291
+CD16+ Monocytes,Freytag,25,5,20
+CD16+ Monocytes,Oetjen,165,33,132
+CD16+ Monocytes,Sun,271,54,217
+CD16+ Monocytes,Villani,172,34,138
+CD20+ B cells,10X,1546,309,1237
+CD20+ B cells,Freytag,427,85,342
+CD20+ B cells,Oetjen,491,98,393
+CD20+ B cells,Sun,409,82,327
+CD4+ T cells,10X,2937,587,2350
+CD4+ T cells,Freytag,1238,248,990
+CD4+ T cells,Oetjen,2524,505,2019
+CD4+ T cells,Sun,4312,862,3450
+CD8+ T cells,10X,350,70,280
+CD8+ T cells,Freytag,270,54,216
+CD8+ T cells,Oetjen,985,197,788
+CD8+ T cells,Sun,578,116,462
+Erythrocytes,Oetjen,1502,300,1202
+Erythroid progenitors,Oetjen,463,93,370
+HSPCs,10X,28,6,22
+HSPCs,Oetjen,445,89,356
+Megakaryocyte progenitors,10X,21,4,17
+Megakaryocyte progenitors,Freytag,16,3,13
+Megakaryocyte progenitors,Oetjen,219,44,175
+Megakaryocyte progenitors,Sun,14,3,11
+Monocyte progenitors,Oetjen,428,86,342
+Monocyte-derived dendritic cells,10X,182,36,146
+Monocyte-derived dendritic cells,Oetjen,214,43,171
+Monocyte-derived dendritic cells,Sun,82,16,66
+Monocyte-derived dendritic cells,Villani,534,107,427
+NK cells,10X,756,151,605
+NK cells,Freytag,476,95,381
+NK cells,Oetjen,89,18,71
+NK cells,Sun,973,195,778
+NKT cells,10X,1056,211,845
+NKT cells,Freytag,432,86,346
+NKT cells,Oetjen,608,122,486
+NKT cells,Sun,649,130,519
+Plasma cells,10X,18,4,14
+Plasma cells,Oetjen,111,22,89
+Plasmacytoid dendritic cells,10X,81,16,65
+Plasmacytoid dendritic cells,Freytag,11,2,9
+Plasmacytoid dendritic cells,Oetjen,133,27,106
+Plasmacytoid dendritic cells,Sun,40,8,32
+Plasmacytoid dendritic cells,Villani,171,34,137

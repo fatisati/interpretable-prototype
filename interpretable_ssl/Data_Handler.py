@@ -13,15 +13,28 @@ SEED = 42
 MINCELLS = 256
 CUDA_DEVICE = "5"
 
-HOME_DIR = '/content/drive/MyDrive/codes/'
+HOME_DIR = os.environ.get('ISLANDER_HOME', '/content/drive/MyDrive/codes/')
 PROJ_DIR = rf"{HOME_DIR}/Islander"
 MODEL_DIR = rf"{PROJ_DIR}/models"
 META_DIR = rf"{PROJ_DIR}/meta"
 DATA_DIR = rf"{PROJ_DIR}/data"
 RES_DIR = rf"{PROJ_DIR}/res"
 
-os.makedirs(RES_DIR, exist_ok=True)
-os.makedirs(rf"{RES_DIR}/scIB", exist_ok=True)
+try:
+    os.makedirs(RES_DIR, exist_ok=True)
+    os.makedirs(rf"{RES_DIR}/scIB", exist_ok=True)
+except OSError:
+    pass  # Islander dir not present outside Colab; only needed for Islander datasets
+
+
+def _load_meta(name, kind):
+    """Load Islander meta json; return {} when the file is absent (non-Colab runs)."""
+    path = rf"{META_DIR}/{name}/{kind}.json"
+    try:
+        with open(path, "r") as f:
+            return json.loads(f.read())
+    except (FileNotFoundError, OSError):
+        return {}
 
 DATA_RAW_ = {
     #
@@ -94,31 +107,31 @@ META_ = {
 }
 
 CELL2CAT_ = {
-    "lung": json.loads(open(rf"{META_DIR}/lung/cell2cat.json", "r").read()),
-    "lung_fetal_donor": json.loads(open(rf"{META_DIR}/lung_fetal_donor/cell2cat.json", "r").read()),
-    "lung_fetal_organoid": json.loads(open(rf"{META_DIR}/lung_fetal_organoid/cell2cat.json", "r").read()),
-    "brain": json.loads(open(rf"{META_DIR}/brain/cell2cat.json", "r").read()),
-    "breast": json.loads(open(rf"{META_DIR}/breast/cell2cat.json", "r").read()),
-    "heart": json.loads(open(rf"{META_DIR}/heart/cell2cat.json", "r").read()),
-    "eye": json.loads(open(rf"{META_DIR}/eye/cell2cat.json", "r").read()),
-    "gut_fetal": json.loads(open(rf"{META_DIR}/gut_fetal/cell2cat.json", "r").read()),
-    "skin": json.loads(open(rf"{META_DIR}/skin/cell2cat.json", "r").read()),
-    "COVID": json.loads(open(rf"{META_DIR}/COVID/cell2cat.json", "r").read()),
-    "pancreas": json.loads(open(rf"{META_DIR}/pancreas/cell2cat.json", "r").read()),
+    "lung": _load_meta("lung", "cell2cat"),
+    "lung_fetal_donor": _load_meta("lung_fetal_donor", "cell2cat"),
+    "lung_fetal_organoid": _load_meta("lung_fetal_organoid", "cell2cat"),
+    "brain": _load_meta("brain", "cell2cat"),
+    "breast": _load_meta("breast", "cell2cat"),
+    "heart": _load_meta("heart", "cell2cat"),
+    "eye": _load_meta("eye", "cell2cat"),
+    "gut_fetal": _load_meta("gut_fetal", "cell2cat"),
+    "skin": _load_meta("skin", "cell2cat"),
+    "COVID": _load_meta("COVID", "cell2cat"),
+    "pancreas": _load_meta("pancreas", "cell2cat"),
 }
 
 BATCH2CAT_ = {
-    "lung": json.loads(open(rf"{META_DIR}/lung/batch2cat.json", "r").read()),
-    "lung_fetal_donor": json.loads(open(rf"{META_DIR}/lung_fetal_donor/batch2cat.json", "r").read()),
-    "lung_fetal_organoid": json.loads(open(rf"{META_DIR}/lung_fetal_organoid/batch2cat.json", "r").read()),
-    "brain": json.loads(open(rf"{META_DIR}/brain/batch2cat.json", "r").read()),
-    "breast": json.loads(open(rf"{META_DIR}/breast/batch2cat.json", "r").read()),
-    "heart": json.loads(open(rf"{META_DIR}/heart/batch2cat.json", "r").read()),
-    "eye": json.loads(open(rf"{META_DIR}/eye/batch2cat.json", "r").read()),
-    "gut_fetal": json.loads(open(rf"{META_DIR}/gut_fetal/batch2cat.json", "r").read()),
-    "skin": json.loads(open(rf"{META_DIR}/skin/batch2cat.json", "r").read()),
-    "COVID": json.loads(open(rf"{META_DIR}/COVID/batch2cat.json", "r").read()),
-    "pancreas": json.loads(open(rf"{META_DIR}/pancreas/batch2cat.json", "r").read()),
+    "lung": _load_meta("lung", "batch2cat"),
+    "lung_fetal_donor": _load_meta("lung_fetal_donor", "batch2cat"),
+    "lung_fetal_organoid": _load_meta("lung_fetal_organoid", "batch2cat"),
+    "brain": _load_meta("brain", "batch2cat"),
+    "breast": _load_meta("breast", "batch2cat"),
+    "heart": _load_meta("heart", "batch2cat"),
+    "eye": _load_meta("eye", "batch2cat"),
+    "gut_fetal": _load_meta("gut_fetal", "batch2cat"),
+    "skin": _load_meta("skin", "batch2cat"),
+    "COVID": _load_meta("COVID", "batch2cat"),
+    "pancreas": _load_meta("pancreas", "batch2cat"),
 }
 
 Gender_Related_Genes = [

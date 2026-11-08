@@ -138,6 +138,18 @@ parallel first would have four containers racing on the same checkpoint path.
   counts). Deliberate: keeps every run on one graph; recorded here so it is not
   later mistaken for an oversight.
 
+## Local result (2026-11-01, d64_leid-rec only, one seed, Mac Studio MPS)
+
+Modal's four arms never reported. The leid-rec arm was run locally with locally
+re-measured NB gradient norms (`notebooks/pbmc_immune_local/notes/d64_leid-rec_mps_expectation.md`):
+no collapse (0 dead, median_nn_cos 0.83), but against the local MSE replicate of
+d63_mse-rec every held-out stable metric is worse by 1.4-7x the measured
+cross-machine floor (within_test_all 0.815 vs 0.861, pooled 0.753 vs 0.794,
+coh_aff 0.095 vs 0.101) and the predicted rare gain did not appear (rare F1 0.61
+vs 0.76, coverage 0.83 vs 1.00; within_rare +0.05 is inside the 6a floor).
+Training-cell metrics favour NB; held-out metrics reverse all of it. Local verdict
+for this arm: fails. The other three arms were not run.
+
 ## Verdict (TO FILL)
 
 - [ ] collapse / dead prototypes:
