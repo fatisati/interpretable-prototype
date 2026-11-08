@@ -62,11 +62,14 @@ def assemble_membership(S_mem, S_live, batch_idx, last_seen=None, step=None,
         (S_eff, size_g, w) -- w is None when the decay is off.
     """
     S_eff = S_mem.clone()
-    S_eff[batch_idx] = S_live               # batch rows carry the gradient
+    # index_copy_, NOT S_eff[batch_idx] = S_live: same result and gradient, but the
+    # advanced-indexing write (index_put_) takes ~1.8 s per call on Apple MPS for
+    # 6k x 300 rows (measured 2026-10-31) while index_copy_ takes 0.1 ms.
+    S_eff.index_copy_(0, batch_idx, S_live)   # batch rows carry the gradient
     w = None
     if half_life and half_life > 0:
         w = age_weights(last_seen, step, half_life)
-        w[batch_idx] = 1.0                  # fresh rows at full weight
+        w.index_fill_(0, batch_idx, 1.0)    # fresh rows at full weight
         S_eff = S_eff * w.unsqueeze(1)      # batch rows * 1.0 -- still live
     return S_eff, S_eff.sum(0), w
 

@@ -1,0 +1,100 @@
+{
+  "written": "2026-11-01T14:32:15",
+  "files": {
+    "data_h5ad": {
+      "path": "/Users/mghandi/CDS/research/interpretable-prototype/data/scpoli/Immune_ALL_human_hvg.h5ad",
+      "exists": true,
+      "bytes": 160028688,
+      "mtime": "2026-10-31T10:53:45",
+      "md5": "a8ca58021e268817016c8941bcef1f74"
+    },
+    "train_h5ad": {
+      "path": "/Users/mghandi/CDS/research/interpretable-prototype/data/node_heldout/pbmc-immune_arbf_ctb20_seed0_train.h5ad",
+      "exists": true,
+      "bytes": 190420790,
+      "mtime": "2026-10-31T10:53:47",
+      "md5": "9e8f0049f387a296f8e39335cd36a0ab"
+    },
+    "split_npz": {
+      "path": "/Users/mghandi/CDS/research/interpretable-prototype/data/node_heldout/pbmc-immune_arbf_ctb20_seed0_split.npz",
+      "exists": true,
+      "bytes": 998015,
+      "mtime": "2026-10-31T10:53:47",
+      "md5": "59ad12ecf80d1f096b6154c3d63ec7ea"
+    },
+    "split_committed": {
+      "path": "/Users/mghandi/CDS/research/interpretable-prototype/files/splits/pbmc-immune_arbf_ctb20_seed0_test_ids.txt",
+      "exists": true,
+      "bytes": 185999,
+      "mtime": "2026-11-01T14:31:32",
+      "md5": "f709b1968b4cb2169e7d5453d1d4371f"
+    },
+    "affinity_pkl": {
+      "path": "/Users/mghandi/CDS/research/interpretable-prototype/graphs/affinity_pbmc-immune_arbf_ctb20_seed0_train26806_ncomp50_kneighbors50_arbf.pkl",
+      "exists": true,
+      "bytes": 25075844,
+      "mtime": "2026-10-31T10:59:18",
+      "md5": "b51fbd6d8f5fef9f4130cf6cca5ced34"
+    },
+    "pretrain_ckpt": {
+      "path": "/Users/mghandi/CDS/research/interpretable-prototype/models/pbmc-immune_arbf_ctb20_seed0_train/pretrain/pretrain_ds-pbmc-immune_arbf_ctb20_seed0_train_cvae_e50/pretrain_checkpoint.pth",
+      "exists": true,
+      "bytes": 2093746,
+      "mtime": "2026-10-31T11:01:05",
+      "md5": "a478fb814cb753c59de98d16f7148bf3"
+    },
+    "gradshares_json": {
+      "path": "/Users/mghandi/CDS/research/interpretable-prototype/notebooks/pbmc_immune_local/tables/gradshares_local.json",
+      "exists": true,
+      "bytes": 1033,
+      "mtime": "2026-11-01T14:20:46",
+      "md5": "badd1a5ebaba7f85004aab32151f8398"
+    }
+  },
+  "packages": {
+    "python": "3.11.18",
+    "torch": "2.15.0",
+    "numpy": "2.2.6",
+    "scipy": "1.13.1",
+    "scanpy": "1.11.5",
+    "anndata": "0.12.19",
+    "scarches": "0.6.1",
+    "sklearn": "1.9.1",
+    "leidenalg": "0.12.0",
+    "igraph": "1.0.0",
+    "SEACells": "0.3.3",
+    "faiss": "1.15.1"
+  },
+  "git": {
+    "commit": "b464933d758fa1e431449c878186b65ea529165d",
+    "branch": "local-mac-mps",
+    "dirty": true
+  },
+  "device": {
+    "device": "cpu",
+    "platform": "macOS-26.5.1-arm64-arm-64bit",
+    "machine": "arm64",
+    "hostname": "Mahmouds-Mac-Studio.local",
+    "torch_cuda": false,
+    "torch_mps": true
+  },
+  "affinity_stats": {
+    "n_cells": 26806,
+    "nnz": 2080686,
+    "n_undirected_edges": 1026940,
+    "weight_sum": 716051.8567243256,
+    "deg_mean": 26.71237248094925,
+    "deg_median": 22.826140623539686,
+    "deg_min": 2.1510046562179923,
+    "deg_max": 214.67874486744404,
+    "diag_sum": 26806.0,
+    "within_batch_edge_frac": 0.9217490797904454
+  },
+  "extra": {
+    "arm": "d63_mse-rec",
+    "run_tag": "d63_mse-rec",
+    "model_name": "d63_mse-rec_local_ds-pbmc_prtInit-leid_frzbe1_aff-arbf_recon0.020137_lprec0.00019542_prfm-mix3_lumap0.0_usim-prot_cvae_e50_lgmk0.022091_cpsg1_ecal1_pum-ema_nagg-max_lcoh3.138053_upsg1_gprb5_cglb2_cmini-full_cdia1.0_lcha5.612829_upm-dotp_v31",
+    "seed": 31,
+    "backfilled": "written 2026-11-01 after the run from the unchanged input files (mtimes predate the runs)"
+  }
+}

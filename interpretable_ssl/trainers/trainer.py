@@ -43,7 +43,8 @@ class Trainer(TrainerBase):
             kwargs["debug"] = 0
         super().__init__(**kwargs)
 
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        from interpretable_ssl.utils import get_device
+        self.device = get_device()
         if self.dataset is None:
             print(f"dataset is None, loading {self.dataset_id}")
             self.dataset = self.get_dataset(self.dataset_id)
@@ -251,7 +252,10 @@ class Trainer(TrainerBase):
 
     def dict_to_device(self, inputs_dict):
         for key in inputs_dict:
-            inputs_dict[key] = inputs_dict[key].to(self.device)
+            tensor = inputs_dict[key]
+            if self.device == "mps" and tensor.dtype == torch.float64:
+                tensor = tensor.float()  # MPS has no float64
+            inputs_dict[key] = tensor.to(self.device)
         return inputs_dict
 
     def encode_adata(
@@ -707,7 +711,7 @@ class Trainer(TrainerBase):
         ad.obs["mc_idx"] = ad.obs["SEACell"].values
         protos = self.model.get_prototypes()
         sample_protos = protos[ad.obs["SEACell"]]
-        batch = self.train_ds.conditions.to("cuda")
+        batch = self.train_ds.conditions.to(self.device)
         ad.layers["metacell"] = (
             self.model.decode(sample_protos, batch).detach().cpu().numpy()
         )
