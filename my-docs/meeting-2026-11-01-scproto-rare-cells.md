@@ -44,6 +44,9 @@ stage 2   fine-tune with:
             CVAE recon kept on, so the batch correction is not destroyed
 ```
 
+The full five-term loss, its weights, and which parts are held fixed are in
+§2.1 below.
+
 **Why the similarity is defined within each batch:** a cross-batch zero mostly
 reflects the batch effect, not real dissimilarity. Comparing cells only to cells
 measured the same way keeps the signal clean.
@@ -54,6 +57,68 @@ adapts to local density, so cells in **sparse, rare regions get similarity
 scores comparable to cells in dense regions.** A fixed-width kernel would make
 every rare cell look dissimilar to everything, which is precisely the failure we
 are trying to fix.
+
+---
+
+
+### 2.1 The full loss, and what is detached
+
+**Detached** = the quantity still affects the loss *value*, but no gradient flows
+back through it, so that term cannot change it.
+
+```
+TERM             WHAT IT PUSHES FOR                    WEIGHT  SHARE  -> ENCODER  -> METACELLS
+---------------------------------------------------------------------------------------------
+cohesion gram    same NEIGHBOURS within a batch        2.7414  14.6%     yes          NO
+                 -> same metacell
+cohesion aff     ARE neighbours within a batch         4.8578  14.6%     yes          NO
+                 -> same metacell
+GM-KL            cell sits near its metacell centre;   0.0274  29.2%     yes         YES
+                 encoder stays stochastic
+CVAE recon       latent can still rebuild the cell,    0.0218  29.2%     yes          NO
+                 so stage-1 batch correction survives
+signature        a metacell means the SAME biology     5.7862  12.5%     yes          NO
+                 in every batch it spans
+```
+
+Weights are not chosen by hand. Each term's gradient size is measured once with
+its weight set to 1, then the weight is solved so the term takes the share
+shown. The **shares** are the design choice; the weights follow. (Numbers above
+are the MSE arm; they are re-derived per dataset and are not portable.)
+
+**Measured gradient onto the metacell positions** — not assumed:
+
+```
+cohesion gram  0.000000     CVAE recon  0.000000     GM-KL  0.033054
+cohesion aff   0.000000     signature   0.000000
+```
+
+Four exact zeros. **GM-KL is the only term that moves the metacells.** Every
+other term can only move cells *between* metacells, by changing the encoder.
+
+Why: if two terms both pull the metacells, each needs its own calibration,
+because a term's pull on the encoder and its pull on the metacells are different
+sizes. We learned this expensively — a term weighted from its encoder gradient
+pulled the metacells 5.7–18.6x harder than GM-KL, and they collapsed onto each
+other (nearest-neighbour similarity 0.81 → 0.9997).
+
+**Three extra detachments inside the signature term:**
+
+```
+memory half       a reference point, not a target. Gradient flows only through
+                  the cells seen in the current step.
+min(size, size)   left live it becomes a SIZE incentive -- a constant pull to
+                  join any large, well-aligned metacell regardless of fit --
+                  because the correlation part, which checks fit, weakens as a
+                  group grows.
+expression data   it is data. Nothing to learn.
+```
+
+Outside the loss, the **batch embedding is frozen** in stage 2. Stage 1 pushed
+batch information out of the latent and into that embedding; unfrozen, the
+encoder would drift batch structure back in and CVAE recon would stop protecting
+what we think it protects.
+
 
 ---
 
@@ -162,6 +227,42 @@ So part of the apparent "misalignment" for that type is correct behaviour, and
 forcing those together would be wrong. This is why we use signature correlation
 and not only annotations.
 
+### Why: cohesion's own optimum is a chimeric partition
+
+Measured after the fact, and it reframes everything above: the loss of
+alignment is **not** an implementation weakness.
+
+The test deletes the encoder. The assignment matrix becomes a plain table of
+numbers, 33,506 cells x 300 metacells, optimized directly against cohesion
+alone -- no network, no learning, no held-out cells. (Full method and the
+weight sweep built on it are in §7.2.)
+
+```
+                                       signature corr   chimeras
+start (stage-1 assignment)                 0.694          0.0%
+real training, full model                  0.603          9.9%
+cohesion alone, no encoder                 0.523         17.7%
+```
+
+Optimizing cohesion by itself destroys cross-batch alignment **by more than
+real training does.** That rules out both explanations we had been assuming:
+
+```
+"the encoder cannot generalise the structure"  -> ruled out, no encoder here
+"it is a held-out / unseen-cell problem"       -> ruled out, these are train cells
+```
+
+What remains is the uncomfortable one: **cohesion's own best answer is a
+chimeric partition.** Cohesion is not failing. It is succeeding, and a
+partition where metacells mean different things in different studies is what
+succeeding looks like for it. Cohesion scores each cell only against its own
+batch's neighbourhood, so a metacell can be perfectly cohesive in every batch
+separately while meaning something different in each.
+
+That is why no cross-batch term bolted on afterwards could fully work. It was
+patching over what the main objective actively wants.
+
+
 ---
 
 ## 5. The two directions we tried
@@ -198,9 +299,10 @@ asymmetry is why a separate alignment force is needed.
 ---
 
 
-## 6. The signature loss — everything in one place
 
-This resolves both directions in §5: the signature loss is built and tested, and
+## 6. The signature loss — what we built and what happened
+
+This resolves both directions in §5. The signature loss is built and tested, and
 the NB question is answered. It was run four ways — pull-only vs pull+push,
 crossed with MSE vs NB — all on the same split and seed.
 
@@ -243,65 +345,7 @@ Three choices decide whether it works at all:
   types, about 19 metacells share each cell type, so most "different metacell"
   pairs are genuinely the same biology and must be left alone.
 
-### 6.2 The full loss it sits inside, and what is detached
-
-**Detached** = the quantity still affects the loss *value*, but no gradient flows
-back through it, so that term cannot change it.
-
-```
-TERM             WHAT IT PUSHES FOR                    WEIGHT  SHARE  -> ENCODER  -> METACELLS
----------------------------------------------------------------------------------------------
-cohesion gram    same NEIGHBOURS within a batch        2.7414  14.6%     yes          NO
-                 -> same metacell
-cohesion aff     ARE neighbours within a batch         4.8578  14.6%     yes          NO
-                 -> same metacell
-GM-KL            cell sits near its metacell centre;   0.0274  29.2%     yes         YES
-                 encoder stays stochastic
-CVAE recon       latent can still rebuild the cell,    0.0218  29.2%     yes          NO
-                 so stage-1 batch correction survives
-signature        a metacell means the SAME biology     5.7862  12.5%     yes          NO
-                 in every batch it spans
-```
-
-Weights are not chosen by hand. Each term's gradient size is measured once with
-its weight set to 1, then the weight is solved so the term takes the share
-shown. The **shares** are the design choice; the weights follow. (Numbers above
-are the MSE arm; they are re-derived per dataset and are not portable.)
-
-**Measured gradient onto the metacell positions** — not assumed:
-
-```
-cohesion gram  0.000000     CVAE recon  0.000000     GM-KL  0.033054
-cohesion aff   0.000000     signature   0.000000
-```
-
-Four exact zeros. **GM-KL is the only term that moves the metacells.** Every
-other term can only move cells *between* metacells, by changing the encoder.
-
-Why: if two terms both pull the metacells, each needs its own calibration,
-because a term's pull on the encoder and its pull on the metacells are different
-sizes. We learned this expensively — a term weighted from its encoder gradient
-pulled the metacells 5.7–18.6x harder than GM-KL, and they collapsed onto each
-other (nearest-neighbour similarity 0.81 → 0.9997).
-
-**Three extra detachments inside the signature term:**
-
-```
-memory half       a reference point, not a target. Gradient flows only through
-                  the cells seen in the current step.
-min(size, size)   left live it becomes a SIZE incentive -- a constant pull to
-                  join any large, well-aligned metacell regardless of fit --
-                  because the correlation part, which checks fit, weakens as a
-                  group grows.
-expression data   it is data. Nothing to learn.
-```
-
-Outside the loss, the **batch embedding is frozen** in stage 2. Stage 1 pushed
-batch information out of the latent and into that embedding; unfrozen, the
-encoder would drift batch structure back in and CVAE recon would stop protecting
-what we think it protects.
-
-### 6.3 Results, held-out cells
+### 6.2 Results, held-out cells
 
 `scProto` is §4's arm. `+ sig` adds pull only; `+ sig both` adds pull and push.
 
@@ -335,7 +379,7 @@ that column as a set. It reproduces §4's figure for the shared arms (0.483 vs
 0.482); the rare row uses a different normalisation from §4's and is not
 comparable to it line by line.
 
-### 6.4 NB — the one place NB is reported
+### 6.3 NB — the one place NB is reported
 
 **Yes, NB was trained**, in two experiments, both on a fresh NB pretrain (an NB
 run cannot reuse the MSE encoder — different decoder head, different data scale):
@@ -380,47 +424,10 @@ than assumed.
 collapse); the cost lands on generalisation, which is the whole point of the
 method.
 
-### 6.5 Verdict
-
-**Partly worked. It did not fail, and it did not deliver.** §7 measures *why*.
-
-What it did:
-
-- **Chimeras nearly halved, 9.9% → 5.7%.** First term we have added that reduces
-  them at all.
-- **Rare metacells recover much of their lost alignment**, signature correlation
-  0.431 → 0.520 against stage-1's 0.671. §4 flagged rare metacells as degrading
-  most; this is the first thing that pushes back. Caveat: 7 rare metacells only.
-- **Within-batch rare purity 0.627 → 0.750**, ~2x the noise floor — the first
-  real gain on a rare metric from any term we have added.
-- **It costs nothing.** Cohesion and purity tie or edge up. Every previous added
-  term paid for its gains somewhere; this one does not.
-- **Batch mixing unharmed**, entropy 0.567 → 0.583.
-
-What it did not do:
-
-- **Missed every target set before the run** (signature correlation >= 0.69,
-  chimeras <= 3%, agreement > 69%). It recovers about a third of what stage 2
-  destroys.
-- **Did not improve generalisation.** Train-to-test cohesion gap 0.0457 without
-  it, 0.0490 with it. The model learns slightly more on training cells and
-  passes none of it on.
-- **Cell-type agreement did not move** (66.0% → 67.2%, inside the ~3 point
-  floor), even though the label-free measures did.
-- **Push term is not useful** — worse than pull-only on its own objective and on
-  every rare metric. Dropped.
-
-Two things to carry into the write-up:
-
-- **Signature correlation is now the training signal**, so it can no longer be
-  the headline evidence. Cell-type agreement and cross-batch purity have to
-  carry that, and neither moved much.
-- **Every rare number here is one run**, and run-to-run noise on rare metrics is
-  0.06–0.08. The 0.627 → 0.750 result needs a second seed before it is a claim.
 
 ---
 
-## 7. Why it under-delivered — the diagnosis
+## 7. Why the signature term lost
 
 §6 left one question open. The signature loss moved every number the right way
 but missed every target, and **its own quantity fell every epoch** while
@@ -519,37 +526,7 @@ Three things, all bad for the term:
 *(5 of 8 planned weights; the run was interrupted. The trend is established but
 the two largest weights are not measured.)*
 
-### 7.3 The finding that matters most
-
-Look at the **weight 0.00** row above: cohesion alone, signature term switched
-off, no encoder, no learning, no held-out cells.
-
-```
-                                       signature corr   chimeras
-start (stage-1 assignment)                 0.694          0.0%
-real training, full model                  0.603          9.9%
-cohesion alone, no encoder                 0.523         17.7%
-```
-
-Optimizing cohesion by itself destroys cross-batch alignment **by more than
-real training does.** That rules out both explanations we had been assuming:
-
-```
-"the encoder cannot generalise the structure"  -> ruled out, no encoder here
-"it is a held-out / unseen-cell problem"       -> ruled out, these are train cells
-```
-
-What remains is the uncomfortable one: **cohesion's own best answer is a
-chimeric partition.** Cohesion is not failing. It is succeeding, and a
-partition where metacells mean different things in different studies is what
-succeeding looks like for it. Cohesion scores each cell only against its own
-batch's neighbourhood, so a metacell can be perfectly cohesive in every batch
-separately while meaning something different in each.
-
-That is why no cross-batch term bolted on afterwards could fully work. It was
-patching over what the main objective actively wants.
-
-### 7.4 Three findings that were not the question
+### 7.3 Three findings that were not the question
 
 **The push half fights the pull half** (−0.712, 62% cancellation). With 300
 metacells and 16 cell types, about 19 metacells hold each cell type, so "make
@@ -567,7 +544,50 @@ justified as non-redundant — gram measures structural equivalence, aff measure
 proximity — but on this dataset their gradients largely agree, and they are
 being paid two separate shares (14.6% + 14.6%) for close to one direction.
 
-### 7.5 What this changes
+
+---
+
+## 8. Where this leaves us
+
+**Partly worked. It did not fail, and it did not deliver.**
+
+What it did:
+
+- **Chimeras nearly halved, 9.9% → 5.7%.** First term we have added that reduces
+  them at all.
+- **Rare metacells recover much of their lost alignment**, signature correlation
+  0.431 → 0.520 against stage-1's 0.671. §4 flagged rare metacells as degrading
+  most; this is the first thing that pushes back. Caveat: 7 rare metacells only.
+- **Within-batch rare purity 0.627 → 0.750**, ~2x the noise floor — the first
+  real gain on a rare metric from any term we have added.
+- **It costs nothing.** Cohesion and purity tie or edge up. Every previous added
+  term paid for its gains somewhere; this one does not.
+- **Batch mixing unharmed**, entropy 0.567 → 0.583.
+
+What it did not do:
+
+- **Missed every target set before the run** (signature correlation >= 0.69,
+  chimeras <= 3%, agreement > 69%). It recovers about a third of what stage 2
+  destroys.
+- **Did not improve generalisation.** Train-to-test cohesion gap 0.0457 without
+  it, 0.0490 with it. The model learns slightly more on training cells and
+  passes none of it on.
+- **Cell-type agreement did not move** (66.0% → 67.2%, inside the ~3 point
+  floor), even though the label-free measures did.
+- **Push term is not useful** — worse than pull-only on its own objective and on
+  every rare metric. Dropped.
+
+Two things to carry into the write-up:
+
+- **Signature correlation is now the training signal**, so it can no longer be
+  the headline evidence. Cell-type agreement and cross-batch purity have to
+  carry that, and neither moved much.
+- **Every rare number here is one run**, and run-to-run noise on rare metrics is
+  0.06–0.08. The 0.627 → 0.750 result needs a second seed before it is a claim.
+
+---
+
+
 
 ```
 DEAD END   raising the signature term's weight. Measured, not guessed.
