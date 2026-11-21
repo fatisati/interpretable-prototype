@@ -25,10 +25,12 @@ land somewhere stage 5 won't look.
 """
 import argparse
 import json
+import platform
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import scipy
 from scipy.sparse import load_npz
 
 from metrics import (
@@ -116,11 +118,21 @@ def score_job(df, affinity, score_mask, rare_pairs_global, std_threshold, min_ty
         result[f"agreement_{scope}"] = summarize_per_cell(values_scored, scored_df, rare_mask=is_rare_scored)
         if scope in FREQUENCY_CHECK_SCOPES:
             freq = compute_frequency(scored_df)
-            corr, pvalue, table = frequency_dependence(values_scored, freq)
+            corr, pvalue, slope, table = frequency_dependence(values_scored, freq)
             freq_rows.append({"metric": f"agreement_{scope}", "spearman_corr": corr,
-                               "spearman_pvalue": pvalue, "binned_table": table})
+                               "spearman_pvalue": pvalue, "slope_per_log10_freq": slope,
+                               "binned_table": table})
 
-    result["coverage"] = coverage(scored_df, rare_pairs)
+    # Per-batch values plus one dataset-wide mean/std, saved here so stage 5
+    # (results) never has to aggregate anything itself.
+    coverage_per_batch = coverage(scored_df, rare_pairs)
+    coverage_values = np.array(list(coverage_per_batch.values()), dtype=float)
+    result["coverage"] = {
+        "per_batch": coverage_per_batch,
+        "mean": float(coverage_values.mean()) if coverage_values.size else float("nan"),
+        "std": float(coverage_values.std()) if coverage_values.size else float("nan"),
+        "n_batches": int(coverage_values.size),
+    }
 
     per_pair, (f1_mean, f1_std) = rare_precision_recall_f1(scored_df, rare_pairs)
     result["rare_f1"] = {"mean": f1_mean, "std": f1_std, "n_pairs": len(per_pair)}
@@ -136,9 +148,10 @@ def score_job(df, affinity, score_mask, rare_pairs_global, std_threshold, min_ty
         },
     }
     freq = compute_frequency(scored_df)
-    corr, pvalue, table = frequency_dependence(cohesion_scored, freq)
+    corr, pvalue, slope, table = frequency_dependence(cohesion_scored, freq)
     freq_rows.append({"metric": "cohesion", "spearman_corr": corr,
-                       "spearman_pvalue": pvalue, "binned_table": table})
+                       "spearman_pvalue": pvalue, "slope_per_log10_freq": slope,
+                       "binned_table": table})
 
     return result, per_pair, freq_rows
 
@@ -231,15 +244,28 @@ def run(baseline, embedding_path, label_key, batch_key, affinity_dir,
     pd.concat(per_rare_type_rows, ignore_index=True).to_csv(out_dir / "metrics_per_rare_type.csv", index=False)
 
     freq_summary = pd.DataFrame([
-        {"job": r["job"], "metric": r["metric"], "spearman_corr": r["spearman_corr"], "spearman_pvalue": r["spearman_pvalue"]}
+        {"job": r["job"], "metric": r["metric"], "spearman_corr": r["spearman_corr"],
+         "spearman_pvalue": r["spearman_pvalue"], "slope_per_log10_freq": r["slope_per_log10_freq"]}
         for r in freq_rows_all
     ])
     freq_summary.to_csv(out_dir / "frequency_dependence.csv", index=False)
+
+    # Mean metric per frequency bin -- lets a reader see whether the decline
+    # is smooth across the whole range or one jump at the rare threshold.
+    bin_rows = []
+    for r in freq_rows_all:
+        for interval, stats in r["binned_table"].iterrows():
+            bin_rows.append({"job": r["job"], "metric": r["metric"],
+                             "freq_low": float(interval.left), "freq_high": float(interval.right),
+                             "mean": stats["mean"], "std": stats["std"], "count": int(stats["count"])})
+    pd.DataFrame(bin_rows).to_csv(out_dir / "frequency_bins.csv", index=False)
 
     (out_dir / "metrics_config.json").write_text(json.dumps({
         "embedding_path": str(embedding_path), "affinity_dir": str(affinity_dir),
         "std_threshold": std_threshold, "min_types_for_std": min_types_for_std,
         "n_rare_pairs": len(rare_pairs_global),
+        "versions": {"python": platform.python_version(), "pandas": pd.__version__,
+                     "numpy": np.__version__, "scipy": scipy.__version__},
     }, indent=2))
 
     print(f"[metrics] wrote {out_dir / 'metrics_summary.json'}")

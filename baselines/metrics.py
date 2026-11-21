@@ -222,17 +222,23 @@ def rare_precision_recall_f1(df, rare_pairs):
 
         precision = tp / (tp + fp) if (tp + fp) > 0 else float("nan")
         recall = tp / (tp + fn) if (tp + fn) > 0 else float("nan")
-        if np.isnan(precision) or np.isnan(recall) or (precision + recall) == 0:
-            f1 = float("nan")
-        else:
-            f1 = 2 * precision * recall / (precision + recall)
+        # F1 = 2TP / (2TP + FP + FN): same value as the harmonic mean whenever
+        # both are defined, and 0 (not NaN) when the type is missed entirely.
+        # A NaN here used to drop fully-scattered rare types from the F1
+        # average -- inflating F1 for exactly the failure this task tests.
+        # NaN only if the type has no cells in this batch and nothing is
+        # labeled as it (can't happen for a rare pair present in the batch).
+        denom = 2 * tp + fp + fn
+        f1 = 2 * tp / denom if denom > 0 else float("nan")
 
         rows.append({
             "true_type": t, "batch": b, "tp": tp, "fp": fp, "fn": fn,
             "precision": precision, "recall": recall, "f1": f1,
         })
 
-    per_pair = pd.DataFrame(rows)
+    # Explicit columns so zero rare pairs gives an empty table, not a crash.
+    per_pair = pd.DataFrame(rows, columns=["true_type", "batch", "tp", "fp", "fn",
+                                           "precision", "recall", "f1"])
     return per_pair, (float(per_pair["f1"].mean()), float(per_pair["f1"].std()))
 
 
@@ -257,12 +263,24 @@ def frequency_dependence(metric_values, frequency_values, n_bins=10):
     -- checks the decline is smooth across the whole range, not just a
     jump at the rare/common threshold (see task doc's frequency-dependence
     check). NaNs in either array are dropped before computing.
+
+    Also a slope: least-squares fit of metric vs log10(frequency), i.e.
+    how much the metric changes per 10x change in frequency. Spearman
+    only says *whether* the metric falls with frequency; the slope says
+    *how steeply*, which is what comparing train vs test needs (task doc:
+    "test-side drop at least as steep"). Positive = metric drops as
+    frequency drops. log10 because frequencies span orders of magnitude
+    (0.001 to 0.5) and a linear fit would be dominated by common types.
+
+    Returns (corr, pvalue, slope, table).
     """
     mask = ~np.isnan(metric_values) & ~np.isnan(frequency_values)
     corr, pvalue = spearmanr(metric_values[mask], frequency_values[mask])
+    log_freq = np.log10(frequency_values[mask])
+    slope = float(np.polyfit(log_freq, metric_values[mask], 1)[0]) if np.ptp(log_freq) > 0 else float("nan")
 
     bins = pd.qcut(frequency_values[mask], q=n_bins, duplicates="drop")
-    table = pd.DataFrame({"metric": metric_values[mask], "bin": bins}).groupby("bin")["metric"].agg(
+    table = pd.DataFrame({"metric": metric_values[mask], "bin": bins}).groupby("bin", observed=True)["metric"].agg(
         ["mean", "std", "count"]
     )
-    return float(corr), float(pvalue), table
+    return float(corr), float(pvalue), slope, table
