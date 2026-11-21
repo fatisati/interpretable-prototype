@@ -23,7 +23,7 @@ own version of that step.
                     |
                     v
 3. Baselines                 baselines/scvi_baseline.py, seacells_baseline.py, (future) harmony_baseline.py, ...
-   the methods under test themselves
+   the methods under test themselves, clustering included (see below)
                     |
                     v
 4. Metrics                   baselines/metrics.py + compute_metrics.py
@@ -40,32 +40,46 @@ own version of that step.
 |---|---|---|---|
 | 1. Dataset prep | `datasets/processed/*.h5ad` | raw downloads | — |
 | 2. Evaluation setup | `split.csv`/`.json`, `affinity_train/full.npz`, `affinity_config.json`, `cluster_config.json` | stage 1's output | — |
-| 3. Baselines | its own `embedding.csv`/`assignments.csv`, `config.json` | stage 1 + stage 2's output | create a split, build its own affinity graph, decide its own cluster count, re-normalize data |
+| 3. Baselines | its own `embedding.csv`/`assignments.csv`¹, `config.json` | stage 1 + stage 2's output² | create a split, build its own affinity graph, decide its own cluster count, re-normalize data |
 | 4. Metrics | `metrics_summary.json`, `metrics_per_batch.csv`, `metrics_per_rare_type.csv` | stage 2 + stage 3's output | know anything method-specific (that's the adapter's job, below) |
 | 5. Results | `results/<task>.md` | stage 4's output across every baseline/dataset | compute anything itself |
 
-## Clustering: one shared number, several method-specific ways to use it
+¹ Embedding **and** cluster labels together, one file — see Clustering below.
+² Split and cluster count always; the affinity graph only if that method needs one as input (SEACells does, as its kernel; scVI/Harmony/ComBat/BBKNN don't — they only meet it later, in stage 4, since every baseline's cohesion is scored against it regardless).
 
-Every baseline must produce the **same number of clusters, K**, for a given
-dataset — otherwise comparing e.g. purity or cohesion across baselines isn't
-fair (more clusters makes purity trivially easier). But *how* each method
-gets to K differs, since the methods don't all produce the same kind of
-output:
+## Clustering: where it happens, and where its output lands
+
+**Clustering happens inside stage 3, as part of each baseline's own
+script — not as a separate stage.** Its output (the cluster label per
+cell) is saved in the *same file* as that baseline's embedding
+(`embedding.csv`), as an extra column, not a separate file. For scVI
+specifically: `scvi_baseline.py` writes one `embedding.csv` with
+`latent_0..latent_9` (the embedding) and `cluster_train_run`/
+`cluster_full_run` (the cluster labels) side by side, same rows. Anything
+reading a baseline's output (stage 4's metrics) reads cluster assignments
+from that one file, never a second one.
+
+Every baseline must still land on the **same number of clusters, K**, for
+a given dataset — otherwise comparing e.g. purity or cohesion across
+baselines isn't fair (more clusters makes purity trivially easier). *How*
+each method reaches K differs, since the methods don't all produce the
+same kind of output:
 
 - **The number itself (K) is shared data, decided once** — stage 2
   (`prepare_eval.py`) computes `K = n_cells // 75` (both for train-only and
-  full cell counts) and saves it in `cluster_config.json`, the same
-  create-once-read-many pattern as the split and the affinity graph.
+  full cell counts) and saves it in `cluster_config.json`. Every baseline
+  reads it with `common.load_cluster_config` — same create-once-read-many
+  pattern as the split and the affinity graph.
 - **How a baseline reaches K is method-specific code**, living in stage 3:
   - **scVI, Harmony, ComBat** output an embedding only — Leiden runs on a
     neighbor graph built from that embedding. Leiden takes a *resolution*
     parameter, not a cluster count directly, so these sweep a small range
-    of resolution values and keep whichever gets closest to the shared K.
-    This sweep is shared *code* (not data) — one helper function used by
-    all three, not reimplemented per baseline.
+    of resolution values and keep whichever gets closest to the shared K
+    (`common.sweep_leiden_to_k` — shared *code*, one helper, not
+    reimplemented per baseline; `scvi_baseline.py` already calls it).
   - **BBKNN** outputs a corrected graph directly — Leiden runs straight on
-    that graph (no neighbor graph needs building first), same sweep-to-K
-    helper.
+    that graph (no neighbor graph needs building first), same
+    `sweep_leiden_to_k` helper.
   - **SEACells** has clustering built into the method itself — it never
     produces an embedding/graph that something else clusters afterward.
     It reads the same K from `cluster_config.json` and passes it straight
