@@ -25,6 +25,8 @@ Usage:
 """
 import argparse
 import json
+import platform
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 import pandas as pd
@@ -43,6 +45,18 @@ def pick_gene_likelihood(adata, layer):
     return "nb" if looks_like_raw_counts(values) else "normal"
 
 
+def environment_versions():
+    """Exact versions of everything that can change this baseline's output
+    (repo rule: see CLAUDE.md), saved into config.json next to the result."""
+    versions = {"python": platform.python_version()}
+    for pkg in ["scvi-tools", "torch", "scanpy", "anndata", "leidenalg", "igraph", "numpy", "pandas"]:
+        try:
+            versions[pkg] = version(pkg)
+        except PackageNotFoundError:
+            versions[pkg] = None
+    return versions
+
+
 def run(
     h5ad_path,
     batch_key,
@@ -51,7 +65,7 @@ def run(
     layer=None,
     test_size=0.2,
     seed=0,
-    max_epochs=None,
+    max_epochs=100,
     n_latent=10,
     accelerator="auto",
     early_stopping=True,
@@ -76,10 +90,13 @@ def run(
     train_adata = adata[train_mask].copy()
     scvi.model.SCVI.setup_anndata(train_adata, batch_key=batch_key, layer=layer)
     model = scvi.model.SCVI(train_adata, n_latent=n_latent, gene_likelihood=gene_likelihood)
-    # early_stopping bounds training to however many epochs the model actually needs
-    # (watches validation loss, stops once it stops improving) instead of always
-    # running scvi-tools' fixed epoch heuristic (400 for a dataset this size).
+    # max_epochs=100 by default: scvi-tools' own heuristic picks 400 for a
+    # dataset this size (~19k cells), which was never a deliberate choice;
+    # 100 is plenty here. early_stopping can still end training sooner
+    # (watches validation loss, stops once it stops improving) -- the
+    # actual count lands in config.json as epochs_trained.
     model.train(max_epochs=max_epochs, accelerator=accelerator, early_stopping=early_stopping)
+    epochs_trained = len(model.history["elbo_train"])
 
     # get_latent_representation accepts any AnnData with the same genes/obs
     # columns as training data -- it registers and embeds test cells through
@@ -130,6 +147,7 @@ def run(
         "seed": seed,
         "n_latent": n_latent,
         "max_epochs": max_epochs,
+        "epochs_trained": epochs_trained,
         "early_stopping": early_stopping,
         "n_train": int(train_mask.sum()),
         "n_test": int(test_mask.sum()),
@@ -140,6 +158,7 @@ def run(
         "n_clusters_train": int(pd.Series(train_labels).nunique()),
         "n_clusters_full": int(pd.Series(full_labels).nunique()),
     }
+    config["environment"] = environment_versions()
     (out_dir / "config.json").write_text(json.dumps(config, indent=2))
 
     print(f"[scvi] wrote {out_dir / 'embedding.csv'}")
@@ -155,7 +174,8 @@ def parse_args():
     p.add_argument("--layer", default=None, help="adata.layers key to use as input (default: X)")
     p.add_argument("--test-size", type=float, default=0.2)
     p.add_argument("--seed", type=int, default=0)
-    p.add_argument("--max-epochs", type=int, default=None, help="default: scvi-tools picks based on dataset size")
+    p.add_argument("--max-epochs", type=int, default=100,
+                   help="upper bound; early stopping may end sooner (default 100, see comment in run())")
     p.add_argument("--n-latent", type=int, default=10)
     p.add_argument("--accelerator", default="auto", help="'auto', 'cpu', or 'gpu'")
     p.add_argument("--no-early-stopping", dest="early_stopping", action="store_false",

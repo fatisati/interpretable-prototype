@@ -166,12 +166,36 @@ def metrics_dir_for(embedding_path):
     return Path(embedding_path).parent / "metrics"
 
 
+def validate_jobs(jobs, embedding_path):
+    """Fail loudly on a stale or broken baseline output instead of scoring
+    it. Checks every row in each job's df, not just scored rows: cohesion
+    for a scored cell depends on every other cell in its cluster, so one
+    unlabeled train cell silently corrupts test cohesion. (This exact case
+    happened: an old scvi embedding.csv had no cluster_full_run label for
+    any train cell, and metrics ran without complaint.)"""
+    for job_name, job in jobs.items():
+        df = job["df"]
+        n_missing = int(df["cluster"].isna().sum())
+        if n_missing:
+            raise ValueError(
+                f"job={job_name}: {n_missing:,} of {len(df):,} cells have no cluster label in "
+                f"{embedding_path}. Likely a stale baseline output -- re-run the baseline."
+            )
+        n_aff = job["affinity"].shape[0]
+        if n_aff != len(df):
+            raise ValueError(
+                f"job={job_name}: affinity graph has {n_aff:,} cells but the job has {len(df):,}. "
+                f"Baseline output and stage 2 files don't match -- re-run whichever is older."
+            )
+
+
 def run(baseline, embedding_path, label_key, batch_key, affinity_dir,
         std_threshold=1.0, min_types_for_std=4):
     if baseline not in ADAPTERS:
         raise ValueError(f"no adapter for baseline={baseline!r}; add one to ADAPTERS in this file")
 
     jobs = ADAPTERS[baseline](embedding_path, label_key, batch_key, affinity_dir)
+    validate_jobs(jobs, embedding_path)
 
     # One fixed, dataset-wide rare-type list, from every cell across every
     # job -- not re-derived per job (see score_job's docstring for why).
