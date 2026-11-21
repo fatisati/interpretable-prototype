@@ -1,0 +1,108 @@
+# Pipeline architecture
+
+One rule everything below follows: **anything that must be identical across
+every baseline gets computed once, saved, and only ever read afterward.**
+Nothing downstream is allowed to create its own copy.
+
+**Every baseline must follow this design — no exceptions.** A baseline that
+creates its own split, its own affinity graph, or its own cluster count,
+even "just this once," breaks the comparison between every baseline, not
+just itself. If a baseline's own library needs something these stages
+already produce, it reads the saved file — it does not call the library's
+own version of that step.
+
+## The 5 stages
+
+```
+1. Dataset prep              datasets/prepare.py
+   raw file -> clean, HVG-selected matrix
+                    |
+                    v
+2. Evaluation setup          baselines/prepare_eval.py
+   split.csv + affinity_train.npz + affinity_full.npz + cluster_config.json
+                    |
+                    v
+3. Baselines                 baselines/scvi_baseline.py, seacells_baseline.py, (future) harmony_baseline.py, ...
+   the methods under test themselves
+                    |
+                    v
+4. Metrics                   baselines/metrics.py + compute_metrics.py
+   generic scoring math, one small adapter per baseline
+                    |
+                    v
+5. Results                   results/<task>.md
+   final comparison + verdict
+```
+
+## What each stage owns, reads, and never touches
+
+| Stage | Owns (only writer) | Reads | Must never do |
+|---|---|---|---|
+| 1. Dataset prep | `datasets/processed/*.h5ad` | raw downloads | — |
+| 2. Evaluation setup | `split.csv`/`.json`, `affinity_train/full.npz`, `affinity_config.json`, `cluster_config.json` | stage 1's output | — |
+| 3. Baselines | its own `embedding.csv`/`assignments.csv`, `config.json` | stage 1 + stage 2's output | create a split, build its own affinity graph, decide its own cluster count, re-normalize data |
+| 4. Metrics | `metrics_summary.json`, `metrics_per_batch.csv`, `metrics_per_rare_type.csv` | stage 2 + stage 3's output | know anything method-specific (that's the adapter's job, below) |
+| 5. Results | `results/<task>.md` | stage 4's output across every baseline/dataset | compute anything itself |
+
+## Clustering: one shared number, several method-specific ways to use it
+
+Every baseline must produce the **same number of clusters, K**, for a given
+dataset — otherwise comparing e.g. purity or cohesion across baselines isn't
+fair (more clusters makes purity trivially easier). But *how* each method
+gets to K differs, since the methods don't all produce the same kind of
+output:
+
+- **The number itself (K) is shared data, decided once** — stage 2
+  (`prepare_eval.py`) computes `K = n_cells // 75` (both for train-only and
+  full cell counts) and saves it in `cluster_config.json`, the same
+  create-once-read-many pattern as the split and the affinity graph.
+- **How a baseline reaches K is method-specific code**, living in stage 3:
+  - **scVI, Harmony, ComBat** output an embedding only — Leiden runs on a
+    neighbor graph built from that embedding. Leiden takes a *resolution*
+    parameter, not a cluster count directly, so these sweep a small range
+    of resolution values and keep whichever gets closest to the shared K.
+    This sweep is shared *code* (not data) — one helper function used by
+    all three, not reimplemented per baseline.
+  - **BBKNN** outputs a corrected graph directly — Leiden runs straight on
+    that graph (no neighbor graph needs building first), same sweep-to-K
+    helper.
+  - **SEACells** has clustering built into the method itself — it never
+    produces an embedding/graph that something else clusters afterward.
+    It reads the same K from `cluster_config.json` and passes it straight
+    in as its own `n_SEACells` parameter. No sweep, no helper — just reads
+    the shared number.
+
+## How a new baseline gets added later
+
+Only two things, nothing else:
+1. One new thin adapter file in stage 3 (e.g. `harmony_baseline.py`) — reads
+   stages 1+2 (including `cluster_config.json` for its target K), writes its
+   own `embedding.csv`.
+2. One small adapter function in stage 4's `compute_metrics.py` — reshapes
+   that baseline's particular `embedding.csv` into the standard shape
+   (`cell_id, batch, true_type, cluster`) the generic metric functions
+   already expect.
+
+The metric math, the split, the affinity graph, and the cluster count never
+change to accommodate a new baseline.
+
+## Every saved artifact has a config sidecar
+
+`split.csv` -> `split.json`. `affinity_*.npz` -> `affinity_config.json`.
+Cluster count -> `cluster_config.json`. Same pattern every time: the exact
+parameters that produced a file live right next to it, so nothing has to be
+reconstructed from memory. A consumer that finds a mismatch (wrong seed,
+wrong test_size, wrong ratio) errors loudly instead of silently reusing a
+stale file.
+
+## Why this matters, concretely
+
+This isn't just tidiness — it already caused a real bug. An early version
+of `scvi_baseline.py` discarded train cells' cluster label from the
+full-dataset clustering run, because *assignment* metrics on train cells
+don't need it. But *cohesion* scoring for a test cell needs to know every
+other cell sharing its cluster, including train cells, from that same run.
+Mixing "what does this baseline need" with "what might downstream scoring
+need" produced a real correctness bug before a single metric was even
+written. Keeping creation and consumption in strictly separate stages is
+what catches this class of problem before it happens again.

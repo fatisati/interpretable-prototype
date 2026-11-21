@@ -3,9 +3,6 @@
 A method for building metacells that preserve rare cell states across
 batches, guided by any cell-cell affinity graph (transcriptomic or spatial).
 
-This branch (`clean-v2`) is a fresh start: an orphan branch with no shared
-history, built to keep baselines, gap-checks, and the method itself
-organized from day one.
 
 ## Folders
 
@@ -26,7 +23,15 @@ organized from day one.
 
 1. Write a task in `tasks/<task_name>.md`: the gap, the metrics that
    decide if it's real, and why -- before running anything.
-2. Run baselines, save each to `runs/<task>/<dataset>/<baseline>/`.
-3. Write the gap verdict in `results/<task>.md`.
-4. If the gap is real, run scProto, save to `runs/<task>/<dataset>/scproto/`.
-5. Update `results/<task>.md` with the comparison and final conclusion.
+2. Prepare the dataset (`datasets/prepare.py`), then the shared evaluation
+   setup for that task -- train/test split, ground-truth affinity graphs,
+   and cluster count (`baselines/prepare_eval.py`). Every baseline below
+   reads these; none of them create their own copy -- see
+   `docs/architecture.md` for the full pipeline design.
+3. Run each baseline, save to `runs/<task>/<dataset>/<baseline>/`.
+4. Compute metrics from each baseline's saved output
+   (`baselines/compute_metrics.py`) -- rerunnable on its own, without
+   retraining anything, if a new metric comes up later.
+5. Write the gap verdict in `results/<task>.md`.
+6. If the gap is real, run scProto, save to `runs/<task>/<dataset>/scproto/`.
+7. Update `results/<task>.md` with the comparison and final conclusion.
