@@ -41,11 +41,12 @@ own version of that step.
 | 1. Dataset prep | `datasets/processed/*.h5ad` | raw downloads | — |
 | 2. Evaluation setup | `split.csv`/`.json`, `affinity_train/full.npz`, `affinity_config.json`, `cluster_config.json` | stage 1's output | — |
 | 3. Baselines | its own `embedding.csv`/`assignments.csv`¹, `config.json` | stage 1 + stage 2's output² | create a split, build its own affinity graph, decide its own cluster count, re-normalize data |
-| 4. Metrics | `metrics_summary.json`, `metrics_per_batch.csv`, `metrics_per_rare_type.csv` | stage 2 + stage 3's output | know anything method-specific (that's the adapter's job, below) |
+| 4. Metrics | `<baseline>/metrics/`³: `metrics_summary.json`, `metrics_per_batch.csv`, `metrics_per_rare_type.csv`, `frequency_dependence.csv`, `metrics_config.json` | stage 2 + stage 3's output | know anything method-specific (that's the adapter's job, below) |
 | 5. Results | `results/<task>.md` | stage 4's output across every baseline/dataset | compute anything itself |
 
 ¹ Embedding **and** cluster labels together, one file — see Clustering below.
 ² Split and cluster count always; the affinity graph only if that method needs one as input (SEACells does, as its kernel; scVI/Harmony/ComBat/BBKNN don't — they only meet it later, in stage 4, since every baseline's cohesion is scored against it regardless).
+³ Full path `runs/<task>/<dataset>/<baseline>/metrics/`, decided in one place (`compute_metrics.metrics_dir_for`), never passed as a flag. A separate subfolder so stage 3 and stage 4 never write the same folder, and re-scoring never touches the baseline's own output.
 
 ## Clustering: where it happens, and where its output lands
 

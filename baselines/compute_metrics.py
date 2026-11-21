@@ -17,8 +17,11 @@ Usage:
     python baselines/compute_metrics.py --baseline scvi \\
         --embedding runs/rare_cell_preservation/heart_cell_atlas/scvi/embedding.csv \\
         --affinity-dir runs/rare_cell_preservation/heart_cell_atlas \\
-        --label-key cell_type --batch-key donor \\
-        --out-dir runs/rare_cell_preservation/heart_cell_atlas/scvi
+        --label-key cell_type --batch-key donor
+
+Output always goes to a metrics/ folder next to the embedding file (see
+metrics_dir_for). There is no --out-dir flag on purpose: results can never
+land somewhere stage 5 won't look.
 """
 import argparse
 import json
@@ -155,7 +158,15 @@ def flatten_per_batch(summary, job_name):
     return rows
 
 
-def run(baseline, embedding_path, label_key, batch_key, affinity_dir, out_dir,
+def metrics_dir_for(embedding_path):
+    """The one place the metrics output location is decided:
+    runs/<task>/<dataset>/<baseline>/metrics/. A subfolder of the baseline's
+    own run folder, so each folder has one writer and re-scoring never
+    touches the (expensive) baseline output."""
+    return Path(embedding_path).parent / "metrics"
+
+
+def run(baseline, embedding_path, label_key, batch_key, affinity_dir,
         std_threshold=1.0, min_types_for_std=4):
     if baseline not in ADAPTERS:
         raise ValueError(f"no adapter for baseline={baseline!r}; add one to ADAPTERS in this file")
@@ -188,7 +199,7 @@ def run(baseline, embedding_path, label_key, batch_key, affinity_dir, out_dir,
             row["job"] = job_name
             freq_rows_all.append(row)
 
-    out_dir = Path(out_dir)
+    out_dir = metrics_dir_for(embedding_path)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     (out_dir / "metrics_summary.json").write_text(json.dumps(summary, indent=2, default=str))
@@ -218,7 +229,6 @@ def parse_args():
     p.add_argument("--label-key", required=True)
     p.add_argument("--batch-key", required=True)
     p.add_argument("--affinity-dir", required=True, help="dataset dir containing affinity_train/full.npz")
-    p.add_argument("--out-dir", required=True)
     p.add_argument("--std-threshold", type=float, default=1.0)
     p.add_argument("--min-types-for-std", type=int, default=4)
     return p.parse_args()
@@ -232,7 +242,6 @@ if __name__ == "__main__":
         label_key=args.label_key,
         batch_key=args.batch_key,
         affinity_dir=args.affinity_dir,
-        out_dir=args.out_dir,
         std_threshold=args.std_threshold,
         min_types_for_std=args.min_types_for_std,
     )
