@@ -6,6 +6,10 @@ encoder, cluster twice (train-only embedding and the full embedding), and
 save everything a metrics script would need -- per-cell latent coordinates,
 split, and both sets of cluster labels -- to one file.
 
+Clustering is a separate step (common.cluster_embedding_file) that reads
+the saved embedding.csv. This script calls it right after training; to
+change clustering later WITHOUT retraining, run baselines/recluster.py.
+
 Reads the split and the target cluster count from
 `baselines/prepare_eval.py`'s output -- doesn't create either itself. Run
 that script first for this dataset; see docs/architecture.md for why.
@@ -25,15 +29,13 @@ Usage:
 """
 import argparse
 import json
-import platform
-from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 import pandas as pd
 import scanpy as sc
 import scvi
 
-from common import load_cluster_config, load_split, looks_like_raw_counts, sweep_leiden_to_k
+from common import cluster_embedding_file, environment_versions, load_cluster_config, load_split, looks_like_raw_counts
 
 
 def pick_gene_likelihood(adata, layer):
@@ -43,18 +45,6 @@ def pick_gene_likelihood(adata, layer):
     """
     values = adata.layers[layer] if layer else adata.X
     return "nb" if looks_like_raw_counts(values) else "normal"
-
-
-def environment_versions():
-    """Exact versions of everything that can change this baseline's output
-    (repo rule: see CLAUDE.md), saved into config.json next to the result."""
-    versions = {"python": platform.python_version()}
-    for pkg in ["scvi-tools", "torch", "scanpy", "anndata", "leidenalg", "igraph", "numpy", "pandas"]:
-        try:
-            versions[pkg] = version(pkg)
-        except PackageNotFoundError:
-            versions[pkg] = None
-    return versions
 
 
 def run(
@@ -84,7 +74,8 @@ def run(
     train_mask = (adata.obs["split"] == "train").to_numpy()
     test_mask = ~train_mask
 
-    cluster_config = load_cluster_config(dataset_dir / "cluster_config.json")
+    # Fail before training (not after) if stage 2's cluster count is missing.
+    load_cluster_config(dataset_dir / "cluster_config.json")
 
     scvi.settings.seed = seed
     train_adata = adata[train_mask].copy()
@@ -103,13 +94,6 @@ def run(
     # the trained encoder without needing a separate setup_anndata call.
     adata.obsm["X_scVI"] = model.get_latent_representation(adata)
 
-    train_labels, resolution_train = sweep_leiden_to_k(
-        adata[train_mask], use_rep="X_scVI", target_k=cluster_config["k_train"]
-    )
-    full_labels, resolution_full = sweep_leiden_to_k(
-        adata, use_rep="X_scVI", target_k=cluster_config["k_full"]
-    )
-
     result = pd.DataFrame({
         "cell_id": adata.obs_names,
         "split": adata.obs["split"].to_numpy(),
@@ -118,19 +102,6 @@ def run(
     })
     for dim in range(adata.obsm["X_scVI"].shape[1]):
         result[f"latent_{dim}"] = adata.obsm["X_scVI"][:, dim]
-
-    # cluster_train_run: only meaningful for train cells (that's the run's
-    # whole population), so train cells get it and test cells get NA.
-    # cluster_full_run: every cell gets a label here -- cohesion scoring for
-    # a test cell needs to know which OTHER cells (including train cells)
-    # share its cluster in this run, not just test cells' own labels. Which
-    # rows count for *assignment* scoring (test only, per the task's
-    # evaluation protocol) is decided by the metrics step that reads this
-    # file, not by what gets saved here.
-    result["cluster_train_run"] = pd.NA
-    result.loc[train_mask, "cluster_train_run"] = train_labels
-
-    result["cluster_full_run"] = full_labels
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -151,17 +122,14 @@ def run(
         "early_stopping": early_stopping,
         "n_train": int(train_mask.sum()),
         "n_test": int(test_mask.sum()),
-        "k_train_target": cluster_config["k_train"],
-        "k_full_target": cluster_config["k_full"],
-        "resolution_train": resolution_train,
-        "resolution_full": resolution_full,
-        "n_clusters_train": int(pd.Series(train_labels).nunique()),
-        "n_clusters_full": int(pd.Series(full_labels).nunique()),
+        "environment": environment_versions(),
     }
-    config["environment"] = environment_versions()
     (out_dir / "config.json").write_text(json.dumps(config, indent=2))
+    print(f"[scvi] wrote {out_dir / 'embedding.csv'} (latents)")
 
-    print(f"[scvi] wrote {out_dir / 'embedding.csv'}")
+    # Adds cluster_train_run / cluster_full_run to embedding.csv and the
+    # clustering fields to config.json -- same code recluster.py runs.
+    cluster_embedding_file(out_dir)
     return out_dir
 
 

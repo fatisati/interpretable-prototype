@@ -9,10 +9,13 @@ embedding/graph-output baseline needs the same sweep logic), not shared
 its own embedding.
 """
 import json
+import platform
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import anndata
 import scanpy as sc
 from sklearn.model_selection import train_test_split
 
@@ -137,7 +140,7 @@ def load_cluster_config(cluster_config_path):
     return json.loads(cluster_config_path.read_text())
 
 
-def sweep_leiden_to_k(adata, use_rep, target_k, resolutions=None):
+def sweep_leiden_to_k(adata, use_rep, target_k, resolutions=None, max_refine_steps=12):
     """Leiden doesn't take a target cluster count directly the way k-means
     would, and its resolution parameter doesn't map cleanly onto cluster
     count -- the count can stay flat across a range of resolution values,
@@ -152,6 +155,9 @@ def sweep_leiden_to_k(adata, use_rep, target_k, resolutions=None):
 
     Builds the neighbor graph once, then sweeps resolution on top of it --
     the expensive step only runs once, not once per candidate resolution.
+    After the coarse grid, bisects between the two grid values that bracket
+    target_k (see step 2 below) so the result lands close to K, not just
+    on whichever grid value happens to be nearest.
     """
     if resolutions is None:
         # Log-spaced: target_k here can be a handful of cell-type-level
@@ -166,14 +172,108 @@ def sweep_leiden_to_k(adata, use_rep, target_k, resolutions=None):
     ad = adata.copy()
     sc.pp.neighbors(ad, use_rep=use_rep)
 
-    best_labels, best_gap, best_resolution, best_k = None, None, None, None
-    for resolution in resolutions:
+    tried = {}  # resolution -> (n_clusters, labels)
+
+    def try_resolution(resolution):
         sc.tl.leiden(ad, resolution=resolution, key_added="_sweep", flavor="igraph")
         labels = ad.obs["_sweep"].to_numpy()
-        n_clusters = len(set(labels))
-        gap = abs(n_clusters - target_k)
-        if best_gap is None or gap < best_gap:
-            best_gap, best_labels, best_resolution, best_k = gap, labels.copy(), resolution, n_clusters
+        tried[resolution] = (len(set(labels)), labels.copy())
 
-    print(f"[cluster] target_k={target_k} -> resolution={best_resolution} gave {best_k} clusters")
+    # 1. Coarse grid: find roughly where target_k sits.
+    for resolution in resolutions:
+        try_resolution(resolution)
+
+    # 2. Refine: the coarse grid can jump right over target_k (heart atlas:
+    # 15 -> 193 clusters, 20 -> 265, target 248). Bisect between the
+    # closest grid value below target_k and the closest above, on a log
+    # scale, until exact or out of tries. Cluster count isn't perfectly
+    # monotone in resolution, so the bracket is re-read from everything
+    # tried so far each step, not assumed.
+    for _ in range(max_refine_steps):
+        if any(k == target_k for k, _ in tried.values()):
+            break
+        below = [r for r, (k, _) in tried.items() if k < target_k]
+        above = [r for r, (k, _) in tried.items() if k > target_k]
+        if not below or not above:
+            break  # target_k outside the grid's reach -- keep the closest
+        lo, hi = max(below), min(above)
+        if lo >= hi:
+            break  # non-monotone region, no clean bracket
+        mid = float(np.sqrt(lo * hi))
+        if mid in tried or hi / lo < 1.001:
+            break
+        try_resolution(mid)
+
+    best_resolution = min(tried, key=lambda r: (abs(tried[r][0] - target_k), r))
+    best_k, best_labels = tried[best_resolution]
+    print(f"[cluster] target_k={target_k} -> resolution={best_resolution:.4g} gave {best_k} clusters "
+          f"({len(tried)} resolutions tried)")
     return best_labels, best_resolution
+
+
+def environment_versions():
+    """Exact versions of everything that can change a baseline's output
+    (repo rule: see CLAUDE.md), saved into config.json next to the result."""
+    versions = {"python": platform.python_version()}
+    for pkg in ["scvi-tools", "torch", "scanpy", "anndata", "leidenalg", "igraph", "numpy", "pandas"]:
+        try:
+            versions[pkg] = version(pkg)
+        except PackageNotFoundError:
+            versions[pkg] = None
+    return versions
+
+
+def cluster_embedding_file(run_dir):
+    """The one clustering code path for every embedding-output baseline
+    (scVI, Harmony, ComBat). Reads <run_dir>/embedding.csv (latent_*
+    columns + split), clusters twice to the shared K from the dataset's
+    cluster_config.json, and rewrites in place:
+      - embedding.csv's cluster_train_run / cluster_full_run columns
+      - config.json's clustering fields (and environment versions)
+    Training scripts call this right after saving the embedding;
+    baselines/recluster.py calls it alone, so clustering can change
+    without retraining -- and both paths run identical code.
+
+    cluster_train_run: train cells only (that run's whole population),
+    test cells get NA. cluster_full_run: every cell -- cohesion for a test
+    cell needs every other cell sharing its cluster, train cells included.
+    Which rows count for *assignment* scoring is the metrics step's call.
+    """
+    run_dir = Path(run_dir)
+    emb_path, config_path = run_dir / "embedding.csv", run_dir / "config.json"
+    df = pd.read_csv(emb_path)
+    latent_cols = [c for c in df.columns if c.startswith("latent_")]
+    if not latent_cols:
+        raise ValueError(f"{emb_path} has no latent_* columns -- nothing to cluster")
+    cluster_config = load_cluster_config(run_dir.parent / "cluster_config.json")
+
+    # float32: what the model produced before the CSV round-trip.
+    ad = anndata.AnnData(obs=pd.DataFrame(index=df["cell_id"].astype(str).to_numpy()))
+    ad.obsm["X_emb"] = df[latent_cols].to_numpy(dtype=np.float32)
+    train_mask = (df["split"] == "train").to_numpy()
+
+    train_labels, resolution_train = sweep_leiden_to_k(
+        ad[train_mask], use_rep="X_emb", target_k=cluster_config["k_train"]
+    )
+    full_labels, resolution_full = sweep_leiden_to_k(
+        ad, use_rep="X_emb", target_k=cluster_config["k_full"]
+    )
+
+    df["cluster_train_run"] = pd.NA
+    df.loc[train_mask, "cluster_train_run"] = train_labels
+    df["cluster_full_run"] = full_labels
+    df.to_csv(emb_path, index=False)
+
+    config = json.loads(config_path.read_text()) if config_path.exists() else {}
+    config.update({
+        "k_train_target": cluster_config["k_train"],
+        "k_full_target": cluster_config["k_full"],
+        "resolution_train": resolution_train,
+        "resolution_full": resolution_full,
+        "n_clusters_train": int(pd.Series(train_labels).nunique()),
+        "n_clusters_full": int(pd.Series(full_labels).nunique()),
+        "environment": environment_versions(),
+    })
+    config_path.write_text(json.dumps(config, indent=2))
+    print(f"[cluster] wrote cluster columns to {emb_path}")
+    return config

@@ -82,10 +82,15 @@ same kind of output:
 - **How a baseline reaches K is method-specific code**, living in stage 3:
   - **scVI, Harmony, ComBat** output an embedding only — Leiden runs on a
     neighbor graph built from that embedding. Leiden takes a *resolution*
-    parameter, not a cluster count directly, so these sweep a small range
-    of resolution values and keep whichever gets closest to the shared K
-    (`common.sweep_leiden_to_k` — shared *code*, one helper, not
-    reimplemented per baseline; `scvi_baseline.py` already calls it).
+    parameter, not a cluster count directly, so these sweep a range of
+    resolution values, then narrow in between the two that bracket K, and
+    keep whichever gets closest to the shared K (`common.sweep_leiden_to_k`
+    — shared *code*, one helper, not reimplemented per baseline).
+    Clustering reads the **saved** `embedding.csv`, not the model in
+    memory (`common.cluster_embedding_file`): the training script calls it
+    right after saving, and `baselines/recluster.py --run-dir <run>` calls
+    it alone — so clustering can change without retraining, and both paths
+    run identical code. After re-clustering, re-run stage 4 metrics.
   - **BBKNN** outputs a corrected graph directly — Leiden runs straight on
     that graph (no neighbor graph needs building first), same
     `sweep_leiden_to_k` helper.
