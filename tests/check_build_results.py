@@ -83,21 +83,6 @@ def full_job_adapter(column):
     return adapter
 
 
-def seacells_adapter(embedding_path, label_key, batch_key, affinity_dir):
-    df = pd.read_csv(embedding_path).rename(columns={label_key: "true_type", batch_key: "batch"})
-    train = df[df["split"] == "train"].reset_index(drop=True).copy()
-    train["cluster"] = train["SEACell_train"]
-    full = df.copy()
-    full["cluster"] = full["SEACell_full"]
-    load = compute_metrics.load_npz
-    return {
-        "train": {"df": train, "affinity": load(Path(affinity_dir) / "affinity_train.npz"),
-                  "score_mask": np.ones(len(train), dtype=bool)},
-        "full": {"df": full, "affinity": load(Path(affinity_dir) / "affinity_full.npz"),
-                 "score_mask": np.ones(len(full), dtype=bool)},
-    }
-
-
 def build_fake_runs(runs_root):
     ds_dir = Path(runs_root) / TASK / DATASET
     ds_dir.mkdir(parents=True)
@@ -125,13 +110,12 @@ def build_fake_runs(runs_root):
     harmony.to_csv(ds_dir / "harmony" / "embedding.csv", index=False)
 
     sea = cells.copy()
-    sea.loc[sea["split"] == "train", "SEACell_train"] = clusters(train, 0.0)
-    sea["SEACell_full"] = clusters(cells, 0.0)
+    sea.loc[sea["split"] == "train", "cluster_train_run"] = clusters(train, 0.0)
+    sea["cluster_full_run"] = clusters(cells, 0.0)
     (ds_dir / "seacells").mkdir()
     sea.to_csv(ds_dir / "seacells" / "assignments.csv", index=False)
 
     compute_metrics.ADAPTERS["harmony"] = full_job_adapter("cluster")
-    compute_metrics.ADAPTERS["seacells"] = seacells_adapter
     for baseline, fname in [("scvi", "embedding.csv"), ("harmony", "embedding.csv"),
                             ("seacells", "assignments.csv")]:
         compute_metrics.run(baseline, ds_dir / baseline / fname, "cell_type", "donor", ds_dir)

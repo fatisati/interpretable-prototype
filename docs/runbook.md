@@ -62,7 +62,7 @@ python baselines/pca_baseline.py \
   --out-dir runs/rare_cell_preservation/heart_cell_atlas/pca
 ```
 
-**SEACells** (reads stage 2's split + affinity graphs; run `prepare_eval.py` first):
+**SEACells** (reads stage 2's split, affinity graphs and cluster count; run `prepare_eval.py` first; ~25 min):
 ```
 python baselines/seacells_baseline.py \
   --h5ad datasets/processed/heart_cell_atlas_hvg.h5ad \

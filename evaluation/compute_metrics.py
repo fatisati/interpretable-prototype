@@ -66,7 +66,32 @@ def embedding_adapter(embedding_path, label_key, batch_key, affinity_dir):
     }
 
 
-ADAPTERS = {"scvi": embedding_adapter, "pca": embedding_adapter}
+def seacells_adapter(embedding_path, label_key, batch_key, affinity_dir):
+    """For seacells_baseline.py's assignments.csv. SEACells can't embed
+    unseen cells, so there is no "test" job (task file, SEACells section).
+    Instead, one job per SEACells run, each with its own clustering:
+      "train": train cells only, cluster_train_run, affinity_train.npz --
+               same cells scVI trains on (the fair cohesion comparison).
+      "full":  every cell, cluster_full_run, affinity_full.npz -- the
+               practical "how SEACells is really used" number.
+    Every row in each job is scored. No embedding -> no neighbor metrics.
+    """
+    df = pd.read_csv(embedding_path)
+    df = df.rename(columns={label_key: "true_type", batch_key: "batch"})
+    train = df[df["split"] == "train"].reset_index(drop=True).copy()
+    train["cluster"] = train["cluster_train_run"]
+    full = df.reset_index(drop=True).copy()
+    full["cluster"] = full["cluster_full_run"]
+    affinity_dir = Path(affinity_dir)
+    return {
+        "train": {"df": train, "affinity": load_npz(affinity_dir / "affinity_train.npz"),
+                  "score_mask": np.ones(len(train), dtype=bool)},
+        "full": {"df": full, "affinity": load_npz(affinity_dir / "affinity_full.npz"),
+                 "score_mask": np.ones(len(full), dtype=bool)},
+    }
+
+
+ADAPTERS = {"scvi": embedding_adapter, "pca": embedding_adapter, "seacells": seacells_adapter}
 
 
 

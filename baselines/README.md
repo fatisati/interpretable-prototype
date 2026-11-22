@@ -33,16 +33,20 @@ re-run metrics.
 Runs twice per dataset (train-only, for a fair comparison against scVI's train
 cohesion; and full dataset, the practical "how well does this actually do"
 number) -- see the SEACells section of `tasks/rare_cell_preservation.md`.
-Reuses the affinity graph `evaluation/prepare_eval.py` saved for the dataset
-(run that first) as SEACells' own kernel, via the library's
-`add_precomputed_kernel_matrix`, instead of letting SEACells rebuild it itself.
+Reads only stage 2's files (run `evaluation/prepare_eval.py` first; it errors if
+they're missing, it never builds them):
+- `affinity_train.npz` / `affinity_full.npz` become SEACells' kernel, via the
+  library's `add_precomputed_kernel_matrix`, instead of SEACells building its own.
+- `cluster_config.json`'s `k_train` / `k_full` become `n_SEACells` (no Leiden sweep).
+- `affinity_config.json`'s `n_pca_comps` sets the PCA SEACells uses to pick its
+  starting cells, so it matches the PCA the graph was built from.
 
-`--n-pca-comps`/`--k`/`--graph-construction` must match whatever the dataset's
-affinity graph was built with -- defaults (50/15/union) match
-`prepare_eval.py`'s own defaults. The number of metacells is derived once
-per dataset (`--cells-per-seacell`, default 75) and cached in
-`seacells_config.json` next to `split.csv` -- delete that file to pick a
-different ratio.
+Writes `assignments.csv` (`cluster_train_run`, `cluster_full_run`) and `config.json`.
+Metrics score two jobs: `train` (train-only run) and `full` (full run); there's no
+`test` job, since SEACells can't place unseen cells. ~25 min on the heart atlas (CPU).
+
+Install: see the Environment section of `datasets/heart_cell_atlas.md` (needs
+`--no-deps`, as `pyranges` won't build without a C compiler).
 
 ## PCA + Leiden, unintegrated control (`pca_baseline.py`)
 
