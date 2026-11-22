@@ -51,6 +51,7 @@ import sys
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import scanpy as sc
 from scipy.sparse import load_npz
@@ -144,11 +145,16 @@ def run(
 
     print(f"[seacells] train-only run: {train_adata.n_obs:,} cells -> "
           f"{cluster_config['k_train']} metacells")
+    # SEACells draws its starting cells from numpy's GLOBAL random generator and
+    # takes no seed of its own. Unseeded, two identical runs gave different
+    # metacells (agreement ARI 0.58, measured 2026-11-22), so seed it here.
+    np.random.seed(seed)
     train_assign = run_seacells(train_adata, affinity_train, cluster_config["k_train"],
                                 n_waypoint_eigs, convergence_epsilon, min_iter, max_iter)
 
     print(f"[seacells] full-dataset run: {full_adata.n_obs:,} cells -> "
           f"{cluster_config['k_full']} metacells")
+    np.random.seed(seed)  # re-seed, so the full run doesn't depend on the train run
     full_assign = run_seacells(full_adata, affinity_full, cluster_config["k_full"],
                                n_waypoint_eigs, convergence_epsilon, min_iter, max_iter)
 
@@ -178,6 +184,7 @@ def run(
         "layer": layer,
         "test_size": test_size,
         "seed": seed,
+        "numpy_global_seed_set": True,
         "n_pca_comps": n_pca_comps,
         "n_waypoint_eigs": n_waypoint_eigs,
         "convergence_epsilon": convergence_epsilon,
