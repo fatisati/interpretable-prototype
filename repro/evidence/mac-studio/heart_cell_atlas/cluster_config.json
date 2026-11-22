@@ -1,0 +1,18 @@
+{
+  "cells_per_cluster": 75,
+  "n_train": 14913,
+  "n_full": 18641,
+  "k_train": 198,
+  "k_full": 248,
+  "run_history": [
+    {
+      "script": "evaluation/prepare_eval.py",
+      "command": "python evaluation/prepare_eval.py --h5ad datasets/processed/heart_cell_atlas_hvg.h5ad --batch-key donor --label-key cell_type --layer counts --out-dir runs/rare_cell_preservation/heart_cell_atlas",
+      "git_commit": "e11debf35114c15342e0bd5aad9f94573971bfae",
+      "git_dirty": false,
+      "script_committed": true,
+      "started_at": "2026-11-22T09:59:57-05:00",
+      "finished_at": "2026-11-22T10:00:00-05:00"
+    }
+  ]
+}

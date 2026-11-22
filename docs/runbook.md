@@ -15,6 +15,25 @@ Run times are measured on the heart atlas (~18.6k cells, CPU); "not measured" me
 
 ---
 
+## 0. Comparing two machines
+
+Background and the full plan: [`reproducibility-plan.md`](reproducibility-plan.md). Evidence
+from the Mac and step-by-step instructions: [`../repro/README.md`](../repro/README.md).
+
+```
+# hashes + summaries of one dataset's stage outputs -> repro/fingerprints/<dataset>/<machine>.json
+python evaluation/fingerprint.py --run-dir runs/rare_cell_preservation/heart_cell_atlas --h5ad datasets/processed/heart_cell_atlas_hvg.h5ad --layer counts --machine <machine>
+# two fingerprints, stage by stage; names the first input difference
+python evaluation/compare_fingerprints.py repro/fingerprints/heart_cell_atlas/<a>.json repro/fingerprints/heart_cell_atlas/<b>.json
+# two run folders or evidence packs: gene, split, graph, embedding, cluster and metric differences
+python evaluation/compare_runs.py --a <folder> --b <folder>
+# small committable copy of a run folder -> repro/evidence/<machine>/<dataset>/
+python evaluation/make_evidence_pack.py --run-dir runs/rare_cell_preservation/heart_cell_atlas --h5ad datasets/processed/heart_cell_atlas_hvg.h5ad --machine <machine>
+```
+
+- **Reads only**; trains nothing. `fingerprint.py` recomputes one PCA (seconds).
+- **Time:** under 1 min each on heart.
+
 ## 1. Dataset prep: raw file → clean, HVG-selected `.h5ad`
 
 | dataset | command | download first? |

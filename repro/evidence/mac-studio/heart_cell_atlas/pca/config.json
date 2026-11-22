@@ -1,0 +1,42 @@
+{
+  "h5ad_path": "datasets/processed/heart_cell_atlas_hvg.h5ad",
+  "split_path": "runs/rare_cell_preservation/heart_cell_atlas/split.csv",
+  "batch_key": "donor",
+  "label_key": "cell_type",
+  "layer": "counts",
+  "test_size": 0.2,
+  "seed": 0,
+  "n_comps": 50,
+  "pca_fit_on": "train",
+  "explained_variance_ratio_sum": 0.44506752490997314,
+  "n_train": 14913,
+  "n_test": 3728,
+  "environment": {
+    "python": "3.11.18",
+    "scvi-tools": "1.4.2",
+    "torch": "2.15.0",
+    "scanpy": "1.11.5",
+    "anndata": "0.12.19",
+    "leidenalg": "0.12.0",
+    "igraph": "1.0.0",
+    "numpy": "2.2.6",
+    "pandas": "2.3.3"
+  },
+  "k_train_target": 198,
+  "k_full_target": 248,
+  "resolution_train": 18.44552310076122,
+  "resolution_full": 22.477930837524543,
+  "n_clusters_train": 198,
+  "n_clusters_full": 247,
+  "run_history": [
+    {
+      "script": "baselines/pca_baseline.py",
+      "command": "python baselines/pca_baseline.py --h5ad datasets/processed/heart_cell_atlas_hvg.h5ad --batch-key donor --label-key cell_type --layer counts --out-dir runs/rare_cell_preservation/heart_cell_atlas/pca",
+      "git_commit": "e11debf35114c15342e0bd5aad9f94573971bfae",
+      "git_dirty": true,
+      "script_committed": true,
+      "started_at": "2026-11-22T10:05:46-05:00",
+      "finished_at": "2026-11-22T10:06:27-05:00"
+    }
+  ]
+}

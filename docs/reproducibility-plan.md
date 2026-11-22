@@ -1,6 +1,9 @@
 # Reproducibility plan: comparable results on the Windows and Mac machines
 
-Status: PROPOSED, 2026-11-22. Nothing below is implemented yet.
+Status: PROPOSED, 2026-11-22. Done so far (Mac side): task A1 (the fingerprint and
+compare tools), task A3 (Mac fingerprint and evidence pack, in `repro/`), and the SEACells
+seeding part of task D1. Everything else is open. To investigate from the Windows side,
+start with [`repro/README.md`](../repro/README.md).
 Written so that Claude Code on either machine can execute it: every task has an ID,
 an owner, the files it touches, and a "done when" check.
 
@@ -38,8 +41,8 @@ Facts, each from a run on this branch. Heart Cell Atlas, 18,641 cells.
 | All-cell metrics agree across machines | PCA and scVI within 0.005 of the committed official table |
 | Rare-cell metrics do not | PCA train rare F1: 0.696 official, 0.846 on Mac. PCA has no training randomness, so this is an input or numerics difference, not seed noise |
 | **On one machine, every stage except SEACells is exactly repeatable** | Second run with the same seed: processed h5ad, `split.csv`, both affinity files, PCA embedding, scVI embedding on CPU, scVI embedding on Metal are all byte-identical; cluster labels identical (ARI 1.000) |
-| **SEACells is not repeatable even on one machine** | Two runs, same command: cluster agreement ARI 0.58. Cause: `SEACells/cpu.py` draws from the global `np.random` and the baseline script never seeds it |
-| scVI on CPU and scVI on Metal are different runs | Same seed, different device: all-cell metrics within 0.002, test rare F1 0.846 vs 0.924 |
+| **SEACells was not repeatable even on one machine; fixed** | Two unseeded runs, same command: cluster agreement ARI 0.58. Cause: `SEACells/cpu.py` draws from the global `np.random` and the baseline script never seeded it. With `np.random.seed(seed)` before each fit (now in `baselines/seacells_baseline.py`): ARI 1.000 between two runs |
+| scVI on CPU and scVI on Metal are different runs | Same seed, different device: each cell shares on average 40% of its 15 nearest neighbours, cluster agreement ARI 0.35, all-cell metrics within 0.002, test rare F1 0.846 vs 0.924 |
 | Package versions differ | WIN: python 3.13.11, scanpy 1.12.4, anndata 0.13.2, numpy 2.4.6, pandas 3.0.5, scvi-tools 1.5.0.post1, torch 2.13.0+cpu. MAC: python 3.11.18, scanpy 1.11.5, anndata 0.12.19, numpy 2.2.6, pandas 2.3.3, scvi-tools 1.4.2, torch 2.15.0 |
 | The committed official results came from uncommitted code | `results/rare_cell_preservation/official/run.json` has `"git_dirty": true` |
 | No environment is pinned anywhere | no requirements or lock file; `baselines/scvi_modal.py` installs unpinned packages |
