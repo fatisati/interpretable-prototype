@@ -78,6 +78,10 @@ sub-claim, instead of one vague claim about "batch correction" in general.
   problem isn't SEACells' method, it's that cross-batch pooling (which it
   doesn't do) is what the rare type actually needs.
 
+- **PCA + Leiden (control, no correction)** — not expected to fail for a
+  correction-specific reason; it is the reference that separates losses
+  caused by correction from losses caused by clustering alone.
+
 Root cause shared across all of them: a rare cell type needs enough cells
 *pooled across batches* before its structure becomes statistically
 visible, and none of these methods do that pooling before making their
@@ -105,11 +109,15 @@ below 1% of the batch). Why log_std, with the numbers:
 
 ## Metrics
 
-Two kinds of signal, because they catch different failures:
-**assignment metrics** (did the final cluster label come out right) and
-**cohesion** (did the method's own notion of similarity still agree with
-the ground-truth affinity graph, independent of where the clustering
-boundary ended up). A method can score fine on one and fail the other.
+Three kinds of signal, because they catch different failures:
+**assignment metrics** (did the final cluster label come out right),
+**cohesion** (do integration + clustering together keep cells that the
+ground-truth affinity graph calls similar in the same cluster), and
+**neighbor metrics** (does the embedding itself, before any clustering,
+keep a cell near its own kind and near the cells the affinity graph calls
+similar). Comparing neighbor metrics against the cluster-based ones tells
+apart "integration lost the rare type" from "clustering lost it". A method
+can score fine on one and fail another.
 
 **Assignment metrics:**
 
@@ -194,6 +202,27 @@ whether that preservation gets worse as frequency drops.
 - **Rare cell type cohesion** — the same, averaged only over locally-rare
   cells (same population used for the rare agreement metrics above).
 
+**Neighbor metrics** — read straight off the embedding, no clusters. For
+each cell *i*, take its *k* = 15 nearest neighbors in the method's
+embedding (Euclidean distance):
+
+- **Neighbor same-type share** — fraction of those neighbors with *i*'s
+  cell type. Three versions, like agreement: neighbors drawn from **all
+  cells** (global), from *i*'s **own batch** only (within-batch), and from
+  **other batches** only (cross-batch). Within-batch high + cross-batch low
+  = the embedding keeps types apart inside a batch but doesn't line up the
+  same type across batches.
+- **Neighbor affinity** — mean ground-truth affinity between *i* and its
+  15 nearest **own-batch** neighbors. Own batch only, because the affinity
+  graph is built from uncorrected data and barely links cells across
+  batches. High = the embedding's neighbors are the cells the affinity
+  graph also calls similar.
+
+Both are reported the same 4 ways as agreement (all / rare cells × whole
+dataset / per batch) and get the same frequency-dependence check. They
+need an embedding: BBKNN (graph only) and SEACells (assignments only)
+don't get them.
+
 **Frequency-dependence check.** In addition to the binary rare/common
 split above, we check whether every metric above moves *continuously*
 with a cell type's frequency within its batch, instead of only comparing
@@ -219,9 +248,9 @@ generalizes to cells the model never saw — that asymmetry should be
 stated plainly in the results, not glossed over.
 
 For every baseline, save its embedding (or corrected representation)
-alongside its cluster assignment, keyed by cell ID, split (train/test),
-and run type (train-only vs. full-embedding, for scVI) — one compact file
-per baseline run, not one file per metric. This way, any new metric we
+alongside its cluster assignment, keyed by cell ID and split
+(train/test) — one compact file per baseline run, not one file per
+metric. This way, any new metric we
 think of later can be computed straight from the saved embeddings without
 rerunning the baseline.
 
@@ -233,37 +262,42 @@ rerunning the baseline.
 2. Train scVI on the train cells only.
 3. Embed both train cells (seen during training) and test cells (passed
    through the trained encoder, never seen during training).
-4. Cluster twice, not once: (a) train embeddings only, giving train cluster
-   labels; (b) the full embedding — train and test cells together — giving
-   test cluster labels, keeping only the test cells' labels from this run.
-   Clustering the full embedding (rather than assigning each test cell to
-   whichever train cluster is nearest) is the part that actually tests the
-   claim: a forced-nearest-cluster rule guarantees every test cell lands in
-   an existing cluster regardless of where the encoder put it, so it can
-   never show a rare cell sitting correctly on its own. Letting the
-   clustering run freely on the full embedding means a rare test cell only
-   gets folded into a dense cluster if that's genuinely where the encoder
-   placed it — which is the actual thing we're trying to observe. This
-   mirrors the train-graph/full-graph split already used for cohesion
-   below.
-5. Compute all assignment metrics on the train labels (from run a) and on
-   the test cells' labels (from run b); check whether they're worse on
-   test, and whether that gap widens as frequency drops.
-6. Build two affinity graphs: one from train cells only, one from all
-   cells (train + test).
-7. Cohesion on train cells: computed against the train-only affinity
-   graph.
-8. Cohesion on test cells: computed against the full affinity graph,
-   averaged only over the test cells.
-9. For both train and test cohesion, run the frequency-dependence check:
-   does cohesion for rare cell types drop as frequency decreases? On
-   train, this asks whether scVI preserves affinity-graph similarity for
-   cells it was trained on, and whether that holds up as a type gets
-   rarer. On test, it asks the same question for cells scVI never saw.
+4. Cluster **once**, on the full embedding — train and test cells
+   together. Train and test cells are then scored from this **same**
+   clustering, so the only difference between the train and test numbers
+   is whether scVI saw those cells during training — not which clustering
+   produced their labels. (Earlier version clustered twice — train cells
+   alone, then all cells — at different cluster counts; the train/test gap
+   then mostly measured the two clusterings, not the encoder. See
+   Revisions below.) Clustering the full embedding, rather than assigning
+   each test cell to whichever train cluster is nearest, means a rare test
+   cell only gets folded into a dense cluster if that's genuinely where
+   the encoder placed it.
+5. Compute every metric twice from that one clustering and one embedding:
+   averaged over train cells, and averaged over test cells. Check whether
+   test is worse, and whether that gap widens as frequency drops.
+6. Cohesion and neighbor affinity, for train and test cells alike, use
+   the one affinity graph built from all cells (train + test).
+7. For both train and test, run the frequency-dependence check. On train,
+   this asks whether scVI preserves the structure for cells it was trained
+   on as a type gets rarer; on test, the same for cells it never saw.
    Compare train cohesion against SEACells run on the same train-split
    cells (a fair, same-data comparison — see SEACells section below); the
    test number has no SEACells equivalent, since SEACells can't be
    evaluated on unseen cells at all.
+
+### PCA + Leiden (unintegrated control)
+
+The same pipeline as scVI — same input file, same train/test split, same
+single clustering, same metrics — with one change: the embedding is plain
+PCA (50 components, fit on train cells, test cells projected) with **no
+batch correction**. It answers: is a rare type lost because of the
+integration, or because of the clustering itself (shared cluster count,
+~75-cell clusters)? If PCA + Leiden also loses a type, the loss isn't the
+correction's fault. Caveat: the ground-truth affinity graph is built from
+uncorrected PCA of all cells, so PCA's cohesion and neighbor affinity sit
+near a ceiling by construction; its cell-type metrics (agreement, purity,
+neighbor same-type share) are the fair comparison.
 
 ### Harmony, BBKNN, ComBat (transductive)
 
@@ -338,4 +372,17 @@ evidence or a reviewer expects them:
 - Every baseline's rare cell type cohesion sits below SEACells' — showing
   that correction methods lose the original neighborhood structure for
   rare cells regardless of which clustering method is applied downstream.
-  
+
+## Revisions
+
+- **2026-11-22**, after the first scVI results, before any final verdict:
+  (1) scVI is clustered once on all cells and train/test are scored from
+  that one clustering, with one (full) affinity graph — the earlier
+  two-clustering setup made the train/test gap mostly a difference between
+  two clusterings (example: all 14 Mesothelial train cells sat in a
+  Fibroblast-majority cluster in the train-only run, but in their own
+  cluster in the full run, same embedding). (2) Added neighbor metrics, so
+  embedding-level loss can be separated from clustering-level loss.
+  (3) Cohesion's stated purpose corrected: it is cluster-based, so it
+  measures integration + clustering together, not "independent of the
+  clustering boundary". (4) Added PCA + Leiden as the unintegrated control.

@@ -73,10 +73,8 @@ weight per-pair averages by cell count.
 
 ## Follow-up (not done in this decision)
 
-- Code default is still `rule="std"` in `baselines/metrics.py` and
-  `baselines/compute_metrics.py`. "std" writes to `metrics/` and feeds
-  `results/.../official/`; other rules write to `metrics__rare-<rule>/`. Switching the
-  default means changing that mapping so log_std becomes the "official" output, then
-  re-running metrics and results.
+- Done 2026-11-22: `compute_metrics.OFFICIAL_RARE_RULE = "log_std"` -- log_std writes
+  to `metrics/` and feeds `results/.../official/`; "std" and "fixed" write to
+  `metrics__rare-<rule>/` (what-if copies only).
 - Re-check this table on each new dataset (HLCA etc.) — the decision is based on one
   dataset.

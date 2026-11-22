@@ -33,7 +33,7 @@ batches, guided by any cell-cell affinity graph (transcriptomic or spatial).
    (`baselines/compute_metrics.py`) -- rerunnable on its own, without
    retraining anything, if a new metric comes up later.
 5. Build the comparison tables (`python baselines/build_results.py --task <task>`
-   -> `results/<task>_tables.md`, generated, never hand-edited), then write
+   -> `results/<task>/official/tables.md`, generated, never hand-edited), then write
    the gap verdict by hand in `results/<task>.md`, citing those tables.
 6. If the gap is real, run scProto, save to `runs/<task>/<dataset>/scproto/`.
 7. Update `results/<task>.md` with the comparison and final conclusion.
