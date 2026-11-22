@@ -1,0 +1,13 @@
+{
+  "run_history": [
+    {
+      "script": "evaluation/build_results.py",
+      "command": "python evaluation/build_results.py --task rare_cell_preservation --metrics-subdir metrics__label-cell_states",
+      "git_commit": "74e08fe5eb5e9dc6d8f63ccc231599cb0469451e",
+      "git_dirty": true,
+      "script_committed": true,
+      "started_at": "2026-11-22T16:53:27+03:30",
+      "finished_at": "2026-11-22T16:54:08+03:30"
+    }
+  ]
+}

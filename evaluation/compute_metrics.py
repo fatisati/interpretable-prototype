@@ -41,7 +41,22 @@ from metrics import (
 )
 
 
-def embedding_adapter(embedding_path, label_key, batch_key, affinity_dir):
+def join_labels(df, label_key, labels_from):
+    """Score against a label column the baseline didn't save (e.g. heart's
+    fine-grained `cell_states` instead of `cell_type`): read it from the
+    processed .h5ad's obs, matched by cell_id. Embedding and clusters are
+    label-free, so nothing is re-run."""
+    import anndata as ad
+    obs = ad.read_h5ad(labels_from, backed="r").obs
+    labels = obs[label_key].astype(str)
+    missing = ~df["cell_id"].isin(labels.index)
+    if missing.any():
+        raise ValueError(f"{missing.sum():,} cells in the embedding are missing from {labels_from}")
+    df[label_key] = df["cell_id"].map(labels).to_numpy()
+    return df
+
+
+def embedding_adapter(embedding_path, label_key, batch_key, affinity_dir, labels_from=None):
     """For any baseline that saves an embedding (latent_* columns) plus a
     cluster label per cell (scVI, PCA, later Harmony/ComBat).
 
@@ -54,6 +69,9 @@ def embedding_adapter(embedding_path, label_key, batch_key, affinity_dir):
     neighbors can be any cell, train or test.
     """
     df = pd.read_csv(embedding_path)
+    if labels_from:
+        df = df.drop(columns=[label_key], errors="ignore")
+        df = join_labels(df, label_key, labels_from)
     df = df.rename(columns={label_key: "true_type", batch_key: "batch"}).reset_index(drop=True)
     df["cluster"] = df["cluster_full_run"]
     latent_cols = [c for c in df.columns if c.startswith("latent_")]
@@ -193,7 +211,7 @@ def flatten_per_batch(summary, job_name):
 OFFICIAL_RARE_RULE = "log_std"  # task file + docs/decisions/0002-rare-cell-type-rule.md
 
 
-def metrics_dir_for(embedding_path, rare_rule=OFFICIAL_RARE_RULE):
+def metrics_dir_for(embedding_path, rare_rule=OFFICIAL_RARE_RULE, label_tag=None):
     """The one place the metrics output location is decided:
     runs/<task>/<dataset>/<baseline>/metrics/. A subfolder of the baseline's
     own run folder, so each folder has one writer and re-scoring never
@@ -203,6 +221,10 @@ def metrics_dir_for(embedding_path, rare_rule=OFFICIAL_RARE_RULE):
     writes to its own metrics__rare-<rule>/ next to it -- a what-if copy for
     comparing rules side by side, never overwriting the official numbers."""
     name = "metrics" if rare_rule == OFFICIAL_RARE_RULE else f"metrics__rare-{rare_rule}"
+    # Scoring against a different label set (--labels-from) also gets its own
+    # folder: metrics__label-<key>/, never overwriting the default labels' numbers.
+    if label_tag:
+        name += f"__label-{label_tag}"
     return Path(embedding_path).parent / name
 
 
@@ -230,11 +252,12 @@ def validate_jobs(jobs, embedding_path):
 
 
 def run(baseline, embedding_path, label_key, batch_key, affinity_dir,
-        std_threshold=1.0, min_types_for_std=4, rare_rule=OFFICIAL_RARE_RULE, fixed_cutoff=0.01):
+        std_threshold=1.0, min_types_for_std=4, rare_rule=OFFICIAL_RARE_RULE, fixed_cutoff=0.01,
+        labels_from=None):
     if baseline not in ADAPTERS:
         raise ValueError(f"no adapter for baseline={baseline!r}; add one to ADAPTERS in this file")
 
-    jobs = ADAPTERS[baseline](embedding_path, label_key, batch_key, affinity_dir)
+    jobs = ADAPTERS[baseline](embedding_path, label_key, batch_key, affinity_dir, labels_from=labels_from)
     validate_jobs(jobs, embedding_path)
 
     # One fixed, dataset-wide rare-type list, from every cell across every
@@ -270,7 +293,7 @@ def run(baseline, embedding_path, label_key, batch_key, affinity_dir,
         group_tables_all.append(groups)
         trend_rows_all += [{"job": job_name, **row} for row in trend_rows]
 
-    out_dir = metrics_dir_for(embedding_path, rare_rule)
+    out_dir = metrics_dir_for(embedding_path, rare_rule, label_tag=label_key if labels_from else None)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # The rare/common decision for every group, with the cutoff it was
@@ -288,6 +311,7 @@ def run(baseline, embedding_path, label_key, batch_key, affinity_dir,
 
     (out_dir / "metrics_config.json").write_text(json.dumps({
         "embedding_path": str(embedding_path), "affinity_dir": str(affinity_dir),
+        "label_key": label_key, "labels_from": str(labels_from) if labels_from else None,
         "rare_rule": rare_rule,
         "rare_rule_text": RARE_RULES[rare_rule].format(k=std_threshold, cutoff=fixed_cutoff),
         "std_threshold": std_threshold, "min_types_for_std": min_types_for_std,
@@ -313,6 +337,9 @@ def parse_args():
     p.add_argument("--rare-rule", default=OFFICIAL_RARE_RULE, choices=["std", "log_std", "fixed"],
                    help="log_std = task file's rule (writes metrics/); others write metrics__rare-<rule>/")
     p.add_argument("--fixed-cutoff", type=float, default=0.01, help="for --rare-rule fixed: 0.01 = 1%%")
+    p.add_argument("--labels-from", default=None,
+                   help="processed .h5ad to read --label-key from (by cell_id), for a label set the "
+                        "embedding file doesn't store, e.g. cell_states; writes metrics__label-<key>/")
     return p.parse_args()
 
 
@@ -328,5 +355,6 @@ if __name__ == "__main__":
         min_types_for_std=args.min_types_for_std,
         rare_rule=args.rare_rule,
         fixed_cutoff=args.fixed_cutoff,
+        labels_from=args.labels_from,
     )
     record_run(out_dir / "metrics_config.json")

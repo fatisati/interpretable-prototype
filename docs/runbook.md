@@ -90,6 +90,11 @@ Change `--baseline` and `--embedding` for scvi, seacells, and so on.
 
 - **Writes:** `<run>/metrics/` (official rare rule).
 - **What-if copy:** add `--rare-rule std` (or `fixed`). This writes to `<run>/metrics__rare-<rule>/` and leaves the official numbers alone.
+- **Other label set** (no retraining, same embedding and clusters), e.g. heart's 65 fine `cell_states`:
+  add `--label-key cell_states --labels-from datasets/processed/heart_cell_atlas_hvg.h5ad`.
+  This reads the labels from the processed file by cell ID and writes to `<run>/metrics__label-cell_states/`.
+  Tables: `python evaluation/build_results.py --task rare_cell_preservation --metrics-subdir metrics__label-cell_states`
+  writes `results/rare_cell_preservation/whatif_label-cell_states/`.
 - **Re-run when:** stage 3 output or the metric code changes.
 
 ## 5. Results: tables + figures (~20 s)
