@@ -8,17 +8,17 @@ split, and both sets of cluster labels -- to one file.
 
 Clustering is a separate step (common.cluster_embedding_file) that reads
 the saved embedding.csv. This script calls it right after training; to
-change clustering later WITHOUT retraining, run baselines/recluster.py.
+change clustering later WITHOUT retraining, run evaluation/recluster.py.
 
 Reads the split and the target cluster count from
-`baselines/prepare_eval.py`'s output -- doesn't create either itself. Run
+`evaluation/prepare_eval.py`'s output -- doesn't create either itself. Run
 that script first for this dataset; see docs/architecture.md for why.
 
 Works on any h5ad file; pass --batch-key / --label-key for your dataset.
 Runs on CPU locally or GPU on Modal with no code change -- see scvi_modal.py.
 
 Usage:
-    python baselines/prepare_eval.py \\
+    python evaluation/prepare_eval.py \\
         --h5ad datasets/processed/pancreas_hvg.h5ad \\
         --batch-key tech --label-key celltype \\
         --out-dir runs/rare_cell_preservation/pancreas
@@ -29,12 +29,14 @@ Usage:
 """
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import pandas as pd
 import scanpy as sc
 import scvi
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evaluation"))  # shared pipeline code
 from run_record import record_run  # first local import: records the script's start time
 from common import cluster_embedding_file, environment_versions, load_cluster_config, load_split, looks_like_raw_counts
 

@@ -1,6 +1,6 @@
 # rare_cell_preservation — generated tables
 
-> **GENERATED FILE — do not edit.** Made by `baselines/build_results.py` from
+> **GENERATED FILE — do not edit.** Made by `evaluation/build_results.py` from
 > `runs/rare_cell_preservation/*/*/metrics/`. Re-run that script to update. The written
 > verdict lives in `results/rare_cell_preservation.md`.
 

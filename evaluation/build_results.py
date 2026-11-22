@@ -25,9 +25,9 @@ out (sorted order, fixed number formatting, no timestamps), so a diff
 of the generated file shows exactly what changed between runs.
 
 Usage:
-    python baselines/build_results.py --task rare_cell_preservation
+    python evaluation/build_results.py --task rare_cell_preservation
     # what-if copy made with another rare rule (compute_metrics --rare-rule fixed):
-    python baselines/build_results.py --task rare_cell_preservation --metrics-subdir metrics__rare-fixed
+    python evaluation/build_results.py --task rare_cell_preservation --metrics-subdir metrics__rare-fixed
 """
 import argparse
 import json
@@ -300,7 +300,7 @@ def render(task, headline, freq, groups, runs, figures, rare, f1, subdir="metric
     lines = [
         title,
         "",
-        "> **GENERATED FILE — do not edit.** Made by `baselines/build_results.py` from",
+        "> **GENERATED FILE — do not edit.** Made by `evaluation/build_results.py` from",
         f"> `runs/{task}/*/*/{subdir}/`. Re-run that script to update. The written",
         f"> verdict lives in `results/{task}.md`.",
         "",

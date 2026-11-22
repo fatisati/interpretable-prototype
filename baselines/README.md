@@ -33,13 +33,13 @@ re-run metrics.
 Runs twice per dataset (train-only, for a fair comparison against scVI's train
 cohesion; and full dataset, the practical "how well does this actually do"
 number) -- see the SEACells section of `tasks/rare_cell_preservation.md`.
-Reuses the affinity graph `build_affinity.py` builds (building it first if it
-doesn't exist yet) as SEACells' own kernel, via the library's
+Reuses the affinity graph `evaluation/prepare_eval.py` saved for the dataset
+(run that first) as SEACells' own kernel, via the library's
 `add_precomputed_kernel_matrix`, instead of letting SEACells rebuild it itself.
 
 `--n-pca-comps`/`--k`/`--graph-construction` must match whatever the dataset's
-affinity graph was (or will be) built with -- defaults (50/15/union) match
-`build_affinity.py`'s own defaults. The number of metacells is derived once
+affinity graph was built with -- defaults (50/15/union) match
+`prepare_eval.py`'s own defaults. The number of metacells is derived once
 per dataset (`--cells-per-seacell`, default 75) and cached in
 `seacells_config.json` next to `split.csv` -- delete that file to pick a
 different ratio.

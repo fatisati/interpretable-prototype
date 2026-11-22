@@ -34,7 +34,7 @@ app = modal.App("scvi-baseline")
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .pip_install("scvi-tools", "scanpy", "pandas", "scikit-learn", "leidenalg", "igraph")
-    .add_local_python_source("scvi_baseline", "common")
+    .add_local_python_source("scvi_baseline", "common", "run_record")
 )
 
 volume = modal.Volume.from_name("scproto-data", create_if_missing=True)

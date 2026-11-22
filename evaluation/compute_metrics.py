@@ -14,7 +14,7 @@ and "which rows get scored" aren't always the same set). Everything after
 that is generic and knows nothing about scVI specifically.
 
 Usage:
-    python baselines/compute_metrics.py --baseline scvi \\
+    python evaluation/compute_metrics.py --baseline scvi \\
         --embedding runs/rare_cell_preservation/heart_cell_atlas/scvi/embedding.csv \\
         --affinity-dir runs/rare_cell_preservation/heart_cell_atlas \\
         --label-key cell_type --batch-key donor

@@ -43,7 +43,7 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "baselines"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "evaluation"))
 from run_record import record_run  # noqa: E402  records the script's start time
 
 import numpy as np
@@ -159,7 +159,7 @@ def preprocess(name, delete_raw):
     digest = sha256(out_path)
     print(f"[{name}] wrote {out_path}  ({ad.n_obs:,} cells x {ad.n_vars:,} genes)  "
           f"sha256={digest}")
-    # Sidecar: which command + code version made this file (see baselines/run_record.py).
+    # Sidecar: which command + code version made this file (see evaluation/run_record.py).
     # Fresh each time -- a new h5ad is a new output.
     sidecar = out_path.with_suffix(".run.json")
     sidecar.write_text(json.dumps({"h5ad": out_path.name, "sha256": digest}, indent=2))

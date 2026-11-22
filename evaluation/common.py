@@ -1,7 +1,7 @@
 """Shared pipeline utilities used by more than one baseline.
 
 Not a baseline adapter itself. Split creation, the affinity graph, and the
-cluster count are all decided once by baselines/prepare_eval.py and saved;
+cluster count are all decided once by evaluation/prepare_eval.py and saved;
 everything here that touches them is read-only (see docs/architecture.md).
 The one exception is `sweep_leiden_to_k`, which is shared *code* (every
 embedding/graph-output baseline needs the same sweep logic), not shared
@@ -90,7 +90,7 @@ def stratified_split(adata, label_key, batch_key, test_size, seed):
 def load_split(adata, label_key, batch_key, test_size, seed, split_path):
     """Read-only: errors if `split_path` is missing or was built with
     different parameters, instead of silently creating one. Splits are
-    created only by baselines/prepare_eval.py -- see docs/architecture.md
+    created only by evaluation/prepare_eval.py -- see docs/architecture.md
     for why every baseline must read the same one instead of making its own.
     """
     split_path = Path(split_path)
@@ -101,7 +101,7 @@ def load_split(adata, label_key, batch_key, test_size, seed, split_path):
 
     if not split_path.exists():
         raise FileNotFoundError(
-            f"{split_path} does not exist -- run `python baselines/prepare_eval.py` for "
+            f"{split_path} does not exist -- run `python evaluation/prepare_eval.py` for "
             f"this dataset first. Baselines only read the split, they don't create it."
         )
 
@@ -134,7 +134,7 @@ def load_cluster_config(cluster_config_path):
     cluster_config_path = Path(cluster_config_path)
     if not cluster_config_path.exists():
         raise FileNotFoundError(
-            f"{cluster_config_path} does not exist -- run `python baselines/prepare_eval.py` "
+            f"{cluster_config_path} does not exist -- run `python evaluation/prepare_eval.py` "
             f"for this dataset first."
         )
     return json.loads(cluster_config_path.read_text())
@@ -231,7 +231,7 @@ def cluster_embedding_file(run_dir):
       - embedding.csv's cluster_train_run / cluster_full_run columns
       - config.json's clustering fields (and environment versions)
     Training scripts call this right after saving the embedding;
-    baselines/recluster.py calls it alone, so clustering can change
+    evaluation/recluster.py calls it alone, so clustering can change
     without retraining -- and both paths run identical code.
 
     cluster_train_run: train cells only (that run's whole population),

@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 from scipy.sparse import csr_matrix, save_npz
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "baselines"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evaluation"))
 import build_results  # noqa: E402
 import compute_metrics  # noqa: E402
 
@@ -50,7 +50,7 @@ def make_cells():
 
 
 def affinity_for(df):
-    """Same type = similar (0.8), different type = 0. Zero diagonal, like build_affinity."""
+    """Same type = similar (0.8), different type = 0. Zero diagonal, like prepare_eval.py."""
     t = df["cell_type"].to_numpy()
     dense = (t[:, None] == t[None, :]).astype(float) * 0.8
     np.fill_diagonal(dense, 0.0)

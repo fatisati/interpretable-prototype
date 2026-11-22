@@ -4,7 +4,7 @@ The one place for **how to run** each pipeline stage, in the order you run them.
 Stage numbers match `docs/architecture.md`. Run every command from the repo root.
 
 **What was actually run** is recorded automatically. Each script adds a `run_history`
-entry to the JSON file it saves (see `baselines/run_record.py`). That entry holds the
+entry to the JSON file it saves (see `evaluation/run_record.py`). That entry holds the
 exact command, the code version (git commit), whether there were uncommitted edits
 (`git_dirty`), and the start/end time. To see how an output was made, open its JSON
 and don't rely on this doc.
@@ -32,7 +32,7 @@ Run times are measured on the heart atlas (~18.6k cells, CPU); "not measured" me
 ## 2. Evaluation setup: split, affinity graphs, cluster count
 
 ```
-python baselines/prepare_eval.py \
+python evaluation/prepare_eval.py \
   --h5ad datasets/processed/heart_cell_atlas_hvg.h5ad \
   --batch-key donor --label-key cell_type --layer counts \
   --out-dir runs/rare_cell_preservation/heart_cell_atlas
@@ -62,7 +62,7 @@ python baselines/pca_baseline.py \
   --out-dir runs/rare_cell_preservation/heart_cell_atlas/pca
 ```
 
-**SEACells** (needs `build_affinity.py`'s graph; builds it if missing):
+**SEACells** (reads stage 2's split + affinity graphs; run `prepare_eval.py` first):
 ```
 python baselines/seacells_baseline.py \
   --h5ad datasets/processed/heart_cell_atlas_hvg.h5ad \
@@ -72,7 +72,7 @@ python baselines/seacells_baseline.py \
 
 **Re-cluster only** (no retraining, e.g. after changing the cluster-count search; ~9 min):
 ```
-python baselines/recluster.py --run-dir runs/rare_cell_preservation/heart_cell_atlas/scvi
+python evaluation/recluster.py --run-dir runs/rare_cell_preservation/heart_cell_atlas/scvi
 ```
 
 - **Writes:** `embedding.csv` (or `assignments.csv` for SEACells) and `config.json`.
@@ -81,7 +81,7 @@ python baselines/recluster.py --run-dir runs/rare_cell_preservation/heart_cell_a
 ## 4. Metrics: score each baseline (~45 s per baseline)
 
 ```
-python baselines/compute_metrics.py --baseline pca \
+python evaluation/compute_metrics.py --baseline pca \
   --embedding runs/rare_cell_preservation/heart_cell_atlas/pca/embedding.csv \
   --affinity-dir runs/rare_cell_preservation/heart_cell_atlas \
   --label-key cell_type --batch-key donor
@@ -95,9 +95,9 @@ Change `--baseline` and `--embedding` for scvi, seacells, and so on.
 ## 5. Results: tables + figures (~20 s)
 
 ```
-python baselines/build_results.py --task rare_cell_preservation
+python evaluation/build_results.py --task rare_cell_preservation
 # what-if version:
-python baselines/build_results.py --task rare_cell_preservation --metrics-subdir metrics__rare-std
+python evaluation/build_results.py --task rare_cell_preservation --metrics-subdir metrics__rare-std
 ```
 
 - **Writes:** `results/<task>/official/` (or `whatif_rare-<rule>/`): `tables.md`, `figures/`, `data/*.csv`, `run.json`.

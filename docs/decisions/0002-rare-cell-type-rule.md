@@ -11,7 +11,7 @@ defined **per batch**: a type's *frequency* is its share of that batch's cells (
 
 The task doc's original rule ("std") found almost no rare types on our first real
 dataset, so we compared three rules. All three are already implemented in
-`baselines/metrics.py` (`rare_group_table`, argument `rule`).
+`evaluation/metrics.py` (`rare_group_table`, argument `rule`).
 
 ## Options considered
 

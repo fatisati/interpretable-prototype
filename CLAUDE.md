@@ -25,5 +25,5 @@ identical input).
 - New or changed command for any stage -> update `docs/runbook.md` (the one place commands live;
   other docs link there instead of copying).
 - Every stage script records what it ran: call `record_run(<its json sidecar>)` from
-  `baselines/run_record.py` after saving output. That writes the exact command, git commit, and
+  `evaluation/run_record.py` after saving output. That writes the exact command, git commit, and
   times next to the result, so nobody has to log commands by hand.

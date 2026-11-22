@@ -17,7 +17,7 @@ Writes, into --out-dir:
   cluster_config.json                   -- target cluster count K (n_cells // cells_per_cluster)
 
 Usage:
-    python baselines/prepare_eval.py \\
+    python evaluation/prepare_eval.py \\
         --h5ad datasets/processed/heart_cell_atlas_hvg.h5ad \\
         --batch-key donor --label-key cell_type \\
         --out-dir runs/rare_cell_preservation/heart_cell_atlas \\

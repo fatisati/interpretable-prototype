@@ -22,6 +22,7 @@ Usage:
 """
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -30,6 +31,7 @@ import scanpy as sc
 from scipy.sparse import issparse
 from sklearn.decomposition import PCA
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evaluation"))  # shared pipeline code
 from run_record import record_run  # first local import: records the script's start time
 from common import cluster_embedding_file, environment_versions, load_cluster_config, load_split, looks_like_raw_counts
 

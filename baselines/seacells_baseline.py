@@ -4,11 +4,10 @@ Thin wrapper around the SEACells library (we call it, we don't reimplement
 it) -- except for one piece: instead of letting SEACells build its own
 cell-cell kernel (SEACellGraph.rbf in the library's build_graph.py, a Python
 loop over every row of the full n x n distance matrix), we hand it the same
-graph build_affinity.py already produces via affinity.py's sparse-native
-version of the identical recipe, through the library's own
-`add_precomputed_kernel_matrix` hook. That graph is loaded from disk if
-already built (shared with build_affinity.py's own cache), or built fresh if
-not.
+graph evaluation/prepare_eval.py already saved for this dataset (built with
+affinity.py's sparse-native version of the identical recipe), through the
+library's own `add_precomputed_kernel_matrix` hook. Like every baseline, this
+script only reads the split and graphs -- run prepare_eval.py first.
 
 SEACells still needs the PCA embedding itself (not just the graph) --
 `initialize_archetypes` picks starting points directly from
@@ -42,15 +41,16 @@ Usage:
 """
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import pandas as pd
 import scanpy as sc
 from scipy.sparse import load_npz
 
-import build_affinity
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evaluation"))  # shared pipeline code
 from run_record import record_run  # first local import: records the script's start time
-from common import compute_pca, load_or_create_split
+from common import compute_pca, load_split
 
 import SEACells
 
@@ -120,8 +120,8 @@ def validate_affinity_config(affinity_config_path, n_pca_comps, k, graph_constru
         raise ValueError(
             f"{affinity_config_path} was built with {saved_subset}, but this call asked for "
             f"{requested} -- they must match, since SEACells needs the exact PCA/graph that "
-            f"produced the cached affinity files. Delete the affinity_*.npz/affinity_config.json "
-            f"in that directory to rebuild with the new parameters, or pass the ones already there."
+            f"produced the cached affinity files. Re-run evaluation/prepare_eval.py --force "
+            f"to rebuild with the new parameters, or pass the ones already there."
         )
 
 
@@ -141,24 +141,22 @@ def run(
     convergence_epsilon=1e-3,
     max_iter=100,
     min_iter=10,
-    force=False,
 ):
     out_dir = Path(out_dir)
     dataset_dir = out_dir.parent
 
     adata = sc.read_h5ad(h5ad_path)
     split_path = dataset_dir / "split.csv"
-    adata.obs["split"] = load_or_create_split(adata, label_key, batch_key, test_size, seed, split_path)
+    adata.obs["split"] = load_split(adata, label_key, batch_key, test_size, seed, split_path)
     train_mask = (adata.obs["split"] == "train").to_numpy()
 
-    # Reuses build_affinity.py's own "skip if already built" logic rather than
-    # re-deriving it -- for a dataset that already has affinity_{train,full}.npz
-    # on disk (e.g. heart_cell_atlas), this is a no-op load-check.
-    build_affinity.run(
-        h5ad_path=h5ad_path, batch_key=batch_key, label_key=label_key, out_dir=dataset_dir,
-        layer=layer, test_size=test_size, seed=seed, n_pca_comps=n_pca_comps, k=k,
-        graph_construction=graph_construction, force=force,
-    )
+    # Read-only, like the split: built once by evaluation/prepare_eval.py.
+    affinity_config_path = dataset_dir / "affinity_config.json"
+    if not affinity_config_path.exists():
+        raise FileNotFoundError(
+            f"{affinity_config_path} does not exist -- run `python evaluation/prepare_eval.py` "
+            f"for this dataset first. Baselines only read the affinity graphs, they don't build them."
+        )
     validate_affinity_config(dataset_dir / "affinity_config.json", n_pca_comps, k, graph_construction)
     affinity_train = load_npz(dataset_dir / "affinity_train.npz")
     affinity_full = load_npz(dataset_dir / "affinity_full.npz")
@@ -253,7 +251,6 @@ def parse_args():
     p.add_argument("--convergence-epsilon", type=float, default=1e-3)
     p.add_argument("--max-iter", type=int, default=100)
     p.add_argument("--min-iter", type=int, default=10)
-    p.add_argument("--force", action="store_true", help="rebuild affinity graph even if cached")
     return p.parse_args()
 
 
@@ -275,6 +272,5 @@ if __name__ == "__main__":
         convergence_epsilon=args.convergence_epsilon,
         max_iter=args.max_iter,
         min_iter=args.min_iter,
-        force=args.force,
     )
     record_run(Path(args.out_dir) / "config.json")

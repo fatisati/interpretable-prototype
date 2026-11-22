@@ -20,7 +20,7 @@ Commands to run each stage: [`runbook.md`](runbook.md).
    raw file -> clean, HVG-selected matrix
                     |
                     v
-2. Evaluation setup          baselines/prepare_eval.py
+2. Evaluation setup          evaluation/prepare_eval.py
    split.csv + affinity_train.npz + affinity_full.npz + cluster_config.json
                     |
                     v
@@ -28,11 +28,11 @@ Commands to run each stage: [`runbook.md`](runbook.md).
    the methods under test themselves, clustering included (see below)
                     |
                     v
-4. Metrics                   baselines/metrics.py + compute_metrics.py
+4. Metrics                   evaluation/metrics.py + compute_metrics.py
    generic scoring math, one small adapter per baseline
                     |
                     v
-5. Results                   baselines/build_results.py
+5. Results                   evaluation/build_results.py
    generated tables -> results/<task>/official/tables.md (never hand-edited)
    verdict          -> results/<task>.md        (handwritten, cites the tables)
 ```
@@ -90,7 +90,7 @@ same kind of output:
     — shared *code*, one helper, not reimplemented per baseline).
     Clustering reads the **saved** `embedding.csv`, not the model in
     memory (`common.cluster_embedding_file`): the training script calls it
-    right after saving, and `baselines/recluster.py --run-dir <run>` calls
+    right after saving, and `evaluation/recluster.py --run-dir <run>` calls
     it alone — so clustering can change without retraining, and both paths
     run identical code. After re-clustering, re-run stage 4 metrics.
   - **BBKNN** outputs a corrected graph directly — Leiden runs straight on

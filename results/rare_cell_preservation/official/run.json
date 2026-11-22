@@ -1,13 +1,13 @@
 {
   "run_history": [
     {
-      "script": "baselines/build_results.py",
-      "command": "python baselines/build_results.py --task rare_cell_preservation",
-      "git_commit": "9f7c2a7305c564b3f3889458fd674a3a15916914",
+      "script": "evaluation/build_results.py",
+      "command": "python evaluation/build_results.py --task rare_cell_preservation",
+      "git_commit": "e0479ea23c6dc0dacf141650d96e0e0dd3d4d968",
       "git_dirty": true,
       "script_committed": true,
-      "started_at": "2026-11-22T16:28:45+03:30",
-      "finished_at": "2026-11-22T16:29:06+03:30"
+      "started_at": "2026-11-22T16:35:31+03:30",
+      "finished_at": "2026-11-22T16:35:54+03:30"
     }
   ]
 }

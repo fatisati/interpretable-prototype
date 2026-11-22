@@ -3,7 +3,7 @@
 No knowledge of any specific baseline. Every function here takes a
 DataFrame with exactly these columns -- cell_id, batch, true_type, cluster
 -- plus, for cohesion, the matching affinity sparse matrix in the same row
-order. baselines/compute_metrics.py's per-baseline adapters are the only
+order. evaluation/compute_metrics.py's per-baseline adapters are the only
 code responsible for reshaping a baseline's actual saved output into this
 shape; nothing in this file knows scVI, Harmony, or any dataset exists.
 """

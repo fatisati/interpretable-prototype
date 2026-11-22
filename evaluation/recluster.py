@@ -14,7 +14,7 @@ compute_metrics.py. (This script doesn't delete metrics/ itself -- that
 folder belongs to the metrics stage, see docs/architecture.md.)
 
 Usage:
-    python baselines/recluster.py --run-dir runs/rare_cell_preservation/heart_cell_atlas/scvi
+    python evaluation/recluster.py --run-dir runs/rare_cell_preservation/heart_cell_atlas/scvi
 """
 import argparse
 from pathlib import Path
@@ -28,4 +28,4 @@ if __name__ == "__main__":
     args = p.parse_args()
     cluster_embedding_file(args.run_dir)
     record_run(Path(args.run_dir) / "config.json")
-    print("[recluster] done -- metrics/ for this run is now stale: re-run baselines/compute_metrics.py")
+    print("[recluster] done -- metrics/ for this run is now stale: re-run evaluation/compute_metrics.py")
