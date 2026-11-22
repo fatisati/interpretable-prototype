@@ -107,6 +107,65 @@ batches: 12 of 14 heart batches had no rare type) and "fixed" (frequency
 below 1% of the batch). Why log_std, with the numbers:
 `docs/decisions/0002-rare-cell-type-rule.md`.
 
+## What a dataset needs in order to test this claim
+
+Added 2026-11-22, after heart (broad labels) showed no scVI gap. Heart broad's
+rare types (Mesothelial, Adipocytes, Neuronal) are whole separate lineages, so any
+embedding keeps them apart. That run answered an easier question than this claim
+asks. A dataset can only show the gap if it has all of these:
+
+1. **The rare population is a sub-state of a common type, not its own lineage.**
+   It should differ from its parent by a few genes, like the one-marker
+   early-cancer example in the Claim. A separate lineage differs by thousands
+   of genes and survives any correction.
+2. **It is rare in every batch, but not tiny in total.** Roughly 2–10 cells per
+   batch, 30+ overall, across many batches. The per-baseline mechanisms above
+   (too few cells for ComBat's estimate, fewer cells than BBKNN's neighbor
+   count, too few for one SEACells metacell) only apply when each batch has
+   very few.
+3. **Its marker genes survive gene filtering.** We keep only the 2,000–4,000
+   most variable genes (HVGs). If the marker is dropped, the state is gone
+   before correction runs. That is a preprocessing loss, not a correction loss.
+4. **The batch effect is strong.** If batches already look alike, correction
+   barely changes anything and has nothing to break.
+5. **The labels don't come from an integrated clustering.** If the authors
+   defined the fine states by clustering after scVI, scANVI, or Harmony, the
+   labels already favor that method and the test is circular.
+6. **The counts are raw** (whole-number counts). scVI's loss assumes them.
+7. *(Bonus)* A published paper already reports some method losing this
+   population.
+
+How each candidate dataset scores against this list:
+`docs/dataset-options.md`, section "Fit for the Task 1 claim".
+
+### Cheap checks before running baselines
+
+Each check can rule a dataset out fast. Cheapest first:
+
+1. **Count (seconds):** for each candidate rare state, cells per batch, total
+   cells, and number of batches. (Item 2 above.)
+2. **Marker (seconds):** is the state's marker gene in the HVG list? (Item 3.)
+3. **Visibility (about 1 min, no correction):** inside one batch, with plain PCA,
+   are the rare cells each other's nearest neighbors? If not, there is nothing
+   for correction to lose, and the label may be noise.
+4. **Batch-effect strength (about 1 min):** in uncorrected PCA, what share of
+   each cell's neighbors come from its own batch? Compare that with the batch's
+   share of all cells. (Item 4.)
+5. **Re-score existing embeddings (no training):** score saved embeddings
+   against the fine labels. A corrected method scoring below the PCA control on
+   the rare state is the gap.
+6. **Fast-method probe (minutes):** run only Harmony (about 1 min on 20k cells)
+   and compute neighbor metrics for the target states.
+7. **Planted rare state:** take a common type, pick about 30 cells across
+   batches, and raise one gene in them. The ground truth is then known for
+   certain, and the size of the boost works as a dial from subtle to obvious.
+   This gives a curve of where each method starts losing the state. It is the
+   most direct test of the one-marker claim and doesn't depend on anyone's
+   labels.
+
+Run the full baseline set only on datasets where checks 1–4 make the gap
+plausible.
+
 ## Metrics
 
 Three kinds of signal, because they catch different failures:
@@ -386,3 +445,9 @@ evidence or a reviewer expects them:
   (3) Cohesion's stated purpose corrected: it is cluster-based, so it
   measures integration + clustering together, not "independent of the
   clustering boundary". (4) Added PCA + Leiden as the unintegrated control.
+- **2026-11-22**, after scVI and PCA results on heart (broad `cell_type` labels):
+  scVI matched or beat the PCA control on every rare-cell metric (rare F1 0.92
+  vs 0.70 on train), so there was no gap. Cause: heart broad's rare types are
+  separate lineages, not sub-states, so this run couldn't test the claim.
+  Added "What a dataset needs in order to test this claim" and the cheap checks
+  to run before any more baselines.

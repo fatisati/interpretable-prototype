@@ -25,6 +25,27 @@ Run times are measured on the heart atlas (~18.6k cells, CPU); "not measured" me
 | pbmc_immune | `python datasets/scripts/prepare.py --dataset pbmc_immune` | yes, see `datasets/pbmc_immune.md` |
 | hlca | `python datasets/scripts/prepare_hlca.py` | yes, see `datasets/hlca.md` |
 
+Task 1 candidates downloaded 2026-11-22. They have no prepare script yet, so these are
+download-only commands. Each file goes in its own folder under `datasets/raw/`:
+
+```
+B=https://ftp.ncbi.nlm.nih.gov/geo/series
+# NeurIPS 2021 bone marrow, CITE-seq part (GEO GSE194122), 616 MB
+curl -L -o datasets/raw/neurips2021_bmmc/GSE194122_openproblems_neurips2021_cite_BMMC_processed.h5ad.gz \
+  $B/GSE194nnn/GSE194122/suppl/GSE194122_openproblems_neurips2021_cite_BMMC_processed.h5ad.gz
+# Haber 2017 mouse intestine (GEO GSE92332), 16 MB + 18 MB
+curl -L -o datasets/raw/haber2017_intestine/GSE92332_atlas_UMIcounts.txt.gz \
+  $B/GSE92nnn/GSE92332/suppl/GSE92332_atlas_UMIcounts.txt.gz
+curl -L -o datasets/raw/haber2017_intestine/GSE92332_SalmHelm_UMIcounts.txt.gz \
+  $B/GSE92nnn/GSE92332/suppl/GSE92332_SalmHelm_UMIcounts.txt.gz
+```
+
+Moffitt 2018 MERFISH hypothalamus (Dryad doi:10.5061/dryad.8t8s248, 1.03 GB): the download is
+**manual**, because Dryad blocks scripted downloads (it returns 401 or 403). Open
+https://datadryad.org/dataset/doi:10.5061/dryad.8t8s248 in a browser, download
+`Moffitt_and_Bambah-Mukku_et_al_merfish_all_cells.csv`, and save it to
+`datasets/raw/moffitt2018_merfish/`.
+
 - **Writes:** `datasets/processed/<name>_hvg.h5ad`, plus `<name>_hvg.run.json` (sha256 + run record).
 - **Re-run when:** the preprocessing code changes. Everything after it must then be re-run too.
 - **Time:** not measured.

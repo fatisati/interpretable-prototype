@@ -5,6 +5,32 @@ reference — update it as datasets get audited or new ones get considered. It d
 commit to using any of these; see `docs/decisions/` for actual decisions and their
 reasoning.
 
+## Fit for the Task 1 claim
+
+Scored 2026-11-22 against the 7 items in `tasks/rare_cell_preservation.md`, section
+"What a dataset needs in order to test this claim". Legend: ✓ meets it, ✗ fails it,
+? not checked yet. Cell counts come from our own processed files. Everything marked
+"(lit.)" comes from the papers and hasn't been checked by us.
+
+| dataset | 1 sub-state? | 2 rare per batch | 3 marker kept | 4 batch effect | 5 labels independent | 6 raw counts | 7 published loss |
+|---|---|---|---|---|---|---|---|
+| Heart, broad `cell_type` (already run) | ✗ rare types are separate lineages | ✓ | ? | moderate (14 donors, one study) | ? | ✓ | ✗ |
+| Heart, fine `cell_states` | ✓ vCM5: 32 cells inside 5,307 ventricular cardiomyocytes (0.6%); also aCM5, EC8_ln, EC9_FB-like, FB7 | ✓ vCM5 ~3 per donor, 10 donors | ? (EBF1 marker (lit.)) | moderate | ? | ✓ | ✗ |
+| HLCA (our capped subsample) | partial: Tuft 165, Neuroendocrine 159, Ionocyte 561 cells inside 13,853 airway epithelium; fairly distinct types | weakened: the 1,000-per-type cap made them ~10x less rare than in the full atlas (Tuft 0.03% → 0.32%) | ? | ✓ strong (14 studies, mixed protocols) | ✗ partly built with scANVI (lit.), which may favor scVI | ✓ | ✓ for Harmony and Seurat RPCA (lit.) |
+| PBMC Seurat v4 (not downloaded) | ✓ L3 fine immune subtypes | probably | ? | weak (one lab, one protocol) | ✓ protein data used to define types (lit.) | ✓ | ✗ |
+| pancreas (scIB) | partial: epsilon 32 cells (0.2%), hormone cells close to alpha cells | ✓ 8 batches | ? | ✓ strongest (different sequencing technologies) | ? | ✗ | ✗ |
+| lung (scIB) | ✗ Ionocytes (46 cells) are a separate type | ✓ 6 batches | ? | ✓ | ? | ✗ | ✗ |
+| pbmc_immune (scIB) | ✗ rare types are separate, or sit in only one batch | ✗ | ? | ✓ | ? | ~ (7.9% non-integer) | ✗ |
+
+Reading of the table:
+- **Heart fine labels** fit the claim best among the datasets we already have.
+  vCM5 is almost exactly the claim's example: a tiny state inside a huge common type.
+- **HLCA** has the strongest outside evidence, but that evidence is about Harmony and
+  Seurat. As remembered from the paper (needs checking), scANVI/scVI kept these types
+  better. Re-subsample with a gentler cap if we use it.
+- **pancreas, lung, pbmc_immune**: not worth running for this claim. They fail
+  items 1 or 6.
+
 ## scIB benchmark trio — pancreas / lung / pbmc_immune
 
 Source: figshare 12420968, Luecken et al. 2022 (*Nature Methods*). Downloaded and
