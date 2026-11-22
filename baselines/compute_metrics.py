@@ -34,57 +34,42 @@ import scipy
 from scipy.sparse import load_npz
 
 from metrics import (
-    agreement, cell_type_purity, cohesion, compute_rare_mask,
+    RARE_RULES, agreement, cell_type_purity, cohesion, knn_affinity, knn_neighbors, knn_same_type,
+    rare_group_table,
     coverage, group_summary, group_trend, rare_precision_recall_f1, summarize_per_cell,
 )
 
 
-def scvi_adapter(embedding_path, label_key, batch_key, affinity_dir):
-    """scVI is inductive: two jobs, train and test, per the task's own
-    evaluation protocol.
+def embedding_adapter(embedding_path, label_key, batch_key, affinity_dir):
+    """For any baseline that saves an embedding (latent_* columns) plus a
+    cluster label per cell (scVI, PCA, later Harmony/ComBat).
 
-    "train": population = train cells only, clustered on their own
-    (cluster_train_run), scored against affinity_train.npz. Scored rows =
-    every row (the job's whole population is exactly what gets scored).
-
-    "test": population = ALL cells (train + test), clustered together
-    (cluster_full_run), scored against affinity_full.npz -- cohesion for a
-    test cell needs to know every other cell sharing its cluster,
-    including train cells, from this same run. But *assignment* metrics
-    (purity, agreement, coverage, rare F1) and the final cohesion average
-    only count test cells, per the task doc -- hence score_mask, separate
-    from which rows exist in the job's df.
+    ONE clustering of all cells (cluster_full_run) and the full affinity
+    graph, for both jobs -- so train and test differ only in whether the
+    model saw those cells, not in which clustering produced their labels.
+      "train": scored rows = train cells.
+      "test":  scored rows = test cells.
+    Both jobs keep every cell in `df`: a cell's cluster-mates and embedding
+    neighbors can be any cell, train or test.
     """
     df = pd.read_csv(embedding_path)
-    df = df.rename(columns={label_key: "true_type", batch_key: "batch"})
-    affinity_dir = Path(affinity_dir)
-
-    train_rows = df[df["split"] == "train"].reset_index(drop=True).copy()
-    train_rows["cluster"] = train_rows["cluster_train_run"]
-
-    full_rows = df.reset_index(drop=True).copy()
-    full_rows["cluster"] = full_rows["cluster_full_run"]
-    test_score_mask = (full_rows["split"] == "test").to_numpy()
-
+    df = df.rename(columns={label_key: "true_type", batch_key: "batch"}).reset_index(drop=True)
+    df["cluster"] = df["cluster_full_run"]
+    latent_cols = [c for c in df.columns if c.startswith("latent_")]
+    embedding = df[latent_cols].to_numpy(dtype=float)
+    affinity = load_npz(Path(affinity_dir) / "affinity_full.npz")
+    split = df["split"].to_numpy()
     return {
-        "train": {
-            "df": train_rows,
-            "affinity": load_npz(affinity_dir / "affinity_train.npz"),
-            "score_mask": np.ones(len(train_rows), dtype=bool),
-        },
-        "test": {
-            "df": full_rows,
-            "affinity": load_npz(affinity_dir / "affinity_full.npz"),
-            "score_mask": test_score_mask,
-        },
+        job: {"df": df, "affinity": affinity, "embedding": embedding, "score_mask": split == job}
+        for job in ("train", "test")
     }
 
 
-ADAPTERS = {"scvi": scvi_adapter}
+ADAPTERS = {"scvi": embedding_adapter, "pca": embedding_adapter}
 
 
 
-def score_job(df, affinity, score_mask, rare_pairs_global, std_threshold, min_types_for_std):
+def score_job(df, affinity, score_mask, rare_pairs_global, freq_lookup, embedding=None, k_neighbors=15):
     """Score one job. `rare_pairs_global` is the single, fixed, dataset-
     wide rare-type list (computed once from the whole embedding, every
     cell) -- reused for every job so train and test numbers stay
@@ -108,7 +93,7 @@ def score_job(df, affinity, score_mask, rare_pairs_global, std_threshold, min_ty
     group_tables, trend_rows = [], []
 
     def frequency_check(metric_name, values_scored):
-        groups = group_summary(values_scored, scored_df, is_rare_scored)
+        groups = group_summary(values_scored, scored_df, is_rare_scored, freq_lookup)
         groups.insert(0, "metric", metric_name)
         group_tables.append(groups)
         trend_rows.append({"metric": metric_name, **group_trend(groups)})
@@ -148,6 +133,19 @@ def score_job(df, affinity, score_mask, rare_pairs_global, std_threshold, min_ty
     }
     frequency_check("cohesion", cohesion_scored)
 
+    # Neighbor metrics: straight off the embedding, no clusters. Only for
+    # baselines that have an embedding (not SEACells / BBKNN).
+    if embedding is not None:
+        mask = np.asarray(score_mask)
+        neighbors = knn_neighbors(embedding, df, k_neighbors)
+        for scope in ("global", "within", "cross"):
+            values = knn_same_type(neighbors[scope], df)[mask]
+            result[f"knn_same_type_{scope}"] = summarize_per_cell(values, scored_df, rare_mask=is_rare_scored)
+            frequency_check(f"knn_same_type_{scope}", values)
+        values = knn_affinity(affinity, neighbors["within"])[mask]
+        result["knn_affinity_within"] = summarize_per_cell(values, scored_df, rare_mask=is_rare_scored)
+        frequency_check("knn_affinity_within", values)
+
     return result, per_pair, pd.concat(group_tables, ignore_index=True), trend_rows
 
 
@@ -166,12 +164,20 @@ def flatten_per_batch(summary, job_name):
     return rows
 
 
-def metrics_dir_for(embedding_path):
+OFFICIAL_RARE_RULE = "log_std"  # task file + docs/decisions/0002-rare-cell-type-rule.md
+
+
+def metrics_dir_for(embedding_path, rare_rule=OFFICIAL_RARE_RULE):
     """The one place the metrics output location is decided:
     runs/<task>/<dataset>/<baseline>/metrics/. A subfolder of the baseline's
     own run folder, so each folder has one writer and re-scoring never
-    touches the (expensive) baseline output."""
-    return Path(embedding_path).parent / "metrics"
+    touches the (expensive) baseline output.
+
+    The task file's rare rule (OFFICIAL_RARE_RULE) writes to metrics/. Any other rare rule
+    writes to its own metrics__rare-<rule>/ next to it -- a what-if copy for
+    comparing rules side by side, never overwriting the official numbers."""
+    name = "metrics" if rare_rule == OFFICIAL_RARE_RULE else f"metrics__rare-{rare_rule}"
+    return Path(embedding_path).parent / name
 
 
 def validate_jobs(jobs, embedding_path):
@@ -198,7 +204,7 @@ def validate_jobs(jobs, embedding_path):
 
 
 def run(baseline, embedding_path, label_key, batch_key, affinity_dir,
-        std_threshold=1.0, min_types_for_std=4):
+        std_threshold=1.0, min_types_for_std=4, rare_rule=OFFICIAL_RARE_RULE, fixed_cutoff=0.01):
     if baseline not in ADAPTERS:
         raise ValueError(f"no adapter for baseline={baseline!r}; add one to ADAPTERS in this file")
 
@@ -213,15 +219,22 @@ def run(baseline, embedding_path, label_key, batch_key, affinity_dir,
     # aren't skewed by counting the same cell twice.
     all_rows = pd.concat([job["df"] for job in jobs.values()], ignore_index=True)
     all_rows = all_rows.drop_duplicates(subset="cell_id")
-    _, rare_pairs_global = compute_rare_mask(all_rows, std_threshold, min_types_for_std)
-    print(f"[metrics] {len(rare_pairs_global)} locally-rare (type, batch) pairs found, dataset-wide")
+    rare_table = rare_group_table(all_rows, rare_rule, std_threshold, min_types_for_std, fixed_cutoff)
+    rare = rare_table[rare_table["is_rare"]]
+    rare_pairs_global = set(zip(rare["batch"], rare["true_type"]))
+    # Each group's frequency, from ALL cells -- frequency belongs to the
+    # group, not to the train/test split, so train and test jobs use the
+    # same value (and tiny groups don't get a noisy test-only frequency).
+    freq_lookup = rare_table.set_index(["batch", "true_type"])["freq"]
+    print(f"[metrics] rare rule={rare_rule}: {len(rare_pairs_global)} locally-rare (type, batch) "
+          f"pairs found, dataset-wide")
 
     summary, per_batch_rows, per_rare_type_rows, group_tables_all, trend_rows_all = {}, [], [], [], []
     for job_name, job in jobs.items():
         print(f"[metrics] scoring job={job_name} ({job['score_mask'].sum():,} scored cells)")
         result, per_pair, groups, trend_rows = score_job(
-            job["df"], job["affinity"], job["score_mask"], rare_pairs_global,
-            std_threshold, min_types_for_std,
+            job["df"], job["affinity"], job["score_mask"], rare_pairs_global, freq_lookup,
+            embedding=job.get("embedding"),
         )
         summary[job_name] = result
         per_batch_rows += flatten_per_batch(result, job_name)
@@ -231,8 +244,12 @@ def run(baseline, embedding_path, label_key, batch_key, affinity_dir,
         group_tables_all.append(groups)
         trend_rows_all += [{"job": job_name, **row} for row in trend_rows]
 
-    out_dir = metrics_dir_for(embedding_path)
+    out_dir = metrics_dir_for(embedding_path, rare_rule)
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # The rare/common decision for every group, with the cutoff it was
+    # compared against -- so "why is this group rare?" is answerable.
+    rare_table.to_csv(out_dir / "rare_groups.csv", index=False)
 
     (out_dir / "metrics_summary.json").write_text(json.dumps(summary, indent=2, default=str))
     pd.DataFrame(per_batch_rows).to_csv(out_dir / "metrics_per_batch.csv", index=False)
@@ -245,7 +262,10 @@ def run(baseline, embedding_path, label_key, batch_key, affinity_dir,
 
     (out_dir / "metrics_config.json").write_text(json.dumps({
         "embedding_path": str(embedding_path), "affinity_dir": str(affinity_dir),
+        "rare_rule": rare_rule,
+        "rare_rule_text": RARE_RULES[rare_rule].format(k=std_threshold, cutoff=fixed_cutoff),
         "std_threshold": std_threshold, "min_types_for_std": min_types_for_std,
+        "fixed_cutoff": fixed_cutoff,
         "n_rare_pairs": len(rare_pairs_global),
         "versions": {"python": platform.python_version(), "pandas": pd.__version__,
                      "numpy": np.__version__, "scipy": scipy.__version__},
@@ -264,6 +284,9 @@ def parse_args():
     p.add_argument("--affinity-dir", required=True, help="dataset dir containing affinity_train/full.npz")
     p.add_argument("--std-threshold", type=float, default=1.0)
     p.add_argument("--min-types-for-std", type=int, default=4)
+    p.add_argument("--rare-rule", default=OFFICIAL_RARE_RULE, choices=["std", "log_std", "fixed"],
+                   help="log_std = task file's rule (writes metrics/); others write metrics__rare-<rule>/")
+    p.add_argument("--fixed-cutoff", type=float, default=0.01, help="for --rare-rule fixed: 0.01 = 1%%")
     return p.parse_args()
 
 
@@ -277,4 +300,6 @@ if __name__ == "__main__":
         affinity_dir=args.affinity_dir,
         std_threshold=args.std_threshold,
         min_types_for_std=args.min_types_for_std,
+        rare_rule=args.rare_rule,
+        fixed_cutoff=args.fixed_cutoff,
     )

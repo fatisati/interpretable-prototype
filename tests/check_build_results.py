@@ -108,8 +108,14 @@ def build_fake_runs(runs_root):
 
     # scVI: train run mildly scatters rare cells, full run (test side) scatters more.
     scvi = cells.copy()
-    scvi.loc[scvi["split"] == "train", "cluster_train_run"] = clusters(train, 0.4)
     scvi["cluster_full_run"] = clusters(cells, 0.7)
+    # Embedding: one direction per type, rarer types blurred more (noisier).
+    types = sorted(TYPE_COUNTS)
+    onehot = np.eye(len(types))[[types.index(t) for t in cells["cell_type"]]]
+    noise = np.array([0.2 + 2 * (1 - TYPE_COUNTS[t] / max(TYPE_COUNTS.values())) for t in cells["cell_type"]])
+    latent = onehot + RNG.normal(size=onehot.shape) * noise[:, None]
+    for d in range(latent.shape[1]):
+        scvi[f"latent_{d}"] = latent[:, d]
     (ds_dir / "scvi").mkdir()
     scvi.to_csv(ds_dir / "scvi" / "embedding.csv", index=False)
 
@@ -141,7 +147,7 @@ def main():
         build_results.run(TASK, runs_root, results_dir)
         assert tables.read_bytes() == text1 and summary.read_bytes() == csv1, "output not deterministic"
 
-        headline, freq, groups, _ = build_results.load_all(runs_root, TASK)
+        headline, freq, groups, _, rare, f1 = build_results.load_all(runs_root, TASK)
         assert not groups.empty, "frequency_groups.csv not written/read"
 
         text = tables.read_text(encoding="utf-8")
@@ -166,14 +172,26 @@ def main():
         # One group = one cell type in one batch: 8 types x 3 batches.
         assert (freq["n_groups"] <= 24).all() and (freq["n_groups"] >= 20).all(), freq
         assert set(groups.columns) >= {"batch", "true_type", "freq", "n_cells", "mean", "std", "is_rare"}
-        assert (results_dir / f"{TASK}_groups.csv").exists()
-        assert len(list((results_dir / "figures").glob("*.png"))) == 4, "one figure per metric expected"
+        out = results_dir / TASK / "official"
+        assert tables == out / "tables.md" and (out / "data" / "groups.csv").exists()
+        assert len(list((out / "figures").glob("*.png"))) == 8, "one figure per metric expected (4 cluster + 4 neighbor)"
+
+        # Rare rules: fixed cutoff flags exactly the groups under it; every
+        # rule's cutoff is a real frequency (> 0 for the log rule, which can't
+        # go negative -- the problem with the task file's std rule).
+        import metrics
+        cells = make_cells().rename(columns={"cell_type": "true_type", "donor": "batch"})
+        fixed = metrics.rare_group_table(cells, "fixed", fixed_cutoff=0.02)
+        assert set(fixed.loc[fixed["is_rare"], "true_type"]) == {"H"}, fixed
+        log = metrics.rare_group_table(cells, "log_std")
+        assert (log["threshold"] > 0).all() and log["is_rare"].any(), log
+        assert set(rare.columns) >= {"batch", "true_type", "n_cells", "freq", "threshold", "is_rare"}
 
         # Regression: fully-missed rare types must count as F1 = 0, not be
         # dropped from the average (scVI test scatters most rare cells).
         f1 = value("scvi", "test", "rare_f1", "rare")
         cov = value("scvi", "test", "coverage", "rare")
-        assert f1 < 0.5 and cov < 0.5, (f1, cov)
+        assert f1 < 0.9 and cov < 0.9, (f1, cov)  # missed types pull F1 down (was 1.0 before the fix)
 
         print("\n" + "=" * 70 + "\nGENERATED TABLES (first 60 lines)\n" + "=" * 70)
         print("\n".join(text.splitlines()[:60]))

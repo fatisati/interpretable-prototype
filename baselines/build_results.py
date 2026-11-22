@@ -3,10 +3,14 @@
 Reads every baseline's saved metrics (stage 4's output, under
 runs/<task>/<dataset>/<baseline>/metrics/) and writes:
 
-  results/<task>_tables.md    comparison tables. GENERATED -- never
-                              hand-edit; re-run this script instead.
-  results/<task>_summary.csv  every headline number, one row each (tidy
-                              format, for plots or spreadsheets later).
+  results/<task>/<version>/            one folder per version of the numbers:
+                                       "official" (task file's rare rule) or
+                                       "whatif_rare-<rule>" (another rare rule)
+      tables.md                        comparison tables. GENERATED -- never
+                                       hand-edit; re-run this script instead.
+      figures/<dataset>_<metric>.png   frequency plots (linked from tables.md)
+      data/summary.csv                 every headline number, one row each
+      data/groups.csv                  every group (cell type in one batch)
 
 Mental model: a scoreboard. It (1) collects every saved metrics folder
 and says which baselines are still missing, (2) lines the numbers up side
@@ -22,6 +26,8 @@ of the generated file shows exactly what changed between runs.
 
 Usage:
     python baselines/build_results.py --task rare_cell_preservation
+    # what-if copy made with another rare rule (compute_metrics --rare-rule fixed):
+    python baselines/build_results.py --task rare_cell_preservation --metrics-subdir metrics__rare-fixed
 """
 import argparse
 import json
@@ -34,20 +40,21 @@ import pandas as pd
 import scipy
 
 # Only used to list which baselines haven't been scored yet, per dataset.
-EXPECTED_BASELINES = ["bbknn", "combat", "harmony", "scvi", "seacells"]
+EXPECTED_BASELINES = ["bbknn", "combat", "harmony", "pca", "scvi", "seacells"]
 
 AGREEMENT_METRICS = ["agreement_global", "agreement_within", "agreement_cross"]
+KNN_METRICS = ["knn_same_type_global", "knn_same_type_within", "knn_same_type_cross", "knn_affinity_within"]
 
 
 # ---------------------------------------------------------------------------
 # 1. Collect
 # ---------------------------------------------------------------------------
 
-def find_metrics_dirs(runs_root, task):
-    """Every runs/<task>/<dataset>/<baseline>/metrics/ that has a summary,
+def find_metrics_dirs(runs_root, task, subdir="metrics"):
+    """Every runs/<task>/<dataset>/<baseline>/<subdir>/ that has a summary,
     sorted so output order never depends on filesystem order."""
     task_dir = Path(runs_root) / task
-    found = sorted(task_dir.glob("*/*/metrics/metrics_summary.json"))
+    found = sorted(task_dir.glob(f"*/*/{subdir}/metrics_summary.json"))
     return [(p.parent.parent.parent.name, p.parent.parent.name, p.parent) for p in found]
 
 
@@ -78,16 +85,21 @@ def summary_to_rows(summary, dataset, baseline):
         add(job, "coverage", "rare", {"mean": cov["mean"], "std": cov["std"], "n": cov["n_batches"]})
         add(job, "rare_f1", "rare", {"mean": result["rare_f1"]["mean"], "std": result["rare_f1"]["std"],
                                      "n": result["rare_f1"]["n_pairs"]})
+        for metric in KNN_METRICS:  # only baselines with an embedding have these
+            if metric in result:
+                add(job, metric, "all", result[metric]["all_overall"])
+                add(job, metric, "rare", result[metric]["rare_overall"])
         add(job, "cohesion", "all", result["cohesion"]["overall"])
         add(job, "cohesion", "rare", result["cohesion"]["rare"])
     return rows
 
 
-def load_all(runs_root, task):
+def load_all(runs_root, task, subdir="metrics"):
     """Returns (headline DataFrame, frequency-dependence DataFrame,
-    per-group frequency DataFrame, list of run info dicts)."""
-    headline, freq, groups, runs = [], [], [], []
-    for dataset, baseline, mdir in find_metrics_dirs(runs_root, task):
+    per-group frequency DataFrame, list of run info dicts, rare-decision
+    DataFrame, per-rare-pair F1 DataFrame)."""
+    headline, freq, groups, runs, rare, f1 = [], [], [], [], [], []
+    for dataset, baseline, mdir in find_metrics_dirs(runs_root, task, subdir):
         summary = json.loads((mdir / "metrics_summary.json").read_text())
         headline += summary_to_rows(summary, dataset, baseline)
 
@@ -112,6 +124,16 @@ def load_all(runs_root, task):
         fg.insert(0, "dataset", dataset)
         groups.append(fg)
 
+        for name, out in (("rare_groups.csv", rare), ("metrics_per_rare_type.csv", f1)):
+            path = mdir / name
+            if not path.exists():
+                raise ValueError(f"{mdir}: no {name} -- made by an older compute_metrics.py. "
+                                 f"Re-run compute_metrics.py for this baseline.")
+            t = pd.read_csv(path)
+            t.insert(0, "baseline", baseline)
+            t.insert(0, "dataset", dataset)
+            out.append(t)
+
         config_path = mdir / "metrics_config.json"
         config = json.loads(config_path.read_text()) if config_path.exists() else {}
         runs.append({"dataset": dataset, "baseline": baseline, "jobs": sorted(summary),
@@ -127,7 +149,9 @@ def load_all(runs_root, task):
     freq_df = freq_df.sort_values(sort_cols, kind="stable").reset_index(drop=True)
     if not groups_df.empty:
         groups_df = groups_df.sort_values(sort_cols + ["freq", "batch", "true_type"], kind="stable").reset_index(drop=True)
-    return headline_df, freq_df, groups_df, runs
+    rare_df = pd.concat(rare, ignore_index=True) if rare else pd.DataFrame()
+    f1_df = pd.concat(f1, ignore_index=True) if f1 else pd.DataFrame()
+    return headline_df, freq_df, groups_df, runs, rare_df, f1_df
 
 
 # ---------------------------------------------------------------------------
@@ -169,12 +193,108 @@ def md_table(header, rows):
     return "\n".join(out)
 
 
-def render(task, headline, freq, groups, runs, figures):
+RARE_METRICS = ["agreement_global", "agreement_within", "agreement_cross", "cohesion",
+                "knn_same_type_global", "knn_affinity_within"]
+
+
+def _pct(x):
+    return "—" if not _is_num(x) else f"{x:.2%}"
+
+
+def render_rare_section(dataset, rare, groups, f1):
+    """Which groups are rare, why, how many cells, and how each did.
+    Only formats saved numbers (rare_groups.csv, frequency_groups.csv,
+    metrics_per_rare_type.csv); "why" is the saved frequency vs the saved
+    cutoff, written out."""
+    r = rare[rare["dataset"] == dataset]
+    if r.empty:
+        return []
+    # The rare decision is the same for every baseline (same cells, same
+    # rule) -- show it once, from the first baseline that has it.
+    r = r[r["baseline"] == sorted(r["baseline"].unique())[0]]
+    rr = r[r["is_rare"]].sort_values(["freq", "batch", "true_type"], kind="stable")
+    batches = sorted(r["batch"].unique())
+    without = [b for b in batches if b not in set(rr["batch"])]
+    rule = r["rule"].iloc[0]
+
     lines = [
-        f"# {task} — generated tables",
+        "### Rare groups",
+        "",
+        f"**{len(rr)} rare groups** (cell type in one batch) in **{rr['batch'].nunique()} of "
+        f"{len(batches)} batches**, {int(rr['n_cells'].sum())} cells in total. Rule: `{rule}`.",
+        "",
+    ]
+    if without:
+        lines += [f"Batches with **no** rare group: {', '.join(without)}.", ""]
+    if rr.empty:
+        return lines
+
+    # Cells per job (train / test), from the per-group table.
+    coh = groups[(groups["dataset"] == dataset) & (groups["metric"] == "cohesion")]
+    jobs = sorted(coh["job"].unique())
+
+    def cells_in(job, batch, cell_type):
+        hit = coh[(coh["job"] == job) & (coh["batch"] == batch) & (coh["true_type"] == cell_type)]
+        return int(hit["n_cells"].iloc[0]) if len(hit) else 0
+
+    header = ["batch", "cell type", "cells (all)"] + [f"cells ({j})" for j in jobs] + \
+             ["frequency", "cutoff in this batch", "why rare"]
+    rows = []
+    for g in rr.itertuples(index=False):
+        why = f"{_pct(g.freq)} < {_pct(g.threshold)}"
+        if getattr(g, "fallback", False):
+            why += " (lowest-quartile fallback)"
+        rows.append([g.batch, g.true_type, int(g.n_cells)] + [cells_in(j, g.batch, g.true_type) for j in jobs]
+                    + [_pct(g.freq), _pct(g.threshold), why])
+    lines += ["**Which groups, and why** (rarest first):", "", md_table(header, rows), ""]
+
+    # Near misses: the lowest-frequency groups that are NOT rare -- shows
+    # where the cutoff bites (or doesn't).
+    near = r[~r["is_rare"]].sort_values("freq", kind="stable").head(5)
+    if len(near):
+        lines += ["**Closest to rare, but not rare** (5 lowest-frequency common groups):", "",
+                  md_table(["batch", "cell type", "cells (all)", "frequency", "cutoff in this batch"],
+                           [[g.batch, g.true_type, int(g.n_cells), _pct(g.freq), _pct(g.threshold)]
+                            for g in near.itertuples(index=False)]), ""]
+
+    # How each rare group did, per baseline and job: mean ± std over its cells.
+    sub = groups[(groups["dataset"] == dataset) & groups["metric"].isin(RARE_METRICS)]
+    f1d = f1[f1["dataset"] == dataset]
+    for (baseline, job), gj in sub.groupby(["baseline", "job"], sort=True):
+        rows = []
+        for g in rr.itertuples(index=False):
+            row = [g.batch, g.true_type]
+            hit = gj[(gj["batch"] == g.batch) & (gj["true_type"] == g.true_type)]
+            n = int(hit["n_cells"].max()) if len(hit) else 0
+            row.append(n)
+            for m in RARE_METRICS:
+                h = hit[hit["metric"] == m]
+                row.append("—" if h.empty else f"{fmt(h['mean'].iloc[0])} ± {fmt(h['std'].iloc[0])}")
+            fh = f1d[(f1d["baseline"] == baseline) & (f1d["job"] == job)
+                     & (f1d["batch"] == g.batch) & (f1d["true_type"] == g.true_type)]
+            if fh.empty:
+                row.append("—")
+            else:
+                x = fh.iloc[0]
+                row.append(f"{fmt(x['f1'], 2)} (found {int(x['tp'])} of {int(x['tp'] + x['fn'])})")
+            rows.append(row)
+        lines += [f"**How each rare group did — {baseline} / {job}** (mean ± std over its cells; "
+                  "std is empty for a 1-cell group):", "",
+                  md_table(["batch", "cell type", "cells", "agreement global", "agreement within",
+                            "agreement cross", "cohesion", "neighbors same type", "neighbor affinity",
+                            "F1 (cells in a cluster labeled its type)"], rows), ""]
+    return lines
+
+
+def render(task, headline, freq, groups, runs, figures, rare, f1, subdir="metrics"):
+    title = f"# {task} — generated tables"
+    if subdir != "metrics":
+        title += f" — WHAT-IF: `{subdir}`"
+    lines = [
+        title,
         "",
         "> **GENERATED FILE — do not edit.** Made by `baselines/build_results.py` from",
-        f"> `runs/{task}/*/*/metrics/`. Re-run that script to update. The written",
+        f"> `runs/{task}/*/*/{subdir}/`. Re-run that script to update. The written",
         f"> verdict lives in `results/{task}.md`.",
         "",
         "Every value is mean ± std, higher = better. \"Rare\" = locally-rare (type, batch)",
@@ -186,16 +306,16 @@ def render(task, headline, freq, groups, runs, figures):
         "",
     ]
     if not runs:
-        lines += [f"No metrics found under `runs/{task}/`. Run `compute_metrics.py` first.", ""]
+        lines += [f"No metrics found under `runs/{task}/*/*/{subdir}/`. Run `compute_metrics.py` first.", ""]
         return "\n".join(lines) + "\n"
 
     lines += [f"Environment (this script): python {platform.python_version()}, pandas {pd.__version__}, "
               f"numpy {numpy.__version__}, scipy {scipy.__version__}. Versions used to compute the "
               f"metrics: each metrics folder's `metrics_config.json`.", ""]
     lines.append(md_table(
-        ["dataset", "baseline", "jobs", "rare pairs", "rare threshold (std)", "metrics folder"],
+        ["dataset", "baseline", "jobs", "rare groups", "rare rule", "metrics folder"],
         [[r["dataset"], r["baseline"], ", ".join(r["jobs"]), r["config"].get("n_rare_pairs", "—"),
-          r["config"].get("std_threshold", "—"), f"`{r['path']}`"] for r in runs],
+          r["config"].get("rare_rule_text", "—"), f"`{r['path']}`"] for r in runs],
     ))
     datasets = sorted({r["dataset"] for r in runs})
     for dataset in datasets:
@@ -210,7 +330,9 @@ def render(task, headline, freq, groups, runs, figures):
         combos = list(combos.itertuples(index=False))
 
         # --- agreement -----------------------------------------------------
-        lines += [f"## {dataset}", "", "### Agreement (all cells / rare cells)", ""]
+        lines += [f"## {dataset}", ""]
+        lines += render_rare_section(dataset, rare, groups, f1)
+        lines += ["### Agreement (all cells / rare cells)", ""]
         header = ["baseline", "job"]
         for m in AGREEMENT_METRICS:
             short = m.replace("agreement_", "")
@@ -224,6 +346,27 @@ def render(task, headline, freq, groups, runs, figures):
                         mean_std(headline, dataset, baseline, job, m, "rare", cov)]
             rows.append(row)
         lines += [md_table(header, rows), ""]
+
+        # --- neighbor metrics (embedding only, no clusters) ----------------
+        knn_combos = [(b, j) for b, j in combos if not headline[
+            (headline["dataset"] == dataset) & (headline["baseline"] == b) & (headline["job"] == j)
+            & (headline["metric"] == "knn_affinity_within")].empty]
+        if knn_combos:
+            lines += ["### Neighbor metrics (embedding only, no clusters; all cells / rare cells)", "",
+                      "Each cell's 15 nearest neighbors in the embedding. `same type` = share of them",
+                      "with the cell's own type (among all cells / own batch / other batches).",
+                      "`affinity` = mean ground-truth affinity to the 15 nearest own-batch neighbors.", ""]
+            header = ["baseline", "job"]
+            for m in KNN_METRICS:
+                short = m.replace("knn_same_type_", "same type ").replace("knn_affinity_within", "affinity")
+                header += [f"{short} — all", f"{short} — rare"]
+            rows = []
+            for b, j in knn_combos:
+                row = [b, j]
+                for m in KNN_METRICS:
+                    row += [mean_std(headline, dataset, b, j, m, "all"), mean_std(headline, dataset, b, j, m, "rare")]
+                rows.append(row)
+            lines += [md_table(header, rows), ""]
 
         # --- the rest of the headline metrics ------------------------------
         lines += ["### Purity, rare coverage, rare F1, cohesion", ""]
@@ -345,7 +488,7 @@ def plot_frequency(task, dataset, metric, groups, freq, fig_dir):
     fig.tight_layout()
 
     fig_dir.mkdir(parents=True, exist_ok=True)
-    path = fig_dir / f"{task}_{dataset}_{metric}.png"
+    path = fig_dir / f"{dataset}_{metric}.png"
     fig.savefig(path, dpi=120, metadata={"Software": None}, bbox_inches="tight")
     plt.close(fig)
     return path
@@ -355,29 +498,34 @@ def plot_frequency(task, dataset, metric, groups, freq, fig_dir):
 # 3. Print
 # ---------------------------------------------------------------------------
 
-def run(task, runs_root="runs", results_dir="results"):
-    headline, freq, groups, runs = load_all(runs_root, task)
-    results_dir = Path(results_dir)
-    results_dir.mkdir(parents=True, exist_ok=True)
+def run(task, runs_root="runs", results_dir="results", subdir="metrics"):
+    headline, freq, groups, runs, rare, f1 = load_all(runs_root, task, subdir)
+    # One folder per version of the numbers, so versions never mix:
+    # results/<task>/official/ or results/<task>/whatif_rare-<rule>/.
+    version = "official" if subdir == "metrics" else subdir.replace("metrics__", "whatif_")
+    out_dir = Path(results_dir) / task / version
+    data_dir = out_dir / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
 
     figures = {}
     if not groups.empty:
         for dataset, metric in groups[["dataset", "metric"]].drop_duplicates().itertuples(index=False):
-            path = plot_frequency(task, dataset, metric, groups, freq, results_dir / "figures")
-            figures[(dataset, metric)] = path.relative_to(results_dir).as_posix()
+            path = plot_frequency(task, dataset, metric, groups, freq, out_dir / "figures")
+            figures[(dataset, metric)] = path.relative_to(out_dir).as_posix()
 
-    tables_path = results_dir / f"{task}_tables.md"
-    tables_path.write_text(render(task, headline, freq, groups, runs, figures), encoding="utf-8", newline="\n")
+    tables_path = out_dir / "tables.md"
+    tables_path.write_text(render(task, headline, freq, groups, runs, figures, rare, f1, subdir),
+                           encoding="utf-8", newline="\n")
 
-    summary_path = results_dir / f"{task}_summary.csv"
+    summary_path = data_dir / "summary.csv"
     headline.to_csv(summary_path, index=False, lineterminator="\n", float_format="%.6g")
-    groups_path = results_dir / f"{task}_groups.csv"
+    groups_path = data_dir / "groups.csv"
     groups.to_csv(groups_path, index=False, lineterminator="\n", float_format="%.6g")
 
     print(f"[results] {len(runs)} metrics folder(s) read")
     for path in (tables_path, summary_path, groups_path):
         print(f"[results] wrote {path}")
-    print(f"[results] wrote {len(figures)} figure(s) to {results_dir / 'figures'}")
+    print(f"[results] wrote {len(figures)} figure(s) to {out_dir / 'figures'}")
     return tables_path, summary_path
 
 
@@ -386,9 +534,11 @@ def parse_args():
     p.add_argument("--task", required=True, help="task name, e.g. rare_cell_preservation")
     p.add_argument("--runs-root", default="runs", help="(for tests) folder holding runs/<task>/")
     p.add_argument("--results-dir", default="results", help="(for tests) where output goes")
+    p.add_argument("--metrics-subdir", default="metrics",
+                   help="metrics folder name per run; metrics__rare-<rule> = a what-if rare rule")
     return p.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    run(args.task, args.runs_root, args.results_dir)
+    run(args.task, args.runs_root, args.results_dir, args.metrics_subdir)

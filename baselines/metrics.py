@@ -26,30 +26,62 @@ def compute_frequency(df):
     return freq_lookup.reindex(key).to_numpy()
 
 
-def compute_rare_mask(df, std_threshold=1.0, min_types_for_std=4):
-    """Per batch: a (type, batch) pair is rare if its frequency is more
-    than `std_threshold` standard deviations below that batch's mean
-    type-frequency. Fallback (fewer than `min_types_for_std` distinct
-    types in that batch -- not specified in the task doc, our own
-    judgment call, change it here if needed): lowest quartile instead.
+RARE_RULES = {
+    "std": "frequency more than {k} std below its batch's mean type-frequency",
+    "log_std": "log10(frequency) more than {k} std below its batch's mean log10 type-frequency (task file's rule)",
+    "fixed": "frequency below {cutoff:.2%} of its batch",
+}
+
+
+def rare_group_table(df, rule="std", std_threshold=1.0, min_types_for_std=4, fixed_cutoff=0.01):
+    """The rare/common decision, one row per group (batch, true_type):
+    n_cells, freq, the batch's cutoff ("threshold", in frequency units), and
+    is_rare. Saved as-is so a reader can see *why* each group is (not) rare.
+
+    rule:
+      "std"     -- task file's rule: freq < batch mean - k * batch std.
+                   With one or two huge types per batch the std is so large
+                   that the cutoff can fall below 0 -> nothing is rare.
+      "log_std" -- same rule on log10(freq), so huge types don't dominate
+                   the spread; threshold reported back in frequency units.
+      "fixed"   -- freq < fixed_cutoff (e.g. 1% of the batch).
+    Fallback for the two std rules (fewer than `min_types_for_std` types in
+    a batch -- not in the task doc, our own call): lowest quartile, <=.
+    """
+    if rule not in RARE_RULES:
+        raise ValueError(f"rule must be one of {sorted(RARE_RULES)}, got {rule!r}")
+    t = df.groupby(["batch", "true_type"]).size().rename("n_cells").reset_index()
+    t["freq"] = t["n_cells"] / t["batch"].map(df.groupby("batch").size())
+
+    t["threshold"], t["is_rare"], t["fallback"] = np.nan, False, False
+    for batch, idx in t.groupby("batch").groups.items():
+        freqs = t.loc[idx, "freq"]
+        if rule == "fixed":
+            t.loc[idx, "threshold"] = fixed_cutoff
+            t.loc[idx, "is_rare"] = freqs < fixed_cutoff
+        elif len(freqs) < min_types_for_std:
+            q1 = freqs.quantile(0.25)
+            t.loc[idx, "threshold"], t.loc[idx, "fallback"] = q1, True
+            t.loc[idx, "is_rare"] = freqs <= q1
+        else:
+            vals = np.log10(freqs) if rule == "log_std" else freqs
+            cut = vals.mean() - std_threshold * vals.std()
+            t.loc[idx, "threshold"] = 10 ** cut if rule == "log_std" else cut
+            t.loc[idx, "is_rare"] = vals < cut
+    t["is_rare"] = t["is_rare"].astype(bool)
+    t["rule"] = rule
+    return t
+
+
+def compute_rare_mask(df, std_threshold=1.0, min_types_for_std=4, rule="std", fixed_cutoff=0.01):
+    """Per batch: which (type, batch) pairs are locally rare -- see
+    rare_group_table for the rules.
 
     Returns (is_rare: bool array aligned to df, rare_pairs: set of (batch, true_type)).
     """
-    type_freq = df.groupby(["batch", "true_type"]).size().rename("n").reset_index()
-    batch_totals = df.groupby("batch").size().rename("n_batch")
-    type_freq["freq"] = type_freq["n"] / type_freq["batch"].map(batch_totals)
-
-    rare_pairs = set()
-    for batch, sub in type_freq.groupby("batch"):
-        freqs = sub.set_index("true_type")["freq"]
-        if len(freqs) >= min_types_for_std:
-            threshold = freqs.mean() - std_threshold * freqs.std()
-            rare_types = freqs[freqs < threshold].index
-        else:
-            q1 = freqs.quantile(0.25)
-            rare_types = freqs[freqs <= q1].index
-        rare_pairs.update((batch, t) for t in rare_types)
-
+    table = rare_group_table(df, rule, std_threshold, min_types_for_std, fixed_cutoff)
+    rare = table[table["is_rare"]]
+    rare_pairs = set(zip(rare["batch"], rare["true_type"]))
     pairs = pd.Series(list(zip(df["batch"], df["true_type"])), index=df.index)
     is_rare = pairs.isin(rare_pairs).to_numpy()
     return is_rare, rare_pairs
@@ -262,7 +294,7 @@ def cohesion(affinity, cluster_labels):
     return result
 
 
-def group_summary(metric_values, df, is_rare):
+def group_summary(metric_values, df, is_rare, freq_lookup):
     """One row per group = (batch, true_type): the unit frequency belongs to.
 
     Frequency is a property of a group, not of a cell -- every cell of type T
@@ -277,10 +309,15 @@ def group_summary(metric_values, df, is_rare):
     cell), is_rare. std is reported, not used in the test: a high std in a
     rare group means its cells split -- some kept together, some scattered
     -- which the mean alone hides.
+
+    freq comes from `freq_lookup` ((batch, true_type) -> frequency over ALL
+    cells), not from `df`: for a test job `df` holds only test cells, and a
+    group's frequency shouldn't depend on which side of the split we score.
     """
     groups = pd.DataFrame({
         "batch": df["batch"].to_numpy(), "true_type": df["true_type"].to_numpy(),
-        "freq": compute_frequency(df), "value": metric_values, "is_rare": is_rare,
+        "freq": freq_lookup.reindex(pd.MultiIndex.from_arrays([df["batch"], df["true_type"]])).to_numpy(),
+        "value": metric_values, "is_rare": is_rare,
     })
     out = groups.groupby(["batch", "true_type"], sort=True).agg(
         freq=("freq", "first"), n_cells=("value", "count"),
@@ -312,3 +349,71 @@ def group_trend(groups):
     slope = float(np.polyfit(np.log10(g["freq"]), g["mean"], 1)[0])
     return {"n_groups": n, "spearman_corr": float(corr), "spearman_pvalue": float(pvalue),
             "slope_per_log10_freq": slope}
+
+
+# ---------------------------------------------------------------------------
+# Neighbor metrics: read straight off the embedding, no clustering involved.
+# ---------------------------------------------------------------------------
+
+def _knn(fit_points, query_points, k, exclude_self):
+    """k nearest neighbors of each query row among fit_points (indices into
+    fit_points). exclude_self: query_points ARE fit_points, drop each row's
+    own index (asks for k+1, removes self, keeps the first k)."""
+    from sklearn.neighbors import NearestNeighbors
+    k_eff = min(k + (1 if exclude_self else 0), len(fit_points))
+    _, idx = NearestNeighbors(n_neighbors=k_eff).fit(fit_points).kneighbors(query_points)
+    if not exclude_self:
+        return idx
+    out = np.empty((len(idx), k_eff - 1), dtype=int)
+    for r, row in enumerate(idx):
+        row = row[row != r]
+        out[r] = row[: k_eff - 1]
+    return out
+
+
+def knn_neighbors(embedding, df, k=15):
+    """Each cell's k nearest neighbors in the embedding, three ways:
+      "global" -- among all cells,
+      "within" -- among cells of its own batch only,
+      "cross"  -- among cells of other batches only.
+    Returns {scope: list of index arrays (into df rows), one per cell}.
+    """
+    embedding = np.asarray(embedding, dtype=float)
+    batches = df["batch"].to_numpy()
+    n = len(df)
+    out = {"global": list(_knn(embedding, embedding, k, exclude_self=True)),
+           "within": [None] * n, "cross": [None] * n}
+    for b in np.unique(batches):
+        rows = np.where(batches == b)[0]
+        others = np.where(batches != b)[0]
+        within = _knn(embedding[rows], embedding[rows], k, exclude_self=True)
+        for r, nb in zip(rows, within):
+            out["within"][r] = rows[nb]
+        if len(others):
+            cross = _knn(embedding[others], embedding[rows], k, exclude_self=False)
+            for r, nb in zip(rows, cross):
+                out["cross"][r] = others[nb]
+    return out
+
+
+def knn_same_type(neighbors, df):
+    """Per cell: share of its k nearest neighbors with the same cell type.
+    The embedding-level version of `agreement` -- no clusters, so it says
+    whether the embedding keeps a cell near its own kind, separately from
+    whether clustering later keeps it in a cluster of its own kind."""
+    types = df["true_type"].to_numpy()
+    return np.array([np.nan if nb is None or len(nb) == 0 else float(np.mean(types[nb] == types[i]))
+                     for i, nb in enumerate(neighbors)])
+
+
+def knn_affinity(affinity, neighbors):
+    """Per cell: mean ground-truth affinity to its k nearest embedding
+    neighbors (use the within-batch neighbors -- the affinity graph is built
+    on uncorrected data, so it barely links cells across batches). High =
+    the embedding's neighbors are cells the affinity graph also calls similar."""
+    affinity = affinity.tocsr()
+    out = np.full(len(neighbors), np.nan)
+    for i, nb in enumerate(neighbors):
+        if nb is not None and len(nb):
+            out[i] = float(np.asarray(affinity[i, nb].todense()).ravel().mean())
+    return out
