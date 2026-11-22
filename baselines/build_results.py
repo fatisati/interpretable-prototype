@@ -3,18 +3,18 @@
 Reads every baseline's saved metrics (stage 4's output, under
 runs/<task>/<dataset>/<baseline>/metrics/) and writes:
 
-  results/<task>_tables.md    comparison tables + one PASS/FAIL row per
-                              expectation in the task file. GENERATED --
-                              never hand-edit; re-run this script instead.
+  results/<task>_tables.md    comparison tables. GENERATED -- never
+                              hand-edit; re-run this script instead.
   results/<task>_summary.csv  every headline number, one row each (tidy
                               format, for plots or spreadsheets later).
 
-The verdict itself (results/<task>.md) is written by hand, citing these
-tables. This script only reads, joins, formats, and compares numbers
-against rules fixed in advance -- it never computes a metric. Any new
-number (a slope, an average across batches, ...) belongs in
-compute_metrics.py, so there is exactly one place numbers come from
-(see docs/architecture.md, stage 5's "must never" column).
+Mental model: a scoreboard. It (1) collects every saved metrics folder
+and says which baselines are still missing, (2) lines the numbers up side
+by side, (3) prints them. It never computes a number -- any new number (a
+slope, an average across batches, ...) belongs in compute_metrics.py, so
+there is exactly one place numbers come from -- and it never judges
+them: no PASS/FAIL. Reading the tables against the task's expectations
+and writing the verdict is done by hand, in results/<task>.md.
 
 Output is deterministic: same metrics files in -> byte-identical files
 out (sorted order, fixed number formatting, no timestamps), so a diff
@@ -26,61 +26,21 @@ Usage:
 import argparse
 import json
 import math
+import platform
 from pathlib import Path
 
+import numpy
 import pandas as pd
+import scipy
 
-# ---------------------------------------------------------------------------
-# Expectation rules. These mirror the "What I expect" section of
-# tasks/rare_cell_preservation.md (plus the SEACells section's own
-# expectation). They are fixed BEFORE any results exist. Changing one after
-# seeing results is allowed only with a written note in results/<task>.md
-# saying what changed and why -- otherwise the check just moves to fit the
-# data.
-# ---------------------------------------------------------------------------
-
-# E1: a metric "drops as frequency falls" if its SLOPE (change per 10x
-# change in frequency, saved by compute_metrics.py) is positive. The slope
-# decides because it measures how BIG the drop is. Spearman only measures
-# ORDER, so a tiny consistent difference can outvote a big one -- e.g.
-# cohesion counts a cell's similarity to itself as 1, giving small clusters
-# a ~0.01 bonus that Spearman can rank above a 0.7 loss for scattered rare
-# cells (seen in tests/check_build_results.py). Spearman is still shown;
-# when it disagrees (not positive with p < ALPHA), the row is flagged for a
-# human look at the binned table instead of silently overruling it.
-ALPHA = 0.05
-
-# Job-name convention every adapter in compute_metrics.py must follow, so
-# this script knows which runs are comparable:
-#   scVI:                    train, test
-#   SEACells:                train, full
-#   Harmony / BBKNN / ComBat: full
-REFERENCE_BASELINE = "seacells"
-INDUCTIVE_BASELINE = "scvi"
+# Only used to list which baselines haven't been scored yet, per dataset.
 EXPECTED_BASELINES = ["bbknn", "combat", "harmony", "scvi", "seacells"]
-
-# E3/E4: which reference (SEACells) job each job is compared against. A job
-# not listed here has no fair SEACells equivalent (scVI's test job: SEACells
-# can't be evaluated on unseen cells -- task file, SEACells section).
-REFERENCE_JOB_FOR = {"train": "train", "full": "full"}
-
-# E4: assignment metrics where SEACells (full) is expected to beat every
-# correction baseline (full). (metric, population) pairs; higher = better
-# for all of them.
-E4_METRICS = [
-    ("purity", "all"),
-    ("agreement_global", "rare"),
-    ("agreement_within", "rare"),
-    ("agreement_cross", "rare"),
-    ("coverage", "rare"),
-    ("rare_f1", "rare"),
-]
 
 AGREEMENT_METRICS = ["agreement_global", "agreement_within", "agreement_cross"]
 
 
 # ---------------------------------------------------------------------------
-# Loading
+# 1. Collect
 # ---------------------------------------------------------------------------
 
 def find_metrics_dirs(runs_root, task):
@@ -96,13 +56,12 @@ def summary_to_rows(summary, dataset, baseline):
     Pure reshaping; every number is copied, none is computed."""
     rows = []
 
-    def add(job, metric, population, stats, **extra):
+    def add(job, metric, population, stats):
         rows.append({
             "dataset": dataset, "baseline": baseline, "job": job,
             "metric": metric, "population": population,
             "mean": stats.get("mean", math.nan), "std": stats.get("std", math.nan),
             "coverage": stats.get("coverage", math.nan), "n": stats.get("n", math.nan),
-            **extra,
         })
 
     for job, result in summary.items():
@@ -126,8 +85,8 @@ def summary_to_rows(summary, dataset, baseline):
 
 def load_all(runs_root, task):
     """Returns (headline DataFrame, frequency-dependence DataFrame,
-    frequency-bins DataFrame, list of run info dicts)."""
-    headline, freq, bins, runs = [], [], [], []
+    per-group frequency DataFrame, list of run info dicts)."""
+    headline, freq, groups, runs = [], [], [], []
     for dataset, baseline, mdir in find_metrics_dirs(runs_root, task):
         summary = json.loads((mdir / "metrics_summary.json").read_text())
         headline += summary_to_rows(summary, dataset, baseline)
@@ -142,12 +101,16 @@ def load_all(runs_root, task):
         fd.insert(0, "dataset", dataset)
         freq.append(fd)
 
-        bins_path = mdir / "frequency_bins.csv"
-        if bins_path.exists():
-            fb = pd.read_csv(bins_path)
-            fb.insert(0, "baseline", baseline)
-            fb.insert(0, "dataset", dataset)
-            bins.append(fb)
+        groups_path = mdir / "frequency_groups.csv"
+        if not groups_path.exists() or "n_groups" not in fd.columns:
+            raise ValueError(
+                f"{mdir}: no per-group frequency results -- made by an older compute_metrics.py. "
+                f"Re-run compute_metrics.py for this baseline."
+            )
+        fg = pd.read_csv(groups_path)
+        fg.insert(0, "baseline", baseline)
+        fg.insert(0, "dataset", dataset)
+        groups.append(fg)
 
         config_path = mdir / "metrics_config.json"
         config = json.loads(config_path.read_text()) if config_path.exists() else {}
@@ -156,116 +119,24 @@ def load_all(runs_root, task):
 
     headline_df = pd.DataFrame(headline)
     freq_df = pd.concat(freq, ignore_index=True) if freq else pd.DataFrame(
-        columns=["dataset", "baseline", "job", "metric", "spearman_corr", "spearman_pvalue", "slope_per_log10_freq"])
-    bins_df = pd.concat(bins, ignore_index=True) if bins else pd.DataFrame()
+        columns=["dataset", "baseline", "job", "metric", "spearman_corr", "n_groups", "spearman_pvalue", "slope_per_log10_freq"])
+    groups_df = pd.concat(groups, ignore_index=True) if groups else pd.DataFrame()
     sort_cols = ["dataset", "baseline", "job", "metric"]
     if not headline_df.empty:
         headline_df = headline_df.sort_values(sort_cols + ["population"], kind="stable").reset_index(drop=True)
     freq_df = freq_df.sort_values(sort_cols, kind="stable").reset_index(drop=True)
-    if not bins_df.empty:
-        bins_df = bins_df.sort_values(sort_cols + ["freq_low"], kind="stable").reset_index(drop=True)
-    return headline_df, freq_df, bins_df, runs
+    if not groups_df.empty:
+        groups_df = groups_df.sort_values(sort_cols + ["freq", "batch", "true_type"], kind="stable").reset_index(drop=True)
+    return headline_df, freq_df, groups_df, runs
 
 
 # ---------------------------------------------------------------------------
-# Expectation checks -- comparisons of saved numbers only
+# 2. Line up (formatting helpers)
 # ---------------------------------------------------------------------------
 
 def _is_num(x):
     return x is not None and not (isinstance(x, float) and math.isnan(x))
 
-
-def lookup(headline, dataset, baseline, job, metric, population):
-    hit = headline[(headline["dataset"] == dataset) & (headline["baseline"] == baseline)
-                   & (headline["job"] == job) & (headline["metric"] == metric)
-                   & (headline["population"] == population)]
-    return float(hit["mean"].iloc[0]) if len(hit) else math.nan
-
-
-def e1_status(slope, corr, pvalue):
-    """Slope decides; Spearman disagreeing only adds a flag (see ALPHA's comment)."""
-    if not _is_num(slope):
-        return "N/A", "slope undefined"
-    status = "PASS" if slope > 0 else "FAIL"
-    reason = "" if slope > 0 else "metric does not fall with frequency"
-    spearman_agrees = _is_num(corr) and _is_num(pvalue) and corr > 0 and pvalue < ALPHA
-    if (slope > 0) != spearman_agrees:
-        flag = "Spearman disagrees, check binned table"
-        reason = f"{reason}; {flag}" if reason else flag
-    return status, reason
-
-
-def check_e1(freq):
-    rows = []
-    for r in freq.itertuples(index=False):
-        status, reason = e1_status(r.slope_per_log10_freq, r.spearman_corr, r.spearman_pvalue)
-        rows.append({"dataset": r.dataset, "baseline": r.baseline, "job": r.job, "metric": r.metric,
-                     "spearman": r.spearman_corr, "p": r.spearman_pvalue,
-                     "slope": r.slope_per_log10_freq, "status": status, "reason": reason})
-    return rows
-
-
-def check_e2(freq, datasets):
-    """scVI cohesion falls with frequency on train AND test, and the test
-    slope is at least as steep as the train slope."""
-    rows = []
-    for dataset in datasets:
-        sub = freq[(freq["dataset"] == dataset) & (freq["baseline"] == INDUCTIVE_BASELINE)
-                   & (freq["metric"] == "cohesion")].set_index("job")
-        if not {"train", "test"} <= set(sub.index):
-            rows.append({"dataset": dataset, "status": "N/A",
-                         "detail": f"{INDUCTIVE_BASELINE} cohesion for train and test not both found"})
-            continue
-        tr, te = sub.loc["train"], sub.loc["test"]
-        tr_status, _ = e1_status(tr["slope_per_log10_freq"], tr["spearman_corr"], tr["spearman_pvalue"])
-        te_status, _ = e1_status(te["slope_per_log10_freq"], te["spearman_corr"], te["spearman_pvalue"])
-        steeper = _is_num(te["slope_per_log10_freq"]) and _is_num(tr["slope_per_log10_freq"]) \
-            and te["slope_per_log10_freq"] >= tr["slope_per_log10_freq"]
-        status = "PASS" if (tr_status == "PASS" and te_status == "PASS" and steeper) else "FAIL"
-        detail = (f"train: falls={tr_status}, slope={fmt(tr['slope_per_log10_freq'])}; "
-                  f"test: falls={te_status}, slope={fmt(te['slope_per_log10_freq'])}; "
-                  f"test at least as steep={'yes' if steeper else 'no'}")
-        rows.append({"dataset": dataset, "status": status, "detail": detail})
-    return rows
-
-
-def check_vs_reference(headline, metrics, skip_jobs_without_reference=False):
-    """For every non-reference baseline job, compare each (metric,
-    population) against the SEACells job it's fairly comparable to.
-    PASS = SEACells strictly higher."""
-    rows = []
-    if headline.empty:
-        return rows
-    combos = headline[["dataset", "baseline", "job"]].drop_duplicates().itertuples(index=False)
-    for dataset, baseline, job in combos:
-        if baseline == REFERENCE_BASELINE:
-            continue
-        ref_job = REFERENCE_JOB_FOR.get(job)
-        for metric, population in metrics:
-            base = {"dataset": dataset, "baseline": baseline, "job": job,
-                    "metric": f"{metric} ({population})"}
-            if ref_job is None:
-                if not skip_jobs_without_reference:
-                    rows.append({**base, "value": math.nan, "reference": math.nan, "status": "N/A",
-                                 "reason": f"no SEACells equivalent for job '{job}'"})
-                continue
-            value = lookup(headline, dataset, baseline, job, metric, population)
-            ref = lookup(headline, dataset, REFERENCE_BASELINE, ref_job, metric, population)
-            if not _is_num(ref):
-                status, reason = "N/A", f"SEACells '{ref_job}' metrics not found"
-            elif not _is_num(value):
-                status, reason = "N/A", "value undefined"
-            elif value < ref:
-                status, reason = "PASS", ""
-            else:
-                status, reason = "FAIL", "not below SEACells"
-            rows.append({**base, "value": value, "reference": ref, "status": status, "reason": reason})
-    return rows
-
-
-# ---------------------------------------------------------------------------
-# Formatting
-# ---------------------------------------------------------------------------
 
 def fmt(x, digits=3):
     if not _is_num(x):
@@ -298,12 +169,7 @@ def md_table(header, rows):
     return "\n".join(out)
 
 
-def count_line(rows):
-    counts = {s: sum(r["status"] == s for r in rows) for s in ("PASS", "FAIL", "N/A")}
-    return f"**{counts['PASS']} PASS, {counts['FAIL']} FAIL, {counts['N/A']} N/A** (of {len(rows)} checks)"
-
-
-def render(task, headline, freq, bins, runs):
+def render(task, headline, freq, groups, runs, figures):
     lines = [
         f"# {task} — generated tables",
         "",
@@ -323,10 +189,9 @@ def render(task, headline, freq, bins, runs):
         lines += [f"No metrics found under `runs/{task}/`. Run `compute_metrics.py` first.", ""]
         return "\n".join(lines) + "\n"
 
-    import platform, numpy, scipy  # noqa: E401 -- only for the environment line
     lines += [f"Environment (this script): python {platform.python_version()}, pandas {pd.__version__}, "
-              f"numpy {numpy.__version__}, scipy {scipy.__version__}. Metric versions: see each "
-              f"metrics folder's own config.", ""]
+              f"numpy {numpy.__version__}, scipy {scipy.__version__}. Versions used to compute the "
+              f"metrics: each metrics folder's `metrics_config.json`.", ""]
     lines.append(md_table(
         ["dataset", "baseline", "jobs", "rare pairs", "rare threshold (std)", "metrics folder"],
         [[r["dataset"], r["baseline"], ", ".join(r["jobs"]), r["config"].get("n_rare_pairs", "—"),
@@ -340,10 +205,11 @@ def render(task, headline, freq, bins, runs):
             lines += ["", f"**{dataset}: not scored yet:** {', '.join(missing)}"]
     lines.append("")
 
-    # --- headline tables, one pair per dataset -----------------------------
     for dataset in datasets:
         combos = headline[headline["dataset"] == dataset][["baseline", "job"]].drop_duplicates()
         combos = list(combos.itertuples(index=False))
+
+        # --- agreement -----------------------------------------------------
         lines += [f"## {dataset}", "", "### Agreement (all cells / rare cells)", ""]
         header = ["baseline", "job"]
         for m in AGREEMENT_METRICS:
@@ -357,7 +223,10 @@ def render(task, headline, freq, bins, runs):
                 row += [mean_std(headline, dataset, baseline, job, m, "all", cov),
                         mean_std(headline, dataset, baseline, job, m, "rare", cov)]
             rows.append(row)
-        lines += [md_table(header, rows), "", "### Purity, rare coverage, rare F1, cohesion", ""]
+        lines += [md_table(header, rows), ""]
+
+        # --- the rest of the headline metrics ------------------------------
+        lines += ["### Purity, rare coverage, rare F1, cohesion", ""]
         rows = [[b, j,
                  mean_std(headline, dataset, b, j, "purity", "all"),
                  mean_std(headline, dataset, b, j, "coverage", "rare"),
@@ -367,103 +236,148 @@ def render(task, headline, freq, bins, runs):
         lines += [md_table(["baseline", "job", "purity", "rare coverage", "rare F1",
                             "cohesion — all", "cohesion — rare"], rows), ""]
 
-    # --- expectation checks ------------------------------------------------
-    e1 = check_e1(freq)
-    e2 = check_e2(freq, datasets)
-    e3 = check_vs_reference(headline, [("cohesion", "rare")])
-    e4 = check_vs_reference(headline, E4_METRICS, skip_jobs_without_reference=True)
-    e4 = [r for r in e4 if r["job"] == "full"]
-
-    lines += [
-        "## Expectation checks",
-        "",
-        "Rules are fixed in `build_results.py` (top of file) and mirror the task file's",
-        "\"What I expect\" section. PASS/FAIL only says whether a saved number crossed a",
-        "pre-set line; whether the gap is *real* is the handwritten verdict's job.",
-        "",
-        "### E1 — every metric drops as frequency falls",
-        "",
-        "PASS = `slope` > 0. `slope` = change in the metric per 10x change in frequency",
-        "(positive = drops as frequency drops); it decides because it measures how big",
-        "the drop is. `spearman` only measures order, so a tiny consistent difference can",
-        f"outvote a big one; when it disagrees (not > 0 with p < {ALPHA}) the row is flagged —",
-        "check that metric's binned table in the appendix. Caveat: with thousands of cells",
-        "almost any p-value is tiny, and cells in one cluster aren't independent — judge",
-        "the size of the slope and the binned tables, not the p-value.",
-        "",
-        count_line(e1),
-        "",
-        md_table(["dataset", "baseline", "job", "metric", "spearman", "p", "slope", "status"],
-                 [[r["dataset"], r["baseline"], r["job"], r["metric"], fmt(r["spearman"]), fmt_p(r["p"]),
-                   fmt(r["slope"]), r["status"] + (f" — {r['reason']}" if r["reason"] else "")] for r in e1]),
-        "",
-        "### E2 — scVI cohesion falls with frequency on train and test, test at least as steep",
-        "",
-        count_line(e2),
-        "",
-        md_table(["dataset", "status", "detail"], [[r["dataset"], r["status"], r["detail"]] for r in e2]),
-        "",
-        "### E3 — every baseline's rare cohesion is below SEACells'",
-        "",
-        "Compared like for like: train job vs SEACells train run, full job vs SEACells full",
-        "run. scVI's test job has no SEACells equivalent (SEACells can't score unseen cells).",
-        "",
-        count_line(e3),
-        "",
-        md_table(["dataset", "baseline", "job", "rare cohesion", "SEACells", "status"],
-                 [[r["dataset"], r["baseline"], r["job"], fmt(r["value"]), fmt(r["reference"]),
-                   r["status"] + (f" — {r['reason']}" if r["reason"] else "")] for r in e3]),
-        "",
-        "### E4 — SEACells (full) beats every correction baseline (full) on assignment metrics",
-        "",
-        "From the task file's SEACells section. Only jobs named `full` are compared, so",
-        "scVI (train/test only) is not in this check.",
-        "",
-        count_line(e4),
-        "",
-        md_table(["dataset", "baseline", "metric", "value", "SEACells", "status"],
-                 [[r["dataset"], r["baseline"], r["metric"], fmt(r["value"]), fmt(r["reference"]),
-                   r["status"] + (f" — {r['reason']}" if r["reason"] else "")] for r in e4]),
-        "",
-    ]
-
-    # --- binned frequency tables (appendix) --------------------------------
-    if not bins.empty:
+        # --- frequency question: per group (cell type x batch) ------------
+        sub = freq[freq["dataset"] == dataset]
         lines += [
-            "## Appendix — metric by frequency bin",
+            "### Does each metric fall as frequency falls?",
             "",
-            "Cells grouped into bins by their type's frequency within their batch (rarest",
-            "first). A smooth fall across bins = gradual loss; a flat line then one drop at",
-            "the low end = loss concentrated at the rare threshold. Both support the claim;",
-            "flat everywhere does not.",
+            "Asked across **groups** (one cell type in one batch), not cells: each group's",
+            "average counts once, whatever its size, so big common groups can't outvote",
+            "small rare ones. `spearman` > 0 = lower-frequency groups have lower averages",
+            "(order only; p-value based on the number of groups). `slope` = how big the",
+            "drop is: change in the group average per 10x change in frequency.",
+            "",
+            md_table(["baseline", "job", "metric", "groups", "spearman", "p", "slope"],
+                     [[r.baseline, r.job, r.metric, int(r.n_groups), fmt(r.spearman_corr),
+                       fmt_p(r.spearman_pvalue), fmt(r.slope_per_log10_freq)]
+                      for r in sub.itertuples(index=False)]),
             "",
         ]
-        for (dataset, baseline, job, metric), sub in bins.groupby(
+        for metric in sorted(groups.loc[groups["dataset"] == dataset, "metric"].unique()):
+            if (dataset, metric) in figures:
+                lines += [f"![{dataset} {metric} vs frequency]({figures[(dataset, metric)]})", ""]
+
+    # --- appendix: every group behind the trend ---------------------------
+    if not groups.empty:
+        lines += [
+            "## Appendix — every group",
+            "",
+            "One row per group (cell type in one batch), rarest first. `cells` = cells with a",
+            "defined value. `std` = spread of the metric across that group's cells: high std",
+            "with a middling mean means the group split (some cells kept together, some",
+            "scattered); low std means all cells did about equally well or badly.",
+            "",
+        ]
+        for (dataset, baseline, job, metric), sub in groups.groupby(
                 ["dataset", "baseline", "job", "metric"], sort=True):
-            lines += [f"**{dataset} / {baseline} / {job} / {metric}**", "",
-                      md_table(["frequency range", "mean", "std", "cells"],
-                               [[f"{r.freq_low:.4f} – {r.freq_high:.4f}", fmt(r.mean), fmt(r.std), int(r.count)]
-                                for r in sub.itertuples(index=False)]), ""]
+            lines += [f"<details><summary>{dataset} / {baseline} / {job} / {metric} — {len(sub)} groups</summary>",
+                      "",
+                      md_table(["batch", "cell type", "frequency", "cells", "mean", "std", "rare"],
+                               [[r.batch, r.true_type, f"{r.freq:.4f}", int(r.n_cells), fmt(r.mean), fmt(r.std),
+                                 "rare" if r.is_rare else ""] for r in sub.itertuples(index=False)]),
+                      "", "</details>", ""]
 
     return "\n".join(lines).rstrip() + "\n"
 
 
+# Colors: default categorical slots 1-2 of the dataviz reference palette,
+# checked with its colorblind validator (protan worst-case dE 24.7, PASS).
+COMMON_COLOR, RARE_COLOR = "#2a78d6", "#eb6834"
+
+
+def plot_frequency(task, dataset, metric, groups, freq, fig_dir):
+    """One figure per (dataset, metric): one panel per (baseline, job), each
+    dot = one group (cell type in one batch), x = its frequency (log scale),
+    y = its average, bar = +/- std across its cells. Shared y-axis so panels
+    compare directly. Only plots saved numbers."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.ticker import FuncFormatter, LogLocator, NullFormatter
+
+    sub = groups[(groups["dataset"] == dataset) & (groups["metric"] == metric)]
+    panels = list(sub[["baseline", "job"]].drop_duplicates().itertuples(index=False))
+    ncols = min(3, len(panels))
+    nrows = math.ceil(len(panels) / ncols)
+    fig, axes = plt.subplots(nrows, ncols, figsize=(4.4 * ncols, 3.6 * nrows), sharey=True, squeeze=False)
+    for ax in axes.flat[len(panels):]:
+        ax.set_visible(False)
+
+    for ax, (baseline, job) in zip(axes.flat, panels):
+        g = sub[(sub["baseline"] == baseline) & (sub["job"] == job)].dropna(subset=["mean"])
+        for is_rare, color, label in ((False, COMMON_COLOR, "common group"), (True, RARE_COLOR, "rare group")):
+            gg = g[g["is_rare"] == is_rare]
+            ax.errorbar(gg["freq"], gg["mean"], yerr=gg["std"].fillna(0), fmt="o", ms=5, color=color,
+                        ecolor=color, elinewidth=1, alpha=0.85, capsize=0, label=label,
+                        markeredgecolor="white", markeredgewidth=0.8)
+        t = freq[(freq["dataset"] == dataset) & (freq["baseline"] == baseline)
+                 & (freq["job"] == job) & (freq["metric"] == metric)]
+        trend = ""
+        if len(t):
+            r = t.iloc[0]
+            # Slope next to Spearman: Spearman is order-only, so a tiny but
+            # consistent difference can read as -1.00; the slope shows its size.
+            trend = (f"\nSpearman {fmt(r['spearman_corr'], 2)} (p {fmt_p(r['spearman_pvalue'])}), "
+                     f"slope {fmt(r['slope_per_log10_freq'], 2)}, {int(r['n_groups'])} groups")
+        ax.set_title(f"{baseline} / {job}{trend}", fontsize=9, color="#333333")
+        ax.set_xscale("log")
+        # Plain percent labels at 1-2-5 steps (1%, 2%, 5%, 10%) -- the
+        # default log labels (2x10^-3, 4x10^-2, ...) overlap.
+        ax.xaxis.set_major_locator(LogLocator(base=10, subs=(1.0, 2.0, 5.0)))
+        ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v * 100:g}%"))
+        ax.xaxis.set_minor_formatter(NullFormatter())
+        ax.grid(True, color="#e6e6e3", linewidth=0.6)
+        ax.set_axisbelow(True)
+        for side in ("top", "right"):
+            ax.spines[side].set_visible(False)
+        for side in ("left", "bottom"):
+            ax.spines[side].set_color("#999999")
+        ax.tick_params(colors="#555555", labelsize=8)
+    for ax in axes[-1]:
+        ax.set_xlabel("frequency of the type within its batch (log)", fontsize=8, color="#555555")
+    for ax in axes[:, 0]:
+        ax.set_ylabel(f"{metric} (group average)", fontsize=8, color="#555555")
+    handles, labels = axes.flat[0].get_legend_handles_labels()
+    fig.suptitle(f"{dataset}: {metric} vs frequency", fontsize=11, color="#222222")
+    fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 0.0), ncol=2, frameon=False,
+               fontsize=8, title="dot = one cell type in one batch;  bar = ± std across its cells",
+               title_fontsize=8)
+    fig.tight_layout()
+
+    fig_dir.mkdir(parents=True, exist_ok=True)
+    path = fig_dir / f"{task}_{dataset}_{metric}.png"
+    fig.savefig(path, dpi=120, metadata={"Software": None}, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+# ---------------------------------------------------------------------------
+# 3. Print
 # ---------------------------------------------------------------------------
 
 def run(task, runs_root="runs", results_dir="results"):
-    headline, freq, bins, runs = load_all(runs_root, task)
+    headline, freq, groups, runs = load_all(runs_root, task)
     results_dir = Path(results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
 
+    figures = {}
+    if not groups.empty:
+        for dataset, metric in groups[["dataset", "metric"]].drop_duplicates().itertuples(index=False):
+            path = plot_frequency(task, dataset, metric, groups, freq, results_dir / "figures")
+            figures[(dataset, metric)] = path.relative_to(results_dir).as_posix()
+
     tables_path = results_dir / f"{task}_tables.md"
-    tables_path.write_text(render(task, headline, freq, bins, runs), encoding="utf-8", newline="\n")
+    tables_path.write_text(render(task, headline, freq, groups, runs, figures), encoding="utf-8", newline="\n")
 
     summary_path = results_dir / f"{task}_summary.csv"
     headline.to_csv(summary_path, index=False, lineterminator="\n", float_format="%.6g")
+    groups_path = results_dir / f"{task}_groups.csv"
+    groups.to_csv(groups_path, index=False, lineterminator="\n", float_format="%.6g")
 
     print(f"[results] {len(runs)} metrics folder(s) read")
-    print(f"[results] wrote {tables_path}")
-    print(f"[results] wrote {summary_path}")
+    for path in (tables_path, summary_path, groups_path):
+        print(f"[results] wrote {path}")
+    print(f"[results] wrote {len(figures)} figure(s) to {results_dir / 'figures'}")
     return tables_path, summary_path
 
 

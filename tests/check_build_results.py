@@ -3,9 +3,9 @@
 Builds a small synthetic dataset in a temp folder, scores it with the REAL
 compute_metrics.run (so the metrics files have exactly the real format),
 then runs build_results.run on them and checks:
-  1. the expected files are written,
-  2. the expectation checks come out as designed (a baseline that scatters
-     rare cells must FAIL to beat SEACells... i.e. E3 = PASS, etc.),
+  1. the expected files are written, with every baseline and no PASS/FAIL,
+  2. stage 4 numbers come out as designed (a fully-missed rare type counts
+     as F1 = 0; baselines that scatter rare cells have a positive slope),
   3. a second run gives byte-identical output (deterministic).
 
 Plain python, no pytest needed:
@@ -141,41 +141,42 @@ def main():
         build_results.run(TASK, runs_root, results_dir)
         assert tables.read_bytes() == text1 and summary.read_bytes() == csv1, "output not deterministic"
 
-        headline, freq, bins, _ = build_results.load_all(runs_root, TASK)
-        assert not bins.empty, "frequency_bins.csv not written/read"
+        headline, freq, groups, _ = build_results.load_all(runs_root, TASK)
+        assert not groups.empty, "frequency_groups.csv not written/read"
 
-        e2 = build_results.check_e2(freq, [DATASET])
-        e3 = build_results.check_vs_reference(headline, [("cohesion", "rare")])
-        status = {(r["baseline"], r["job"]): r["status"] for r in e3}
-        assert status[("scvi", "train")] == "PASS", e3
-        assert status[("scvi", "test")] == "N/A", e3
-        assert status[("harmony", "full")] == "PASS", e3
-        assert e2[0]["status"] in ("PASS", "FAIL") and "slope" in e2[0]["detail"], e2
+        text = tables.read_text(encoding="utf-8")
+        for needed in ("scvi", "harmony", "seacells", "cohesion", "Appendix",
+                       "not scored yet:** bbknn, combat"):
+            assert needed in text, f"missing from tables: {needed}"
+        assert "PASS" not in text and "FAIL" not in text, "results file must not judge (no PASS/FAIL)"
 
-        # Every baseline that scatters rare cells should show a positive slope
-        # (metric falls as frequency falls). Not asserted on Spearman: in this
-        # toy, cohesion's self-similarity term (sim(i,i)=1) gives tiny clusters
-        # a tiny bonus, and Spearman (rank-only) picks that up as a consistent
-        # negative trend even though the size of the effect is ~0.01.
-        e1 = build_results.check_e1(freq)
-        scattered = [r for r in e1 if r["baseline"] != "seacells"]
-        assert all(r["slope"] > 0 for r in scattered), scattered
-        # ...so E1 must PASS them all (slope decides), and flag the cohesion rows
-        # where Spearman disagrees instead of silently failing them.
-        assert all(r["status"] == "PASS" for r in scattered), scattered
-        flagged = [r for r in scattered if "Spearman disagrees" in r["reason"]]
-        assert any(r["metric"] == "cohesion" for r in flagged), scattered
-        assert e2[0]["status"] == "PASS", e2
+        def value(baseline, job, metric, population):
+            hit = headline[(headline["baseline"] == baseline) & (headline["job"] == job)
+                           & (headline["metric"] == metric) & (headline["population"] == population)]
+            return float(hit["mean"].iloc[0])
+
+        # Every baseline that scatters rare cells must show "metric falls as
+        # frequency falls" -- Spearman AND slope positive, across groups. This
+        # is the case the old per-cell Spearman got wrong for cohesion (it
+        # came out strongly negative: thousands of common cells with a tiny
+        # small-cluster bonus outvoted the few scattered rare cells).
+        scattered = freq[freq["baseline"] != "seacells"]
+        assert (scattered["spearman_corr"] > 0).all(), scattered
+        assert (scattered["slope_per_log10_freq"] > 0).all(), scattered
+        # One group = one cell type in one batch: 8 types x 3 batches.
+        assert (freq["n_groups"] <= 24).all() and (freq["n_groups"] >= 20).all(), freq
+        assert set(groups.columns) >= {"batch", "true_type", "freq", "n_cells", "mean", "std", "is_rare"}
+        assert (results_dir / f"{TASK}_groups.csv").exists()
+        assert len(list((results_dir / "figures").glob("*.png"))) == 4, "one figure per metric expected"
 
         # Regression: fully-missed rare types must count as F1 = 0, not be
         # dropped from the average (scVI test scatters most rare cells).
-        f1 = build_results.lookup(headline, DATASET, "scvi", "test", "rare_f1", "rare")
-        cov = build_results.lookup(headline, DATASET, "scvi", "test", "coverage", "rare")
+        f1 = value("scvi", "test", "rare_f1", "rare")
+        cov = value("scvi", "test", "coverage", "rare")
         assert f1 < 0.5 and cov < 0.5, (f1, cov)
 
         print("\n" + "=" * 70 + "\nGENERATED TABLES (first 60 lines)\n" + "=" * 70)
-        print("\n".join(tables.read_text(encoding="utf-8").splitlines()[:60]))
-        print("\nE2:", e2)
+        print("\n".join(text.splitlines()[:60]))
         print("\nALL CHECKS PASSED")
 
 

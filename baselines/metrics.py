@@ -262,30 +262,53 @@ def cohesion(affinity, cluster_labels):
     return result
 
 
-def frequency_dependence(metric_values, frequency_values, n_bins=10):
-    """Spearman correlation between a per-cell metric and its (type, batch)
-    frequency, plus a binned table of mean metric value per frequency bin
-    -- checks the decline is smooth across the whole range, not just a
-    jump at the rare/common threshold (see task doc's frequency-dependence
-    check). NaNs in either array are dropped before computing.
+def group_summary(metric_values, df, is_rare):
+    """One row per group = (batch, true_type): the unit frequency belongs to.
 
-    Also a slope: least-squares fit of metric vs log10(frequency), i.e.
-    how much the metric changes per 10x change in frequency. Spearman
-    only says *whether* the metric falls with frequency; the slope says
-    *how steeply*, which is what comparing train vs test needs (task doc:
-    "test-side drop at least as steep"). Positive = metric drops as
-    frequency drops. log10 because frequencies span orders of magnitude
-    (0.001 to 0.5) and a linear fit would be dominated by common types.
+    Frequency is a property of a group, not of a cell -- every cell of type T
+    in batch b shares the same frequency. So the frequency question ("does
+    the metric drop as frequency drops?") is asked across groups, not cells
+    (pseudobulk: average first, then test). Counting cells instead would
+    (1) let big common groups outvote small rare ones, and (2) fake
+    certainty: 18,000 cells are really ~100-150 groups.
 
-    Returns (corr, pvalue, slope, table).
+    Per group: freq, n_cells (cells with a defined value -- e.g. cross-batch
+    agreement is undefined for some cells), mean, std (ddof=1; NaN for one
+    cell), is_rare. std is reported, not used in the test: a high std in a
+    rare group means its cells split -- some kept together, some scattered
+    -- which the mean alone hides.
     """
-    mask = ~np.isnan(metric_values) & ~np.isnan(frequency_values)
-    corr, pvalue = spearmanr(metric_values[mask], frequency_values[mask])
-    log_freq = np.log10(frequency_values[mask])
-    slope = float(np.polyfit(log_freq, metric_values[mask], 1)[0]) if np.ptp(log_freq) > 0 else float("nan")
+    groups = pd.DataFrame({
+        "batch": df["batch"].to_numpy(), "true_type": df["true_type"].to_numpy(),
+        "freq": compute_frequency(df), "value": metric_values, "is_rare": is_rare,
+    })
+    out = groups.groupby(["batch", "true_type"], sort=True).agg(
+        freq=("freq", "first"), n_cells=("value", "count"),
+        mean=("value", "mean"), std=("value", "std"), is_rare=("is_rare", "first"),
+    ).reset_index()
+    return out
 
-    bins = pd.qcut(frequency_values[mask], q=n_bins, duplicates="drop")
-    table = pd.DataFrame({"metric": metric_values[mask], "bin": bins}).groupby("bin", observed=True)["metric"].agg(
-        ["mean", "std", "count"]
-    )
-    return float(corr), float(pvalue), slope, table
+
+def group_trend(groups):
+    """Across groups (from group_summary): does the group mean drop as
+    frequency drops? Each group counts once, whatever its cell count.
+
+    spearman: rank correlation of group mean vs frequency (> 0 = rarer
+      groups score lower). Spearman, not a straight-line fit, because the
+      task's question is "does it go down" (monotonic), and a sharp drop
+      at the rare threshold counts as much as a smooth decline.
+    slope: least-squares fit of group mean vs log10(frequency) -- how big
+      the drop is, per 10x change in frequency. log10 because frequencies
+      span orders of magnitude. Reported for size, not for the yes/no.
+    Groups with an undefined mean are left out; n_groups says how many
+    were used.
+    """
+    g = groups.dropna(subset=["mean", "freq"])
+    n = len(g)
+    if n < 3 or g["freq"].nunique() < 2:
+        return {"n_groups": n, "spearman_corr": float("nan"),
+                "spearman_pvalue": float("nan"), "slope_per_log10_freq": float("nan")}
+    corr, pvalue = spearmanr(g["mean"], g["freq"])
+    slope = float(np.polyfit(np.log10(g["freq"]), g["mean"], 1)[0])
+    return {"n_groups": n, "spearman_corr": float(corr), "spearman_pvalue": float(pvalue),
+            "slope_per_log10_freq": slope}

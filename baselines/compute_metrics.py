@@ -34,8 +34,8 @@ import scipy
 from scipy.sparse import load_npz
 
 from metrics import (
-    agreement, cell_type_purity, cohesion, compute_frequency, compute_rare_mask,
-    coverage, frequency_dependence, rare_precision_recall_f1, summarize_per_cell,
+    agreement, cell_type_purity, cohesion, compute_rare_mask,
+    coverage, group_summary, group_trend, rare_precision_recall_f1, summarize_per_cell,
 )
 
 
@@ -82,10 +82,6 @@ def scvi_adapter(embedding_path, label_key, batch_key, affinity_dir):
 
 ADAPTERS = {"scvi": scvi_adapter}
 
-# Headline continuous metrics checked for frequency-dependence -- the same
-# `frequency_dependence` helper works on any per-cell array, so extending
-# this to other metrics later is just adding entries here.
-FREQUENCY_CHECK_SCOPES = ["global"]
 
 
 def score_job(df, affinity, score_mask, rare_pairs_global, std_threshold, min_types_for_std):
@@ -107,7 +103,15 @@ def score_job(df, affinity, score_mask, rare_pairs_global, std_threshold, min_ty
     ).isin(rare_pairs).to_numpy()
 
     result = {}
-    freq_rows = []
+    # Frequency question, asked per group (see metrics.group_summary):
+    # one group table + one trend row per per-cell metric.
+    group_tables, trend_rows = [], []
+
+    def frequency_check(metric_name, values_scored):
+        groups = group_summary(values_scored, scored_df, is_rare_scored)
+        groups.insert(0, "metric", metric_name)
+        group_tables.append(groups)
+        trend_rows.append({"metric": metric_name, **group_trend(groups)})
 
     purity_mean, purity_std = cell_type_purity(scored_df)
     result["purity"] = {"mean": purity_mean, "std": purity_std}
@@ -116,12 +120,7 @@ def score_job(df, affinity, score_mask, rare_pairs_global, std_threshold, min_ty
         values_full = agreement(df, scope)  # needs the FULL job population for cluster structure
         values_scored = values_full[np.asarray(score_mask)]
         result[f"agreement_{scope}"] = summarize_per_cell(values_scored, scored_df, rare_mask=is_rare_scored)
-        if scope in FREQUENCY_CHECK_SCOPES:
-            freq = compute_frequency(scored_df)
-            corr, pvalue, slope, table = frequency_dependence(values_scored, freq)
-            freq_rows.append({"metric": f"agreement_{scope}", "spearman_corr": corr,
-                               "spearman_pvalue": pvalue, "slope_per_log10_freq": slope,
-                               "binned_table": table})
+        frequency_check(f"agreement_{scope}", values_scored)
 
     # Per-batch values plus one dataset-wide mean/std, saved here so stage 5
     # (results) never has to aggregate anything itself.
@@ -147,13 +146,9 @@ def score_job(df, affinity, score_mask, rare_pairs_global, std_threshold, min_ty
             "std": float(np.nanstd(rare_cohesion)) if rare_cohesion.size else float("nan"),
         },
     }
-    freq = compute_frequency(scored_df)
-    corr, pvalue, slope, table = frequency_dependence(cohesion_scored, freq)
-    freq_rows.append({"metric": "cohesion", "spearman_corr": corr,
-                       "spearman_pvalue": pvalue, "slope_per_log10_freq": slope,
-                       "binned_table": table})
+    frequency_check("cohesion", cohesion_scored)
 
-    return result, per_pair, freq_rows
+    return result, per_pair, pd.concat(group_tables, ignore_index=True), trend_rows
 
 
 def flatten_per_batch(summary, job_name):
@@ -221,10 +216,10 @@ def run(baseline, embedding_path, label_key, batch_key, affinity_dir,
     _, rare_pairs_global = compute_rare_mask(all_rows, std_threshold, min_types_for_std)
     print(f"[metrics] {len(rare_pairs_global)} locally-rare (type, batch) pairs found, dataset-wide")
 
-    summary, per_batch_rows, per_rare_type_rows, freq_rows_all = {}, [], [], []
+    summary, per_batch_rows, per_rare_type_rows, group_tables_all, trend_rows_all = {}, [], [], [], []
     for job_name, job in jobs.items():
         print(f"[metrics] scoring job={job_name} ({job['score_mask'].sum():,} scored cells)")
-        result, per_pair, freq_rows = score_job(
+        result, per_pair, groups, trend_rows = score_job(
             job["df"], job["affinity"], job["score_mask"], rare_pairs_global,
             std_threshold, min_types_for_std,
         )
@@ -232,9 +227,9 @@ def run(baseline, embedding_path, label_key, batch_key, affinity_dir,
         per_batch_rows += flatten_per_batch(result, job_name)
         per_pair["job"] = job_name
         per_rare_type_rows.append(per_pair)
-        for row in freq_rows:
-            row["job"] = job_name
-            freq_rows_all.append(row)
+        groups.insert(0, "job", job_name)
+        group_tables_all.append(groups)
+        trend_rows_all += [{"job": job_name, **row} for row in trend_rows]
 
     out_dir = metrics_dir_for(embedding_path)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -243,22 +238,10 @@ def run(baseline, embedding_path, label_key, batch_key, affinity_dir,
     pd.DataFrame(per_batch_rows).to_csv(out_dir / "metrics_per_batch.csv", index=False)
     pd.concat(per_rare_type_rows, ignore_index=True).to_csv(out_dir / "metrics_per_rare_type.csv", index=False)
 
-    freq_summary = pd.DataFrame([
-        {"job": r["job"], "metric": r["metric"], "spearman_corr": r["spearman_corr"],
-         "spearman_pvalue": r["spearman_pvalue"], "slope_per_log10_freq": r["slope_per_log10_freq"]}
-        for r in freq_rows_all
-    ])
-    freq_summary.to_csv(out_dir / "frequency_dependence.csv", index=False)
-
-    # Mean metric per frequency bin -- lets a reader see whether the decline
-    # is smooth across the whole range or one jump at the rare threshold.
-    bin_rows = []
-    for r in freq_rows_all:
-        for interval, stats in r["binned_table"].iterrows():
-            bin_rows.append({"job": r["job"], "metric": r["metric"],
-                             "freq_low": float(interval.left), "freq_high": float(interval.right),
-                             "mean": stats["mean"], "std": stats["std"], "count": int(stats["count"])})
-    pd.DataFrame(bin_rows).to_csv(out_dir / "frequency_bins.csv", index=False)
+    # Frequency question, per group (cell type x batch): the trend across
+    # groups, one row per (job, metric), and the group table behind it.
+    pd.DataFrame(trend_rows_all).to_csv(out_dir / "frequency_dependence.csv", index=False)
+    pd.concat(group_tables_all, ignore_index=True).to_csv(out_dir / "frequency_groups.csv", index=False)
 
     (out_dir / "metrics_config.json").write_text(json.dumps({
         "embedding_path": str(embedding_path), "affinity_dir": str(affinity_dir),
