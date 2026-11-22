@@ -244,15 +244,20 @@ def rare_precision_recall_f1(df, rare_pairs):
 
 def cohesion(affinity, cluster_labels):
     """Per-cell cohesion: average sim(i, j) over every j in i's cluster,
-    with sim(i, i) := 1 (the stored affinity matrix has a 0 diagonal, so
-    that's added explicitly here rather than read off the matrix).
+    with sim(i, i) := 1.
+
+    The stored diagonal is ignored and replaced by exactly 1, so this is
+    correct whatever the matrix holds there. (affinity.py's graphs store 1
+    on the diagonal; an earlier version of this function assumed 0 and
+    added 1 on top, counting self twice -- e.g. two cells with sim 0.5
+    scored 1.25 instead of 0.75.)
     """
     n = affinity.shape[0]
     result = np.zeros(n)
     for cluster_id in pd.unique(cluster_labels):
         idx = np.where(cluster_labels == cluster_id)[0]
         sub = affinity[idx][:, idx]
-        row_sums = np.asarray(sub.sum(axis=1)).ravel() + 1.0
+        row_sums = np.asarray(sub.sum(axis=1)).ravel() - sub.diagonal() + 1.0
         result[idx] = row_sums / len(idx)
     return result
 
