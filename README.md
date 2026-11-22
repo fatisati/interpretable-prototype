@@ -21,9 +21,11 @@ batches, guided by any cell-cell affinity graph (transcriptomic or spatial).
 
 ## Workflow
 
+Exact command for every step: [`docs/runbook.md`](docs/runbook.md).
+
 1. Write a task in `tasks/<task_name>.md`: the gap, the metrics that
    decide if it's real, and why -- before running anything.
-2. Prepare the dataset (`datasets/prepare.py`), then the shared evaluation
+2. Prepare the dataset (`datasets/scripts/prepare.py`), then the shared evaluation
    setup for that task -- train/test split, ground-truth affinity graphs,
    and cluster count (`baselines/prepare_eval.py`). Every baseline below
    reads these; none of them create their own copy -- see
@@ -32,7 +34,7 @@ batches, guided by any cell-cell affinity graph (transcriptomic or spatial).
 4. Compute metrics from each baseline's saved output
    (`baselines/compute_metrics.py`) -- rerunnable on its own, without
    retraining anything, if a new metric comes up later.
-5. Build the comparison tables (`python baselines/build_results.py --task <task>`
+5. Build the comparison tables (`baselines/build_results.py`
    -> `results/<task>/official/tables.md`, generated, never hand-edited), then write
    the gap verdict by hand in `results/<task>.md`, citing those tables.
 6. If the gap is real, run scProto, save to `runs/<task>/<dataset>/scproto/`.

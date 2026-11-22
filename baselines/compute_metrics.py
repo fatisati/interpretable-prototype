@@ -33,6 +33,7 @@ import pandas as pd
 import scipy
 from scipy.sparse import load_npz
 
+from run_record import record_run  # first local import: records the script's start time
 from metrics import (
     RARE_RULES, agreement, cell_type_purity, cohesion, knn_affinity, knn_neighbors, knn_same_type,
     rare_group_table,
@@ -292,7 +293,7 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    run(
+    out_dir = run(
         baseline=args.baseline,
         embedding_path=args.embedding,
         label_key=args.label_key,
@@ -303,3 +304,4 @@ if __name__ == "__main__":
         rare_rule=args.rare_rule,
         fixed_cutoff=args.fixed_cutoff,
     )
+    record_run(out_dir / "metrics_config.json")

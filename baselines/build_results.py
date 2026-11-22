@@ -35,6 +35,8 @@ import math
 import platform
 from pathlib import Path
 
+from run_record import record_run  # records the script's start time
+
 import numpy
 import pandas as pd
 import scipy
@@ -558,4 +560,9 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    run(args.task, args.runs_root, args.results_dir, args.metrics_subdir)
+    tables_path, _ = run(args.task, args.runs_root, args.results_dir, args.metrics_subdir)
+    # Kept out of tables.md (which stays byte-identical across runs). Fresh file
+    # each time: it describes the tables just written, not older builds.
+    run_json = tables_path.parent / "run.json"
+    run_json.unlink(missing_ok=True)
+    record_run(run_json)

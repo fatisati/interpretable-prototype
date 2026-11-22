@@ -30,6 +30,7 @@ import scanpy as sc
 from scipy.sparse import issparse
 from sklearn.decomposition import PCA
 
+from run_record import record_run  # first local import: records the script's start time
 from common import cluster_embedding_file, environment_versions, load_cluster_config, load_split, looks_like_raw_counts
 
 
@@ -99,3 +100,4 @@ def parse_args():
 if __name__ == "__main__":
     a = parse_args()
     run(a.h5ad, a.batch_key, a.label_key, a.out_dir, a.layer, a.test_size, a.seed, a.n_comps)
+    record_run(Path(a.out_dir) / "config.json")

@@ -17,7 +17,9 @@ Usage:
     python baselines/recluster.py --run-dir runs/rare_cell_preservation/heart_cell_atlas/scvi
 """
 import argparse
+from pathlib import Path
 
+from run_record import record_run  # first local import: records the script's start time
 from common import cluster_embedding_file
 
 if __name__ == "__main__":
@@ -25,4 +27,5 @@ if __name__ == "__main__":
     p.add_argument("--run-dir", required=True, help="baseline run folder containing embedding.csv + config.json")
     args = p.parse_args()
     cluster_embedding_file(args.run_dir)
+    record_run(Path(args.run_dir) / "config.json")
     print("[recluster] done -- metrics/ for this run is now stale: re-run baselines/compute_metrics.py")

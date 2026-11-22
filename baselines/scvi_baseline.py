@@ -35,6 +35,7 @@ import pandas as pd
 import scanpy as sc
 import scvi
 
+from run_record import record_run  # first local import: records the script's start time
 from common import cluster_embedding_file, environment_versions, load_cluster_config, load_split, looks_like_raw_counts
 
 
@@ -166,3 +167,4 @@ if __name__ == "__main__":
         accelerator=args.accelerator,
         early_stopping=args.early_stopping,
     )
+    record_run(Path(args.out_dir) / "config.json")

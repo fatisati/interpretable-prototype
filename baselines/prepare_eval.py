@@ -30,6 +30,7 @@ from pathlib import Path
 import scanpy as sc
 from scipy.sparse import save_npz
 
+from run_record import record_run  # first local import: records the script's start time
 from affinity import build_affinity_graph
 from common import compute_pca, stratified_split
 
@@ -130,6 +131,8 @@ def run(
         "n_full": int(adata.n_obs),
     }
     (out_dir / "affinity_config.json").write_text(json.dumps(config, indent=2))
+    for sidecar in (split_path.with_suffix(".json"), out_dir / "affinity_config.json", cluster_config_path):
+        record_run(sidecar)
 
     print(f"[prepare_eval] wrote {train_path} (nnz={affinity_train.nnz:,}) and {full_path} (nnz={affinity_full.nnz:,})")
     return out_dir

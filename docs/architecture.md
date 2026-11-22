@@ -13,8 +13,10 @@ own version of that step.
 
 ## The 5 stages
 
+Commands to run each stage: [`runbook.md`](runbook.md).
+
 ```
-1. Dataset prep              datasets/prepare.py
+1. Dataset prep              datasets/scripts/prepare*.py
    raw file -> clean, HVG-selected matrix
                     |
                     v
