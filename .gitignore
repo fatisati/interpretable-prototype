@@ -1,0 +1,16 @@
+plans/
+__pycache__/
+
+# Data: too big for git (GBs). Recreate with the commands in docs/runbook.md.
+datasets/raw/
+datasets/processed/
+figshare_meta.json
+
+# Intermediate run outputs (embeddings, affinity graphs). Re-creatable; the
+# committed summary lives in results/.
+runs/
+
+# Local tool state and personal scratch notes
+.claude/
+tmp_*.txt
+draft.txt
