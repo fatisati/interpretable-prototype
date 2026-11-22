@@ -16,6 +16,8 @@ that script first for this dataset; see docs/architecture.md for why.
 
 Works on any h5ad file; pass --batch-key / --label-key for your dataset.
 Runs on CPU locally or GPU on Modal with no code change -- see scvi_modal.py.
+On an Apple Silicon Mac pass --accelerator mps to train on the Metal GPU:
+scvi-tools turns the default 'auto' into CPU there on purpose.
 
 Usage:
     python evaluation/prepare_eval.py \\
@@ -91,6 +93,8 @@ def run(
     # actual count lands in config.json as epochs_trained.
     model.train(max_epochs=max_epochs, accelerator=accelerator, early_stopping=early_stopping)
     epochs_trained = len(model.history["elbo_train"])
+    device_used = str(model.device)  # what training really ran on, e.g. 'cpu', 'mps:0', 'cuda:0'
+    print(f"[scvi] trained {epochs_trained} epochs on {device_used} (--accelerator {accelerator})")
 
     # get_latent_representation accepts any AnnData with the same genes/obs
     # columns as training data -- it registers and embeds test cells through
@@ -123,6 +127,8 @@ def run(
         "max_epochs": max_epochs,
         "epochs_trained": epochs_trained,
         "early_stopping": early_stopping,
+        "accelerator": accelerator,
+        "device_used": device_used,
         "n_train": int(train_mask.sum()),
         "n_test": int(test_mask.sum()),
         "environment": environment_versions(),
@@ -148,7 +154,8 @@ def parse_args():
     p.add_argument("--max-epochs", type=int, default=100,
                    help="upper bound; early stopping may end sooner (default 100, see comment in run())")
     p.add_argument("--n-latent", type=int, default=10)
-    p.add_argument("--accelerator", default="auto", help="'auto', 'cpu', or 'gpu'")
+    p.add_argument("--accelerator", default="auto", help="'auto', 'cpu', 'gpu' (CUDA) or 'mps' (Apple Metal GPU). "
+                        "'auto' picks CUDA when present and CPU otherwise -- never mps")
     p.add_argument("--no-early-stopping", dest="early_stopping", action="store_false",
                     help="disable early stopping, always run the full --max-epochs")
     return p.parse_args()

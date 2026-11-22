@@ -72,6 +72,11 @@ python baselines/scvi_baseline.py \
   --batch-key donor --label-key cell_type --layer counts \
   --out-dir runs/rare_cell_preservation/heart_cell_atlas/scvi
 ```
+On an Apple Silicon Mac, add `--accelerator mps` to train on the Metal GPU. Without it the run
+uses CPU: scvi-tools turns `auto` into CPU on a Mac on purpose. `config.json` records
+`accelerator` and `device_used`. Timings and the environment are in
+[`docs/local-mac.md`](local-mac.md).
+
 To run on Modal GPU instead, see the docstring of `baselines/scvi_modal.py`. Modal runs get
 **no** run record, because the remote machine has no git.
 
