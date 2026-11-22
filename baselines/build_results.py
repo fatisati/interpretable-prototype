@@ -120,6 +120,11 @@ def load_all(runs_root, task, subdir="metrics"):
                 f"Re-run compute_metrics.py for this baseline."
             )
         fg = pd.read_csv(groups_path)
+        if not {"min", "q25", "q75", "max"} <= set(fg.columns):
+            raise ValueError(
+                f"{mdir}: frequency_groups.csv has no min/q25/q75/max columns -- made by an older "
+                f"compute_metrics.py. Re-run compute_metrics.py for this baseline."
+            )
         fg.insert(0, "baseline", baseline)
         fg.insert(0, "dataset", dataset)
         groups.append(fg)
@@ -426,12 +431,14 @@ def render(task, headline, freq, groups, runs, figures, rare, f1, subdir="metric
 # Colors: default categorical slots 1-2 of the dataviz reference palette,
 # checked with its colorblind validator (protan worst-case dE 24.7, PASS).
 COMMON_COLOR, RARE_COLOR = "#2a78d6", "#eb6834"
+BOX_MIN_CELLS = 5  # fewer cells -> no "middle half" bar, just min..max
 
 
 def plot_frequency(task, dataset, metric, groups, freq, fig_dir):
     """One figure per (dataset, metric): one panel per (baseline, job), each
     dot = one group (cell type in one batch), x = its frequency (log scale),
-    y = its average, bar = +/- std across its cells. Shared y-axis so panels
+    y = its average, thin line = min..max of its cells, thick line = middle
+    half (25th-75th percentile). Shared y-axis so panels
     compare directly. Only plots saved numbers."""
     import matplotlib
     matplotlib.use("Agg")
@@ -450,9 +457,17 @@ def plot_frequency(task, dataset, metric, groups, freq, fig_dir):
         g = sub[(sub["baseline"] == baseline) & (sub["job"] == job)].dropna(subset=["mean"])
         for is_rare, color, label in ((False, COMMON_COLOR, "common group"), (True, RARE_COLOR, "rare group")):
             gg = g[g["is_rare"] == is_rare]
-            ax.errorbar(gg["freq"], gg["mean"], yerr=gg["std"].fillna(0), fmt="o", ms=5, color=color,
-                        ecolor=color, elinewidth=1, alpha=0.85, capsize=0, label=label,
-                        markeredgecolor="white", markeredgewidth=0.8)
+            # Slim box plot per group. Not mean +/- std: for a bounded,
+            # skewed metric that bar leaves the possible range (> 1).
+            #   thin line  = min..max (real range of its cells)
+            #   thick line = q25..q75 (middle half), only with >= BOX_MIN_CELLS
+            #                cells -- a "middle half" of 2 cells means nothing
+            #   dot        = group average (what the tables and Spearman use)
+            ax.vlines(gg["freq"], gg["min"], gg["max"], color=color, linewidth=0.8, alpha=0.6)
+            big = gg[gg["n_cells"] >= BOX_MIN_CELLS]
+            ax.vlines(big["freq"], big["q25"], big["q75"], color=color, linewidth=3, alpha=0.6)
+            ax.plot(gg["freq"], gg["mean"], "o", ms=5, color=color, alpha=0.9, label=label,
+                    markeredgecolor="white", markeredgewidth=0.8)
         t = freq[(freq["dataset"] == dataset) & (freq["baseline"] == baseline)
                  & (freq["job"] == job) & (freq["metric"] == metric)]
         trend = ""
@@ -483,7 +498,9 @@ def plot_frequency(task, dataset, metric, groups, freq, fig_dir):
     handles, labels = axes.flat[0].get_legend_handles_labels()
     fig.suptitle(f"{dataset}: {metric} vs frequency", fontsize=11, color="#222222")
     fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 0.0), ncol=2, frameon=False,
-               fontsize=8, title="dot = one cell type in one batch;  bar = ± std across its cells",
+               fontsize=8, title=("dot = average of one cell type in one batch;  thin line = min to max "
+                                  f"of its cells;\nthick line = middle half of its cells (25th-75th "
+                                  f"percentile, groups with {BOX_MIN_CELLS}+ cells)"),
                title_fontsize=8)
     fig.tight_layout()
 

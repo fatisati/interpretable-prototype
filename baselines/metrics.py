@@ -310,6 +310,11 @@ def group_summary(metric_values, df, is_rare, freq_lookup):
     rare group means its cells split -- some kept together, some scattered
     -- which the mean alone hides.
 
+    Also min, q25, q75, max (NaN-skipping, like mean): the real range and
+    the middle half of the group's cells. Plots draw these, not mean +/- std
+    -- for a bounded, skewed metric (most cells at 1, a few low) mean + std
+    lands above 1, a value no cell can have.
+
     freq comes from `freq_lookup` ((batch, true_type) -> frequency over ALL
     cells), not from `df`: for a test job `df` holds only test cells, and a
     group's frequency shouldn't depend on which side of the split we score.
@@ -321,7 +326,10 @@ def group_summary(metric_values, df, is_rare, freq_lookup):
     })
     out = groups.groupby(["batch", "true_type"], sort=True).agg(
         freq=("freq", "first"), n_cells=("value", "count"),
-        mean=("value", "mean"), std=("value", "std"), is_rare=("is_rare", "first"),
+        mean=("value", "mean"), std=("value", "std"),
+        min=("value", "min"), q25=("value", lambda v: v.quantile(0.25)),
+        q75=("value", lambda v: v.quantile(0.75)), max=("value", "max"),
+        is_rare=("is_rare", "first"),
     ).reset_index()
     return out
 
