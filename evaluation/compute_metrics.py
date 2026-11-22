@@ -84,7 +84,7 @@ def embedding_adapter(embedding_path, label_key, batch_key, affinity_dir, labels
     }
 
 
-def seacells_adapter(embedding_path, label_key, batch_key, affinity_dir):
+def seacells_adapter(embedding_path, label_key, batch_key, affinity_dir, labels_from=None):
     """For seacells_baseline.py's assignments.csv. SEACells can't embed
     unseen cells, so there is no "test" job (task file, SEACells section).
     Instead, one job per SEACells run, each with its own clustering:
@@ -95,6 +95,9 @@ def seacells_adapter(embedding_path, label_key, batch_key, affinity_dir):
     Every row in each job is scored. No embedding -> no neighbor metrics.
     """
     df = pd.read_csv(embedding_path)
+    if labels_from:
+        df = df.drop(columns=[label_key], errors="ignore")
+        df = join_labels(df, label_key, labels_from)
     df = df.rename(columns={label_key: "true_type", batch_key: "batch"})
     train = df[df["split"] == "train"].reset_index(drop=True).copy()
     train["cluster"] = train["cluster_train_run"]
