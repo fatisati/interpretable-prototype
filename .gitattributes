@@ -1,0 +1,3 @@
+# Frozen gene lists / splits: keep bytes exactly as written (LF), so their sha256
+# fingerprints match on every OS. See evaluation/frozen.py.
+datasets/frozen/** -text

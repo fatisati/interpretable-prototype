@@ -15,11 +15,20 @@ download), then writes `datasets/processed/heart_cell_atlas_hvg.h5ad`.
 
 | | raw file | processed (`heart_cell_atlas_hvg.h5ad`) |
 |---|---|---|
-| sha256 | `4a54acfa72faf108473f8c2705894eea2194b45a2b5e21b7630bdd32eaf1e808` | `7e686ed33e98f18b3d0f7bff08eb3011b8b5daae00ab9bc67c02cd7fdb96de4f` |
+| sha256 | `4a54acfa72faf108473f8c2705894eea2194b45a2b5e21b7630bdd32eaf1e808` | `ce95fb8687f706f520877dccd48bd4f5914c0b5b8a3f203c71f842b1d610d6f2` (since 2026-11-23; was `7e686ed3...de4f`) |
 
-Re-ran the whole pipeline twice on a clean `processed/` output — both runs produced the
-**identical** processed checksum above, confirming the pipeline is deterministic (no
-unseeded randomness in the `seurat_v3` HVG step).
+**Gene list and split are frozen** (committed, not recomputed): `datasets/frozen/heart_cell_atlas/`
+(`genes.txt`, `split.csv`, see `evaluation/frozen.py`). Why: the `seurat_v3` HVG step is
+repeatable on one machine, but a Mac with other package versions picked 2 different genes of
+2000 from the same raw file (Windows only: AP005329.3, LINC00603; Mac only: GIPR, LILRB4).
+The frozen list is the Windows one, taken from the `7e686ed3...` file behind the official
+results.
+
+The checksum changed on 2026-11-23 only because the processed file no longer carries scanpy's
+HVG ranking columns in `var` (`highly_variable`, `means`, ...). Checked: same genes in the same
+order, same cells, identical `X` and `layers['counts']`, and re-running PCA + metrics on it gave
+identical embedding, clusters and metrics. The old checksum was reproduced twice on Windows
+before that.
 
 ## Environment (exact versions used to produce the checksums above, 2026-11-16)
 

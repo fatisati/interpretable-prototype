@@ -57,6 +57,7 @@ from scipy.sparse import load_npz
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evaluation"))  # shared pipeline code
 from run_record import record_run  # first local import: records the script's start time
+import frozen
 from common import compute_pca, environment_versions, load_cluster_config, load_split
 
 import SEACells
@@ -129,7 +130,9 @@ def run(
 
     # All read-only -- created once by prepare_eval.py, shared by every
     # baseline on this dataset (see docs/architecture.md).
-    split_path = dataset_dir / "split.csv"
+    dataset = frozen.dataset_id(h5ad_path)
+    frozen.check_genes(adata, dataset)  # stop if the processed file is out of date
+    split_path = frozen.split_path(dataset)
     adata.obs["split"] = load_split(adata, label_key, batch_key, test_size, seed, split_path)
     train_mask = (adata.obs["split"] == "train").to_numpy()
     cluster_config = load_cluster_config(dataset_dir / "cluster_config.json")
@@ -172,6 +175,7 @@ def run(
     config = {
         "h5ad_path": str(h5ad_path),
         "split_path": str(split_path),
+        "frozen": frozen.fingerprint(dataset),
         "affinity_dir": str(dataset_dir),
         "batch_key": batch_key,
         "label_key": label_key,

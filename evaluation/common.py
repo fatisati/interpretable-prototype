@@ -64,7 +64,8 @@ def stratified_split(adata, label_key, batch_key, test_size, seed):
     Groups with only one cell can't be split (sklearn needs >=2 per group
     to stratify), so those single cells go to train.
 
-    Used only by prepare_eval.py -- the one place allowed to create a split.
+    Used only by prepare_eval.py -- the one place allowed to create a split,
+    and only when the dataset has no frozen split yet (or --refresh-split).
     """
     groups = adata.obs[label_key].astype(str) + "||" + adata.obs[batch_key].astype(str)
     positions = np.arange(adata.n_obs)
@@ -90,11 +91,13 @@ def stratified_split(adata, label_key, batch_key, test_size, seed):
 def load_split(adata, label_key, batch_key, test_size, seed, split_path):
     """Read-only: errors if `split_path` is missing or was built with
     different parameters, instead of silently creating one. Splits are
-    created only by evaluation/prepare_eval.py -- see docs/architecture.md
-    for why every baseline must read the same one instead of making its own.
+    created only by evaluation/prepare_eval.py and committed under
+    datasets/frozen/<dataset>/ (see evaluation/frozen.py) -- see
+    docs/architecture.md for why every baseline must read the same one
+    instead of making its own.
     """
     split_path = Path(split_path)
-    meta_path = split_path.with_suffix(".json")
+    meta_path = split_path.parent / "split.json"  # split.csv or split.csv.gz
     requested_meta = {
         "seed": seed, "test_size": test_size, "label_key": label_key, "batch_key": batch_key,
     }

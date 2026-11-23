@@ -1,0 +1,26 @@
+{
+  "dataset": "heart_cell_atlas",
+  "n_genes": 2000,
+  "sha256": "b314c584a2b612617035df4ed4322c6e593716ae7de7cdaf6dcfd596945d12ad",
+  "method": "scanpy highly_variable_genes flavor=seurat_v3 n_top_genes=2000 layer=counts batch_key=donor; taken from datasets/processed/heart_cell_atlas_hvg.h5ad (sha256 7e686ed3...de4f), the file behind the official results; environment that chose them: see datasets/heart_cell_atlas.md 'Environment' (2026-11-16)",
+  "environment": {
+    "python": "3.13.11",
+    "scanpy": "1.12.4",
+    "scikit-misc": "0.5.3",
+    "anndata": "0.13.2",
+    "numpy": "2.4.6",
+    "scipy": "1.18.0",
+    "pandas": "3.0.5"
+  },
+  "run_history": [
+    {
+      "script": "evaluation/-",
+      "command": "python evaluation/-",
+      "git_commit": "e11debf35114c15342e0bd5aad9f94573971bfae",
+      "git_dirty": true,
+      "script_committed": false,
+      "started_at": "2026-11-23T17:55:27+03:30",
+      "finished_at": "2026-11-23T17:55:27+03:30"
+    }
+  ]
+}

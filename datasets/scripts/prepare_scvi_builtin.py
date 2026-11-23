@@ -24,6 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "evaluation"))
 from run_record import record_run  # noqa: E402  records the script's start time
+import frozen  # noqa: E402  committed gene lists, see evaluation/frozen.py
 
 import numpy as np
 import scipy.sparse as sp
@@ -63,7 +64,7 @@ def sha256(path, chunk=2**20):
     return h.hexdigest()
 
 
-def preprocess(name):
+def preprocess(name, refresh=False):
     cfg = DATASETS[name]
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     out_path = OUT_DIR / cfg["out_name"]
@@ -87,10 +88,21 @@ def preprocess(name):
 
     # seurat_v3 HVG operates on raw counts directly -- X stays raw counts throughout,
     # no normalize_total/log1p here (that's the scVI model's own job internally).
+    # Only runs when there is no committed gene list yet (or --refresh-frozen):
+    # otherwise the committed datasets/frozen/<dataset>/genes.txt is used as is.
     import scanpy as sc
-    sc.pp.highly_variable_genes(
-        ad, flavor="seurat_v3", n_top_genes=N_TOP_GENES,
-        layer="counts", batch_key=cfg["batch_key"], subset=True,
+
+    def propose(a):
+        sc.pp.highly_variable_genes(
+            a, flavor="seurat_v3", n_top_genes=N_TOP_GENES,
+            layer="counts", batch_key=cfg["batch_key"],
+        )
+        return list(a.var_names[a.var["highly_variable"]])
+
+    ad = frozen.select_genes(
+        ad, frozen.dataset_id(out_path), propose, refresh=refresh,
+        method=f"scanpy highly_variable_genes flavor=seurat_v3 n_top_genes={N_TOP_GENES} "
+               f"layer=counts batch_key={cfg['batch_key']}",
     )
     ad.X = sp.csr_matrix(ad.X).astype(np.float32) if sp.issparse(ad.X) else ad.X.astype(np.float32)
 
@@ -109,10 +121,13 @@ def preprocess(name):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--dataset", choices=list(DATASETS) + ["all"], required=True)
+    p.add_argument("--refresh-frozen", action="store_true",
+                   help="recompute the gene list and overwrite datasets/frozen/<dataset>/genes.txt "
+                        "(then commit the diff); default: use the committed list")
     args = p.parse_args()
     names = list(DATASETS) if args.dataset == "all" else [args.dataset]
     for name in names:
-        preprocess(name)
+        preprocess(name, args.refresh_frozen)
 
 
 if __name__ == "__main__":

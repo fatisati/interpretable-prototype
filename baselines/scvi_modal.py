@@ -13,7 +13,9 @@ Before each run, upload the input file (Modal containers can't see your
 local disk):
     modal volume put scproto-data datasets/processed/pancreas_hvg.h5ad pancreas_hvg.h5ad
 
-Then run:
+Then run (from the repo root, so datasets/frozen/ is found and shipped along;
+the h5ad's name must stay <dataset>_hvg.h5ad, which is how the frozen files
+are found):
     modal run baselines/scvi_modal.py \\
         --h5ad-path pancreas_hvg.h5ad \\
         --batch-key tech --label-key celltype \\
@@ -34,7 +36,11 @@ app = modal.App("scvi-baseline")
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .pip_install("scvi-tools", "scanpy", "pandas", "scikit-learn", "leidenalg", "igraph")
-    .add_local_python_source("scvi_baseline", "common", "run_record")
+    # The committed gene lists + splits (evaluation/frozen.py) travel with the
+    # code, so the remote run reads the same files as a local one.
+    .env({"SCPROTO_FROZEN_DIR": "/root/frozen"})
+    .add_local_python_source("scvi_baseline", "common", "run_record", "frozen")
+    .add_local_dir("datasets/frozen", "/root/frozen")
 )
 
 volume = modal.Volume.from_name("scproto-data", create_if_missing=True)
