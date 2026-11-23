@@ -27,6 +27,11 @@ Scored 2026-11-22 against the 7 items in `tasks/rare_cell_preservation.md`, sect
 | Allen whole-brain MERFISH, spatial (backup) | ✓ thousands of fine clusters (lit.) | ✓ (lit.) | ✓ ~500 genes | moderate | ✓ mapped from a separate scRNA atlas (lit.) | ✓ (lit.) | ✗ |
 | CosMx lung cancer (He 2022), spatial (backup) | partial: tumor/immune sub-states (lit.) | ✓ 8 samples, 5 patients (lit.) | ✓ 960 genes | ✓ strong (patients) | ✓ reference-based labels (lit.) | ✓ (lit.) | ✗ |
 | Tabula Sapiens, 10x part only (backup) | partial (lit.) | ✓ many donors (lit.) | ? | ✓ | ✓ (lit.) | ✓ 10x part; ✗ Smart-seq2 part (read counts) | ✗ |
+| Fetal lung, donor (He 2022), from the Islander paper (not downloaded) | ✓ 144 fine labels; 9 fibroblast subtypes inside one fibroblast family (lit.) | ? 29 batches; per-batch counts not checked | ? | ✓ probably strong: batches span developmental weeks 5–22 (lit.) | ✗ for BBKNN: authors built labels on a BBKNN integration (lit.); ? for others | ? | partial: baselines distort fibroblast relationships (scGraph), not shown as rare-cell loss (lit.) |
+| Breast (Kumar 2023), from the Islander paper (not downloaded) | ? 39 labels (lit.) | ? 126 batches, so per-batch rarity is likely | ? | ? | ? | ? | ✗ |
+| Fetal lung, organoid (He 2022), from the Islander paper (not downloaded) | ? 28 labels (lit.) | ? 37 batches | ? | ? | ? | ? | partial: scGraph low for scGen 0.161, Harmony 0.284 (lit.), not rare-cell loss |
+| Fetal gut (Elmentaite 2020), from the Islander paper (not downloaded) | ? 21 labels (lit.) | ? 9 batches | ? | ? | ? | ? | partial: scGraph scores only moderate for baselines (lit.), not rare-cell loss |
+| COVID PBMC (Su 2020), from the Islander paper (not downloaded) | ? 31 immune labels (lit.) | ? 10 batches | ? | ? | ? | ? | partial: scGraph lower for scPoli 0.573, scGPT 0.535 (lit.), not rare-cell loss |
 
 Reading of the table:
 - **Heart fine labels** fit the claim best among the datasets we already have.
@@ -45,6 +50,28 @@ Reading of the table:
   common spatial benchmark; spots hold several cells and are labeled only by brain layer,
   so no single rare cells exist) and the MOSAIC cancer cohort (each spot gets its
   most common type's label, which hides rare types).
+
+## From the Islander / scGraph paper (Wang, Leskovec, Regev 2025, *Nat Biotech*)
+
+PDF: `papers/cell-embedding-metrics-natbiotech25.pdf`. The paper benchmarks 13 methods on 11
+atlases. Its scGraph metric shows that scIB misses cell-type relationships that integration
+distorts. Download links for all 11 atlases are in the Islander repo README
+(github.com/Genentech/Islander). Added 2026-11-23:
+
+- **Fetal lung, donor:** best fit. It has many fine sub-states of one parent type
+  (fibroblasts) and strong batches. Baselines already do badly on its fibroblast subset
+  (BBKNN scGraph 0.075 vs PCA 0.452, Ext. Data Table 5). Drop BBKNN from the comparison:
+  the labels came from a BBKNN integration.
+- **Breast:** maybe. Its 126 batches make "rare in every batch" likely. Nothing else
+  is checked yet.
+- **Fetal lung organoid, fetal gut, COVID:** worth a cheap check. Baselines score poorly
+  on scGraph there, so something goes wrong for them. scGraph measures distortion between
+  cell types, not rare-state loss, so the link to Task 1 is unproven. Run the count and
+  marker checks first; drop any dataset that has no small sub-state inside a common type.
+- **Already listed above:** heart, adult lung (HLCA), pancreas.
+- **Not added:**
+  - Brain (11 types) and eye (11 types): broad lineages only, which fails item 1.
+  - Skin: 13 types, 5 batches.
 
 ## Where these candidates came from (literature search, 2026-11-22)
 
