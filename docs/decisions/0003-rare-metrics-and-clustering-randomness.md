@@ -69,8 +69,24 @@ cluster-based one moves.
    flips shift the mean by 0.1–0.15. This matches the 0.08–0.15 rerun spread in
    Mahmoud's review.
 
-Within-machine seed spread has **not** been measured yet (see Proposal step 1). The
-cross-machine gap is our only estimate so far.
+**Step 5 — seed test on one machine** (`repro/leiden_seed_test.py`). Same Windows PCA
+embedding, same neighbour graph, same resolution; only Leiden's `random_state` changes.
+Seed 0 reproduces the official clusters exactly (ARI 1.000). Seeds 1–3 agree with seed 0
+at ARI 0.77–0.80, the same as Windows vs Mac (0.77).
+
+| Rare-cell metric | Seed 0 (official) | 1 | 2 | 3 | Range | Mac |
+|---|---|---|---|---|---|---|
+| `rare_f1`, train | 0.696 | 0.846 | 0.768 | 0.852 | **0.156** | 0.846 |
+| `rare_f1`, test | 0.781 | 0.859 | 0.824 | 0.859 | 0.078 | 0.850 |
+| `coverage`, train | 0.690 | 0.893 | 0.786 | 0.893 | **0.202** | 0.893 |
+| `agreement_global`, train (mean over rare cells) | 0.824 | 0.838 | 0.838 | 0.855 | 0.032 | 0.838 |
+| `agreement`, mean over rare (type, donor) pairs | 0.706 | 0.768 | 0.734 | 0.777 | 0.071 | — |
+| `knn_same_type_global`, train | 0.803 | 0.803 | 0.803 | 0.803 | 0.000 | 0.803 |
+| `knn_same_type_cross`, train | 0.795 | 0.795 | 0.795 | 0.795 | 0.000 | 0.795 |
+
+The Windows–Mac gap is ordinary seed spread. The official run happened to be the lowest
+seed. Caveat: at a fixed resolution, seeds 1–3 gave 201–206 clusters instead of 199; no
+trend with F1 is visible.
 
 ## Options considered
 
@@ -82,6 +98,26 @@ cross-machine gap is our only estimate so far.
 | D. Make neighbour-based metrics the headline | Yes (deterministic given the embedding) | Clustering-free kNN metrics are what scIB (Luecken et al. 2022, Nat. Methods) and LISI (Korsunsky et al. 2019, Nat. Methods) rely on for the same reason. Already computed by `compute_metrics.py`. Matches the claim's own wording in `tasks/rare_cell_preservation.md`: "fewer of the rare cells' nearest neighbors are rare cells of the same kind." |
 | E. Choose resolution by stability (chooseR, Patterson-Cross et al. 2021; consensus clustering, SC3, Kiselev et al. 2017) | Partly | Picks K by how stable the clusters are under subsampling. Changes K per method, so it makes cross-method comparison harder. Useful later, not needed for the claim. |
 | F. Optimise resolution per method and keep the best (scIB's NMI/ARI and isolated-label F1) | No | Standard in scIB, but "best of N" rewards lucky seeds and still has single-run noise. |
+
+## Published metrics checked (2026-11-23), and why none were adopted
+
+Each was checked against its source code, and tested on the heart data where possible.
+
+| Metric | Source | Verdict | Reason |
+|---|---|---|---|
+| Isolated-label F1 | scIB (`scib/metrics/isolated_labels.py`) | Not adopted | For one label: the single best cluster's F1, then the best resolution of 10 between 0.2 and 2.0. "Isolated" means present in the fewest batches, not rare in every batch as in our claim. With our rare types and fixed K, across 4 seeds it still moves 0.09 (pooled) to 0.10 (per type and donor). Keeping the best resolution makes methods fair to each other but doesn't remove randomness. |
+| Balanced ARI / AMI / homogeneity / completeness | Maan et al. 2024, Nat. Biotechnol. (`hsmaan/balanced-clustering`) | Optional, as an overall score | Rescales each cell type's row of the type × cluster table to the average type size, so small types count as much as large ones. Gives one dataset-wide number. The reweighting uses global type size, so types that are rare in each donor but common overall get little extra weight. |
+| Jaccard index | scIB-E, Yi et al. 2025, Genome Biol. (`Chenxin-Yi/scIB-E`, `calculate_mean_ja`) | Not adopted | Per batch, the share of 15-NN graph edges kept between a per-batch PCA and the method's embedding. Calibration on heart: the same per-donor PCA with 40 instead of 50 PCs scores 0.62; our PCA control scores 0.35; scVI 0.20. It counts exact neighbour identities, so it mixes "different coordinate system" with "lost biology". Swapping one same-type neighbour for another costs as much as losing a rare cell to its parent type. |
+| PCR comparison | `scib-metrics` (batch-correction group), reused by scIB-E | Possible later | (batch variance before − after) ÷ before. Shows that correction removed batch effect. It doesn't test rare cells. |
+
+## Decision so far (2026-11-23, Fatemeh)
+
+Keep the metrics `compute_metrics.py` already produces. Stop using `coverage` and
+`rare_f1` as evidence; they are still computed. Neighbour same-type metrics are the main
+evidence for embedding methods. Agreement, purity and cohesion are the cluster-based
+metrics, and the only ones available for SEACells and BBKNN; report them as mean ± spread
+over Leiden seeds. Recorded in `tasks/rare_cell_preservation.md`, section "Metrics".
+Status stays **proposed** until Mahmoud agrees.
 
 ## Proposal
 
