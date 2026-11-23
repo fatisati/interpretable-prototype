@@ -204,6 +204,25 @@ plausible.
 
 ## Metrics
 
+> **Which metrics count as evidence (decided 2026-11-23).**
+> Clustering is random. Changing only Leiden's seed (same embedding, same
+> settings) changes a rare F1 score by up to 0.16 and a coverage score by up
+> to 0.20. That is as large as the gaps between methods. So:
+>
+> | Metric | Use it? | Why |
+> |---|---|---|
+> | Neighbor same-type share (global / cross-batch) | **Yes, main evidence** for embedding methods | No clustering, so the seed has no effect (0.000 change across seeds) |
+> | Agreement, purity, cohesion | **Yes**, the only option for SEACells and BBKNN | Uses clusters, so it moves with the seed (agreement: 0.03–0.07; purity and cohesion not measured yet). Average several seeds |
+> | Coverage, rare F1 | **No**, still computed but not used as evidence | Yes/no per rare group ("is it the majority of some cluster?"), so a few cells crossing a boundary flips the score |
+>
+> Two rules for any comparison:
+> 1. Every cluster-based number is a mean ± spread over several Leiden seeds, never one run.
+> 2. A method is worse than the PCA control only if the gap is larger than that seed spread.
+>
+> Evidence and the options we rejected (scIB isolated-label F1, balanced
+> ARI/AMI, the scIB-E Jaccard index): `docs/decisions/0003-rare-metrics-and-clustering-randomness.md`
+> (on branch `adr-0003-leiden-randomness` until merged).
+
 Three kinds of signal, because they catch different failures:
 **assignment metrics** (did the final cluster label come out right),
 **cohesion** (do integration + clustering together keep cells that the
@@ -252,13 +271,13 @@ can score fine on one and fail another.
   agree with each other (an un-integrated batch effect); both high means
   real integration.
 
-- **Coverage** — per batch: fraction of that batch's locally-rare types
+- **Coverage** *(not used as evidence, see the box above)* — per batch: fraction of that batch's locally-rare types
   with at least one cell in a cluster whose majority label is that type.
   A binary per-type check (present or not), not a ratio — catches a type
   dropped entirely, which agreement (always some number, never literally
   "absent") can't flag as cleanly.
 
-- **Rare precision / recall / F1** — the fragmentation question (is
+- **Rare precision / recall / F1** *(not used as evidence, see the box above)* — the fragmentation question (is
   this type scattered across many clusters) that nothing above measures.
 
   Step 1, done once, globally: every cluster gets exactly one label —
@@ -487,3 +506,12 @@ evidence or a reviewer expects them:
   separate lineages, not sub-states, so this run couldn't test the claim.
   Added "What a dataset needs in order to test this claim" and the cheap checks
   to run before any more baselines.
+  *Note added 2026-11-23:* that 0.92 vs 0.70 was one Leiden run each. PCA's
+  rare F1 alone ranges 0.70–0.85 across 4 seeds, so this gap is not reliable.
+- **2026-11-23**, after Windows and Mac gave different rare F1 for the same
+  PCA run (0.70 vs 0.85): genes, split, graph and embedding matched; only the
+  Leiden clusters differed. Rerunning Leiden with 4 seeds on one machine gave
+  the same spread. So the cause is clustering randomness, not the machine.
+  Coverage and rare F1 are no longer used as evidence. Neighbor metrics are
+  the main evidence, and cluster-based metrics are averaged over seeds (box
+  at the top of Metrics).
