@@ -66,6 +66,10 @@ https://datadryad.org/dataset/doi:10.5061/dryad.8t8s248 in a browser, download
 `datasets/raw/moffitt2018_merfish/`.
 
 - **Writes:** `datasets/processed/<name>_hvg.h5ad`, plus `<name>_hvg.run.json` (sha256 + run record).
+- **Gene list:** if `datasets/frozen/<name>/genes.txt` exists (committed), it is used as is and
+  gene selection is skipped, so every machine gets the same genes. The first run for a new
+  dataset writes it: commit it. To recompute on purpose, add `--refresh-frozen`; it prints the
+  added/removed genes, and the git diff is the change to review. Every later stage is then stale.
 - **Re-run when:** the preprocessing code changes. Everything after it must then be re-run too.
 - **Time:** not measured.
 
@@ -78,8 +82,11 @@ python evaluation/prepare_eval.py \
   --out-dir runs/rare_cell_preservation/heart_cell_atlas
 ```
 
-- **Writes:** `split.csv`/`.json`, `affinity_train.npz`, `affinity_full.npz`, `affinity_config.json`, `cluster_config.json`.
-- **Skips** if those files already exist. Add `--force` to rebuild. A rebuild makes every later stage stale.
+- **Writes:** `affinity_train.npz`, `affinity_full.npz`, `affinity_config.json`, `cluster_config.json` into `--out-dir`.
+- **Split:** read from the committed `datasets/frozen/<dataset>/split.csv` (`split.csv.gz` above
+  100k cells). Only written if missing (commit it), or with `--refresh-split`, which also
+  rebuilds the graphs. Baselines read the split from there too.
+- **Skips** if those files already exist. Add `--force` to rebuild the graphs and cluster count (the split is kept). A rebuild makes every later stage stale.
 - **Time:** not measured.
 
 ## 3. Baselines: one folder per method, `runs/<task>/<dataset>/<baseline>/`

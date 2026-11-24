@@ -33,6 +33,7 @@ from sklearn.decomposition import PCA
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evaluation"))  # shared pipeline code
 from run_record import record_run  # first local import: records the script's start time
+import frozen
 from common import cluster_embedding_file, environment_versions, load_cluster_config, load_split, looks_like_raw_counts
 
 
@@ -51,7 +52,9 @@ def log_normalized(adata, layer):
 def run(h5ad_path, batch_key, label_key, out_dir, layer=None, test_size=0.2, seed=0, n_comps=50):
     adata = sc.read_h5ad(h5ad_path)
     dataset_dir = Path(out_dir).parent
-    split_path = dataset_dir / "split.csv"
+    dataset = frozen.dataset_id(h5ad_path)
+    frozen.check_genes(adata, dataset)  # stop if the processed file is out of date
+    split_path = frozen.split_path(dataset)
     adata.obs["split"] = load_split(adata, label_key, batch_key, test_size, seed, split_path)
     train_mask = (adata.obs["split"] == "train").to_numpy()
     load_cluster_config(dataset_dir / "cluster_config.json")  # fail early if missing
@@ -76,6 +79,7 @@ def run(h5ad_path, batch_key, label_key, out_dir, layer=None, test_size=0.2, see
     result.to_csv(out_dir / "embedding.csv", index=False)
     (out_dir / "config.json").write_text(json.dumps({
         "h5ad_path": str(h5ad_path), "split_path": str(split_path),
+        "frozen": frozen.fingerprint(dataset),
         "batch_key": batch_key, "label_key": label_key, "layer": layer,
         "test_size": test_size, "seed": seed, "n_comps": n_comps, "pca_fit_on": "train",
         "explained_variance_ratio_sum": float(pca.explained_variance_ratio_.sum()),

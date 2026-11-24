@@ -1,0 +1,27 @@
+{
+  "seed": 0,
+  "test_size": 0.2,
+  "label_key": "cell_type",
+  "batch_key": "donor",
+  "n_train": 14913,
+  "n_test": 3728,
+  "file": "split.csv",
+  "sha256": "120e1d81b33d6155c14bfc22b695ec5fae92bfef7190ae6322b181eefe68f6af",
+  "environment": {
+    "python": "3.13.11",
+    "scikit-learn": "1.9.0",
+    "numpy": "2.4.6",
+    "pandas": "3.0.5"
+  },
+  "run_history": [
+    {
+      "script": "evaluation/-",
+      "command": "python evaluation/-",
+      "git_commit": "e11debf35114c15342e0bd5aad9f94573971bfae",
+      "git_dirty": true,
+      "script_committed": false,
+      "started_at": "2026-11-23T17:55:27+03:30",
+      "finished_at": "2026-11-23T17:55:27+03:30"
+    }
+  ]
+}

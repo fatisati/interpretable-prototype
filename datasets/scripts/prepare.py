@@ -45,6 +45,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "evaluation"))
 from run_record import record_run  # noqa: E402  records the script's start time
+import frozen  # noqa: E402  committed gene lists, see evaluation/frozen.py
 
 import numpy as np
 import scanpy as sc
@@ -108,7 +109,7 @@ def sha256(path, chunk=2**20):
     return h.hexdigest()
 
 
-def preprocess(name, delete_raw):
+def preprocess(name, delete_raw, refresh=False):
     cfg = DATASETS[name]
     raw_path = RAW_DIR / cfg["raw_name"]
     if not raw_path.exists():
@@ -150,9 +151,18 @@ def preprocess(name, delete_raw):
         print(f"[{name}] no counts layer in the raw file")
 
     # batch-aware HVG: every downstream method must see the SAME genes, picked without
-    # one batch's technical variance dominating the selection.
-    sc.pp.highly_variable_genes(ad, n_top_genes=N_TOP_GENES, batch_key=cfg["batch_key"])
-    ad = ad[:, ad.var["highly_variable"]].copy()
+    # one batch's technical variance dominating the selection. Only runs when there is
+    # no committed gene list yet (or --refresh-frozen); otherwise the committed
+    # datasets/frozen/<dataset>/genes.txt is used as is.
+    def propose(a):
+        sc.pp.highly_variable_genes(a, n_top_genes=N_TOP_GENES, batch_key=cfg["batch_key"])
+        return list(a.var_names[a.var["highly_variable"]])
+
+    ad = frozen.select_genes(
+        ad, frozen.dataset_id(out_path), propose, refresh=refresh,
+        method=f"scanpy highly_variable_genes (default flavor) n_top_genes={N_TOP_GENES} "
+               f"batch_key={cfg['batch_key']}",
+    )
     ad.X = sp.csr_matrix(ad.X).astype(np.float32) if sp.issparse(ad.X) else ad.X.astype(np.float32)
 
     ad.write_h5ad(out_path)
@@ -178,10 +188,13 @@ def main():
     p.add_argument("--delete-raw", action="store_true",
                    help="remove the raw file after a successful write, to save disk "
                         "(re-download by hand if you ever need it again)")
+    p.add_argument("--refresh-frozen", action="store_true",
+                   help="recompute the gene list and overwrite datasets/frozen/<dataset>/genes.txt "
+                        "(then commit the diff); default: use the committed list")
     args = p.parse_args()
     names = list(DATASETS) if args.dataset == "all" else [args.dataset]
     for name in names:
-        preprocess(name, args.delete_raw)
+        preprocess(name, args.delete_raw, args.refresh_frozen)
 
 
 if __name__ == "__main__":

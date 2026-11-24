@@ -2,35 +2,71 @@
 
 ## Claim
 
-The standard pipeline for integrating multi-batch single-cell data —
-*batch correction* (removing technical differences between
-experiments/datasets so cells can be compared across them) followed by
-*clustering* (grouping cells into discrete groups via Leiden community
-detection — run directly on BBKNN's corrected graph, or on a neighbor
-graph built from the corrected embedding for methods that output an
-embedding instead of a graph, like Harmony, ComBat, and scVI; Leiden doesn't take a target cluster
-count directly the way k-means would, and its resolution parameter
-doesn't map cleanly onto cluster count — the count can stay flat across a
-range of resolution values, then jump — so rather than solving for an
-exact count, we sweep a small range of resolution values and pick
-whichever gets closest to the desired number of clusters) — does not
-preserve rare cell types. A rare cell state gets mixed into a denser,
-more common one during this process. For example, an early-cancerous
-population marked by one specific gene can get absorbed into a healthy,
-abundant population, because the correction step never had a reason to
-treat that marker as signal rather than noise.
+**Main claim:** the standard pipeline for multi-batch single-cell data
+loses rare cell *sub-states*. A small population that differs from a
+common type by only a few genes gets merged back into that common type.
 
-A second, related claim: **SEACells** (an existing *metacell* method — it
-groups similar cells into small aggregates called metacells to reduce
-noise) works well with a **single batch**, but in a **multi-batch** setting
-it fails to form a metacell for a rare cell type, because no single batch
-has enough cells of that type to form one on its own.
+**Example:** a few early-cancer cells differ from healthy cells by one
+marker gene. After the pipeline, they sit inside the healthy cluster. The
+correction step had no reason to treat that one gene as real signal, so it
+treated it as noise.
 
-The point of scProto is to give the model explicit *guidance* (the
-affinity graph) so it keeps finding a rare pattern even when the
-reconstruction loss alone would never surface it. This task is the
-evidence step: show the gap is real and measurable in existing methods
-before comparing scProto against it.
+**The gap — exactly when it happens.** We expect the loss only when all
+three are true:
+
+1. **The rare population is a sub-state, not its own lineage.** It differs
+   from a common "parent" type by a few genes. A separate lineage (for
+   example, nerve cells among heart cells) differs by thousands of genes,
+   and every method keeps it apart.
+2. **It is rare in every batch.** Each batch has only a handful of these
+   cells (roughly 2–10), even if the total across batches is large enough
+   (30+) to be a real population.
+3. **The batches differ strongly.** Correction has to move cells a lot,
+   so it has room to move the rare cells to the wrong place.
+
+**Why the methods lose it:** every correction method decides what is real
+biology and what is batch noise by looking for patterns shared by many
+cells. A handful of rare cells per batch is too few to form a pattern.
+Pooled across all batches they would be enough — but no method pools them
+before it decides. So the rare cells' marker gets treated as noise, and
+the cells are pulled into their parent type.
+
+**How we know it's the correction's fault:** we also run plain PCA with
+no correction (the control). The gap is a corrected method keeping the
+rare sub-state *worse* than this uncorrected control — for example, fewer
+of the rare cells' nearest neighbors are rare cells of the same kind. If
+the control loses it too, the clustering is to blame, not the correction.
+
+**What is *not* the gap:** a rare type that is its own lineage. Our first
+run (heart, broad labels) had only those — scVI kept them as well as or
+better than the control. That result is expected and doesn't test the
+claim.
+
+**The pipeline has two steps:**
+
+1. **Batch correction** — removes technical differences between batches
+   (separate experiments or datasets), so cells from different batches can
+   be compared. Methods tested: ComBat, Harmony, BBKNN, scVI.
+2. **Clustering** — groups cells with Leiden. For BBKNN, Leiden runs on its
+   corrected neighbor graph. For the others, which output an embedding (a
+   new set of coordinates per cell), Leiden runs on a neighbor graph built
+   from that embedding.
+
+**Second claim (SEACells):** SEACells is a *metacell* method — it groups
+similar cells into small bundles, called metacells, to reduce noise. It
+works on one batch. With many batches, it fails to make a metacell for a
+rare type, because no single batch has enough cells of that type.
+
+**Why this matters for scProto:** scProto gives the model extra guidance
+(the affinity graph — a record of which cells look alike in the raw data),
+so it keeps a rare pattern that the training loss alone would ignore. This
+task is the evidence step: show that existing methods really lose rare
+types, and measure how much, before comparing scProto against them.
+
+> **Note — picking the number of clusters.** Leiden has no "number of
+> clusters" setting. It has a *resolution* setting, and the cluster count
+> jumps unevenly as resolution changes. So we try a small range of
+> resolution values and keep the one closest to the target count.
 
 ## Why this should happen, per baseline
 
@@ -168,6 +204,25 @@ plausible.
 
 ## Metrics
 
+> **Which metrics count as evidence (decided 2026-11-23).**
+> Clustering is random. Changing only Leiden's seed (same embedding, same
+> settings) changes a rare F1 score by up to 0.16 and a coverage score by up
+> to 0.20. That is as large as the gaps between methods. So:
+>
+> | Metric | Use it? | Why |
+> |---|---|---|
+> | Neighbor same-type share (global / cross-batch) | **Yes, main evidence** for embedding methods | No clustering, so the seed has no effect (0.000 change across seeds) |
+> | Agreement, purity, cohesion | **Yes**, the only option for SEACells and BBKNN | Uses clusters, so it moves with the seed (agreement: 0.03–0.07; purity and cohesion not measured yet). Average several seeds |
+> | Coverage, rare F1 | **No**, still computed but not used as evidence | Yes/no per rare group ("is it the majority of some cluster?"), so a few cells crossing a boundary flips the score |
+>
+> Two rules for any comparison:
+> 1. Every cluster-based number is a mean ± spread over several Leiden seeds, never one run.
+> 2. A method is worse than the PCA control only if the gap is larger than that seed spread.
+>
+> Evidence and the options we rejected (scIB isolated-label F1, balanced
+> ARI/AMI, the scIB-E Jaccard index): `docs/decisions/0003-rare-metrics-and-clustering-randomness.md`
+> (on branch `adr-0003-leiden-randomness` until merged).
+
 Three kinds of signal, because they catch different failures:
 **assignment metrics** (did the final cluster label come out right),
 **cohesion** (do integration + clustering together keep cells that the
@@ -216,13 +271,13 @@ can score fine on one and fail another.
   agree with each other (an un-integrated batch effect); both high means
   real integration.
 
-- **Coverage** — per batch: fraction of that batch's locally-rare types
+- **Coverage** *(not used as evidence, see the box above)* — per batch: fraction of that batch's locally-rare types
   with at least one cell in a cluster whose majority label is that type.
   A binary per-type check (present or not), not a ratio — catches a type
   dropped entirely, which agreement (always some number, never literally
   "absent") can't flag as cleanly.
 
-- **Rare precision / recall / F1** — the fragmentation question (is
+- **Rare precision / recall / F1** *(not used as evidence, see the box above)* — the fragmentation question (is
   this type scattered across many clusters) that nothing above measures.
 
   Step 1, done once, globally: every cluster gets exactly one label —
@@ -451,3 +506,12 @@ evidence or a reviewer expects them:
   separate lineages, not sub-states, so this run couldn't test the claim.
   Added "What a dataset needs in order to test this claim" and the cheap checks
   to run before any more baselines.
+  *Note added 2026-11-23:* that 0.92 vs 0.70 was one Leiden run each. PCA's
+  rare F1 alone ranges 0.70–0.85 across 4 seeds, so this gap is not reliable.
+- **2026-11-23**, after Windows and Mac gave different rare F1 for the same
+  PCA run (0.70 vs 0.85): genes, split, graph and embedding matched; only the
+  Leiden clusters differed. Rerunning Leiden with 4 seeds on one machine gave
+  the same spread. So the cause is clustering randomness, not the machine.
+  Coverage and rare F1 are no longer used as evidence. Neighbor metrics are
+  the main evidence, and cluster-based metrics are averaged over seeds (box
+  at the top of Metrics).

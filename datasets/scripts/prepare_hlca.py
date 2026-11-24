@@ -27,7 +27,9 @@ subset into memory.
 
 Usage (from repo root, after datasets/raw/hlca_core.h5ad exists):
     python datasets/scripts/prepare_hlca.py
+    python datasets/scripts/prepare_hlca.py --refresh-frozen   # recompute the committed gene list
 """
+import argparse
 import hashlib
 import json
 import sys
@@ -35,6 +37,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "evaluation"))
 from run_record import record_run  # noqa: E402  records the script's start time
+import frozen  # noqa: E402  committed gene lists, see evaluation/frozen.py
 
 import anndata as ad
 import numpy as np
@@ -65,7 +68,7 @@ def pick_subsample_indices(obs):
     return np.sort(np.concatenate(keep))
 
 
-def main():
+def main(refresh=False):
     print(f"[hlca] loading {RAW_PATH} in backed mode (metadata only)")
     full = ad.read_h5ad(RAW_PATH, backed="r")
     print(f"[hlca] full: {full.n_obs:,} cells x {full.n_vars:,} genes | "
@@ -104,10 +107,17 @@ def main():
     sub.layers["counts"] = sub.raw.X.copy()  # true raw counts, confirmed above
     # sub.X stays log-normalized as shipped (cellxgene schema) -- no renormalization.
 
-    sc.pp.highly_variable_genes(
-        sub, n_top_genes=N_TOP_GENES, batch_key=BATCH_KEY,
+    # Only runs when there is no committed gene list yet (or --refresh-frozen);
+    # otherwise the committed datasets/frozen/hlca_core/genes.txt is used as is.
+    def propose(a):
+        sc.pp.highly_variable_genes(a, n_top_genes=N_TOP_GENES, batch_key=BATCH_KEY)
+        return list(a.var_names[a.var["highly_variable"]])
+
+    sub = frozen.select_genes(
+        sub, frozen.dataset_id(OUT_PATH), propose, refresh=refresh,
+        method=f"scanpy highly_variable_genes (default flavor) n_top_genes={N_TOP_GENES} "
+               f"batch_key={BATCH_KEY}",
     )
-    sub = sub[:, sub.var["highly_variable"]].copy()
     sub.X = sp.csr_matrix(sub.X).astype(np.float32) if sp.issparse(sub.X) else sub.X.astype(np.float32)
     sub.layers["counts"] = sp.csr_matrix(sub.layers["counts"]).astype(np.float32)
 
@@ -135,4 +145,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    p = argparse.ArgumentParser()
+    p.add_argument("--refresh-frozen", action="store_true",
+                   help="recompute the gene list and overwrite datasets/frozen/hlca_core/genes.txt "
+                        "(then commit the diff); default: use the committed list")
+    main(p.parse_args().refresh_frozen)

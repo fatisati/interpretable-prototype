@@ -10,8 +10,11 @@ that file's own docstring): decide something about the data once, save it,
 have every consumer read the same saved file. See docs/architecture.md for
 the full pipeline design -- every baseline must follow it, no exceptions.
 
+Writes, into datasets/frozen/<dataset>/ (committed to git, see evaluation/frozen.py):
+  split.csv, split.json                -- train/test division. Only written when the
+                                          dataset has none yet, or with --refresh-split;
+                                          otherwise the committed one is read.
 Writes, into --out-dir:
-  split.csv, split.json                -- train/test division
   affinity_train.npz, affinity_full.npz -- RBF graphs, train-only and all-cells PCA
   affinity_config.json
   cluster_config.json                   -- target cluster count K (n_cells // cells_per_cluster)
@@ -32,26 +35,22 @@ from scipy.sparse import save_npz
 
 from run_record import record_run  # first local import: records the script's start time
 from affinity import build_affinity_graph
-from common import compute_pca, stratified_split
+import frozen
+from common import compute_pca, load_split, stratified_split
 
 
-def create_split(adata, label_key, batch_key, test_size, seed, split_path):
-    """Always creates/overwrites -- this script is the one place allowed to.
-    Everything else (baselines, metrics) only reads split_path.
+def create_split(adata, dataset, label_key, batch_key, test_size, seed):
+    """Creates the dataset's frozen split -- this script is the one place
+    allowed to, and only when none exists yet or --refresh-split is given.
+    Everything else (baselines, metrics) only reads it.
     """
     train_pos, test_pos = stratified_split(adata, label_key, batch_key, test_size, seed)
     split = ["train"] * adata.n_obs
     for i in test_pos:
         split[i] = "test"
-
-    import pandas as pd
-    split_path.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame({"cell_id": adata.obs_names, "split": split}).to_csv(split_path, index=False)
-    split_path.with_suffix(".json").write_text(json.dumps({
+    frozen.write_split(dataset, list(adata.obs_names), split, {
         "seed": seed, "test_size": test_size, "label_key": label_key, "batch_key": batch_key,
-        "n_train": len(train_pos), "n_test": len(test_pos),
-    }, indent=2))
-    print(f"[prepare_eval] wrote {split_path} ({len(train_pos):,} train / {len(test_pos):,} test)")
+    })
     return split
 
 
@@ -87,21 +86,28 @@ def run(
     graph_construction="union",
     cells_per_cluster=75,
     force=False,
+    refresh_split=False,
 ):
     out_dir = Path(out_dir)
-    split_path = out_dir / "split.csv"
+    dataset = frozen.dataset_id(h5ad_path)
+    split_path = frozen.split_path(dataset)
     train_path = out_dir / "affinity_train.npz"
     full_path = out_dir / "affinity_full.npz"
     cluster_config_path = out_dir / "cluster_config.json"
 
     if (split_path.exists() and train_path.exists() and full_path.exists()
-            and cluster_config_path.exists() and not force):
+            and cluster_config_path.exists() and not force and not refresh_split):
         print(f"[prepare_eval] {out_dir} already has split + affinity graphs + cluster "
               f"config, skipping (--force to rebuild)")
         return out_dir
 
     adata = sc.read_h5ad(h5ad_path)
-    adata.obs["split"] = create_split(adata, label_key, batch_key, test_size, seed, split_path)
+    frozen.check_genes(adata, dataset)
+    if split_path.exists() and not refresh_split:
+        adata.obs["split"] = load_split(adata, label_key, batch_key, test_size, seed, split_path)
+    else:
+        adata.obs["split"] = create_split(adata, dataset, label_key, batch_key, test_size, seed)
+        split_path = frozen.split_path(dataset)
 
     train_adata = adata[adata.obs["split"] == "train"]
     print(f"[prepare_eval] train-only affinity graph: {train_adata.n_obs:,} cells")
@@ -124,6 +130,7 @@ def run(
     config = {
         "h5ad_path": str(h5ad_path),
         "split_path": str(split_path),
+        "frozen": frozen.fingerprint(dataset),
         "n_pca_comps": n_pca_comps,
         "k": k,
         "graph_construction": graph_construction,
@@ -131,7 +138,7 @@ def run(
         "n_full": int(adata.n_obs),
     }
     (out_dir / "affinity_config.json").write_text(json.dumps(config, indent=2))
-    for sidecar in (split_path.with_suffix(".json"), out_dir / "affinity_config.json", cluster_config_path):
+    for sidecar in (out_dir / "affinity_config.json", cluster_config_path):
         record_run(sidecar)
 
     print(f"[prepare_eval] wrote {train_path} (nnz={affinity_train.nnz:,}) and {full_path} (nnz={affinity_full.nnz:,})")
@@ -152,7 +159,11 @@ def parse_args():
     p.add_argument("--graph-construction", default="union", choices=["union", "intersection"])
     p.add_argument("--cells-per-cluster", type=int, default=75,
                     help="target cluster count = n_cells // this; same ratio SEACells uses for metacell sizing")
-    p.add_argument("--force", action="store_true", help="rebuild even if split/affinity/cluster files already exist")
+    p.add_argument("--force", action="store_true",
+                   help="rebuild affinity/cluster files even if they exist (the frozen split is kept)")
+    p.add_argument("--refresh-split", action="store_true",
+                   help="recompute the committed split in datasets/frozen/ (then commit the diff); "
+                        "makes every later stage stale")
     return p.parse_args()
 
 
@@ -171,4 +182,5 @@ if __name__ == "__main__":
         graph_construction=args.graph_construction,
         cells_per_cluster=args.cells_per_cluster,
         force=args.force,
+        refresh_split=args.refresh_split,
     )
