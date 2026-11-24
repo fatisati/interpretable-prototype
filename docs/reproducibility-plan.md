@@ -99,6 +99,13 @@ Modal CLI installed) - it remains a fallback if Phase C fails, see section 8.
 
 ## 4. Files to add or change
 
+> **Update 2026-11-24.** The committed inputs described below were implemented under a different
+> path: `datasets/frozen/<dataset>/` (`genes.txt`, `split.csv`, see `evaluation/frozen.py`), not
+> `repro/inputs/<dataset>/`. Not implemented: `manifest.json`, the content-hash check and
+> `tests/check_inputs.py`. Added instead: committed baseline outputs
+> (`datasets/frozen/<dataset>/baselines/<baseline>/`, `evaluation/frozen_run.py`), because the
+> same genes and split still gave different Leiden clusters on the two machines.
+
 New files are marked NEW. Paths are final names; keep them so both sides match.
 
 ### 4.1 Environment

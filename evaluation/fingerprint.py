@@ -4,7 +4,8 @@ Reads files only (plus one PCA, a few seconds). Trains nothing, changes nothing.
 Writes one JSON with a short hash or summary for every stage output it finds:
 
     processed   the stage-1 h5ad: cell order, gene order, matrix values
-    split       split.csv
+    split       split.csv (the committed one in datasets/frozen/<dataset>/, or an
+                older run folder's own copy)
     cluster_config
     pca         the PCA the affinity graph is built from (recomputed here)
     affinity_full / affinity_train
@@ -39,6 +40,7 @@ from scipy.sparse import csr_matrix, issparse, load_npz
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import frozen  # noqa: E402  committed gene list + split
 
 
 def short_hash(*chunks):
@@ -114,8 +116,10 @@ def fingerprint_processed(h5ad_path, split_meta):
     return out, adata
 
 
-def fingerprint_split(run_dir):
-    split = read_table(run_dir, "split.csv")
+def fingerprint_split(run_dir, dataset):
+    split = read_table(run_dir, "split.csv")  # run folders made before the freeze
+    if split is None and frozen.split_path(dataset).exists():
+        split = pd.read_csv(frozen.split_path(dataset))
     if split is None:
         return None
     pairs = sorted(split["cell_id"].astype(str) + ":" + split["split"].astype(str))
@@ -217,7 +221,10 @@ def environment():
 def run(run_dir, h5ad_path, layer, machine, out_path=None, skip_pca=False):
     run_dir = Path(run_dir)
     dataset = run_dir.name
+    frozen_id = frozen.dataset_id(h5ad_path)
     split_json = run_dir / "split.json"
+    if not split_json.exists():  # since the freeze the split lives in datasets/frozen/
+        split_json = frozen.split_meta_path(frozen_id)
     split_meta = json.loads(split_json.read_text()) if split_json.exists() else None
     affinity_json = run_dir / "affinity_config.json"
     affinity_config = json.loads(affinity_json.read_text()) if affinity_json.exists() else {}
@@ -225,7 +232,8 @@ def run(run_dir, h5ad_path, layer, machine, out_path=None, skip_pca=False):
     result = {"dataset": dataset, "machine": machine, "run_dir": run_dir.as_posix()}
     processed, adata = fingerprint_processed(h5ad_path, split_meta)
     result["processed"] = processed
-    result["split"] = fingerprint_split(run_dir)
+    result["split"] = fingerprint_split(run_dir, frozen_id)
+    result["frozen"] = frozen.fingerprint(frozen_id)
     if split_meta:
         result["split_params"] = {k: split_meta.get(k) for k in ("seed", "test_size", "label_key", "batch_key")}
     cluster_json = run_dir / "cluster_config.json"
@@ -254,7 +262,7 @@ def run(run_dir, h5ad_path, layer, machine, out_path=None, skip_pca=False):
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--run-dir", required=True, help="runs/<task>/<dataset> (holds split.csv, affinity_*.npz, baselines)")
+    p.add_argument("--run-dir", required=True, help="runs/<task>/<dataset> (holds affinity_*.npz and the baselines)")
     p.add_argument("--h5ad", required=True, help="the processed stage-1 file this run-dir was built from")
     p.add_argument("--layer", default=None, help="same --layer value the stages were run with (heart: counts)")
     p.add_argument("--machine", required=True, help="short tag for this computer, e.g. win-main, mac-studio")

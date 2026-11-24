@@ -5,7 +5,7 @@ Writes repro/evidence/<machine>/<dataset>/, laid out like the run folder so
 evaluation/compare_runs.py reads either one:
 
     hvg_genes.txt                 genes in the processed file, in matrix order
-    split.csv, split.json
+    split.csv, split.json         (from datasets/frozen/<dataset>/ when the run folder has none)
     cluster_config.json, affinity_config.json
     affinity_full.npz             (skipped with --no-affinity; ~4 MB for heart)
     <baseline>/embedding.csv.gz   or assignments.csv.gz
@@ -28,7 +28,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pandas as pd
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import frozen  # noqa: E402  committed gene list + split
 
 
 def gzip_copy(src, dst):
@@ -51,6 +55,12 @@ def run(run_dir, h5ad_path, machine, include_affinity=True):
     for name in ("split.csv", "split.json", "cluster_config.json", "affinity_config.json"):
         if (run_dir / name).exists():
             shutil.copyfile(run_dir / name, out / name)
+    # Since the freeze the split is committed in datasets/frozen/, not kept in the run folder.
+    dataset = frozen.dataset_id(h5ad_path)
+    if not (out / "split.csv").exists() and frozen.split_path(dataset).exists():
+        split = pd.read_csv(frozen.split_path(dataset))
+        split.to_csv(out / "split.csv", index=False, lineterminator="\n")
+        shutil.copyfile(frozen.split_meta_path(dataset), out / "split.json")
     if include_affinity and (run_dir / "affinity_full.npz").exists():
         shutil.copyfile(run_dir / "affinity_full.npz", out / "affinity_full.npz")
 

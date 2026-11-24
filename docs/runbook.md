@@ -130,6 +130,31 @@ python evaluation/recluster.py --run-dir runs/rare_cell_preservation/heart_cell_
 - **Writes:** `embedding.csv` (or `assignments.csv` for SEACells) and `config.json`.
 - **Re-run when:** the method's code or its flags change. After any re-run or re-cluster, stage 4 is stale.
 
+### 3b. Frozen baseline output: same clusters on every machine
+
+An embedding recomputed on another machine differs in the last digits, and Leiden then gives
+different clusters (heart PCA, Windows vs Mac: ARI 0.77). So the official machine commits each
+baseline's output once, and every machine scores that file. Details: `evaluation/frozen_run.py`.
+
+```
+# official machine, once per baseline, then commit datasets/frozen/<dataset>/baselines/<baseline>/
+python evaluation/frozen_run.py freeze  --run-dir runs/rare_cell_preservation/heart_cell_atlas/pca
+# any machine: how close is my own run to the frozen one (coordinates, neighbours, clusters)?
+python evaluation/frozen_run.py check   --run-dir runs/rare_cell_preservation/heart_cell_atlas/pca
+# any machine: put the frozen output into the run folder, then run stage 4 on it
+python evaluation/frozen_run.py restore --run-dir runs/rare_cell_preservation/heart_cell_atlas/pca
+```
+
+- **Writes:** `freeze`: `embedding.csv.gz` (or `assignments.csv.gz`), `source_config.json`, `result.json`
+  in `datasets/frozen/<dataset>/baselines/<baseline>/` (heart PCA: ~5 MB). `restore`: the run folder's
+  `embedding.csv`; the machine's own output is kept as `embedding.local.csv`, and `config.json` gets a
+  `frozen_run` entry with the file's sha256.
+- **`check` result:** `IDENTICAL`, `WITHIN TOLERANCE` (coordinates within `--tol`, default 0.01, and
+  99% of cells with the same 15 neighbours) or `DIFFERENT` (exit code 1).
+- **Replace a frozen result on purpose:** `freeze --replace`, then commit the diff. Needed after the
+  gene list or split changes; `restore` stops if they no longer match.
+- **Time:** seconds each on heart.
+
 ## 4. Metrics: score each baseline (~45 s per baseline)
 
 ```

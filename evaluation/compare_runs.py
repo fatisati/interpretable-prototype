@@ -40,6 +40,17 @@ def read_table(folder, name):
     return None
 
 
+def read_split(folder):
+    """split.csv in the folder (evidence packs, older run folders), else the
+    committed one in datasets/frozen/<folder name>/ (run folders since the freeze)."""
+    table = read_table(folder, "split.csv")
+    if table is None:
+        import frozen
+        path = frozen.split_path(Path(folder).name)
+        table = pd.read_csv(path) if path.exists() else None
+    return table
+
+
 def read_genes(folder, h5ad=None):
     if h5ad:
         import anndata as ad
@@ -75,7 +86,7 @@ def compare_genes(ga, gb):
 
 def compare_split(a_dir, b_dir):
     section("split.csv")
-    a, b = read_table(a_dir, "split.csv"), read_table(b_dir, "split.csv")
+    a, b = read_split(a_dir), read_split(b_dir)
     if a is None or b is None:
         print("   skipped (missing on one side)")
         return None
