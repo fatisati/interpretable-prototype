@@ -52,12 +52,14 @@ KNN_METRICS = ["knn_same_type_global", "knn_same_type_within", "knn_same_type_cr
 # 1. Collect
 # ---------------------------------------------------------------------------
 
-def find_metrics_dirs(runs_root, task, subdir="metrics"):
+def find_metrics_dirs(runs_root, task, subdir="metrics", datasets=None):
     """Every runs/<task>/<dataset>/<baseline>/<subdir>/ that has a summary,
-    sorted so output order never depends on filesystem order."""
+    sorted so output order never depends on filesystem order.
+    datasets: only these dataset folders (None = all)."""
     task_dir = Path(runs_root) / task
     found = sorted(task_dir.glob(f"*/*/{subdir}/metrics_summary.json"))
-    return [(p.parent.parent.parent.name, p.parent.parent.name, p.parent) for p in found]
+    out = [(p.parent.parent.parent.name, p.parent.parent.name, p.parent) for p in found]
+    return [r for r in out if datasets is None or r[0] in datasets]
 
 
 def summary_to_rows(summary, dataset, baseline):
@@ -96,12 +98,12 @@ def summary_to_rows(summary, dataset, baseline):
     return rows
 
 
-def load_all(runs_root, task, subdir="metrics"):
+def load_all(runs_root, task, subdir="metrics", datasets=None):
     """Returns (headline DataFrame, frequency-dependence DataFrame,
     per-group frequency DataFrame, list of run info dicts, rare-decision
     DataFrame, per-rare-pair F1 DataFrame)."""
     headline, freq, groups, runs, rare, f1 = [], [], [], [], [], []
-    for dataset, baseline, mdir in find_metrics_dirs(runs_root, task, subdir):
+    for dataset, baseline, mdir in find_metrics_dirs(runs_root, task, subdir, datasets):
         summary = json.loads((mdir / "metrics_summary.json").read_text())
         headline += summary_to_rows(summary, dataset, baseline)
 
@@ -517,11 +519,13 @@ def plot_frequency(task, dataset, metric, groups, freq, fig_dir):
 # 3. Print
 # ---------------------------------------------------------------------------
 
-def run(task, runs_root="runs", results_dir="results", subdir="metrics"):
-    headline, freq, groups, runs, rare, f1 = load_all(runs_root, task, subdir)
+def run(task, runs_root="runs", results_dir="results", subdir="metrics", datasets=None):
+    headline, freq, groups, runs, rare, f1 = load_all(runs_root, task, subdir, datasets)
     # One folder per version of the numbers, so versions never mix:
     # results/<task>/official/ or results/<task>/whatif_rare-<rule>/.
     version = "official" if subdir == "metrics" else subdir.replace("metrics__", "whatif_")
+    if datasets:  # a subset never overwrites the all-datasets tables
+        version += "__" + "+".join(sorted(datasets))
     out_dir = Path(results_dir) / task / version
     data_dir = out_dir / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -548,7 +552,7 @@ def run(task, runs_root="runs", results_dir="results", subdir="metrics"):
     return tables_path, summary_path
 
 
-def unreproducible_runs(runs_root, task, subdir="metrics"):
+def unreproducible_runs(runs_root, task, subdir="metrics", datasets=None):
     """Hard gate: every run record feeding a result must come from committed code.
 
     For each metrics folder, checks the latest run_history entry of the records along its
@@ -556,7 +560,7 @@ def unreproducible_runs(runs_root, task, subdir="metrics"):
     Returns one "path: reason" line per problem (empty list = all clean). A record with no
     run_history predates run_record.py, so we can't tell what code made it: also a problem."""
     problems = []
-    for _, _, mdir in find_metrics_dirs(runs_root, task, subdir):
+    for _, _, mdir in find_metrics_dirs(runs_root, task, subdir, datasets):
         chain = [mdir / "metrics_config.json", mdir.parent / "config.json",
                  mdir.parent.parent / "affinity_config.json",
                  mdir.parent.parent / "cluster_config.json"]
@@ -583,6 +587,9 @@ def parse_args():
     p.add_argument("--results-dir", default="results", help="(for tests) where output goes")
     p.add_argument("--metrics-subdir", default="metrics",
                    help="metrics folder name per run; metrics__rare-<rule> = a what-if rare rule")
+    p.add_argument("--datasets", nargs="+", default=None,
+                   help="only these datasets (default: all); output goes to <version>__<names>/ "
+                        "so it never overwrites the all-datasets tables")
     p.add_argument("--allow-dirty", action="store_true",
                    help="build anyway from runs made with uncommitted code (for checks only; "
                         "the flag is kept in run.json's command, so such tables stay traceable)")
@@ -592,7 +599,7 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
     # Hard gate (see CLAUDE.md): results only from committed code, this script included.
-    problems = unreproducible_runs(args.runs_root, args.task, args.metrics_subdir)
+    problems = unreproducible_runs(args.runs_root, args.task, args.metrics_subdir, args.datasets)
     changed, script_untracked = uncommitted()
     if changed or script_untracked:
         problems.insert(0, f"build_results.py itself: uncommitted code ({', '.join(changed[:5]) or 'script not in git'})")
@@ -605,7 +612,7 @@ if __name__ == "__main__":
     if problems:
         print(f"[results] --allow-dirty: building despite {len(problems)} problem(s); "
               f"these tables are NOT reproducible")
-    tables_path, _ = run(args.task, args.runs_root, args.results_dir, args.metrics_subdir)
+    tables_path, _ = run(args.task, args.runs_root, args.results_dir, args.metrics_subdir, args.datasets)
     # Kept out of tables.md (which stays byte-identical across runs). Fresh file
     # each time: it describes the tables just written, not older builds.
     run_json = tables_path.parent / "run.json"

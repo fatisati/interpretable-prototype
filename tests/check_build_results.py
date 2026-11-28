@@ -75,7 +75,7 @@ def clusters(df, scatter_prob):
 
 def full_job_adapter(column):
     """Adapter for a transductive baseline: one 'full' job (all cells)."""
-    def adapter(embedding_path, label_key, batch_key, affinity_dir):
+    def adapter(embedding_path, label_key, batch_key, affinity_dir, labels_from=None):
         df = pd.read_csv(embedding_path).rename(columns={label_key: "true_type", batch_key: "batch"})
         df["cluster"] = df[column]
         return {"full": {"df": df, "affinity": compute_metrics.load_npz(Path(affinity_dir) / "affinity_full.npz"),

@@ -47,11 +47,23 @@ def _git(*args):
     return out.stdout.strip() if out.returncode == 0 else None
 
 
+def _launched_by_modal():
+    """True under `modal run <script> ...`: then argv[0] is the modal CLI, argv[1:] = ['run', script, ...]."""
+    return Path(sys.argv[0]).stem == "modal" and len(sys.argv) > 2 and sys.argv[1] == "run"
+
+
 def _script_path():
+    path = sys.argv[2].split("::")[0] if _launched_by_modal() else sys.argv[0]
     try:
-        return Path(sys.argv[0]).resolve().relative_to(REPO_ROOT).as_posix()
+        return Path(path).resolve().relative_to(REPO_ROOT).as_posix()
     except ValueError:
-        return sys.argv[0]
+        return path
+
+
+def _command():
+    if _launched_by_modal():
+        return "modal " + shlex.join(["run", _script_path(), *sys.argv[3:]])
+    return "python " + shlex.join([_script_path(), *sys.argv[1:]])
 
 
 def uncommitted():
@@ -104,7 +116,7 @@ def current_run():
     changed, _ = uncommitted()
     return {
         "script": script,
-        "command": "python " + shlex.join([script, *sys.argv[1:]]),
+        "command": _command(),
         "git_commit": _git("rev-parse", "HEAD"),
         "git_dirty": bool(changed) if available else None,
         "git_dirty_files": changed,
