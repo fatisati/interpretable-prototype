@@ -7,7 +7,9 @@ its output. That appends one entry to a `run_history` list inside the JSON:
     command           the exact command line, copy-pasteable
     git_commit        the code version (commit hash) checked out at the time
     git_dirty         true if tracked code had uncommitted edits -> the commit
-                      alone does NOT fully describe the code that ran
+                      alone does NOT fully describe the code that ran.
+                      Prose *.md docs don't count.
+    git_dirty_files   the uncommitted tracked files behind git_dirty
     script_committed  false if the script itself isn't in git at all
     started_at, finished_at
 
@@ -62,6 +64,10 @@ def uncommitted():
         return [], False
     # split, not line[3:]: _git strips the output, which eats the first line's leading space.
     changed = [line.split(None, 1)[1] for line in status.splitlines() if line.strip()]
+    # Prose docs (*.md) don't change what a run computes; an edit to one (e.g. the runbook,
+    # by a parallel session) must not mark every run in that window dirty. Data files that
+    # do change results (genes.txt, split.csv, *.json) still count.
+    changed = [f for f in changed if not f.strip('"').endswith(".md")]
     script = _script_path()
     script_untracked = (script.endswith(".py") and not Path(script).is_absolute()
                         and _git("ls-files", "--error-unmatch", "--", script) is None)
@@ -94,12 +100,14 @@ except Exception:
 def current_run():
     """One run_history entry describing this process."""
     script = _script_path()
-    status = _git("status", "--porcelain", "--untracked-files=no")
+    available = _git("rev-parse", "HEAD") is not None
+    changed, _ = uncommitted()
     return {
         "script": script,
         "command": "python " + shlex.join([script, *sys.argv[1:]]),
         "git_commit": _git("rev-parse", "HEAD"),
-        "git_dirty": None if status is None else bool(status),
+        "git_dirty": bool(changed) if available else None,
+        "git_dirty_files": changed,
         "script_committed": _git("ls-files", "--error-unmatch", "--", script) is not None,
         "started_at": STARTED_AT,
         "finished_at": datetime.now().astimezone().isoformat(timespec="seconds"),
