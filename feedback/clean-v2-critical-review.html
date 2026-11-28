@@ -1,0 +1,440 @@
+<title>clean-v2 Critical Review</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column (about 70ch) with a contents strip on top; wide tables scroll inside their own box. */
+:root {
+  --bg: #f7f9f9; --surface: #ffffff; --fg: #17232a; --muted: #56666e; --line: #d5dee0;
+  --accent: #0d6b6e; --accent-soft: #e2f1f0;
+  --warn: #9a4a06; --warn-soft: #fbeedd;
+  --bad: #a1262d; --bad-soft: #fbe6e6;
+  --good: #1f6b3a; --good-soft: #e2f3e7;
+  --code-bg: #edf2f3;
+  --display: "Space Grotesk", "Inter", system-ui, sans-serif;
+  --body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #10181b; --surface: #172226; --fg: #e4ecee; --muted: #9bacb2; --line: #2c3b40;
+    --accent: #5cc4c1; --accent-soft: #163536;
+    --warn: #f0b072; --warn-soft: #3a2a17;
+    --bad: #f19a9d; --bad-soft: #3d1f21;
+    --good: #84d3a0; --good-soft: #17352270;
+    --code-bg: #1e2c31; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #10181b; --surface: #172226; --fg: #e4ecee; --muted: #9bacb2; --line: #2c3b40;
+  --accent: #5cc4c1; --accent-soft: #163536;
+  --warn: #f0b072; --warn-soft: #3a2a17;
+  --bad: #f19a9d; --bad-soft: #3d1f21;
+  --good: #84d3a0; --good-soft: #17352270;
+  --code-bg: #1e2c31; color-scheme: dark;
+}
+body { background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 16px; line-height: 1.6; }
+.wrap { max-width: 860px; margin: 0 auto; padding-block: 40px 72px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+header.top { border-bottom: 1px solid var(--line); padding-bottom: 20px; margin-bottom: 8px; }
+.eyebrow { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+h1 { font-family: var(--display); font-size: clamp(28px, 5vw, 38px); line-height: 1.15; margin: 6px 0 10px; text-wrap: balance; font-weight: 600; }
+.meta { color: var(--muted); font-size: 14px; margin: 0; }
+h2 { font-family: var(--display); font-size: 25px; line-height: 1.2; margin: 52px 0 12px; padding-top: 18px; border-top: 1px solid var(--line); text-wrap: balance; font-weight: 600; }
+h3 { font-family: var(--display); font-size: 18px; line-height: 1.3; margin: 28px 0 8px; text-wrap: balance; font-weight: 600; }
+p { margin: 0 0 14px; max-width: 70ch; }
+ul, ol { margin: 0 0 14px; padding-left: 22px; max-width: 70ch; }
+li { margin-bottom: 7px; }
+a { color: var(--accent); text-underline-offset: 2px; }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+code { font-family: var(--mono); font-size: .86em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+.lead { font-size: 18px; line-height: 1.55; }
+nav.toc { display: flex; flex-wrap: wrap; gap: 6px 8px; margin: 18px 0 0; font-size: 14px; }
+nav.toc a { text-decoration: none; padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--fg); }
+nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+.summary { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 20px 22px 8px; margin-top: 16px; }
+.summary h2 { margin-top: 0; padding-top: 0; border-top: 0; }
+.tbl { overflow-x: auto; margin: 6px 0 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; line-height: 1.45; }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+th { font-weight: 600; font-size: 12.5px; letter-spacing: .03em; color: var(--muted); background: var(--code-bg); white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wide table { min-width: 780px; }
+.chip { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+.chip.keep { background: var(--good-soft); color: var(--good); }
+.chip.drop { background: var(--bad-soft); color: var(--bad); }
+.chip.hold { background: var(--warn-soft); color: var(--warn); }
+.flag h3 { display: flex; gap: 10px; align-items: baseline; }
+.flag h3 .n { font-family: var(--mono); font-size: 13px; color: var(--bad); flex: none; }
+.note { border-left: 3px solid var(--warn); background: var(--warn-soft); padding: 10px 14px; border-radius: 0 6px 6px 0; margin: 0 0 16px; font-size: 14.5px; max-width: 70ch; }
+.note p { margin: 0; }
+.step { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 14px 18px 4px; margin-bottom: 12px; }
+.step h3 { margin-top: 0; }
+.step .time { font-family: var(--mono); font-size: 12.5px; color: var(--muted); font-weight: 400; }
+footer { margin-top: 56px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+</style>
+
+<div class="wrap">
+<header class="top">
+  <div class="eyebrow">scProto &middot; branch clean-v2</div>
+  <h1>clean-v2 critical review and dataset plan</h1>
+  <p class="meta">As of 22 November 2026 &middot; based on the clean-v2 files at commit <code>e11debf</code>, one local rerun on heart, and a literature search</p>
+  <nav class="toc" aria-label="Contents">
+    <a href="#summary">Summary</a><a href="#what">What it is</a><a href="#strengths">Strengths</a><a href="#flags">Red flags</a><a href="#results">Results</a><a href="#datasets">Datasets</a><a href="#plan">Plan</a><a href="#open">Not verified</a>
+  </nav>
+</header>
+
+<section class="summary" id="summary">
+<h2>Executive summary</h2>
+<p class="lead">clean-v2 is a well-built benchmark attached to a claim that its own first results and the published literature do not support. The pipeline is worth keeping. The claim, the scoreboard and the dataset strategy need to change before more datasets are run.</p>
+<p><strong>What it is.</strong> A restart of scProto as an evidence-first project: show that batch correction plus clustering, and SEACells, lose rare cell types, then show scProto fixes it. Three baselines exist (scVI, PCA control, SEACells), one dataset has committed results (heart), and scProto itself is not in the branch.</p>
+<p><strong>Main strengths.</strong> Claim and metrics written before running; a null result reported openly; one shared split, graph and cluster count for all methods; an uncorrected control; full run records; a real finding that the scIB trio's counts are not raw.</p>
+<p><strong>Main red flags.</strong></p>
+<ol>
+<li><strong>The premise is contradicted.</strong> scVI matched or beat the uncorrected control on rare cells on heart. Published benchmarks mostly list scVI and scANVI among the methods that keep rare types; they blame Harmony and Seurat.</li>
+<li><strong>The dataset search has turned into looking for a dataset where the baselines fail.</strong> The seven selection criteria were written after the null result.</li>
+<li><strong>The ground-truth graph is batch-confounded and the planned comparison is circular.</strong> 56% of its edges join cells of the same donor, against 8.4% expected. scProto would be trained on this graph and scored on it.</li>
+<li><strong>No statistical power.</strong> 44 rare test cells, one run per method, and a rerun moves rare F1 by 0.08 to 0.15.</li>
+<li><strong>Metric and baseline gaps.</strong> About 248 clusters for 11 cell types; home-made metrics instead of the field's; SEACells run in a way its authors do not recommend; Harmony, BBKNN and ComBat not written.</li>
+</ol>
+<p><strong>Datasets.</strong> The best-supported target is one disease-relevant rare state followed across modalities: aberrant basaloid cells in pulmonary fibrosis (Adams 2020 and Habermann 2020 dissociated, Vannan 2025 Xenium). HLCA core is the reviewer-expected benchmark, and SEA-AD MERFISH the second spatial case. Heart fine labels, Haber, Moffitt and the single-animal Allen brain atlas should be dropped. None of the new candidates has been downloaded or audited yet.</p>
+<p><strong>Plan.</strong> Freeze the claim and scoreboard, measure the seed noise, add the three missing baselines, then run a planted rare-state test with a known answer. That test decides in days whether any baseline loses a state the uncorrected data can still see. Only datasets passing cheap checks get full baselines, and scProto runs only where a gap was shown, compared against its own backbone.</p>
+<p><strong>Recommended reframing.</strong> Lead with batch-aware metacells and niche-defined rare states, where no direct competitor was found, and stop leading with "scVI loses rare cells". If the planted-state test and two real datasets show no gap, withdraw the rare-cell motivation.</p>
+</section>
+
+<section id="what">
+<h2>What clean-v2 is</h2>
+<p>clean-v2 is a restart of the scProto project as an evidence-first benchmark: prove that existing methods lose rare cell types, then show scProto fixes it. It is a new history of 24 commits (15 to 22 November 2026, one author) and contains no scProto code yet; <code>scproto/</code> is empty.</p>
+<p><strong>The claim under test</strong> (Task 1, <code>tasks/rare_cell_preservation.md</code>). Batch correction followed by Leiden clustering absorbs a rare sub-state into an abundant type. A second claim says SEACells cannot form a metacell for a type that is rare in every batch. scProto is meant to fix both by following a cell-cell affinity graph.</p>
+<p><strong>The pipeline</strong> (<code>docs/architecture.md</code>). Five stages, each writing files that later stages only read:</p>
+<ol>
+<li>Dataset prep: raw file to an HVG-selected <code>.h5ad</code>.</li>
+<li>Evaluation setup: one train/test split (80/20, stratified on cell type and batch), an affinity graph, and a shared cluster count K = cells / 75.</li>
+<li>Baselines: each writes an embedding or assignments, clustered to the shared K.</li>
+<li>Metrics: purity, agreement (global, within-batch, cross-batch), rare coverage, rare F1, cohesion, neighbor metrics, and a frequency-dependence check.</li>
+<li>Results: generated tables and figures; the verdict is written by hand.</li>
+</ol>
+<div class="tbl"><table>
+<tr><th>Item</th><th>Status</th></tr>
+<tr><td>Datasets prepared</td><td>heart (18,641 cells), HLCA capped subsample (50,819), scIB trio (pancreas, lung, pbmc_immune)</td></tr>
+<tr><td>Baselines implemented</td><td>scVI, PCA + Leiden, SEACells</td></tr>
+<tr><td>Baselines named in the task but not written</td><td>Harmony, BBKNN, ComBat</td></tr>
+<tr><td>Committed results</td><td>heart only, scVI and PCA only, one seed each</td></tr>
+<tr><td>Outcome so far</td><td>no gap: scVI matched or beat the uncorrected PCA control on rare-cell metrics</td></tr>
+<tr><td>Verdict file <code>results/rare_cell_preservation.md</code></td><td>not written</td></tr>
+<tr><td>scProto run</td><td>none</td></tr>
+<tr><td>Decision records</td><td>0001 dataset selection, 0002 rare-cell rule</td></tr>
+</table></div>
+<p>After the first null result the task file gained a seven-point list of what a dataset must have to show the gap, and <code>docs/dataset-options.md</code> now scores 13 candidates against it.</p>
+</section>
+
+<section id="strengths">
+<h2>Strengths</h2>
+<p>The engineering and the honesty of clean-v2 are well above the previous branch; the weaknesses below are about the science, not the code.</p>
+<ul>
+<li><strong>Evidence before method.</strong> The task file states the claim, per-baseline mechanisms, metrics and expectations before any run. This answers the reviewer question "is the problem real?" before the method is shown.</li>
+<li><strong>A null result was reported, not buried.</strong> The first heart run contradicted the expectation. The task file records it under Revisions with the cause the authors believe, and the results script was changed so it no longer prints a verdict.</li>
+<li><strong>Shared inputs by construction.</strong> Split, affinity graph and cluster count are created once and only read afterwards. Baselines fail loudly if those files are missing or built with other parameters.</li>
+<li><strong>An uncorrected control.</strong> PCA + Leiden separates "integration lost the type" from "clustering lost it". Most integration papers omit this.</li>
+<li><strong>Neighbor metrics next to cluster metrics.</strong> Embedding-level loss can be told apart from clustering-level loss.</li>
+<li><strong>Raw-count audit.</strong> The scIB trio was checked directly and found to have non-integer counts (pancreas 42.8%, lung 91.6%, pbmc_immune 7.9%), so they were removed from negative-binomial use. This was a real, previously unnoticed problem.</li>
+<li><strong>Provenance.</strong> Every output has a config sidecar with the command, git commit, dirty flag and package versions. Decision records exist for dataset choice and the rare-cell rule.</li>
+<li><strong>Cheap pre-checks and a planted-state test are already proposed</strong> (task file, "Cheap checks before running baselines"). Check 7, a planted rare state with a dial, is the strongest idea in the repo.</li>
+<li><strong>It runs elsewhere.</strong> All five stages ran unchanged on a second machine (Mac, 2026-11-22), and a self-contained sanity test exists.</li>
+</ul>
+</section>
+
+<section id="flags">
+<h2>Weaknesses and red flags</h2>
+<p>The four most serious problems are about what is being claimed and how it is scored; the rest are fixable gaps. Ordered by severity.</p>
+
+<div class="flag">
+<h3><span class="n">01</span>The premise about scVI is contradicted by the project's own data and by published benchmarks</h3>
+<p>The task file names scVI's weakness as "the specific weakness scProto's affinity guidance is meant to fix". The evidence points the other way.</p>
+<ul>
+<li>Own data: scVI beat the uncorrected control on rare cells on heart, with both label sets.</li>
+<li><a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC8748196/">scIB</a> describes scVI, scANVI, Scanorama and Harmony as retaining rare cell types, and singles out Harmony for the lowest isolated-label F1 among top methods on the immune task.</li>
+<li><a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC10287567/">HLCA</a>: the three rare airway types formed separate clusters after scANVI; Harmony and Seurat RPCA failed.</li>
+<li><a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC10682386/">scDREAMER</a> lists scVI among the three methods that kept lung ionocytes separate. <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC12636214/">scIB-E</a> reports scVI with the highest within-cell-type conservation score.</li>
+<li>Against scVI: <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC9944958/">scDML</a> (missed B-cell subtypes on lung) and <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC11971424/">scCRAFT</a> (32.2% of rare islet cells had a wrong-type neighbour, against 3.5% for scCRAFT).</li>
+</ul>
+<p>The literature blames Harmony and Seurat far more than scVI. scProto is itself built on a conditional VAE, the same model family, so "VAEs lose rare cells" is also an awkward message.</p>
+</div>
+
+<div class="flag">
+<h3><span class="n">02</span>The dataset search now looks like searching for a dataset where the baselines fail</h3>
+<p>The expectation was written, the first run contradicted it, and the response was a seven-point list of dataset properties under which the baselines should fail. Each item is defensible alone. Together, and written after the result, a reviewer will read them as tuning the benchmark to the conclusion. The README says a task file is "never edited after results exist"; it was revised twice on 22 November. The edits are logged honestly, which helps, but the list needs to be frozen before the next run and every dataset tried must be reported, including heart.</p>
+</div>
+
+<div class="flag">
+<h3><span class="n">03</span>The "ground-truth" affinity graph is batch-confounded, and the planned comparison is circular</h3>
+<p>The graph is a k = 15 kernel on uncorrected PCA of all batches. Measured on heart: 56% of its edges join two cells of the same donor, against 8.4% expected if the graph ignored donor. Part of that is real biology, because donors differ in cell source (nuclei, whole cells, CD45-sorted) and composition. Consequences:</p>
+<ul>
+<li>Cohesion rewards keeping batches apart. The uncorrected control sits near the ceiling by construction (the task file admits this), and good integration is penalised.</li>
+<li>SEACells is given this graph as its kernel and is then scored on cohesion against it.</li>
+<li>scProto will be trained to follow this graph and scored on the same graph. A win on cohesion would prove only that the loss was optimised.</li>
+</ul>
+<p>Cohesion can stay as a diagnostic. It cannot be evidence for the method.</p>
+</div>
+
+<div class="flag">
+<h3><span class="n">04</span>The rare-cell numbers have almost no statistical power</h3>
+<p>The test half has 44 rare cells; most rare groups hold one to three cells; every method was run once. Rerunning moved rare F1 by 0.08 to 0.15, as large as the differences being interpreted. Nothing has a confidence interval across seeds. Subsampling makes this worse: the heart file is 18,641 of 486,134 cells, and the HLCA cap changes how rare the target types are by about tenfold (the repo's own note).</p>
+</div>
+
+<div class="flag">
+<h3><span class="n">05</span>Several metrics measure something other than what they are named for</h3>
+<ul>
+<li><strong>K = cells / 75</strong> gives about 248 clusters for 11 cell types. Purity is 0.97 for every method, so it cannot discriminate. A 30-cell state can never be the majority of a typical 71-cell cluster unless the method isolates it into a much smaller one.</li>
+<li><strong>Cohesion</strong> averages a sparse 15-neighbor graph over about 71 cluster members, so it mostly tracks cluster size; small clusters score high. This is why rare groups score higher than common ones.</li>
+<li><strong>Within-batch neighbor same-type share</strong> is capped at (n &minus; 1) / 15 for a type with n cells in the batch, so it falls with rarity for every method.</li>
+<li><strong>The rare rule depends on label granularity.</strong> With 65 fine labels, vCM5 at 0.3 to 0.5% of a batch is not flagged rare in most batches.</li>
+<li><strong>Rare F1</strong> averages over (type, batch) pairs, many with one cell, so single cells decide the mean.</li>
+<li><strong>None of these are the field's metrics.</strong> Reviewers will ask for isolated-label F1 and silhouette (scIB, Open Problems) and the HLCA rare-cell recall and precision.</li>
+</ul>
+</div>
+
+<div class="flag">
+<h3><span class="n">06</span>The SEACells comparison is open to a strawman objection</h3>
+<p>The <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC10713451/">SEACells paper</a> says metacells can be computed per sample and integrated afterwards. The <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC11220014/">metacell review</a> gives two routes: per sample then integrate, or correct batch first then build metacells. Running SEACells on pooled, uncorrected cells is neither. The task file also describes SEACells as building metacells within a single batch, which is not how the baseline script runs it. Fair baselines are per-sample SEACells and SEACells on a corrected embedding, plus <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC11782697/">MetaQ</a>, which already claims rare types down to 0.01%.</p>
+</div>
+
+<div class="flag">
+<h3><span class="n">07</span>The baselines most likely to show the gap are not written</h3>
+<p>Harmony, BBKNN and ComBat are named in the task but absent. They are the cheapest to run and the ones the literature reports failing. Also missing: scANVI, scPoli (scProto's own backbone, the fairest ablation), Scanorama, and the direct competitors scDML and scCRAFT.</p>
+</div>
+
+<div class="flag">
+<h3><span class="n">08</span>Mechanisms are asserted, not cited or tested</h3>
+<p>The per-baseline explanations (ComBat's shared factor, Harmony's diversity term, scVI's KL pull) read as established fact. None has a reference or a test. The literature search found no paper showing ComBat or BBKNN losing a rare type, and no published statement that SEACells fails on rare types across batches.</p>
+</div>
+
+<div class="flag">
+<h3><span class="n">09</span>The method is absent, and the older branch's negative findings were not carried over</h3>
+<p>clean-v2 has no scProto code. The older branch's commit log records that stage-2 training was "net harmful as configured" (D59), that a rare-purity gain was retracted as noise (D60), and that the negative-binomial variant was worse than MSE on held-out metrics (D64, one seed). clean-v2 documents none of this, so the benchmark is being built for a method whose rare-cell advantage has not yet been observed.</p>
+</div>
+
+<div class="flag">
+<h3><span class="n">10</span>Smaller gaps</h3>
+<ul>
+<li>Marker survival after gene filtering (the task's own item 3) is "?" for almost every dataset.</li>
+<li>The processed heart file has a different checksum on a second machine with the same raw file; the cause is unknown.</li>
+<li>HLCA fine labels were built with scANVI (the repo's note), which favours scVI-family methods.</li>
+<li>Modal runs get no run record.</li>
+<li>The verdict file the README requires does not exist.</li>
+</ul>
+</div>
+</section>
+
+<section id="results">
+<h2>What the current results show</h2>
+<p>The results so far do not support the claim, and they are too small to refute it either. Three sets of numbers matter.</p>
+
+<h3>1. Heart, broad labels (committed, official)</h3>
+<p>scVI is at or above the uncorrected PCA control on every rare-cell metric.</p>
+<div class="tbl"><table>
+<tr><th>Metric (rare cells)</th><th class="num">PCA train</th><th class="num">scVI train</th><th class="num">PCA test</th><th class="num">scVI test</th></tr>
+<tr><td>Rare F1</td><td class="num">0.696</td><td class="num">0.919</td><td class="num">0.807</td><td class="num">0.875</td></tr>
+<tr><td>Rare coverage</td><td class="num">0.690</td><td class="num">0.964</td><td class="num">0.903</td><td class="num">0.958</td></tr>
+<tr><td>Agreement, global</td><td class="num">0.822</td><td class="num">0.897</td><td class="num">0.781</td><td class="num">0.807</td></tr>
+</table></div>
+<p>The rare population is 216 cells in 27 (type, batch) groups; the test half holds 44 rare cells. Four groups have no test cell and most have one to three.</p>
+
+<h3>2. Heart, fine labels (committed what-if, 65 <code>cell_states</code>)</h3>
+<p>Nothing recovers the rare states, including the control. Test rare F1 is 0.103 for PCA and 0.247 for scVI; train is 0.076 and 0.086. vCM5 cells share a cluster with other vCM5 cells about 1 to 4% of the time under plain PCA. A state the uncorrected data cannot separate cannot be "lost by correction", so this label set cannot show the gap. This contradicts the reading in <code>docs/dataset-options.md</code> that heart fine labels "fit the claim best".</p>
+
+<h3>3. Replication on a second machine (Mac, 2026-11-22, not committed)</h3>
+<p>Rare-cell numbers are not stable across reruns.</p>
+<div class="tbl"><table>
+<tr><th>Comparison</th><th>All-cell metrics</th><th>Rare-cell metrics</th></tr>
+<tr><td>PCA, official machine vs Mac</td><td>within 0.005</td><td>train rare F1 0.696 vs 0.846</td></tr>
+<tr><td>scVI on CPU vs scVI on Metal, same Mac</td><td>within 0.002</td><td>test rare F1 0.846 vs 0.924</td></tr>
+</table></div>
+<p>A swing of 0.08 to 0.15 is as large as the PCA-to-scVI difference in table 1. One run per method cannot rank methods on rare metrics. The older branch measured the same thing on pbmc-immune (rare F1 noise 0.08 between identical runs) and wrote a rule against single-run rare comparisons; clean-v2 does not carry that rule over.</p>
+
+<h3>SEACells (Mac run, not committed)</h3>
+<p>This is the only result pointing the claimed way, and it is one seed.</p>
+<div class="tbl"><table>
+<tr><th>Metric</th><th class="num">SEACells full</th><th class="num">scVI (CPU / Metal)</th></tr>
+<tr><td>Rare F1</td><td class="num">0.69</td><td class="num">0.85 to 0.92</td></tr>
+<tr><td>Rare coverage</td><td class="num">0.73</td><td class="num">0.88 to 0.96</td></tr>
+<tr><td>Purity, all cells</td><td class="num">0.953</td><td class="num">0.975</td></tr>
+<tr><td>Rare cohesion</td><td class="num">0.119</td><td class="num">0.064</td></tr>
+<tr><td>Metacells drawn from a single donor (of 248)</td><td class="num">10</td><td class="num">0 to 1</td></tr>
+</table></div>
+<p>SEACells is lower on rare F1 and coverage and higher on rare cohesion. The cohesion lead is expected by construction: SEACells is given the evaluation graph as its kernel.</p>
+
+<h3>Frequency dependence</h3>
+<p>The task expected every metric to fall as a type gets rarer. scVI's cohesion rises instead (Spearman &minus;0.55 on test). The strongest positive trend, within-batch neighbor same-type share (Spearman 0.81), is partly mechanical: a type with n cells in a batch can have at most n &minus; 1 same-type neighbors out of 15.</p>
+</section>
+
+<section id="datasets">
+<h2>Dataset candidates</h2>
+<p>The best-supported target is one rare, disease-relevant state followed across modalities: aberrant basaloid cells in pulmonary fibrosis, in two dissociated atlases and one Xenium atlas, with HLCA as the published-failure benchmark and SEA-AD MERFISH as the second spatial case. No candidate found meets all seven of the task's criteria; label provenance is the usual failure.</p>
+<div class="note"><p>Facts in this section were collected from the linked pages by a literature search. Nothing here has been downloaded or audited, and cell counts marked "not stated" were not in the papers' main text.</p></div>
+
+<h3>Where the method has a defensible opening</h3>
+<div class="tbl wide"><table>
+<tr><th>Angle</th><th>What the literature already says</th><th>Why it suits scProto</th></tr>
+<tr><td>Harmony / Seurat lose rare types</td><td>Documented in HLCA and scIB</td><td>A known, citable gap; no need to prove it from scratch</td></tr>
+<tr><td>Rare states defined partly by spatial niche</td><td>Vannan 2025 says cell-type annotation alone does not capture the basaloid niche</td><td>The affinity graph can be spatial; expression-only integration has no access to this</td></tr>
+<tr><td>Batch-aware metacells</td><td>No published batch-aware metacell method was found (absence of a search hit, not proof)</td><td>Possibly the clearest novelty, if framed against per-sample SEACells and MetaQ</td></tr>
+<tr><td>scVI loses rare types</td><td>Mixed, mostly against</td><td>Do not build the paper on this</td></tr>
+</table></div>
+
+<h3>Candidates already in <code>docs/dataset-options.md</code></h3>
+<div class="tbl wide"><table>
+<tr><th>Dataset</th><th>Verdict</th><th>Reason</th></tr>
+<tr><td>Heart, broad labels</td><td><span class="chip keep">Keep</span> as the reported negative case</td><td>Rare types are separate lineages; no gap found</td></tr>
+<tr><td>Heart, fine labels</td><td><span class="chip drop">Drop</span> for this claim</td><td>Own what-if run: uncorrected PCA cannot separate the states either (rare F1 0.08 to 0.10)</td></tr>
+<tr><td>HLCA capped subsample</td><td><span class="chip keep">Keep</span> the dataset, redo the sampling</td><td>Only dataset with a published failure statement; the 1,000-per-type cap makes target types about 10x less rare</td></tr>
+<tr><td>NeurIPS 2021 bone marrow</td><td><span class="chip keep">Keep</span>, second tier</td><td>Raw counts and 12 batches confirmed locally by the repo; annotation method still unverified</td></tr>
+<tr><td>scIB pancreas / lung / immune</td><td><span class="chip hold">Comparability only</span></td><td>They are the field's recurring evidence for rare-cell claims (scDML, scCRAFT, scDREAMER); use normalised input, not count likelihoods</td></tr>
+<tr><td>PBMC Seurat v4</td><td><span class="chip hold">Low priority</span></td><td>One lab, weak batch effect; the paper says some clusters blend in RNA-only analysis</td></tr>
+<tr><td>Haber 2017 intestine</td><td><span class="chip drop">Drop</span></td><td>Coarse labels, small, 2017</td></tr>
+<tr><td>Moffitt 2018 MERFISH</td><td><span class="chip drop">Drop</span></td><td>2018; values are volume-normalised, not raw counts; labels from clustering the same data</td></tr>
+<tr><td>Allen whole-brain MERFISH (Yao)</td><td><span class="chip drop">Drop</span></td><td>One animal, so no donor batch; the Zhuang atlas has 4 animals if a brain atlas is wanted</td></tr>
+<tr><td>CosMx lung cancer</td><td><span class="chip hold">Unverified</span></td><td>Labels and download contents could not be confirmed</td></tr>
+</table></div>
+
+<h3>New candidates, dissociated</h3>
+<div class="tbl wide"><table>
+<tr><th>Dataset</th><th>Size and batches</th><th>Rare state</th><th>Labels</th><th>Data</th><th>Main risk</th></tr>
+<tr><td><a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC7439502/">Adams 2020, Sci Adv</a></td><td>312,928 cells; 32 IPF, 18 COPD, 28 control lungs</td><td>Aberrant basaloid: 483 cells (448 IPF, 33 COPD, 0 control), about 14 per IPF lung</td><td>Recursive sub-clustering, validated by immunohistochemistry</td><td>GEO GSE136831, raw matrix 2.0 GB</td><td>State absent in controls, so tied to disease; weak batch effect within one study</td></tr>
+<tr><td><a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC7439444/">Habermann 2020, Sci Adv</a></td><td>114,396 cells; 20 fibrosis, 10 control lungs</td><td>KRT5&minus;/KRT17+ epithelial cells; count not stated</td><td>Sub-clustering, validated by RNA in situ</td><td>GEO GSE135893, raw matrix 1.0 GB</td><td>Same disease tie; second lab gives the cross-study batch effect Adams lacks</td></tr>
+<tr><td><a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC10287567/">HLCA, Sikkema 2023, Nat Med</a></td><td>Core 584,944 cells (CELLxGENE file), 107 people, 14 datasets</td><td>Ionocyte 0.08%, neuroendocrine 0.02%, tuft 0.01%; also AT0 (~1,440) and pre-TB secretory (~4,393) sub-states</td><td>scANVI integration, then expert re-annotation</td><td>CELLxGENE, raw counts in <code>.raw</code></td><td>Labels derived from scANVI; the three headline types are distinct types, not sub-states</td></tr>
+<tr><td><a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC11003869">Zhang 2024, Nat Immunol</a></td><td>72,179 CITE-seq cells, 8 donors</td><td>HSC-1: 70 cells (0.04%) among 242,832 cells from 38 published donors</td><td>Protein-informed (132 antibodies)</td><td>GEO GSE245108; file listing not verified</td><td>Few donors in the new data; accession of the 38-donor set not traced</td></tr>
+<tr><td><a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC11578898/">Pan-GI atlas, Oliver 2024, Nature</a></td><td>1.6M cells, 271 donors</td><td>MUC6+ metaplastic cells, mislabelled or excluded in source studies</td><td>scVI-derived</td><td>gutcellatlas.org; raw counts not verified</td><td>Found in only a few patients; circular labels</td></tr>
+</table></div>
+<p>Checked and set aside: KPMP kidney (altered states probably not rare), Kumar breast atlas (no specific missed state found), Becker 2022 polyps (the stem-like state is a large fraction, not rare).</p>
+
+<h3>New candidates, spatial</h3>
+<div class="tbl wide"><table>
+<tr><th>Dataset</th><th>Platform and size</th><th>Rare state</th><th>Labels</th><th>Data</th><th>Main risk</th></tr>
+<tr><td><a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC11906353/">Vannan 2025, Nat Genet</a></td><td>Xenium, 343 genes; 1,630,319 cells; 45 cores from 35 lungs</td><td>Aberrant basaloid, transitional AT2, activated fibroblasts; 96% of basaloid cells sit in one niche</td><td>Leiden on the same data plus markers and histology</td><td>GEO GSE250346; sizes not verified</td><td>Circular labels; needs labels transferred from Adams / Habermann</td></tr>
+<tr><td><a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC11614693/">SEA-AD, Gabitto 2024, Nat Neurosci</a></td><td>MERFISH, 140 genes; 27 donors, 69 sections</td><td>Vulnerable Sst and Pvalb supertypes in layers 2 to 3</td><td>Mapped from an independent snRNA-seq taxonomy</td><td>AWS open bucket; sizes not verified</td><td>140 genes may not separate supertypes; disease stage varies by donor</td></tr>
+<tr><td><a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC10024607/">Aging mouse brain, Allen 2023, Cell</a></td><td>MERFISH, 416 genes; 378,918 cells</td><td>Activated oligodendrocyte, astrocyte, microglia states in white matter</td><td>Harmony + BBKNN joint embedding</td><td>CELLxGENE, 351 MB</td><td>Labels were made with two of the baselines under test</td></tr>
+<tr><td><a href="https://datadryad.org/dataset/doi:10.5061/dryad.rjdfn2zh3">Mouse colitis, Cadinu 2024</a></td><td>MERFISH, 940 genes; about 1.35M cells, 61 slices</td><td>Inflammation-associated fibroblasts</td><td>Clustering of the same data</td><td>Dryad, 18 GB main file</td><td>Large; states tied to disease stage</td></tr>
+</table></div>
+<p>Set aside: Janesick Xenium breast (boundary cells are real, about 283 cells, but only 2 donors), Visium HD colorectal (3 to 4 patients), SPATCH (3 patients, coarse labels), Xenium 5K previews (single donor each).</p>
+
+<h3>Ranking</h3>
+<ol>
+<li><strong>Pulmonary fibrosis trio: Adams + Habermann + Vannan.</strong> One validated, clinically important rare state; labels independent of integration in the dissociated data; about 14 cells per diseased lung; two labs for a real batch effect; and a spatial atlas where the state is niche-bound. It tests the transcriptomic and the spatial graph on the same biology.</li>
+<li><strong>HLCA core, resampled without the cap.</strong> The reviewer-expected benchmark with a published failure of Harmony and Seurat RPCA. Score against original per-study labels and marker genes to answer the scANVI-label objection.</li>
+<li><strong>SEA-AD MERFISH.</strong> The only spatial candidate with many donors and independently derived labels.</li>
+<li><strong>Bone marrow with protein-backed labels</strong> (Zhang 2024, or NeurIPS 2021 as the practical fallback).</li>
+</ol>
+<p>Two cautions on the top pick: a state that exists only in diseased lungs is confounded with condition, so the test must be run among diseased donors; and the 483-cell total across 50 lungs is workable only if scored with seeds and per-donor intervals.</p>
+</section>
+
+<section id="plan">
+<h2>Recommended plan</h2>
+<p>Freeze the claim and the scoreboard first, find out cheaply whether any baseline loses a rare state at all, and only then spend time on new datasets and on scProto. Each step names what would stop or redirect the work.</p>
+
+<div class="step">
+<h3>Step 0. Decide the claim <span class="time">a decision for the authors, before any run</span></h3>
+<p>The recommendation is to stop presenting "scVI loses rare cells" as the motivation and choose between two framings the evidence can support:</p>
+<ul>
+<li><strong>A. Batch-aware metacells that keep rare states.</strong> Baselines: per-sample SEACells then integration, SEACells on a corrected embedding, MetaQ, Harmony or scVI followed by clustering.</li>
+<li><strong>B. Rare states defined by niche.</strong> A spatial affinity graph recovers states that expression-only integration merges into the parent type.</li>
+</ul>
+<p>Both can be in one paper. A is the safer core; B is the more distinctive result if it works.</p>
+</div>
+
+<div class="step">
+<h3>Step 1. Freeze the scoreboard <span class="time">about 2 days, no new data</span></h3>
+<ol>
+<li>Add the field's metrics: isolated-label F1 and silhouette, and HLCA-style rare-cell recall and precision. Keep the home-made metrics as secondary.</li>
+<li>Demote cohesion to a diagnostic, or rebuild the graph within each batch so it no longer rewards batch separation. Never report it as evidence for a method trained on that graph.</li>
+<li>Report rare metrics per rare state with its cell count, pooled over batches, with a minimum of about 30 cells in total. Drop the mean over one-cell groups.</li>
+<li>Report at two cluster counts: the metacell scale (cells / 75) and a cell-type scale. A result that holds at one only is a clustering effect.</li>
+<li>Run every method with at least 5 seeds and report mean &plusmn; std and the interval. Write the pass rule now, for example: "a gap exists if the baseline's rare recall is below the uncorrected control's by more than twice the seed std".</li>
+<li>Commit <code>split.csv</code> and <code>cluster_config.json</code> per dataset so every machine uses the same ones.</li>
+<li>Write the missing <code>results/rare_cell_preservation.md</code> verdict for heart: no gap, with the reason.</li>
+</ol>
+</div>
+
+<div class="step">
+<h3>Step 2. Measure the noise floor <span class="time">half a day</span></h3>
+<p>Run PCA and scVI with 5 seeds each on heart. Expected: rare F1 std near 0.05 to 0.10, which would confirm that no single-run rare comparison so far means anything. If the std is below 0.02, the cross-machine difference is an input problem and must be traced first.</p>
+</div>
+
+<div class="step">
+<h3>Step 3. Write the three missing baselines <span class="time">1 to 2 days</span></h3>
+<p>Harmony, BBKNN and ComBat adapters, plus per-sample SEACells. They are fast, and they are where the literature reports the failure.</p>
+</div>
+
+<div class="step">
+<h3>Step 4. Planted rare state, the decisive cheap test <span class="time">2 to 3 days</span></h3>
+<p>Take a common type in a dataset with raw counts (NeurIPS bone marrow, 12 batches). Pick about 5 cells per batch and raise a small gene set by a controlled factor. Sweep the factor and the number of genes. For each setting, score whether each method isolates the planted cells, against the uncorrected control.</p>
+<ul>
+<li>Expected if the claim holds: some baseline loses the state at an effect size the uncorrected control still detects.</li>
+<li>If every baseline tracks the control at every setting: claim 1 is false for these methods. Do not look for another dataset. Move to framing A or B only.</li>
+<li>This test needs no one's labels, so it also answers the circular-label objection.</li>
+</ul>
+</div>
+
+<div class="step">
+<h3>Step 5. Cheap checks on real data, then go or no-go per dataset <span class="time">2 to 3 days</span></h3>
+<p>Download Adams and Habermann, and resample HLCA core without the per-type cap. For each rare state run the task file's checks 1 to 4: cells per batch, marker genes kept after gene filtering, visibility within one batch in plain PCA, batch-effect strength. A dataset where the uncorrected control cannot see the state is dropped before any training, as heart fine labels should have been.</p>
+</div>
+
+<div class="step">
+<h3>Step 6. Full baselines on datasets that passed, and a written verdict</h3>
+<p>All baselines, 5 seeds, the frozen scoreboard. The verdict for each dataset is one of: gap exists, no gap, inconclusive because of a named reason. Report every dataset tried.</p>
+</div>
+
+<div class="step">
+<h3>Step 7. scProto, only where a gap was shown</h3>
+<ol>
+<li>Port the trainer into <code>scproto/</code> with the lessons of the older branch written down (D59 to D64).</li>
+<li>The key comparison is scProto against its own backbone (scPoli) with the same clustering, so the gain is attributable to the affinity term.</li>
+<li>Judge it on label-based metrics. A cohesion gain on its own training graph does not count.</li>
+</ol>
+</div>
+
+<div class="step">
+<h3>Step 8. Spatial extension <span class="time">after step 7 works on dissociated data</span></h3>
+<p>Transfer the basaloid labels from Adams and Habermann to the Vannan Xenium data, so labels do not come from clustering the spatial data. On SEA-AD, first check whether 140 genes separate the Sst supertypes in one donor. Compare a transcriptomic graph against a spatial graph in scProto, with the same baselines.</p>
+</div>
+
+<h3>What to drop</h3>
+<ul>
+<li>Heart fine labels, Haber, Moffitt, Allen whole-brain (Yao) as evidence datasets.</li>
+<li>Cohesion and purity as headline metrics.</li>
+<li>Pooled, uncorrected SEACells as the only metacell baseline.</li>
+<li>Any further edit of the dataset criteria after step 1.</li>
+</ul>
+
+<h3>Stop rule</h3>
+<p>If steps 4 and 5 show no baseline losing a state that the uncorrected control can see, on two datasets, the rare-cell claim should be withdrawn as the paper's motivation. The remaining contribution to test is batch-aware metacells with held-out cell placement and niche-aware prototypes, judged on their own merits.</p>
+</section>
+
+<section id="open">
+<h2>What was not verified, and open questions</h2>
+<p>This review rests on the clean-v2 files, one local rerun on heart, and a web literature search; the limits below apply.</p>
+<h3>Not verified</h3>
+<ul>
+<li>No new dataset in the candidates section was downloaded or audited. Raw-count status, label columns and per-donor counts of the rare states must be checked directly before any is adopted.</li>
+<li>Literature statements come from the linked pages, mostly PubMed Central full text read through a summarising tool. Numbers that appear only in figures or supplements could not be read, including per-method isolated-label scores in scIB and HLCA.</li>
+<li>Cadinu 2024's venue and the Zhuang atlas details came from search snippets only.</li>
+<li>"No published batch-aware metacell method" and "no paper shows ComBat or BBKNN losing a rare type" mean no search hit was found, not that none exists.</li>
+<li>The cross-machine difference in PCA rare F1 (0.696 against 0.846) has an unknown cause. The processed file's checksum differs; whether the gene set, the split or only the file encoding differs was not checked.</li>
+<li>The affinity graph's same-donor share (56%) was measured on the locally rebuilt graph, and donor is mixed with cell source and composition in heart, so the technical share of that number is unknown.</li>
+<li>The local SEACells and scVI numbers are one seed each.</li>
+<li>The older branch's findings (D59 to D64) were read from commit titles and its instruction file, not from the full decision records.</li>
+</ul>
+<h3>Questions for the authors</h3>
+<ol>
+<li>Which venue and date is clean-v2 aimed at? The plan above is about three weeks before scProto is run.</li>
+<li>Is the paper's core claim rare-cell preservation, or batch-aware metacells with rare cells as one benefit?</li>
+<li>Was the dataset criteria list meant to be frozen as of 22 November?</li>
+<li>Will scProto in clean-v2 be the D63 recipe from the older branch, or a new design?</li>
+<li>Is a spatial result required for the paper, or a bonus?</li>
+<li>Is there compute for 5 seeds per method on a 500,000-cell atlas, or should atlases be subsampled in a way that keeps true rarity?</li>
+</ol>
+</section>
+
+<footer>Review of branch <code>clean-v2</code> at commit <code>e11debf</code>. Local rerun: Mac Studio, heart_cell_atlas, 22 November 2026.</footer>
+</div>

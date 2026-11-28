@@ -50,7 +50,7 @@ Commands to run each stage: [`runbook.md`](runbook.md).
 ¹ Embedding **and** cluster labels together, one file — see Clustering below.
 ² Split and cluster count always; the affinity graph only if that method needs one as input (SEACells does, as its kernel; scVI/Harmony/ComBat/BBKNN don't — they only meet it later, in stage 4, since every baseline's cohesion is scored against it regardless).
 ³ Full path `runs/<task>/<dataset>/<baseline>/metrics/`, decided in one place (`compute_metrics.metrics_dir_for`), never passed as a flag. A separate subfolder so stage 3 and stage 4 never write the same folder, and re-scoring never touches the baseline's own output.
-⁴ Committed to git, not under `runs/`: the code proposes a gene list / split once, the committed file decides from then on (`evaluation/frozen.py`). Stages 2 and 3 stop if the processed file's genes or cells don't match, and every `config.json` records the two files' sha256 under `frozen`.
+⁴ Committed to git, not under `runs/`: the code proposes a gene list / split once, the committed file decides from then on (`evaluation/frozen.py`). Stages 2 and 3 stop if the processed file's genes or cells don't match, and every `config.json` records the two files' sha256 under `frozen`. A baseline's embedding and clusters can be committed the same way (`evaluation/frozen_run.py`, `datasets/frozen/<dataset>/baselines/<baseline>/`), so every machine scores the same file.
 
 ## Clustering: where it happens, and where its output lands
 

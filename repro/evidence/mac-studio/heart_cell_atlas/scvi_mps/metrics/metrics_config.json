@@ -1,0 +1,29 @@
+{
+  "embedding_path": "runs/rare_cell_preservation/heart_cell_atlas/scvi_mps/embedding.csv",
+  "affinity_dir": "runs/rare_cell_preservation/heart_cell_atlas",
+  "label_key": "cell_type",
+  "labels_from": null,
+  "rare_rule": "log_std",
+  "rare_rule_text": "log10(frequency) more than 1.0 std below its batch's mean log10 type-frequency (task file's rule)",
+  "std_threshold": 1.0,
+  "min_types_for_std": 4,
+  "fixed_cutoff": 0.01,
+  "n_rare_pairs": 27,
+  "versions": {
+    "python": "3.11.18",
+    "pandas": "2.3.3",
+    "numpy": "2.2.6",
+    "scipy": "1.13.1"
+  },
+  "run_history": [
+    {
+      "script": "evaluation/compute_metrics.py",
+      "command": "python evaluation/compute_metrics.py --baseline scvi --embedding runs/rare_cell_preservation/heart_cell_atlas/scvi_mps/embedding.csv --affinity-dir runs/rare_cell_preservation/heart_cell_atlas --label-key cell_type --batch-key donor",
+      "git_commit": "e11debf35114c15342e0bd5aad9f94573971bfae",
+      "git_dirty": true,
+      "script_committed": true,
+      "started_at": "2026-11-22T10:05:23-05:00",
+      "finished_at": "2026-11-22T10:05:29-05:00"
+    }
+  ]
+}

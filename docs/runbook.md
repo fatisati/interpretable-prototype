@@ -51,6 +51,25 @@ live; the cluster search prints one line per try).
 
 ---
 
+## 0. Comparing two machines
+
+Background and the full plan: [`reproducibility-plan.md`](reproducibility-plan.md). Evidence
+from the Mac and step-by-step instructions: [`../repro/README.md`](../repro/README.md).
+
+```
+# hashes + summaries of one dataset's stage outputs -> repro/fingerprints/<dataset>/<machine>.json
+python evaluation/fingerprint.py --run-dir runs/rare_cell_preservation/heart_cell_atlas --h5ad datasets/processed/heart_cell_atlas_hvg.h5ad --layer counts --machine <machine>
+# two fingerprints, stage by stage; names the first input difference
+python evaluation/compare_fingerprints.py repro/fingerprints/heart_cell_atlas/<a>.json repro/fingerprints/heart_cell_atlas/<b>.json
+# two run folders or evidence packs: gene, split, graph, embedding, cluster and metric differences
+python evaluation/compare_runs.py --a <folder> --b <folder>
+# small committable copy of a run folder -> repro/evidence/<machine>/<dataset>/
+python evaluation/make_evidence_pack.py --run-dir runs/rare_cell_preservation/heart_cell_atlas --h5ad datasets/processed/heart_cell_atlas_hvg.h5ad --machine <machine>
+```
+
+- **Reads only**; trains nothing. `fingerprint.py` recomputes one PCA (seconds).
+- **Time:** under 1 min each on heart.
+
 ## 1. Dataset prep: raw file → clean, HVG-selected `.h5ad`
 
 | dataset | command | download first? |
@@ -126,6 +145,11 @@ python baselines/scvi_baseline.py \
 `--gene-likelihood` (default `auto`: `nb` for integer counts, else `normal`) forces a choice,
 e.g. `--gene-likelihood nb` on a layer kept with `--keep-nonint-counts`.
 
+On an Apple Silicon Mac, add `--accelerator mps` to train on the Metal GPU. Without it the run
+uses CPU: scvi-tools turns `auto` into CPU on a Mac on purpose. `config.json` records
+`accelerator` and `device_used`. Timings and the environment are in
+[`docs/local-mac.md`](local-mac.md).
+
 To run on Modal GPU instead, see the docstring of `baselines/scvi_modal.py`. The run record is
 written on your machine, so Modal runs get one like local runs (`config.json` says `ran_on`).
 
@@ -152,6 +176,39 @@ python evaluation/recluster.py --run-dir runs/rare_cell_preservation/heart_cell_
 
 - **Writes:** `embedding.csv` (or `assignments.csv` for SEACells) and `config.json`.
 - **Re-run when:** the method's code or its flags change. After any re-run or re-cluster, stage 4 is stale.
+
+### 3b. Frozen baseline output: same clusters on every machine
+
+Clusters recomputed on another machine do not match (heart PCA, Windows vs Mac: ARI 0.77). The
+embedding differs in the last digits, but that is not the only cause: from an identical embedding
+the neighbour graph differs (about 82% of cells get the same 15-neighbour list), and on an identical
+graph Leiden with the same seed still gives different clusters (ARI 0.80). So the official machine
+commits each baseline's output once, clusters included, and every machine scores that file.
+Details: `evaluation/frozen_run.py`; evidence: `repro/evidence/windows/graph_leiden_check/`.
+
+Only the committed cluster columns are the same everywhere. Clustering a frozen embedding again
+(extra seeds, another resolution) will not match across machines.
+
+```
+# official machine, once per baseline, then commit datasets/frozen/<dataset>/baselines/<baseline>/
+python evaluation/frozen_run.py freeze  --run-dir runs/rare_cell_preservation/heart_cell_atlas/pca
+# any machine: how close is my own run to the frozen one (coordinates, neighbours, clusters)?
+python evaluation/frozen_run.py check   --run-dir runs/rare_cell_preservation/heart_cell_atlas/pca
+# any machine: put the frozen output into the run folder, then run stage 4 on it
+python evaluation/frozen_run.py restore --run-dir runs/rare_cell_preservation/heart_cell_atlas/pca
+```
+
+- **Writes:** `freeze`: `embedding.csv.gz` (or `assignments.csv.gz`), `source_config.json`, `result.json`
+  in `datasets/frozen/<dataset>/baselines/<baseline>/` (heart PCA: ~5 MB). `restore`: the run folder's
+  `embedding.csv` (or `assignments.csv`); the machine's own output is kept as `embedding.local.csv`
+  (or `assignments.local.csv`), and `config.json` gets a `frozen_run` entry with the file's sha256.
+- **`check` result:** `IDENTICAL`, `WITHIN TOLERANCE` (coordinates within `--tol`, default 0.01, and
+  99% of cells with the same 15 neighbours) or `DIFFERENT` (exit code 1). After a `restore`, `check`
+  compares the kept `.local.csv`; if there is none, it prints `SAME FILE` (nothing of this machine's
+  own to compare). SEACells has no coordinates, so any cluster difference is `DIFFERENT`.
+- **Replace a frozen result on purpose:** `freeze --replace`, then commit the diff. Needed after the
+  gene list or split changes; `restore` stops if they no longer match.
+- **Time:** seconds each on heart.
 
 ## 4. Metrics: score each baseline (~45 s per baseline)
 
