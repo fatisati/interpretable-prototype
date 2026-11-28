@@ -14,6 +14,7 @@ dataset-specific is hardcoded, so the same command works on any dataset; swap in
 | lung | `datasets/processed/lung_hvg.h5ad` | `batch` | `cell_type` | *(omit — no true counts, see `datasets/lung.md`)* |
 | pbmc_immune | `datasets/processed/pbmc_immune_hvg.h5ad` | `study` | `final_annotation` | *(omit — no true counts, see `datasets/pbmc_immune.md`)* |
 | heart_cell_atlas | `datasets/processed/heart_cell_atlas_hvg.h5ad` | `donor` | `cell_type` (broad, 11 types — use this one for metrics; `cell_states` is the 65-type fine-grained alternative) | `counts` (true raw counts, confirmed) |
+| neurips_bmmc | `datasets/processed/neurips_bmmc_hvg.h5ad` | `batch` | `cell_type` (45 types) | `counts` (true raw counts, confirmed) |
 
 If a processed file is missing (`ls datasets/processed/`), regenerate it with stage 1 of the runbook.
 

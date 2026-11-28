@@ -137,7 +137,8 @@ Luecken et al. 2021, NeurIPS Datasets & Benchmarks. GEO GSE194122. Download: see
 (625 MB, unzipped). Counted by us 2026-11-22:
 
 - 90,261 cells × 14,087 genes. Raw counts in `layers['counts']` (0% non-integer on the
-  first 2,000 cells). Protein (ADT) data is not in this file's genes.
+  first 2,000 cells). Correction 2026-11-28: the file does hold 134 protein (ADT)
+  features next to 13,953 genes (`var['feature_types']`); `prepare_neurips_bmmc.py` drops them.
 - Batch: `batch`, 12 values (`s1d1` … `s4d9` = site × donor). 4 sites (`Site`), 9 donors
   (`DonorID`). 3,929–11,473 cells per batch.
 - Labels: `cell_type`, 45 types. Largest: CD14+ Mono 21,693 (24%).

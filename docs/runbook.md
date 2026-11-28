@@ -24,9 +24,10 @@ Run times are measured on the heart atlas (~18.6k cells, CPU); "not measured" me
 | lung | `python datasets/scripts/prepare.py --dataset lung` | yes, see `datasets/lung.md` |
 | pbmc_immune | `python datasets/scripts/prepare.py --dataset pbmc_immune` | yes, see `datasets/pbmc_immune.md` |
 | hlca | `python datasets/scripts/prepare_hlca.py` | yes, see `datasets/hlca.md` |
+| neurips_bmmc | `python datasets/scripts/prepare_neurips_bmmc.py` | yes, the curl command below |
 
-Task 1 candidates downloaded 2026-11-22. They have no prepare script yet, so these are
-download-only commands. Each file goes in its own folder under `datasets/raw/`:
+Task 1 candidates downloaded 2026-11-22. Only the bone marrow one has a prepare script so far
+(table above); the others are download-only commands. Each file goes in its own folder under `datasets/raw/`:
 
 ```
 B=https://ftp.ncbi.nlm.nih.gov/geo/series

@@ -1,0 +1,27 @@
+{
+  "seed": 0,
+  "test_size": 0.2,
+  "label_key": "cell_type",
+  "batch_key": "batch",
+  "n_train": 72209,
+  "n_test": 18052,
+  "file": "split.csv",
+  "sha256": "68b6978a89566e15bf283c18b980c29f65fb5aed44cccea1e57cdc9964fc7378",
+  "environment": {
+    "python": "3.13.11",
+    "scikit-learn": "1.9.0",
+    "numpy": "2.4.6",
+    "pandas": "3.0.5"
+  },
+  "run_history": [
+    {
+      "script": "evaluation/prepare_eval.py",
+      "command": "python evaluation/prepare_eval.py --h5ad datasets/processed/neurips_bmmc_hvg.h5ad --batch-key batch --label-key cell_type --layer counts --out-dir runs/rare_cell_preservation/neurips_bmmc",
+      "git_commit": "2627f1d7c71269e5c19fef2466ba6cda52916e39",
+      "git_dirty": true,
+      "script_committed": true,
+      "started_at": "2026-11-28T11:36:33+03:30",
+      "finished_at": "2026-11-28T11:36:37+03:30"
+    }
+  ]
+}

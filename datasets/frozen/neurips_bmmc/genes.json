@@ -1,0 +1,26 @@
+{
+  "dataset": "neurips_bmmc",
+  "n_genes": 2000,
+  "sha256": "13cebbf973bedbf6a151f6b4c634ba0e8f3b3723ff3155c681eb53fa6e5923f3",
+  "method": "RNA (GEX) features only; scanpy highly_variable_genes flavor=seurat_v3 n_top_genes=2000 layer=counts batch_key=batch",
+  "environment": {
+    "python": "3.13.11",
+    "scanpy": "1.12.4",
+    "scikit-misc": "0.5.3",
+    "anndata": "0.13.2",
+    "numpy": "2.4.6",
+    "scipy": "1.18.0",
+    "pandas": "3.0.5"
+  },
+  "run_history": [
+    {
+      "script": "datasets/scripts/prepare_neurips_bmmc.py",
+      "command": "python datasets/scripts/prepare_neurips_bmmc.py",
+      "git_commit": "2627f1d7c71269e5c19fef2466ba6cda52916e39",
+      "git_dirty": true,
+      "script_committed": false,
+      "started_at": "2026-11-28T11:34:24+03:30",
+      "finished_at": "2026-11-28T11:35:53+03:30"
+    }
+  ]
+}
