@@ -1,0 +1,27 @@
+{
+  "seed": 0,
+  "test_size": 0.2,
+  "label_key": "cell_type",
+  "batch_key": "batch",
+  "n_train": 25981,
+  "n_test": 6491,
+  "file": "split.csv",
+  "sha256": "0137936d9b0afcfac0a6ae9c4e2e94ca4c31be838422a0c17c61512852c2519e",
+  "environment": {
+    "python": "3.13.11",
+    "scikit-learn": "1.9.0",
+    "numpy": "2.4.6",
+    "pandas": "3.0.5"
+  },
+  "run_history": [
+    {
+      "script": "evaluation/prepare_eval.py",
+      "command": "python evaluation/prepare_eval.py --h5ad datasets/processed/lung_hvg.h5ad --batch-key batch --label-key cell_type --out-dir runs/rare_cell_preservation/lung",
+      "git_commit": "1977bf00e45e2c9f98c2edf7e7a3c0d896e409d9",
+      "git_dirty": false,
+      "script_committed": true,
+      "started_at": "2026-11-28T13:59:34+03:30",
+      "finished_at": "2026-11-28T13:59:38+03:30"
+    }
+  ]
+}

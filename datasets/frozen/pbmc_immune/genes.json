@@ -1,0 +1,26 @@
+{
+  "dataset": "pbmc_immune",
+  "n_genes": 4000,
+  "sha256": "7578bfb7543dbf523b14ecebdfb98821e64656307ea0df8ab1d75cec14037e76",
+  "method": "scanpy highly_variable_genes (default flavor) n_top_genes=4000 batch_key=study",
+  "environment": {
+    "python": "3.13.11",
+    "scanpy": "1.12.4",
+    "scikit-misc": "0.5.3",
+    "anndata": "0.13.2",
+    "numpy": "2.4.6",
+    "scipy": "1.18.0",
+    "pandas": "3.0.5"
+  },
+  "run_history": [
+    {
+      "script": "datasets/scripts/prepare.py",
+      "command": "python datasets/scripts/prepare.py --dataset pbmc_immune --keep-nonint-counts",
+      "git_commit": "1977bf00e45e2c9f98c2edf7e7a3c0d896e409d9",
+      "git_dirty": false,
+      "script_committed": true,
+      "started_at": "2026-11-28T14:02:35+03:30",
+      "finished_at": "2026-11-28T14:03:37+03:30"
+    }
+  ]
+}
