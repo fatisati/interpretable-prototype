@@ -11,6 +11,7 @@ its own embedding.
 import json
 import platform
 from importlib.metadata import PackageNotFoundError, version
+import time
 from pathlib import Path
 
 import numpy as np
@@ -181,15 +182,22 @@ def sweep_leiden_to_k(adata, use_rep, target_k, resolutions=None, max_refine_ste
                        7.0, 10.0, 15.0, 20.0, 25.0, 30.0, 40.0, 50.0]
 
     ad = adata.copy()
+    t0 = time.perf_counter()
     sc.pp.neighbors(ad, use_rep=use_rep, random_state=NEIGHBORS_SEED)
+    print(f"[cluster] neighbour graph on {ad.n_obs:,} cells: {time.perf_counter() - t0:.0f}s")
 
     tried = {}  # resolution -> (n_clusters, labels)
 
     def try_resolution(resolution):
+        t = time.perf_counter()
         sc.tl.leiden(ad, resolution=resolution, key_added="_sweep", flavor="igraph",
                      random_state=LEIDEN_SEED)
         labels = ad.obs["_sweep"].to_numpy()
         tried[resolution] = (len(set(labels)), labels.copy())
+        # One line per attempt, so a long search shows it is moving and where.
+        print(f"[cluster]   try {len(tried):2d}: resolution={resolution:.4g} -> "
+              f"{tried[resolution][0]} clusters (target {target_k}), "
+              f"{time.perf_counter() - t:.0f}s")
 
     # 1. Coarse grid: find roughly where target_k sits.
     for resolution in resolutions:

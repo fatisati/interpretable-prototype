@@ -35,6 +35,16 @@ from datetime import datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# Print each line as soon as it is written, even when output goes to a log file.
+# By default Python holds file output back in big chunks, so `tail -f` on a log showed
+# nothing for an hour on the bone marrow run. Every stage script imports this module
+# first, so this one line covers all of them (same effect as `python -u`).
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(line_buffering=True)
+    except (AttributeError, ValueError):
+        pass
 # Imported at the top of every stage script, so this is the script's start time.
 STARTED_AT = datetime.now().astimezone().isoformat(timespec="seconds")
 

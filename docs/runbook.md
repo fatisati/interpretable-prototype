@@ -18,6 +18,20 @@ Examples use heart_cell_atlas. For other datasets, take the flag values (`--h5ad
 `--batch-key`, `--label-key`, `--layer`) from the table in `baselines/README.md`.
 Run times are measured on the heart atlas (~18.6k cells, CPU); "not measured" means nobody has timed it yet.
 
+## Watching a long run
+
+Send output to a log and follow it from a second terminal:
+```
+python baselines/scvi_baseline.py ... > runs/<task>/<dataset>/logs/scvi.log 2>&1
+tail -f runs/<task>/<dataset>/logs/scvi.log
+```
+- Lines appear as they are printed (every stage script turns on line buffering via
+  `evaluation/run_record.py`), so no `python -u` is needed.
+- The cluster search prints one line per resolution tried: clusters found vs target, seconds.
+- scVI also writes live loss curves (train/validation ELBO, reconstruction, KL) each epoch:
+  `tensorboard --logdir runs/<task>/<dataset>/scvi/tensorboard`, then open http://localhost:6006.
+- Task 1 metrics can't be live: they need the final clusters (stage 4, ~1 min after a run).
+
 ---
 
 ## 1. Dataset prep: raw file → clean, HVG-selected `.h5ad`

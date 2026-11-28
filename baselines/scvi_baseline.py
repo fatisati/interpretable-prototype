@@ -35,11 +35,36 @@ from pathlib import Path
 import pandas as pd
 import scanpy as sc
 import scvi
+from lightning.pytorch.callbacks import Callback
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evaluation"))  # shared pipeline code
 from run_record import record_run  # first local import: records the script's start time
 import frozen
 from common import cluster_embedding_file, environment_versions, load_cluster_config, load_split, looks_like_raw_counts
+
+
+class TensorBoardEpochLog(Callback):
+    """Write every logged scalar (train/validation ELBO, reconstruction loss, KL, ...)
+    to TensorBoard at the end of each epoch, for live curves while training runs:
+        tensorboard --logdir <out-dir>/tensorboard
+    A callback, not a replacement logger: swapping scVI's own logger would empty
+    model.history, which we use for epochs_trained.
+    """
+
+    def __init__(self, log_dir):
+        from torch.utils.tensorboard import SummaryWriter
+        self.writer = SummaryWriter(log_dir=str(log_dir))
+
+    def on_train_epoch_end(self, trainer, pl_module):
+        for name, value in trainer.callback_metrics.items():
+            try:
+                self.writer.add_scalar(name, float(value), trainer.current_epoch)
+            except (TypeError, ValueError):
+                pass
+        self.writer.flush()
+
+    def on_train_end(self, trainer, pl_module):
+        self.writer.close()
 
 
 def pick_gene_likelihood(adata, layer):
@@ -96,7 +121,10 @@ def run(
     # 100 is plenty here. early_stopping can still end training sooner
     # (watches validation loss, stops once it stops improving) -- the
     # actual count lands in config.json as epochs_trained.
-    model.train(max_epochs=max_epochs, accelerator=accelerator, early_stopping=early_stopping)
+    tb_dir = Path(out_dir) / "tensorboard"
+    print(f"[scvi] live training curves: tensorboard --logdir {tb_dir}")
+    model.train(max_epochs=max_epochs, accelerator=accelerator, early_stopping=early_stopping,
+                callbacks=[TensorBoardEpochLog(tb_dir)])
     epochs_trained = len(model.history["elbo_train"])
 
     # get_latent_representation accepts any AnnData with the same genes/obs
