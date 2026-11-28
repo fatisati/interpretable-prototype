@@ -32,6 +32,13 @@ Scored 2026-11-22 against the 7 items in `tasks/rare_cell_preservation.md`, sect
 | Fetal lung, organoid (He 2022), from the Islander paper (not downloaded) | ? 28 labels (lit.) | ? 37 batches | ? | ? | ? | ? | partial: scGraph low for scGen 0.161, Harmony 0.284 (lit.), not rare-cell loss |
 | Fetal gut (Elmentaite 2020), from the Islander paper (not downloaded) | ? 21 labels (lit.) | ? 9 batches | ? | ? | ? | ? | partial: scGraph scores only moderate for baselines (lit.), not rare-cell loss |
 | COVID PBMC (Su 2020), from the Islander paper (not downloaded) | ? 31 immune labels (lit.) | ? 10 batches | ? | ? | ? | ? | partial: scGraph lower for scPoli 0.573, scGPT 0.535 (lit.), not rare-cell loss |
+| Adams 2020 lung fibrosis, from Mahmoud's review (not downloaded) | ✓ aberrant basaloid: 483 cells among 312,928 (lit.) | partial: ~14 per IPF lung, 0 in controls (lit.) | ? | weak (one study, 78 lungs) | ✓ recursive sub-clustering, checked by immunohistochemistry (lit.) | ✓ probably, raw matrix on GEO GSE136831 (lit.) | ✗ |
+| Habermann 2020 lung fibrosis, from Mahmoud's review (not downloaded) | ✓ KRT5−/KRT17+ epithelial cells, count not stated (lit.) | ? 30 lungs | ? | moderate; with Adams it gives a second lab (lit.) | ✓ sub-clustering, checked by RNA in situ (lit.) | ✓ probably, GEO GSE135893 (lit.) | ✗ |
+| Vannan 2025 lung fibrosis Xenium, spatial, from Mahmoud's review (not downloaded) | ✓ aberrant basaloid, transitional AT2, activated fibroblasts (lit.) | ? 45 cores from 35 lungs | ✓ automatic: 343 genes | ✓ probably (lit.) | ✗ Leiden on the same data; transfer labels from Adams/Habermann instead | ✓ probably (lit.) | ✗ |
+| HLCA core, full (no cap), from Mahmoud's review (not downloaded) | partial: ionocyte 0.08%, neuroendocrine 0.02%, tuft 0.01% are distinct types; AT0 (~1,440) and pre-TB secretory (~4,393) are sub-states (lit.) | ? 107 people, 14 datasets | ? | ✓ strong | ✗ scANVI-built; score against per-study labels too | ✓ raw counts in .raw (lit.) | ✓ for Harmony and Seurat RPCA (lit.) |
+| SEA-AD MERFISH, spatial, from Mahmoud's review (not downloaded) | ✓ vulnerable Sst and Pvalb supertypes (lit.) | ? 27 donors, 69 sections | ✓ automatic: 140 genes, but may be too few to separate supertypes | ✓ probably (donors) | ✓ mapped from a separate snRNA-seq taxonomy (lit.) | ? | ✗ |
+| Zhang 2024 bone marrow CITE-seq, from Mahmoud's review (not downloaded) | ✓ HSC-1: 70 cells (0.04%) (lit.) | ✗ probably: 70 cells over 38 donors | ? | ? 8 new donors + 38 published | ✓ defined with 132 antibodies (lit.) | ? file list not checked | ✗ |
+| Pan-GI atlas (Oliver 2024), from Mahmoud's review (not downloaded) | ✓ MUC6+ metaplastic cells (lit.) | ✗ probably: present in only a few patients (lit.) | ? | ✓ 271 donors | ✗ scVI-derived labels | ? | ✗ |
 
 Reading of the table:
 - **Heart fine labels** fit the claim best among the datasets we already have.
@@ -72,6 +79,41 @@ distorts. Download links for all 11 atlases are in the Islander repo README
 - **Not added:**
   - Brain (11 types) and eye (11 types): broad lineages only, which fails item 1.
   - Skin: 13 types, 5 batches.
+
+## From Mahmoud's critical review (2026-11-22)
+
+Source: `feedback/clean-v2-critical-review.html` (PR #5), from a literature search. None
+of these are downloaded or checked by us; all numbers are "(lit.)". Added 2026-11-28.
+
+His ranking:
+1. **Lung fibrosis trio: Adams 2020 + Habermann 2020 + Vannan 2025 (Xenium).** One
+   validated rare state (aberrant basaloid cells) seen in two dissociated atlases and one
+   spatial atlas. Two labs give a real batch effect, and in the spatial data 96% of
+   basaloid cells sit in one niche. Cautions: the state exists only in diseased lungs, so
+   test among diseased donors only. 483 cells over 50 lungs is workable only with seeds
+   and per-donor spread.
+2. **HLCA core, resampled without the 1,000-per-type cap.** The benchmark reviewers will
+   expect, with a published failure of Harmony and Seurat RPCA. Score against per-study
+   labels and markers too, since the HLCA labels were built with scANVI.
+3. **SEA-AD MERFISH.** The only spatial candidate with many donors and labels from a
+   separate dataset. First check that 140 genes separate the Sst supertypes in one donor.
+4. **Bone marrow with protein-backed labels:** Zhang 2024, or our NeurIPS 2021 copy as the
+   practical fallback.
+
+Set aside by him: pan-GI atlas (state in only a few patients, scVI-built labels), KPMP
+kidney, Kumar breast, Becker polyps; spatial: Janesick Xenium breast (2 donors), Visium
+HD colorectal, SPATCH, Xenium 5K previews (single donor each), aging mouse brain
+MERFISH (labels made with Harmony + BBKNN, two of our baselines), Cadinu 2024 colitis
+MERFISH (large, labels from clustering the same data).
+
+His view on datasets already listed here (not yet agreed by us):
+- **Drop heart fine labels** for this claim. Our own what-if run shows uncorrected PCA
+  can't separate vCM5 either (test rare F1 ~0.10), so no method can be "losing" it.
+  This disagrees with the "fits the claim best" reading above.
+- **Drop Haber, Moffitt MERFISH, Allen whole-brain (Yao)** as evidence datasets. Haber has
+  coarse labels; Moffitt values are volume-normalised, not raw counts, with labels from
+  clustering the same data; Yao is one animal, so no donor batches (the Zhuang atlas has 4).
+- **Heart broad labels:** keep, reported as the negative case.
 
 ## Where these candidates came from (literature search, 2026-11-22)
 
