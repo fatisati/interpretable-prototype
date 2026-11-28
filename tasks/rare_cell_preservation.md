@@ -53,12 +53,12 @@ claim.
    from that embedding.
 
 **Second claim (SEACells):** SEACells is a *metacell* method — it groups
-similar cells into small bundles, called metacells, to reduce noise. We run
-it on all batches pooled, but its affinity graph is built on uncorrected
-PCA (the SEACells default), which carries the batch effect, so the graph
-mostly links cells from the same batch. Its metacells therefore mostly form
-inside one batch. A rare type that has too few cells in every single batch
-then fails to get its own metacell.
+similar cells into small bundles (metacells, about 75 cells each) to reduce
+noise. On many batches, its paper builds metacells inside each sample
+separately, then batch-corrects the metacells with Harmony. A state with
+only a few cells in a sample can't fill a metacell there, so it is merged
+into a neighbouring metacell, and the correction afterwards can't split it
+out again. Details, and how our own run differs: SEACells bullet below.
 
 **Why this matters for scProto:** scProto gives the model extra guidance
 (the affinity graph — a record of which cells look alike in the raw data),
@@ -110,30 +110,44 @@ sub-claim, instead of one vague claim about "batch correction" in general.
   shrinks any rare representation toward the bulk. This is the specific
   weakness scProto's affinity guidance is meant to fix.
 
-- **SEACells (multi-batch)** — a different failure mode, not a correction
-  method. We run it on all cells pooled, not one batch at a time. But its
-  affinity graph is built on uncorrected PCA (the SEACells paper's
-  default), and that PCA carries the batch effect, so the graph mostly
-  connects cells within one batch (heart: 56% of edges join cells of the
-  same donor, against 8.4% if donor didn't matter). So in practice its
-  metacells mostly form inside one batch and carry the batch effect. If a
-  rare type is rare in every batch, no single batch has enough of its cells
-  to form a metacell, so it gets merged into a bigger neighbouring
-  metacell. What the rare type needs is pooling across batches, which this
-  graph doesn't give.
+- **SEACells (multi-batch)** — not a correction method. It loses the rare
+  state earlier, at the step that builds metacells. Three ways to run it on
+  many batches; all three lose the state, each for its own reason:
 
-  The same holds for the route the SEACells paper suggests (metacells per
-  sample, then integrate the metacells): integration afterwards only lines
-  up metacells across batches. It can't split a metacell that already
-  absorbed the rare state.
+  1. **The paper's route: metacells per sample, then Harmony.** From the
+     SEACells paper (Persad et al. 2023, Methods, "SEACells application to
+     COVID-19 samples and data integration"; 40 samples):
+     1. Run SEACells (PCA → affinity graph → archetypal analysis) on each
+        sample alone, about 1 metacell per 75 cells.
+     2. Sum the counts inside each metacell.
+     3. Stack every sample's metacells, then normalize, keep the top 1,500
+        HVGs, run PCA, and run Harmony with sample as the batch.
+     4. Optional: run SEACells again on the Harmony PCs, to group similar
+        metacells across samples ("meta2cells").
 
-  The other route is to run SEACells' archetypal analysis on an integrated
-  space (e.g. the scVI embedding) instead of PCA. That has its own problem:
-  integration training is dominated by common states (the reconstruction
-  loss is summed over cells), so a rare state can be absorbed into a denser
-  neighbour during integration. Any metacell or clustering step afterwards
-  only partitions an embedding that has already lost the separation. Both
-  routes are baselines to run (see SEACells section below).
+     The SEACells library has no batch option. The user splits the data by
+     sample, as the official COVID notebook does.
+     **Gap:** every metacell holds cells from one sample only. A state with
+     about 5 cells in a sample can't fill a 75-cell metacell, so it is merged
+     into a metacell of its parent type. For example, 5 rare + 70 parent
+     cells give a profile that is 93% parent. Steps 3–4 only move and group
+     whole metacells, so they can't split the rare cells back out. Pooled
+     over all samples the state may have enough cells (30+), but this route
+     never pools cells before building metacells.
+  2. **Our current run: all cells pooled, uncorrected-PCA graph.** We run
+     SEACells once on all batches, with our affinity graph as its kernel.
+     That graph is built on uncorrected PCA, which carries the batch effect
+     (heart: 56% of edges join cells of the same donor, against 8.4% if
+     donor didn't matter). So metacells still mostly form inside one batch,
+     and the same loss as in route 1 follows. This is *not* the paper's
+     route, so results must say which route was run.
+  3. **SEACells on an integrated embedding** (for example scVI) instead of
+     PCA. Integration training is dominated by common states (the
+     reconstruction loss is summed over cells), so the rare state can be
+     absorbed into a denser neighbour during integration. Any metacell step
+     afterwards only splits up an embedding that has already lost it.
+
+  Routes 1 and 3 are still to run (`docs/todo.md`).
 
 - **PCA + Leiden (control, no correction)** — not expected to fail for a
   correction-specific reason; it is the reference that separates losses
@@ -480,18 +494,18 @@ this but doesn't remove it (see Cohesion metrics). Its cell-type metrics
 
 SEACells is transductive like Harmony/BBKNN/ComBat — no encoder, so it
 can't be tested on unseen cells the way scVI can. That means it can't
-produce a true "test" number at all. Run it twice instead, each run
-answering a different question:
+produce a true "test" number at all. Both runs below use our pooled route
+(route 2 in the SEACells bullet above), not the paper's per-sample route.
+Run it twice, each run answering a different question:
 
 1. **Full dataset** (train + test pooled) — the practical number: how
    well SEACells does the way it's actually used. Also compute the same
    assignment metrics as the other baselines (purity, within/cross-batch
    agreement, rare homogeneity, rare F1) here, not just cohesion. Expectation: SEACells
    scores better than the correction-method baselines on all of them,
-   especially the rare cell type versions — even forced into the
-   multi-batch setting it isn't designed for, its within-batch archetypal
-   structure should still capture local affinity better than a blunt
-   linear/graph/generative correction does.
+   especially the rare cell type versions — even pooled, its within-batch
+   archetypal structure should still capture local affinity better than a
+   blunt linear/graph/generative correction does.
 2. **Train-split cells only** (the same cells scVI trains on) — a fair,
    confound-free comparison against **scVI's train cohesion** specifically:
    same data given to both, so any gap reflects the method, not a
@@ -503,8 +517,7 @@ Both runs act as the reference ceiling for cohesion: SEACells is built
 specifically to maximize it, so run 1 tells us the best any baseline
 should be expected to do in practice, and run 2 tells us the best
 achievable on the exact data scVI had access to — and whether even that
-ceiling drops for rare types once SEACells is pooled across batches,
-a setting it isn't designed for.
+ceiling drops for rare types.
 
 ## Baselines left out for now (future work)
 
@@ -590,3 +603,8 @@ evidence or a reviewer expects them:
   description: we run it on pooled cells, not within one batch. Its
   metacells still mostly form inside one batch, because its PCA graph
   carries the batch effect.
+- **2026-11-28**, after reading the SEACells paper and its code: the paper's
+  multi-batch route is metacells per sample, then Harmony on the metacells
+  (not a suggestion, its actual method). Logged its steps and its gap (a
+  state with few cells per sample is merged at the metacell step), and
+  marked our pooled run as a different route (SEACells bullet).

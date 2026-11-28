@@ -16,7 +16,7 @@ Order matters: earlier steps decide whether later ones are worth doing.
 
 ## Add
 - [ ] Baselines: Harmony, BBKNN, ComBat (+ Leiden); scANVI; scPoli (scProto's backbone); MetaQ.
-- [ ] SEACells variants: SEACells then Harmony on the metacells (the paper's own route); SEACells on a corrected embedding (scVI, Harmony).
+- [ ] SEACells variants (routes 1 and 3 in the task file's SEACells bullet): metacells per sample, then Harmony on the metacells (the paper's own route); SEACells on a corrected embedding (scVI, Harmony).
 - [ ] Metrics: isolated-label F1, silhouette, HLCA-style rare recall/precision, scGraph; a second, cell-type-level cluster count.
 - [ ] Citations for each baseline's failure mechanism, or reword them as hypotheses.
 
