@@ -37,8 +37,11 @@ Two more things seen on the way (not stored here, see PR #7 comments):
 ## What this does not show
 
 - Whether Docker on the Windows machine gives these labels. That is the next step.
-- Anything about PCA, scVI or SEACells inside the image. Only the neighbour graph and
-  Leiden were run, on a fixed embedding.
+- Anything about PCA or SEACells inside the image. This check runs only the neighbour
+  graph and Leiden, on a fixed embedding.
+
+scVI was tested separately: [`scvi/README.md`](scvi/README.md). It is byte-identical on
+repeat on one CPU type, and differs between ARM and x86-64.
 
 ## To do on Windows (about 10 minutes, mostly the image build)
 

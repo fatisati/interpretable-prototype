@@ -39,7 +39,9 @@ python evaluation/make_evidence_pack.py --run-dir runs/rare_cell_preservation/he
 A Linux image with the Windows machine's package versions. On the Mac, its ARM and x86-64
 builds give identical Leiden clusters from the same embedding; Windows native does not match
 them. Evidence and open points: [`../repro/evidence/mac-studio/container_check/README.md`](../repro/evidence/mac-studio/container_check/README.md).
-Needs Docker. Not part of the pipeline yet: the image has no torch, scvi-tools or SEACells.
+Needs Docker. Not part of the pipeline yet. The image runs the PCA and scVI baselines and the
+metrics; it has no SEACells. scVI in it is byte-identical on repeat on one CPU type, but differs
+between ARM and x86-64: [`scvi/README.md`](../repro/evidence/mac-studio/container_check/scvi/README.md).
 
 ```
 # build the image (once; the build context is the folder with the Windows pip freeze)
@@ -47,12 +49,14 @@ docker build -f repro/docker/Dockerfile -t clean-v2-ref repro/evidence/windows
 # cluster the Mac's committed PCA embedding in the container and compare with another machine's labels
 # (PowerShell: write "${PWD}:/repo")
 docker run --rm -v "$PWD:/repo" clean-v2-ref python repro/container_check.py --expect repro/evidence/mac-studio/container_check/labels_linux_arm64.csv.gz
+# any stage command runs the same way, e.g. scVI on CPU (stages 1 and 2 must have been run)
+docker run --rm -v "$PWD:/repo" clean-v2-ref python baselines/scvi_baseline.py --h5ad datasets/processed/heart_cell_atlas_hvg.h5ad --batch-key donor --label-key cell_type --layer counts --accelerator cpu --out-dir runs/rare_cell_preservation/heart_cell_atlas/scvi_ref
 ```
 
 - **Writes:** `runs/container_check/labels.csv` and `labels.json` (platform, package versions,
   sha256 of the labels, the comparison, run record).
 - **Result:** last line is `SAME CLUSTERS in every column` or `DIFFERENT clusters in at least one column`.
-- **Time:** image build ~5 min, check ~1 min (several minutes for an emulated platform).
+- **Time:** image build ~5 min (2.5 GB), check ~1 min, scVI on heart ~5.5 min on one thread (about twice that for an emulated platform).
 
 ## 1. Dataset prep: raw file → clean, HVG-selected `.h5ad`
 
