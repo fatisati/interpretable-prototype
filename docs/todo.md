@@ -28,3 +28,13 @@ Order matters: earlier steps decide whether later ones are worth doing.
 
 ## Then
 - [ ] scProto, only where a gap was shown, against scPoli + the same clustering. Before porting, write down the old branch's lessons (D59–D64).
+
+## Open questions (from notes, 2026-11-28)
+- Rare F1 and coverage are not stable metrics. Would a standard one (some scIB metrics) fix that?
+- scGraph: per batch, compare cell-type similarity with the integrated space (are relative
+  similarities kept?). Compute it on our baselines too.
+- Isolated-label F1: can we use it with our own "isolated" definition? Is its per-type
+  precision/recall the same as ours? It takes the best score over a sweep. Is that bad practice,
+  or do they have a reason?
+- Need a clear explanation of balanced ARI / AMI / homogeneity / completeness (Maan et al. 2024,
+  Nat Biotech), and a short one of scIB-E, to judge whether they solve our problem.

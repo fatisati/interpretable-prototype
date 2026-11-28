@@ -14,3 +14,6 @@ runs/
 .claude/
 tmp_*.txt
 draft.txt
+
+# Reading material (PDFs), kept local
+papers/
