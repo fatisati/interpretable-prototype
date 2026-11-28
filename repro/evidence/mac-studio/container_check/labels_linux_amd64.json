@@ -1,0 +1,122 @@
+{
+  "labels_file": "labels.csv",
+  "labels_sha256": "40a5eea3de63474dce64bda39f949550f47f8ac5c08554702663ee9b261b611b",
+  "inputs": {
+    "embedding": "repro/evidence/mac-studio/heart_cell_atlas/pca/embedding.csv.gz",
+    "config": "repro/evidence/mac-studio/heart_cell_atlas/pca/config.json",
+    "windows_dir": "repro/evidence/windows/graph_leiden_check"
+  },
+  "n_clusters": {
+    "train_own_graph": 200,
+    "train_windows_graph": 200,
+    "full_own_graph": 246,
+    "full_windows_graph": 246
+  },
+  "environment": {
+    "platform": "Linux-7.0.14-linuxkit-x86_64-with-glibc2.41",
+    "machine": "x86_64",
+    "python": "3.13.11",
+    "packages": {
+      "scanpy": "1.12.4",
+      "anndata": "0.13.2",
+      "pynndescent": "0.6.0",
+      "umap-learn": "0.5.12",
+      "leidenalg": "0.12.0",
+      "igraph": "1.0.0",
+      "numpy": "2.4.6",
+      "scipy": "1.18.0",
+      "scikit-learn": "1.9.0",
+      "pandas": "3.0.5",
+      "numba": "0.67.0",
+      "llvmlite": "0.49.0"
+    },
+    "threads": {
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1",
+      "MKL_NUM_THREADS": "1",
+      "NUMBA_NUM_THREADS": "1"
+    }
+  },
+  "vs_windows_native": {
+    "train_own_graph": {
+      "identical": false,
+      "ari": 0.7992,
+      "n_clusters": [
+        200,
+        204
+      ]
+    },
+    "train_windows_graph": {
+      "identical": false,
+      "ari": 0.7992,
+      "n_clusters": [
+        200,
+        204
+      ]
+    },
+    "full_own_graph": {
+      "identical": false,
+      "ari": 0.7777,
+      "n_clusters": [
+        246,
+        249
+      ]
+    },
+    "full_windows_graph": {
+      "identical": false,
+      "ari": 0.7777,
+      "n_clusters": [
+        246,
+        249
+      ]
+    }
+  },
+  "vs_expected": {
+    "file": "runs/container_check/arm64/labels.csv",
+    "columns": {
+      "train_own_graph": {
+        "identical": true,
+        "ari": 1.0,
+        "n_clusters": [
+          200,
+          200
+        ]
+      },
+      "train_windows_graph": {
+        "identical": true,
+        "ari": 1.0,
+        "n_clusters": [
+          200,
+          200
+        ]
+      },
+      "full_own_graph": {
+        "identical": true,
+        "ari": 1.0,
+        "n_clusters": [
+          246,
+          246
+        ]
+      },
+      "full_windows_graph": {
+        "identical": true,
+        "ari": 1.0,
+        "n_clusters": [
+          246,
+          246
+        ]
+      }
+    }
+  },
+  "run_history": [
+    {
+      "script": "repro/container_check.py",
+      "command": "python repro/container_check.py --out runs/container_check/amd64/labels.csv --expect runs/container_check/arm64/labels.csv",
+      "git_commit": null,
+      "git_dirty": null,
+      "script_committed": false,
+      "started_at": "2026-11-28T16:10:14+00:00",
+      "finished_at": "2026-11-28T16:10:57+00:00"
+    }
+  ]
+}
