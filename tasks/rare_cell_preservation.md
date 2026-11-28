@@ -204,16 +204,19 @@ plausible.
 
 ## Metrics
 
-> **Which metrics count as evidence (decided 2026-11-23).**
-> Clustering is random. Changing only Leiden's seed (same embedding, same
-> settings) changes a rare F1 score by up to 0.16 and a coverage score by up
-> to 0.20. That is as large as the gaps between methods. So:
+> **Which metrics count as evidence (decided 2026-11-23, reason corrected 2026-11-28).**
+> Clustering is random. On PCA heart, 8 Leiden seeds (same embedding, same
+> settings) put rare F1 on one of two levels, ~0.70 or ~0.85, and coverage on
+> ~0.69 or ~0.89. Mostly one cell vote decides: whether the 17 Mesothelial
+> cells are the majority of some cluster (7 vs 8 Endothelial in the official
+> run). A 2-gene change in the gene list only shifts how often that vote is won.
+> A jump that size is as large as the gaps between methods. So:
 >
 > | Metric | Use it? | Why |
 > |---|---|---|
 > | Neighbor same-type share (global / cross-batch) | **Yes, main evidence** for embedding methods | No clustering, so the seed has no effect (0.000 change across seeds) |
-> | Agreement, purity, cohesion | **Yes**, the only option for SEACells and BBKNN | Uses clusters, so it moves with the seed (agreement: 0.03–0.07; purity and cohesion not measured yet). Average several seeds |
-> | Coverage, rare F1 | **No**, still computed but not used as evidence | Yes/no per rare group ("is it the majority of some cluster?"), so a few cells crossing a boundary flips the score |
+> | Agreement, purity, cohesion | **Yes**, the only option for SEACells and BBKNN | Uses clusters, so it moves with the seed, but smoothly (8 seeds: agreement sd ~0.015, cohesion sd 0.002–0.011; purity not measured yet). Average several seeds |
+> | Coverage, rare F1 | **No**, still computed but not used as evidence | Yes/no per rare group ("is it the majority of some cluster?"), so one cell crossing a boundary flips the score. Averaging seeds doesn't help: the mean only says how often the vote is won |
 >
 > Two rules for any comparison:
 > 1. Every cluster-based number is a mean ± spread over several Leiden seeds, never one run.
@@ -506,12 +509,21 @@ evidence or a reviewer expects them:
   separate lineages, not sub-states, so this run couldn't test the claim.
   Added "What a dataset needs in order to test this claim" and the cheap checks
   to run before any more baselines.
-  *Note added 2026-11-23:* that 0.92 vs 0.70 was one Leiden run each. PCA's
-  rare F1 alone ranges 0.70–0.85 across 4 seeds, so this gap is not reliable.
+  *Note added 2026-11-23, corrected 2026-11-28:* that 0.92 vs 0.70 was one
+  Leiden run each. PCA's rare F1 alone reaches 0.85 in 1 of 8 seeds (official
+  gene list), so this gap is not reliable.
 - **2026-11-23**, after Windows and Mac gave different rare F1 for the same
-  PCA run (0.70 vs 0.85): genes, split, graph and embedding matched; only the
-  Leiden clusters differed. Rerunning Leiden with 4 seeds on one machine gave
-  the same spread. So the cause is clustering randomness, not the machine.
+  PCA run (0.70 vs 0.85): the split matched and the gene lists differed by 2
+  genes, but the main difference was in the Leiden clusters. Rerunning Leiden
+  with other seeds on one machine gave the same spread.
   Coverage and rare F1 are no longer used as evidence. Neighbor metrics are
   the main evidence, and cluster-based metrics are averaged over seeds (box
   at the top of Metrics).
+- **2026-11-28**, after 8 seeds × both gene lists × both machines: corrected
+  the reason in the Metrics box. The jump in rare F1 and coverage is mostly one
+  Mesothelial majority vote. The gene list changes how often it is won, so it
+  isn't "seed only". Also, the same embedding with the same seed gives
+  different clusters on another machine (ARI 0.78). Seeds are fixed in code
+  (`evaluation/common.py`), but runs only reproduce on one machine, so official
+  clusters are frozen as files (PR #7). Decision unchanged. Details: ADR 0003,
+  steps 6–7.
