@@ -21,11 +21,15 @@ Run times are measured on the heart atlas (~18.6k cells, CPU); "not measured" me
 ## Watching runs: the live dashboard
 
 ```
-python evaluation/dashboard.py        # then open http://localhost:5000
+python evaluation/dashboard.py
 ```
-One page for every run of every stage script (local MLflow, nothing leaves the laptop).
-Leave that terminal open; Ctrl+C stops the page, not your runs. Runs report by themselves,
-nothing to add to the commands below.
+- **http://localhost:5001 — status:** one table of every run: state, step, progress, time left,
+  last update. Refreshes every 10 s. Running runs on top.
+- **http://localhost:5000 — MLflow:** click a run name on the status page to get here: loss charts,
+  parameters, final metrics, side-by-side comparison.
+
+Local only (nothing leaves the laptop). Leave that terminal open; Ctrl+C stops the pages, not
+your runs. Runs report by themselves, nothing to add to the commands below.
 
 - **State** belongs to each run (one script on one folder, e.g. "neurips_bmmc / scvi"):
   RUNNING, FINISHED, FAILED (the `error` tag says why), KILLED (Ctrl+C). A process killed
@@ -37,8 +41,8 @@ nothing to add to the commands below.
   finished run of the same kind (first run: "later steps unknown").
 - **Charts** (click a run): scVI losses per epoch, `step_pct`, `eta_min`; metrics runs hold
   the final Task 1 numbers (e.g. `test/rare_f1/mean`), so baselines can be compared side by side.
-- **First time only:** in the runs table, "Columns" -> tick `progress`, `stage`,
-  `last_update`, `eta_min`. The browser remembers it.
+- In MLflow, pick **Model training** (top left), not GenAI; ignore its "MLflow Assistant"
+  chat (an AI helper we don't use).
 - Turn tracking off for one command: `SCPROTO_TRACKING=0 python ...`. Data: `mlruns.db`
   (gitignored). Code: `evaluation/tracking.py`. Needs `pip install mlflow==3.18.0`.
 

@@ -28,6 +28,7 @@ is unavailable, the git fields are null.
 No heavy imports on purpose -- datasets/scripts/ import this too.
 """
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -113,8 +114,9 @@ def _warn_if_uncommitted():
     print("\n".join(lines) + "\n", file=sys.stderr, flush=True)
 
 
-try:  # never crash a run over a warning
-    _warn_if_uncommitted()
+try:  # never crash a run over a warning; the dashboard is a viewer, not a run
+    if not os.environ.get("SCPROTO_NO_DIRTY_WARNING"):
+        _warn_if_uncommitted()
 except Exception:
     pass
 
