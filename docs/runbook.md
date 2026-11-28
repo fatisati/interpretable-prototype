@@ -18,19 +18,32 @@ Examples use heart_cell_atlas. For other datasets, take the flag values (`--h5ad
 `--batch-key`, `--label-key`, `--layer`) from the table in `baselines/README.md`.
 Run times are measured on the heart atlas (~18.6k cells, CPU); "not measured" means nobody has timed it yet.
 
-## Watching a long run
+## Watching runs: the live dashboard
 
-Send output to a log and follow it from a second terminal:
 ```
-python baselines/scvi_baseline.py ... > runs/<task>/<dataset>/logs/scvi.log 2>&1
-tail -f runs/<task>/<dataset>/logs/scvi.log
+python evaluation/dashboard.py        # then open http://localhost:5000
 ```
-- Lines appear as they are printed (every stage script turns on line buffering via
-  `evaluation/run_record.py`), so no `python -u` is needed.
-- The cluster search prints one line per resolution tried: clusters found vs target, seconds.
-- scVI also writes live loss curves (train/validation ELBO, reconstruction, KL) each epoch:
-  `tensorboard --logdir runs/<task>/<dataset>/scvi/tensorboard`, then open http://localhost:6006.
-- Task 1 metrics can't be live: they need the final clusters (stage 4, ~1 min after a run).
+One page for every run of every stage script (local MLflow, nothing leaves the laptop).
+Leave that terminal open; Ctrl+C stops the page, not your runs. Runs report by themselves,
+nothing to add to the commands below.
+
+- **State** belongs to each run (one script on one folder, e.g. "neurips_bmmc / scvi"):
+  RUNNING, FINISHED, FAILED (the `error` tag says why), KILLED (Ctrl+C). A process killed
+  from outside or a machine that slept can't report; the dashboard marks those FAILED with
+  "process died without reporting" the next time it or any run starts.
+- **`progress` tag**: current step, how far, time left, e.g.
+  `training (step 2/5), 17/100 (17%), ~80 min left`. Time left = average time per epoch or
+  per cluster-search try so far x what's left, plus later steps' durations from the last
+  finished run of the same kind (first run: "later steps unknown").
+- **Charts** (click a run): scVI losses per epoch, `step_pct`, `eta_min`; metrics runs hold
+  the final Task 1 numbers (e.g. `test/rare_f1/mean`), so baselines can be compared side by side.
+- **First time only:** in the runs table, "Columns" -> tick `progress`, `stage`,
+  `last_update`, `eta_min`. The browser remembers it.
+- Turn tracking off for one command: `SCPROTO_TRACKING=0 python ...`. Data: `mlruns.db`
+  (gitignored). Code: `evaluation/tracking.py`. Needs `pip install mlflow==3.18.0`.
+
+Log files still work too: `python <script> ... > log 2>&1`, then `tail -f log` (lines appear
+live; the cluster search prints one line per try).
 
 ---
 

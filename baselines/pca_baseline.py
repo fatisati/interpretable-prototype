@@ -34,6 +34,7 @@ from sklearn.decomposition import PCA
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evaluation"))  # shared pipeline code
 from run_record import record_run  # first local import: records the script's start time
 import frozen
+import tracking
 from common import cluster_embedding_file, environment_versions, load_cluster_config, load_split, looks_like_raw_counts
 
 
@@ -59,6 +60,7 @@ def run(h5ad_path, batch_key, label_key, out_dir, layer=None, test_size=0.2, see
     train_mask = (adata.obs["split"] == "train").to_numpy()
     load_cluster_config(dataset_dir / "cluster_config.json")  # fail early if missing
 
+    tracking.stage("pca")
     X = log_normalized(adata, layer)
     pca = PCA(n_components=n_comps, random_state=seed).fit(X[train_mask])
     emb = pca.transform(X)
@@ -105,5 +107,8 @@ def parse_args():
 
 if __name__ == "__main__":
     a = parse_args()
+    tracking.start(a.out_dir, kind="baseline", params=vars(a),
+                   stages=["load", "pca", "cluster search train", "cluster search full"])
+    tracking.stage("load")
     run(a.h5ad, a.batch_key, a.label_key, a.out_dir, a.layer, a.test_size, a.seed, a.n_comps)
     record_run(Path(a.out_dir) / "config.json")

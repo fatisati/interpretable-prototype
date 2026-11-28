@@ -20,6 +20,8 @@ import anndata
 import scanpy as sc
 from sklearn.model_selection import train_test_split
 
+import tracking
+
 
 def looks_like_raw_counts(values, threshold=0.01):
     """True if `values` (a matrix or array) looks like real integer counts,
@@ -152,7 +154,10 @@ NEIGHBORS_SEED = 0  # sc.pp.neighbors: its neighbour search is approximate (pynn
 LEIDEN_SEED = 0
 
 
-def sweep_leiden_to_k(adata, use_rep, target_k, resolutions=None, max_refine_steps=12):
+MIN_RESOLUTION, MAX_RESOLUTION = 0.01, 1000.0  # limits when extending the grid
+
+
+def sweep_leiden_to_k(adata, use_rep, target_k, resolutions=None, max_refine_steps=20):
     """Leiden doesn't take a target cluster count directly the way k-means
     would, and its resolution parameter doesn't map cleanly onto cluster
     count -- the count can stay flat across a range of resolution values,
@@ -194,6 +199,9 @@ def sweep_leiden_to_k(adata, use_rep, target_k, resolutions=None, max_refine_ste
                      random_state=LEIDEN_SEED)
         labels = ad.obs["_sweep"].to_numpy()
         tried[resolution] = (len(set(labels)), labels.copy())
+        # Tries aren't known in advance: the grid, then usually a few refine steps.
+        expected = max(len(resolutions) + 6, len(tried) + 1)
+        tracking.progress(len(tried), expected)
         # One line per attempt, so a long search shows it is moving and where.
         print(f"[cluster]   try {len(tried):2d}: resolution={resolution:.4g} -> "
               f"{tried[resolution][0]} clusters (target {target_k}), "
@@ -214,8 +222,15 @@ def sweep_leiden_to_k(adata, use_rep, target_k, resolutions=None, max_refine_ste
             break
         below = [r for r, (k, _) in tried.items() if k < target_k]
         above = [r for r, (k, _) in tried.items() if k > target_k]
-        if not below or not above:
-            break  # target_k outside the grid's reach -- keep the closest
+        if not above or not below:
+            # target_k outside the grid: extend it (x2 up, /2 down) instead of
+            # settling. Bone marrow (72k cells, target 962) still had only 687
+            # clusters at resolution 50, the old top of the grid.
+            extend = max(tried) * 2 if not above else min(tried) / 2
+            if extend > MAX_RESOLUTION or extend < MIN_RESOLUTION:
+                break  # truly out of reach -- keep the closest
+            try_resolution(extend)
+            continue
         lo, hi = max(below), min(above)
         if lo >= hi:
             break  # non-monotone region, no clean bracket
@@ -273,9 +288,11 @@ def cluster_embedding_file(run_dir):
     ad.obsm["X_emb"] = df[latent_cols].to_numpy(dtype=np.float32)
     train_mask = (df["split"] == "train").to_numpy()
 
+    tracking.stage("cluster search train")
     train_labels, resolution_train = sweep_leiden_to_k(
         ad[train_mask], use_rep="X_emb", target_k=cluster_config["k_train"]
     )
+    tracking.stage("cluster search full")
     full_labels, resolution_full = sweep_leiden_to_k(
         ad, use_rep="X_emb", target_k=cluster_config["k_full"]
     )

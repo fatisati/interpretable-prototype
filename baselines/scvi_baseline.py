@@ -40,31 +40,19 @@ from lightning.pytorch.callbacks import Callback
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evaluation"))  # shared pipeline code
 from run_record import record_run  # first local import: records the script's start time
 import frozen
+import tracking
 from common import cluster_embedding_file, environment_versions, load_cluster_config, load_split, looks_like_raw_counts
 
 
-class TensorBoardEpochLog(Callback):
-    """Write every logged scalar (train/validation ELBO, reconstruction loss, KL, ...)
-    to TensorBoard at the end of each epoch, for live curves while training runs:
-        tensorboard --logdir <out-dir>/tensorboard
-    A callback, not a replacement logger: swapping scVI's own logger would empty
-    model.history, which we use for epochs_trained.
-    """
-
-    def __init__(self, log_dir):
-        from torch.utils.tensorboard import SummaryWriter
-        self.writer = SummaryWriter(log_dir=str(log_dir))
+class TrackEpochs(Callback):
+    """After each epoch: send every logged loss (train/validation ELBO, reconstruction,
+    KL) to the live dashboard as a chart point, and update progress + time left
+    (see evaluation/tracking.py). A callback, not a replacement logger: swapping scVI's
+    own logger would empty model.history, which we use for epochs_trained."""
 
     def on_train_epoch_end(self, trainer, pl_module):
-        for name, value in trainer.callback_metrics.items():
-            try:
-                self.writer.add_scalar(name, float(value), trainer.current_epoch)
-            except (TypeError, ValueError):
-                pass
-        self.writer.flush()
-
-    def on_train_end(self, trainer, pl_module):
-        self.writer.close()
+        tracking.log_metrics(dict(trainer.callback_metrics), step=trainer.current_epoch)
+        tracking.progress(trainer.current_epoch + 1, trainer.max_epochs)
 
 
 def pick_gene_likelihood(adata, layer):
@@ -90,6 +78,7 @@ def run(
     early_stopping=True,
     gene_likelihood="auto",
 ):
+    tracking.stage("load")
     adata = sc.read_h5ad(h5ad_path)
     # "auto" checks the data; an explicit value overrides, e.g. "nb" on the scIB
     # datasets' non-integer counts layer, which we treat as estimated counts.
@@ -121,15 +110,15 @@ def run(
     # 100 is plenty here. early_stopping can still end training sooner
     # (watches validation loss, stops once it stops improving) -- the
     # actual count lands in config.json as epochs_trained.
-    tb_dir = Path(out_dir) / "tensorboard"
-    print(f"[scvi] live training curves: tensorboard --logdir {tb_dir}")
+    tracking.stage("training")
     model.train(max_epochs=max_epochs, accelerator=accelerator, early_stopping=early_stopping,
-                callbacks=[TensorBoardEpochLog(tb_dir)])
+                callbacks=[TrackEpochs()])
     epochs_trained = len(model.history["elbo_train"])
 
     # get_latent_representation accepts any AnnData with the same genes/obs
     # columns as training data -- it registers and embeds test cells through
     # the trained encoder without needing a separate setup_anndata call.
+    tracking.stage("embed")
     adata.obsm["X_scVI"] = model.get_latent_representation(adata)
 
     result = pd.DataFrame({
@@ -195,6 +184,8 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
+    tracking.start(args.out_dir, kind="baseline", params=vars(args),
+                   stages=["load", "training", "embed", "cluster search train", "cluster search full"])
     run(
         h5ad_path=args.h5ad,
         batch_key=args.batch_key,

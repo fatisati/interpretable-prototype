@@ -21,11 +21,14 @@ from pathlib import Path
 
 from run_record import record_run  # first local import: records the script's start time
 from common import cluster_embedding_file
+import tracking
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--run-dir", required=True, help="baseline run folder containing embedding.csv + config.json")
     args = p.parse_args()
+    tracking.start(args.run_dir, kind="recluster", params=vars(args),
+                   stages=["cluster search train", "cluster search full"])
     cluster_embedding_file(args.run_dir)
     record_run(Path(args.run_dir) / "config.json")
     print("[recluster] done -- metrics/ for this run is now stale: re-run evaluation/compute_metrics.py")

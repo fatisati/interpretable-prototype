@@ -17,3 +17,8 @@ draft.txt
 
 # Reading material (PDFs), kept local
 papers/
+
+# Live run dashboard (MLflow, local): evaluation/tracking.py
+mlruns.db
+mlartifacts/
+mlruns/

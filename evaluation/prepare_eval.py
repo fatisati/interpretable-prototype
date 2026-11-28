@@ -36,6 +36,7 @@ from scipy.sparse import save_npz
 from run_record import record_run  # first local import: records the script's start time
 from affinity import build_affinity_graph
 import frozen
+import tracking
 from common import compute_pca, load_split, stratified_split
 
 
@@ -111,13 +112,18 @@ def run(
 
     train_adata = adata[adata.obs["split"] == "train"]
     print(f"[prepare_eval] train-only affinity graph: {train_adata.n_obs:,} cells")
+    tracking.stage("pca train")
     train_pca = compute_pca(train_adata, layer, n_pca_comps)
+    tracking.stage("graph train")
     affinity_train = build_affinity_graph(train_pca, k=k, graph_construction=graph_construction)
 
     print(f"[prepare_eval] full affinity graph: {adata.n_obs:,} cells")
+    tracking.stage("pca full")
     full_pca = compute_pca(adata, layer, n_pca_comps)
+    tracking.stage("graph full")
     affinity_full = build_affinity_graph(full_pca, k=k, graph_construction=graph_construction)
 
+    tracking.stage("save")
     out_dir.mkdir(parents=True, exist_ok=True)
     save_npz(train_path, affinity_train)
     save_npz(full_path, affinity_full)
@@ -169,6 +175,9 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
+    tracking.start(args.out_dir, kind="eval setup", params=vars(args),
+                   stages=["load", "pca train", "graph train", "pca full", "graph full", "save"])
+    tracking.stage("load")
     run(
         h5ad_path=args.h5ad,
         batch_key=args.batch_key,

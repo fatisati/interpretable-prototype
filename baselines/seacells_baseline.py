@@ -58,6 +58,7 @@ from scipy.sparse import load_npz
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evaluation"))  # shared pipeline code
 from run_record import record_run  # first local import: records the script's start time
 import frozen
+import tracking
 from common import compute_pca, environment_versions, load_cluster_config, load_split
 
 import SEACells
@@ -145,11 +146,13 @@ def run(
     train_adata.obsm["X_pca"] = compute_pca(train_adata, layer, n_pca_comps)
     full_adata.obsm["X_pca"] = compute_pca(full_adata, layer, n_pca_comps)
 
+    tracking.stage("seacells train")
     print(f"[seacells] train-only run: {train_adata.n_obs:,} cells -> "
           f"{cluster_config['k_train']} metacells")
     train_assign = run_seacells(train_adata, affinity_train, cluster_config["k_train"],
                                 n_waypoint_eigs, convergence_epsilon, min_iter, max_iter)
 
+    tracking.stage("seacells full")
     print(f"[seacells] full-dataset run: {full_adata.n_obs:,} cells -> "
           f"{cluster_config['k_full']} metacells")
     full_assign = run_seacells(full_adata, affinity_full, cluster_config["k_full"],
@@ -219,6 +222,11 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
+    # SEACells' iterations run inside the library, so progress is per step only; time left
+    # comes from the last finished SEACells run on the same dataset.
+    tracking.start(args.out_dir, kind="baseline", params=vars(args),
+                   stages=["load", "seacells train", "seacells full"])
+    tracking.stage("load")
     run(
         h5ad_path=args.h5ad,
         batch_key=args.batch_key,

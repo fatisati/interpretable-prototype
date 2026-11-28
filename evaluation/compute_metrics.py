@@ -348,6 +348,12 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
+    import tracking
+    # One dashboard run per metrics folder (metrics/, metrics__rare-std/, ...), named after it.
+    _label_tag = args.label_key if args.labels_from else None
+    _mdir = metrics_dir_for(args.embedding, args.rare_rule, _label_tag)
+    tracking.start(_mdir.parent, kind=_mdir.name, params=vars(args), stages=["score"])
+    tracking.stage("score")
     out_dir = run(
         baseline=args.baseline,
         embedding_path=args.embedding,
@@ -361,3 +367,4 @@ if __name__ == "__main__":
         labels_from=args.labels_from,
     )
     record_run(out_dir / "metrics_config.json")
+    tracking.log_summary(json.loads((out_dir / "metrics_summary.json").read_text()))
