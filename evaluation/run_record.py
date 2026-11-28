@@ -16,6 +16,9 @@ an existing folder, so replacing the entry would lose the original command.
 A script that writes a fresh JSON (e.g. a new training run) starts a new list,
 which is correct -- the output is new.
 
+Importing this module also prints a warning at the start of the run if the code has
+uncommitted edits (soft gate; build_results.py refuses such runs -- the hard gate).
+
 How to run each stage (the recipe, written by hand) lives in docs/runbook.md;
 this module is the record of what really happened. Never crashes a run: if git
 is unavailable, the git fields are null.
@@ -47,6 +50,45 @@ def _script_path():
         return Path(sys.argv[0]).resolve().relative_to(REPO_ROOT).as_posix()
     except ValueError:
         return sys.argv[0]
+
+
+def uncommitted():
+    """(changed tracked files, script_untracked) for this process; ([], False) if git is unavailable.
+
+    Untracked files other than the script don't count: new data/notes don't change the code
+    that ran. An untracked *script* does -- nobody else can get it back."""
+    status = _git("status", "--porcelain", "--untracked-files=no")
+    if status is None:
+        return [], False
+    # split, not line[3:]: _git strips the output, which eats the first line's leading space.
+    changed = [line.split(None, 1)[1] for line in status.splitlines() if line.strip()]
+    script = _script_path()
+    script_untracked = (script.endswith(".py") and not Path(script).is_absolute()
+                        and _git("ls-files", "--error-unmatch", "--", script) is None)
+    return changed, script_untracked
+
+
+def _warn_if_uncommitted():
+    """Soft gate: say so loudly at the START of a run, so a long run can be stopped and the
+    code committed first. Never blocks (quick tests stay quick); the hard gate is in
+    build_results.py. ASCII only: a Windows console can't always print symbols."""
+    changed, script_untracked = uncommitted()
+    if not changed and not script_untracked:
+        return
+    lines = ["", "WARNING: uncommitted code -- this run will NOT be reproducible "
+                 "(run record gets git_dirty=true). Commit first if you will keep the output."]
+    lines += [f"  changed: {f}" for f in changed[:5]]
+    if len(changed) > 5:
+        lines.append(f"  ... and {len(changed) - 5} more (git status)")
+    if script_untracked:
+        lines.append(f"  not in git at all: {_script_path()}")
+    print("\n".join(lines) + "\n", file=sys.stderr, flush=True)
+
+
+try:  # never crash a run over a warning
+    _warn_if_uncommitted()
+except Exception:
+    pass
 
 
 def current_run():

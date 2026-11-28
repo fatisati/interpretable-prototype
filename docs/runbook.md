@@ -9,6 +9,11 @@ exact command, the code version (git commit), whether there were uncommitted edi
 (`git_dirty`), and the start/end time. To see how an output was made, open its JSON
 and don't rely on this doc.
 
+**Commit before any run whose output you keep.** Every stage script prints a warning at the
+start if the code has uncommitted edits, and still runs, so quick tests aren't blocked.
+`build_results.py` (stage 5) refuses to build tables from such runs. See "Commit rule" in
+`CLAUDE.md`.
+
 Examples use heart_cell_atlas. For other datasets, take the flag values (`--h5ad`,
 `--batch-key`, `--label-key`, `--layer`) from the table in `baselines/README.md`.
 Run times are measured on the heart atlas (~18.6k cells, CPU); "not measured" means nobody has timed it yet.
@@ -143,4 +148,7 @@ python evaluation/build_results.py --task rare_cell_preservation --metrics-subdi
 
 - **Writes:** `results/<task>/official/` (or `whatif_rare-<rule>/`): `tables.md`, `figures/`, `data/*.csv`, `run.json`.
 - `tables.md` is generated, so never hand-edit it. The verdict is written by hand in `results/<task>.md`.
+- **Refuses** if any run feeding the tables (metrics, baseline, shared graph, cluster count)
+  was made from uncommitted code or has no run record. It lists each one; commit, re-run those
+  stages, build again. `--allow-dirty` builds anyway, for throwaway checks only.
 - **Sanity test** (synthetic data, no real runs needed): `python tests/check_build_results.py`

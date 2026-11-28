@@ -27,3 +27,15 @@ identical input).
 - Every stage script records what it ran: call `record_run(<its json sidecar>)` from
   `evaluation/run_record.py` after saving output. That writes the exact command, git commit, and
   times next to the result, so nobody has to log commands by hand.
+
+## Commit rule: commit before any run whose output you keep
+
+A result is only reproducible if the exact code that made it is in git. So before running a
+stage script whose output is kept (anything writing to `runs/` or `results/`), commit the code
+first. Quick throwaway checks (does it load, print a shape) don't need a commit.
+
+- Claude: before such a run, check `git status`; if code changed, commit it (one small commit
+  per finished step), then run. Don't run on uncommitted code and "commit later".
+- Built-in gates: every stage script warns at start on uncommitted code (`evaluation/run_record.py`);
+  `evaluation/build_results.py` refuses to build tables from runs made with uncommitted code
+  (`--allow-dirty` only for throwaway checks).

@@ -35,7 +35,7 @@ import math
 import platform
 from pathlib import Path
 
-from run_record import record_run  # records the script's start time
+from run_record import record_run, uncommitted  # records the script's start time
 
 import numpy
 import pandas as pd
@@ -548,6 +548,34 @@ def run(task, runs_root="runs", results_dir="results", subdir="metrics"):
     return tables_path, summary_path
 
 
+def unreproducible_runs(runs_root, task, subdir="metrics"):
+    """Hard gate: every run record feeding a result must come from committed code.
+
+    For each metrics folder, checks the latest run_history entry of the records along its
+    chain -- the metrics, the baseline, and the dataset's shared graph / cluster count.
+    Returns one "path: reason" line per problem (empty list = all clean). A record with no
+    run_history predates run_record.py, so we can't tell what code made it: also a problem."""
+    problems = []
+    for _, _, mdir in find_metrics_dirs(runs_root, task, subdir):
+        chain = [mdir / "metrics_config.json", mdir.parent / "config.json",
+                 mdir.parent.parent / "affinity_config.json",
+                 mdir.parent.parent / "cluster_config.json"]
+        for path in chain:
+            if not path.exists():
+                continue
+            history = json.loads(path.read_text()).get("run_history")
+            if not history:
+                problems.append(f"{path.as_posix()}: no run record (made before run_record.py)")
+                continue
+            last = history[-1]
+            if last.get("git_dirty"):
+                problems.append(f"{path.as_posix()}: made from uncommitted code "
+                                f"(commit {str(last.get('git_commit'))[:7]} + edits)")
+            elif last.get("script_committed") is False:
+                problems.append(f"{path.as_posix()}: script {last.get('script')} was not in git")
+    return sorted(set(problems))
+
+
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--task", required=True, help="task name, e.g. rare_cell_preservation")
@@ -555,11 +583,28 @@ def parse_args():
     p.add_argument("--results-dir", default="results", help="(for tests) where output goes")
     p.add_argument("--metrics-subdir", default="metrics",
                    help="metrics folder name per run; metrics__rare-<rule> = a what-if rare rule")
+    p.add_argument("--allow-dirty", action="store_true",
+                   help="build anyway from runs made with uncommitted code (for checks only; "
+                        "the flag is kept in run.json's command, so such tables stay traceable)")
     return p.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
+    # Hard gate (see CLAUDE.md): results only from committed code, this script included.
+    problems = unreproducible_runs(args.runs_root, args.task, args.metrics_subdir)
+    changed, script_untracked = uncommitted()
+    if changed or script_untracked:
+        problems.insert(0, f"build_results.py itself: uncommitted code ({', '.join(changed[:5]) or 'script not in git'})")
+    if problems and not args.allow_dirty:
+        raise SystemExit(
+            "[results] REFUSED: these results would not be reproducible:\n  - "
+            + "\n  - ".join(problems)
+            + "\nCommit the code, re-run the listed stages (docs/runbook.md), then build again."
+            "\n(For a throwaway check only: add --allow-dirty.)")
+    if problems:
+        print(f"[results] --allow-dirty: building despite {len(problems)} problem(s); "
+              f"these tables are NOT reproducible")
     tables_path, _ = run(args.task, args.runs_root, args.results_dir, args.metrics_subdir)
     # Kept out of tables.md (which stays byte-identical across runs). Fresh file
     # each time: it describes the tables just written, not older builds.
