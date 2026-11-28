@@ -147,10 +147,12 @@ python evaluation/frozen_run.py restore --run-dir runs/rare_cell_preservation/he
 
 - **Writes:** `freeze`: `embedding.csv.gz` (or `assignments.csv.gz`), `source_config.json`, `result.json`
   in `datasets/frozen/<dataset>/baselines/<baseline>/` (heart PCA: ~5 MB). `restore`: the run folder's
-  `embedding.csv`; the machine's own output is kept as `embedding.local.csv`, and `config.json` gets a
-  `frozen_run` entry with the file's sha256.
+  `embedding.csv` (or `assignments.csv`); the machine's own output is kept as `embedding.local.csv`
+  (or `assignments.local.csv`), and `config.json` gets a `frozen_run` entry with the file's sha256.
 - **`check` result:** `IDENTICAL`, `WITHIN TOLERANCE` (coordinates within `--tol`, default 0.01, and
-  99% of cells with the same 15 neighbours) or `DIFFERENT` (exit code 1).
+  99% of cells with the same 15 neighbours) or `DIFFERENT` (exit code 1). After a `restore`, `check`
+  compares the kept `.local.csv`; if there is none, it prints `SAME FILE` (nothing of this machine's
+  own to compare). SEACells has no coordinates, so any cluster difference is `DIFFERENT`.
 - **Replace a frozen result on purpose:** `freeze --replace`, then commit the diff. Needed after the
   gene list or split changes; `restore` stops if they no longer match.
 - **Time:** seconds each on heart.

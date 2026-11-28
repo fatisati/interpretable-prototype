@@ -23,7 +23,8 @@ Three commands, all take the baseline's run folder:
               nearest neighbours, clusters. Says how close a recompute gets.
     restore   put the frozen output into the run folder, so stage 4
               (compute_metrics.py) scores it. The machine's own output is kept
-              next to it as embedding.local.csv.
+              next to it as embedding.local.csv (assignments.local.csv for
+              SEACells).
 
 Usage (from the repo root):
     python evaluation/frozen_run.py freeze  --run-dir runs/rare_cell_preservation/heart_cell_atlas/pca
@@ -66,6 +67,11 @@ def local_table_path(run_dir):
         if (run_dir / name).exists():
             return run_dir / name
     raise SystemExit(f"[frozen_run] {run_dir} has no embedding.csv or assignments.csv -- run the baseline first.")
+
+
+def local_copy_name(table):
+    """Where `restore` keeps this machine's own output: embedding.csv -> embedding.local.csv."""
+    return table.removesuffix(".csv") + ".local.csv"
 
 
 def names(run_dir):
@@ -145,9 +151,18 @@ def check(run_dir, tol=0.01, min_same_neighbours=0.99):
     frozen_path = frozen_table_path(dataset, baseline)
     if frozen_path is None:
         raise SystemExit(f"[frozen_run] nothing frozen for {dataset}/{baseline} -- run `freeze` on the official machine.")
-    local_path = run_dir / "embedding.local.csv"
+    # After `restore`, this machine's own output is <table>.local.csv
+    # (embedding.local.csv, or assignments.local.csv for SEACells).
+    table = frozen_path.name.removesuffix(".gz")
+    local_path = run_dir / local_copy_name(table)
     if not local_path.exists():
-        local_path = local_table_path(run_dir)
+        local_path = run_dir / table
+        if not local_path.exists():
+            raise SystemExit(f"[frozen_run] {run_dir} has no {table} -- run the baseline first.")
+        if local_path.read_bytes().replace(b"\r\n", b"\n") == read_frozen_bytes(frozen_path):
+            print(f"[frozen_run] {local_path} IS the frozen file (restored, or byte-identical) and there is "
+                  f"no {local_copy_name(table)}: nothing of this machine's own to compare.")
+            return "SAME FILE"
     a = pd.read_csv(frozen_path)
     b = pd.read_csv(local_path)
     print(f"[frozen_run] frozen: {frozen_path}\n[frozen_run] local:  {local_path}")
@@ -186,10 +201,8 @@ def check(run_dir, tol=0.01, min_same_neighbours=0.99):
             ari = float(adjusted_rand_score(la, lb))
             print(f"   {col}: {la.nunique()} vs {lb.nunique()} clusters, adjusted Rand index {ari:.4f} (1 = same grouping)")
             identical &= ari == 1.0
-    if "metacell" in a and "metacell" in b:  # SEACells assignments
-        ari = float(adjusted_rand_score(a["metacell"].astype(str), b["metacell"].astype(str)))
-        print(f"   metacell: adjusted Rand index {ari:.4f}")
-        identical &= ari == 1.0
+    if not latent:  # SEACells: no coordinates, so the clusters are all there is to compare
+        close &= identical
 
     verdict = "IDENTICAL" if identical else ("WITHIN TOLERANCE" if close else "DIFFERENT")
     print(f"[frozen_run] {verdict}"
@@ -219,7 +232,7 @@ def restore(run_dir):
     target = run_dir / frozen_path.name.removesuffix(".gz")
     run_dir.mkdir(parents=True, exist_ok=True)
     if target.exists() and target.read_bytes().replace(b"\r\n", b"\n") != content:
-        local_copy = target.with_name(target.stem + ".local.csv")
+        local_copy = run_dir / local_copy_name(target.name)
         if not local_copy.exists():  # keep this machine's own output, once
             target.replace(local_copy)
             print(f"[frozen_run] kept this machine's own output as {local_copy}")
