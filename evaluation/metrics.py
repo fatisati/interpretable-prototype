@@ -274,9 +274,31 @@ def rare_precision_recall_f1(df, rare_pairs):
     return per_pair, (float(per_pair["f1"].mean()), float(per_pair["f1"].std()))
 
 
-def cohesion(affinity, cluster_labels):
-    """Per-cell cohesion: average sim(i, j) over every j in i's cluster,
-    with sim(i, i) := 1.
+def cohesion(affinity, cluster_labels, batch_labels):
+    """Per-cell cohesion, batch-restricted: for cell i in batch b,
+
+        cohesion(i) = sum of sim(i, j) over j in (C ∩ V(b))  /  |C ∩ V(b)|
+
+    C = i's cluster, sim(i, i) := 1, and V(b) = the cells in batch b plus
+    every cell with a direct affinity edge to some cell in b. Same rule as
+    the scProto paper (ICLR manuscript, appendix "Cohesion", paragraph
+    "Batch restriction"), which applies it at evaluation time too.
+
+    Why the restriction: the affinity graph is built on uncorrected PCA of
+    all cells, so cross-batch similarity is mostly hidden by the batch
+    effect. A missing edge between two cells of different batches is not
+    evidence that they differ. Without the restriction, a cluster that
+    mixes batches is divided by its full size but only gets similarity
+    from its own-batch members, so mixing batches is punished and keeping
+    batches apart is rewarded (Mahmoud's review, red flag 03). With it,
+    cells i can't be linked to simply don't count, for or against.
+
+    Only the divisor changes: a cell outside V(b) has no edge to any cell
+    in b, so its sim(i, j) is 0 and the sum is the same either way.
+    Restricting only the sum would leave the bias in place.
+
+    With one batch, V(b) is every cell and this is the plain average over
+    the whole cluster.
 
     The stored diagonal is ignored and replaced by exactly 1, so this is
     correct whatever the matrix holds there. (affinity.py's graphs store 1
@@ -284,14 +306,30 @@ def cohesion(affinity, cluster_labels):
     added 1 on top, counting self twice -- e.g. two cells with sim 0.5
     scored 1.25 instead of 0.75.)
     """
+    affinity = affinity.tocsr()
     n = affinity.shape[0]
-    result = np.zeros(n)
-    for cluster_id in pd.unique(cluster_labels):
-        idx = np.where(cluster_labels == cluster_id)[0]
+    cluster_codes, _ = pd.factorize(np.asarray(cluster_labels))
+    batch_labels = np.asarray(batch_labels)
+    if (cluster_codes < 0).any():
+        raise ValueError("cohesion: some cells have no cluster label")
+
+    # Sum part: sim to own-cluster members, self counted as exactly 1.
+    numerator = np.zeros(n)
+    for code in np.unique(cluster_codes):
+        idx = np.where(cluster_codes == code)[0]
         sub = affinity[idx][:, idx]
-        row_sums = np.asarray(sub.sum(axis=1)).ravel() - sub.diagonal() + 1.0
-        result[idx] = row_sums / len(idx)
-    return result
+        numerator[idx] = np.asarray(sub.sum(axis=1)).ravel() - sub.diagonal() + 1.0
+
+    # Divisor part: per batch, how many of each cluster's members are in V(b).
+    n_clusters = cluster_codes.max() + 1
+    denominator = np.zeros(n)
+    for b in pd.unique(batch_labels):
+        in_b = batch_labels == b
+        linked = np.asarray((affinity[in_b] != 0).sum(axis=0)).ravel() > 0
+        in_vb = in_b | linked
+        size_in_vb = np.bincount(cluster_codes[in_vb], minlength=n_clusters)
+        denominator[in_b] = size_in_vb[cluster_codes[in_b]]
+    return numerator / denominator
 
 
 def group_summary(metric_values, df, is_rare, freq_lookup):

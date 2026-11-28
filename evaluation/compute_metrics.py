@@ -168,7 +168,7 @@ def score_job(df, affinity, score_mask, rare_pairs_global, freq_lookup, embeddin
     per_pair, (f1_mean, f1_std) = rare_precision_recall_f1(scored_df, rare_pairs)
     result["rare_f1"] = {"mean": f1_mean, "std": f1_std, "n_pairs": len(per_pair)}
 
-    cohesion_full = cohesion(affinity, df["cluster"].to_numpy())
+    cohesion_full = cohesion(affinity, df["cluster"].to_numpy(), df["batch"].to_numpy())
     cohesion_scored = cohesion_full[np.asarray(score_mask)]
     rare_cohesion = cohesion_scored[is_rare_scored]
     result["cohesion"] = {

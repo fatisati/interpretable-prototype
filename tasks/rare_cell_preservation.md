@@ -53,9 +53,12 @@ claim.
    from that embedding.
 
 **Second claim (SEACells):** SEACells is a *metacell* method — it groups
-similar cells into small bundles, called metacells, to reduce noise. It
-works on one batch. With many batches, it fails to make a metacell for a
-rare type, because no single batch has enough cells of that type.
+similar cells into small bundles, called metacells, to reduce noise. We run
+it on all batches pooled, but its affinity graph is built on uncorrected
+PCA (the SEACells default), which carries the batch effect, so the graph
+mostly links cells from the same batch. Its metacells therefore mostly form
+inside one batch. A rare type that has too few cells in every single batch
+then fails to get its own metacell.
 
 **Why this matters for scProto:** scProto gives the model extra guidance
 (the affinity graph — a record of which cells look alike in the raw data),
@@ -108,11 +111,29 @@ sub-claim, instead of one vague claim about "batch correction" in general.
   weakness scProto's affinity guidance is meant to fix.
 
 - **SEACells (multi-batch)** — a different failure mode, not a correction
-  method: it builds metacells from local structure *within* a single
-  batch. If a rare type is rare in every batch individually, no single
-  batch ever has enough of its cells to form a metacell there — the
-  problem isn't SEACells' method, it's that cross-batch pooling (which it
-  doesn't do) is what the rare type actually needs.
+  method. We run it on all cells pooled, not one batch at a time. But its
+  affinity graph is built on uncorrected PCA (the SEACells paper's
+  default), and that PCA carries the batch effect, so the graph mostly
+  connects cells within one batch (heart: 56% of edges join cells of the
+  same donor, against 8.4% if donor didn't matter). So in practice its
+  metacells mostly form inside one batch and carry the batch effect. If a
+  rare type is rare in every batch, no single batch has enough of its cells
+  to form a metacell, so it gets merged into a bigger neighbouring
+  metacell. What the rare type needs is pooling across batches, which this
+  graph doesn't give.
+
+  The same holds for the route the SEACells paper suggests (metacells per
+  sample, then integrate the metacells): integration afterwards only lines
+  up metacells across batches. It can't split a metacell that already
+  absorbed the rare state.
+
+  The other route is to run SEACells' archetypal analysis on an integrated
+  space (e.g. the scVI embedding) instead of PCA. That has its own problem:
+  integration training is dominated by common states (the reconstruction
+  loss is summed over cells), so a rare state can be absorbed into a denser
+  neighbour during integration. Any metacell or clustering step afterwards
+  only partitions an embedding that has already lost the separation. Both
+  routes are baselines to run (see SEACells section below).
 
 - **PCA + Leiden (control, no correction)** — not expected to fail for a
   correction-specific reason; it is the reference that separates losses
@@ -308,12 +329,41 @@ can score fine on one and fail another.
 **Cohesion metrics** — how well a method's clusters agree with the
 original RBF affinity graph's notion of "these cells belong together":
 
-    cohesion(i) = average of sim(i, j) over every j in i's cluster
+    for cell i in batch b, with cluster C:
+    cohesion(i) = sum of sim(i, j) over j in (C ∩ V(b))  /  |C ∩ V(b)|
                   (with sim(i, i) := 1)
+
+    V(b) = the cells in batch b, plus every cell with a direct affinity
+           edge to some cell in b.
 
 Tells us whether the affinity-defined similarity survives clustering, how
 well it's preserved, and — via the frequency-dependence check below —
 whether that preservation gets worse as frequency drops.
+
+Why V(b): the affinity graph is built on uncorrected PCA, so cells of
+different batches are rarely linked even when they are the same biology.
+A missing cross-batch edge isn't evidence that two cells differ. Without
+V(b), a cluster that mixes batches is divided by its full size but only
+gets similarity from its own-batch members, so mixing batches is punished.
+Example: 5 donor-A and 5 donor-B cells in one cluster, no edges across.
+Unrestricted, a donor-A cell is divided by 10 and its score is about
+halved. With V(b), it's divided by 5, so mixing is neither rewarded nor
+punished. Only the divisor changes: a cell outside V(b) has no edge into b,
+so it adds 0 to the sum anyway. With one batch, V(b) is every cell.
+
+Limit: V(b) includes cells from other batches that are linked to *some*
+cell in b, not necessarily to i. On heart, V(b) holds about a third of all
+cells, against about 6% for a donor's own cells, so most of the bias is
+removed but not all. That's why cohesion stays a diagnostic next to the
+neighbor metrics, not the headline evidence.
+
+Held-out nodes, for scProto (or any method trained on the affinity graph):
+cohesion on the graph a method was trained on can't be evidence for it —
+the method was optimized to match that graph. The fair version uses the
+existing train/test split: train on `affinity_train.npz` (train cells
+only), so test cells and all their edges are never seen in training, then
+score test cells against `affinity_full.npz`. Only test-cell numbers count
+as evidence; train-cell numbers just show the loss was optimized.
 
 - **Cohesion** — the metric above, averaged over all cells.
 - **Rare cell type cohesion** — the same, averaged only over locally-rare
@@ -413,8 +463,9 @@ integration, or because of the clustering itself (shared cluster count,
 ~75-cell clusters)? If PCA + Leiden also loses a type, the loss isn't the
 correction's fault. Caveat: the ground-truth affinity graph is built from
 uncorrected PCA of all cells, so PCA's cohesion and neighbor affinity sit
-near a ceiling by construction; its cell-type metrics (agreement, purity,
-neighbor same-type share) are the fair comparison.
+near a ceiling by construction. The V(b) restriction in cohesion reduces
+this but doesn't remove it (see Cohesion metrics). Its cell-type metrics
+(agreement, purity, neighbor same-type share) are the fair comparison.
 
 ### Harmony, BBKNN, ComBat (transductive)
 
@@ -527,3 +578,15 @@ evidence or a reviewer expects them:
   (`evaluation/common.py`), but runs only reproduce on one machine, so official
   clusters are frozen as files (PR #7). Decision unchanged. Details: ADR 0003,
   steps 6–7.
+- **2026-11-28**, after Mahmoud's review (PR #5, red flags 03 and 06):
+  (1) Cohesion is now batch-restricted to V(b) (Cohesion metrics). The
+  unrestricted version punished clusters that mix batches, because the
+  affinity graph is built on uncorrected PCA (heart: 56% of edges join
+  cells of the same donor, against 8.4% by chance). On heart, mean cohesion
+  over all cells went from 0.061 to 0.073 for PCA and from 0.038 to 0.065
+  for scVI (one Leiden run each). Results in `results/.../official/` still
+  use the old version until regenerated. (2) Added the held-out-node rule
+  for scoring scProto on its own graph. (3) Corrected the SEACells
+  description: we run it on pooled cells, not within one batch. Its
+  metacells still mostly form inside one batch, because its PCA graph
+  carries the batch effect.
