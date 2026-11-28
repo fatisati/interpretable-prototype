@@ -132,9 +132,15 @@ python evaluation/recluster.py --run-dir runs/rare_cell_preservation/heart_cell_
 
 ### 3b. Frozen baseline output: same clusters on every machine
 
-An embedding recomputed on another machine differs in the last digits, and Leiden then gives
-different clusters (heart PCA, Windows vs Mac: ARI 0.77). So the official machine commits each
-baseline's output once, and every machine scores that file. Details: `evaluation/frozen_run.py`.
+Clusters recomputed on another machine do not match (heart PCA, Windows vs Mac: ARI 0.77). The
+embedding differs in the last digits, but that is not the only cause: from an identical embedding
+the neighbour graph differs (about 82% of cells get the same 15-neighbour list), and on an identical
+graph Leiden with the same seed still gives different clusters (ARI 0.80). So the official machine
+commits each baseline's output once, clusters included, and every machine scores that file.
+Details: `evaluation/frozen_run.py`; evidence: `repro/evidence/windows/graph_leiden_check/`.
+
+Only the committed cluster columns are the same everywhere. Clustering a frozen embedding again
+(extra seeds, another resolution) will not match across machines.
 
 ```
 # official machine, once per baseline, then commit datasets/frozen/<dataset>/baselines/<baseline>/

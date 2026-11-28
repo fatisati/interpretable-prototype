@@ -1,13 +1,21 @@
 """Freeze one baseline's output (embedding + clusters) as a committed file, so
 every machine scores exactly the same cells in exactly the same clusters.
 
-Why: the gene list and split are already frozen (evaluation/frozen.py), but a
-baseline's embedding is still recomputed per machine, and it differs in the
-last digits between machines (PCA on heart, Windows vs Mac, same genes: up to
-0.002). That is enough to change a few neighbour edges, and Leiden then returns
-a different clustering (ARI 0.77) although its seed and version are the same.
-Leiden is repeatable only when its input is identical, so the input is what
-gets frozen. Same rule as frozen.py: code proposes, a committed file decides.
+Why: the gene list and split are already frozen (evaluation/frozen.py), but
+the clusters are still recomputed per machine, and they do not match (PCA on
+heart, Windows vs Mac, same genes: ARI 0.77). Three steps differ:
+  - the embedding, in the last digits (up to 0.002);
+  - the neighbour graph, even from an identical embedding (about 82% of cells
+    get the same 15-neighbour list; sc.pp.neighbors is an approximate search);
+  - Leiden, even on an identical graph with the same seed and the same
+    leidenalg and igraph versions (ARI 0.80).
+Evidence: repro/evidence/windows/graph_leiden_check/ and ADR 0003. So the
+clusters themselves are frozen, together with the embedding they came from.
+Same rule as frozen.py: code proposes, a committed file decides.
+
+Limit: only the committed cluster columns are the same everywhere. Clustering
+a frozen embedding again (other seeds, another resolution) gives each machine
+its own clusters.
 
     datasets/frozen/<dataset>/baselines/<baseline>/
         embedding.csv.gz     the baseline's embedding.csv (or assignments.csv.gz
