@@ -81,6 +81,9 @@ curl -L -o datasets/raw/haber2017_intestine/GSE92332_SalmHelm_UMIcounts.txt.gz \
   $B/GSE92nnn/GSE92332/suppl/GSE92332_SalmHelm_UMIcounts.txt.gz
 ```
 
+Lung fibrosis trio (Adams 2020 + Habermann 2020 + Vannan 2025, GEO, ~4.3 GB, downloaded
+2026-11-28): download commands are in [`datasets/lung_fibrosis.md`](../datasets/lung_fibrosis.md).
+
 Moffitt 2018 MERFISH hypothalamus (Dryad doi:10.5061/dryad.8t8s248, 1.03 GB): the download is
 **manual**, because Dryad blocks scripted downloads (it returns 401 or 403). Open
 https://datadryad.org/dataset/doi:10.5061/dryad.8t8s248 in a browser, download
