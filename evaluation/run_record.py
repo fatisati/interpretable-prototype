@@ -119,17 +119,22 @@ except Exception:
     pass
 
 
+# Code version at START: the code a process runs is the code it loaded when it began.
+# Reading git at the end (as before) would credit a commit made during a long run to
+# a run that never executed it.
+_START_COMMIT = _git("rev-parse", "HEAD")
+_START_CHANGED = uncommitted()[0] if _START_COMMIT is not None else None
+
+
 def current_run():
     """One run_history entry describing this process."""
     script = _script_path()
-    available = _git("rev-parse", "HEAD") is not None
-    changed, _ = uncommitted()
     return {
         "script": script,
         "command": _command(),
-        "git_commit": _git("rev-parse", "HEAD"),
-        "git_dirty": bool(changed) if available else None,
-        "git_dirty_files": changed,
+        "git_commit": _START_COMMIT,
+        "git_dirty": None if _START_CHANGED is None else bool(_START_CHANGED),
+        "git_dirty_files": _START_CHANGED or [],
         "script_committed": _git("ls-files", "--error-unmatch", "--", script) is not None,
         "started_at": STARTED_AT,
         "finished_at": datetime.now().astimezone().isoformat(timespec="seconds"),
