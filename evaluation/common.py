@@ -143,6 +143,14 @@ def load_cluster_config(cluster_config_path):
     return json.loads(cluster_config_path.read_text())
 
 
+# Both are scanpy's defaults; written out so the seed is visible and recorded in
+# config.json. A fixed seed repeats only on the same machine and package versions:
+# the same embedding + same seeds gave different clusters on Windows vs Mac
+# (ARI 0.78, docs/decisions/0003 step 7), so official clusters are frozen as files.
+NEIGHBORS_SEED = 0  # sc.pp.neighbors: its neighbour search is approximate (pynndescent)
+LEIDEN_SEED = 0
+
+
 def sweep_leiden_to_k(adata, use_rep, target_k, resolutions=None, max_refine_steps=12):
     """Leiden doesn't take a target cluster count directly the way k-means
     would, and its resolution parameter doesn't map cleanly onto cluster
@@ -173,12 +181,13 @@ def sweep_leiden_to_k(adata, use_rep, target_k, resolutions=None, max_refine_ste
                        7.0, 10.0, 15.0, 20.0, 25.0, 30.0, 40.0, 50.0]
 
     ad = adata.copy()
-    sc.pp.neighbors(ad, use_rep=use_rep)
+    sc.pp.neighbors(ad, use_rep=use_rep, random_state=NEIGHBORS_SEED)
 
     tried = {}  # resolution -> (n_clusters, labels)
 
     def try_resolution(resolution):
-        sc.tl.leiden(ad, resolution=resolution, key_added="_sweep", flavor="igraph")
+        sc.tl.leiden(ad, resolution=resolution, key_added="_sweep", flavor="igraph",
+                     random_state=LEIDEN_SEED)
         labels = ad.obs["_sweep"].to_numpy()
         tried[resolution] = (len(set(labels)), labels.copy())
 
@@ -218,7 +227,8 @@ def environment_versions():
     """Exact versions of everything that can change a baseline's output
     (repo rule: see CLAUDE.md), saved into config.json next to the result."""
     versions = {"python": platform.python_version()}
-    for pkg in ["scvi-tools", "torch", "scanpy", "anndata", "leidenalg", "igraph", "numpy", "pandas"]:
+    for pkg in ["scvi-tools", "torch", "scanpy", "anndata", "leidenalg", "igraph",
+                "pynndescent", "numpy", "pandas"]:
         try:
             versions[pkg] = version(pkg)
         except PackageNotFoundError:
@@ -275,6 +285,8 @@ def cluster_embedding_file(run_dir):
         "resolution_full": resolution_full,
         "n_clusters_train": int(pd.Series(train_labels).nunique()),
         "n_clusters_full": int(pd.Series(full_labels).nunique()),
+        "neighbors_seed": NEIGHBORS_SEED,
+        "leiden_seed": LEIDEN_SEED,
         "environment": environment_versions(),
     })
     config_path.write_text(json.dumps(config, indent=2))
