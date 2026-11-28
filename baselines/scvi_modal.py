@@ -69,6 +69,12 @@ image = (
         "scanpy==1.12.4", "anndata==0.13.2", "numpy==2.4.6", "pandas==3.0.5",
         "scipy==1.18.0", "scikit-learn==1.9.0", "h5py==3.16.0",
         "leidenalg==0.12.0", "igraph==1.0.0",
+        # Indirect deps pinned too: an unpinned newer neighbour library made
+        # scanpy's neighbors step crash in the container (2026-11-28).
+        "umap-learn==0.5.12", "pynndescent==0.6.0", "numba==0.67.0", "llvmlite==0.49.0",
+        "joblib==1.5.3", "threadpoolctl==3.6.0", "natsort==8.4.0", "networkx==3.6.1",
+        "pyro-ppl==1.9.2", "torchmetrics==1.9.0", "mudata==0.4.1", "ml-collections==1.1.0",
+        "docrep==0.3.2", "xarray==2026.9.0", "sparse==0.19.3",
     )
     # The committed gene lists + splits (evaluation/frozen.py) travel with the
     # code, so the remote run reads the same files as a local one.
