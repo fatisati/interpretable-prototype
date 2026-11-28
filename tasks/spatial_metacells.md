@@ -63,6 +63,17 @@ Cheap check before training: for the chosen cell type, find genes differing
 between niches at single-cell level (ground truth). Then check whether baseline
 metacells are mixed across niches for that type.
 
+## Chosen dataset (2026-11-28)
+
+**Vannan 2025 lung fibrosis, Xenium** (GEO GSE250346; download in
+`datasets/lung_fibrosis.md`). Why: fibrosis creates niches where cells change
+state (aberrant basaloid cells, ~96% in one niche; activated fibroblasts in
+fibroblastic foci); 35 lungs / 45 cores, so many samples; and pathologists
+marked tissue regions on H&E (fibroblastic focus, fibrosis, normal alveoli, …),
+which gives niche labels made *independently* of expression.
+Cautions: only 343 genes (the niche genes must be among them); expression is
+nucleus-only; the file is an R object and must be converted to `.h5ad` first.
+
 ## How we measure it
 
 - **Niche purity** within a cell type: are a metacell's cells from one niche?
