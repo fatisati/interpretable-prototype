@@ -1,0 +1,27 @@
+{
+  "seed": 0,
+  "test_size": 0.2,
+  "label_key": "celltype",
+  "batch_key": "tech",
+  "n_train": 13108,
+  "n_test": 3274,
+  "file": "split.csv",
+  "sha256": "970fa5be3e97e3a346eb375dfd9fe4b7e059d0d1f91d5ddfbfb80dbad0bd5c51",
+  "environment": {
+    "python": "3.13.11",
+    "scikit-learn": "1.9.0",
+    "numpy": "2.4.6",
+    "pandas": "3.0.5"
+  },
+  "run_history": [
+    {
+      "script": "evaluation/prepare_eval.py",
+      "command": "python evaluation/prepare_eval.py --h5ad datasets/processed/pancreas_hvg.h5ad --batch-key tech --label-key celltype --out-dir runs/rare_cell_preservation/pancreas",
+      "git_commit": "2627f1d7c71269e5c19fef2466ba6cda52916e39",
+      "git_dirty": true,
+      "script_committed": true,
+      "started_at": "2026-11-28T11:35:39+03:30",
+      "finished_at": "2026-11-28T11:35:42+03:30"
+    }
+  ]
+}

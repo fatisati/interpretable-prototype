@@ -63,9 +63,13 @@ def run(
     n_latent=10,
     accelerator="auto",
     early_stopping=True,
+    gene_likelihood="auto",
 ):
     adata = sc.read_h5ad(h5ad_path)
-    gene_likelihood = pick_gene_likelihood(adata, layer)
+    # "auto" checks the data; an explicit value overrides, e.g. "nb" on the scIB
+    # datasets' non-integer counts layer, which we treat as estimated counts.
+    if gene_likelihood == "auto":
+        gene_likelihood = pick_gene_likelihood(adata, layer)
     print(f"[scvi] {adata.n_obs:,} cells x {adata.n_vars:,} genes | "
           f"gene_likelihood={gene_likelihood} (checked {'layer=' + layer if layer else 'X'})")
 
@@ -155,6 +159,9 @@ def parse_args():
     p.add_argument("--accelerator", default="auto", help="'auto', 'cpu', or 'gpu'")
     p.add_argument("--no-early-stopping", dest="early_stopping", action="store_false",
                     help="disable early stopping, always run the full --max-epochs")
+    p.add_argument("--gene-likelihood", default="auto", choices=["auto", "nb", "zinb", "normal"],
+                   help="'auto' (default): nb if the input looks like integer counts, else normal. "
+                        "Set nb to force the count likelihood on non-integer estimated counts")
     return p.parse_args()
 
 
@@ -172,5 +179,6 @@ if __name__ == "__main__":
         n_latent=args.n_latent,
         accelerator=args.accelerator,
         early_stopping=args.early_stopping,
+        gene_likelihood=args.gene_likelihood,
     )
     record_run(Path(args.out_dir) / "config.json")

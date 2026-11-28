@@ -1,0 +1,26 @@
+{
+  "dataset": "pancreas",
+  "n_genes": 4000,
+  "sha256": "01876596445179a941ec25ca70b60c7fcbaadddff44915699dcdbe603b0019c8",
+  "method": "scanpy highly_variable_genes (default flavor) n_top_genes=4000 batch_key=tech",
+  "environment": {
+    "python": "3.13.11",
+    "scanpy": "1.12.4",
+    "scikit-misc": "0.5.3",
+    "anndata": "0.13.2",
+    "numpy": "2.4.6",
+    "scipy": "1.18.0",
+    "pandas": "3.0.5"
+  },
+  "run_history": [
+    {
+      "script": "datasets/scripts/prepare.py",
+      "command": "python datasets/scripts/prepare.py --dataset pancreas --keep-nonint-counts",
+      "git_commit": "2627f1d7c71269e5c19fef2466ba6cda52916e39",
+      "git_dirty": true,
+      "script_committed": true,
+      "started_at": "2026-11-28T11:33:49+03:30",
+      "finished_at": "2026-11-28T11:34:50+03:30"
+    }
+  ]
+}

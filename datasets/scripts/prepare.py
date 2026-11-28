@@ -17,6 +17,8 @@ Usage (from repo root, after the raw file is in datasets/raw/):
     python datasets/scripts/prepare.py --dataset lung
     python datasets/scripts/prepare.py --dataset pbmc_immune
     python datasets/scripts/prepare.py --dataset all
+    python datasets/scripts/prepare.py --dataset lung --keep-nonint-counts   # keep the
+                                                                  # non-integer counts layer
     python datasets/scripts/prepare.py --dataset pancreas --delete-raw   # free disk after a
                                                                   # successful write
 
@@ -109,7 +111,7 @@ def sha256(path, chunk=2**20):
     return h.hexdigest()
 
 
-def preprocess(name, delete_raw, refresh=False):
+def preprocess(name, delete_raw, refresh=False, keep_nonint_counts=False):
     cfg = DATASETS[name]
     raw_path = RAW_DIR / cfg["raw_name"]
     if not raw_path.exists():
@@ -136,13 +138,20 @@ def preprocess(name, delete_raw, refresh=False):
         sc.pp.normalize_total(ad, target_sum=1e4)
         sc.pp.log1p(ad)
 
+    frac_nonint = None
     if "counts" in ad.layers:
         c = ad.layers["counts"]
         data = c.data if sp.issparse(c) else np.asarray(c)[np.asarray(c) != 0]
         frac_nonint = float(np.mean(np.abs(data - np.round(data)) > 1e-3)) if data.size else 0.0
         print(f"[{name}] layers['counts']: {frac_nonint:.1%} of nonzero entries are "
               f"non-integer")
-        if frac_nonint > NONINT_DROP_THRESHOLD:
+        if frac_nonint > NONINT_DROP_THRESHOLD and keep_nonint_counts:
+            # Decided 2026-11-28: treat these as estimated counts (scaled / SoupX-corrected
+            # values of real counts) so scVI can use its count likelihood. Results from
+            # count models on this layer carry that caveat; see datasets/<name>.md.
+            print(f"[{name}] keeping layers['counts'] anyway (--keep-nonint-counts): "
+                  f"treated as estimated counts, NOT true raw counts")
+        elif frac_nonint > NONINT_DROP_THRESHOLD:
             print(f"[{name}] dropping layers['counts'] -- not true raw counts (likely "
                   f"batch-scaled by the depositors), would silently corrupt any "
                   f"NB/ZINB likelihood or size-factor recomputation downstream")
@@ -172,7 +181,12 @@ def preprocess(name, delete_raw, refresh=False):
     # Sidecar: which command + code version made this file (see evaluation/run_record.py).
     # Fresh each time -- a new h5ad is a new output.
     sidecar = out_path.with_suffix(".run.json")
-    sidecar.write_text(json.dumps({"h5ad": out_path.name, "sha256": digest}, indent=2))
+    sidecar.write_text(json.dumps({
+        "h5ad": out_path.name, "sha256": digest,
+        "counts_layer": ("kept, non-integer (--keep-nonint-counts)" if "counts" in ad.layers
+                         and keep_nonint_counts else ("kept" if "counts" in ad.layers else "none")),
+        "counts_frac_nonint": frac_nonint,
+    }, indent=2))
     record_run(sidecar)
 
     if delete_raw:
@@ -191,10 +205,13 @@ def main():
     p.add_argument("--refresh-frozen", action="store_true",
                    help="recompute the gene list and overwrite datasets/frozen/<dataset>/genes.txt "
                         "(then commit the diff); default: use the committed list")
+    p.add_argument("--keep-nonint-counts", action="store_true",
+                   help="keep layers['counts'] even if it has non-integer values (treated as "
+                        "estimated counts, e.g. for scVI's NB likelihood); default: drop it")
     args = p.parse_args()
     names = list(DATASETS) if args.dataset == "all" else [args.dataset]
     for name in names:
-        preprocess(name, args.delete_raw, args.refresh_frozen)
+        preprocess(name, args.delete_raw, args.refresh_frozen, args.keep_nonint_counts)
 
 
 if __name__ == "__main__":

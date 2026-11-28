@@ -26,6 +26,10 @@ Run times are measured on the heart atlas (~18.6k cells, CPU); "not measured" me
 | hlca | `python datasets/scripts/prepare_hlca.py` | yes, see `datasets/hlca.md` |
 | neurips_bmmc | `python datasets/scripts/prepare_neurips_bmmc.py` | yes, the curl command below |
 
+On pancreas / lung / pbmc_immune, `prepare.py` drops `layers['counts']` because it holds
+non-integer values. Add `--keep-nonint-counts` to keep it as estimated counts (e.g. so scVI can use
+`--gene-likelihood nb`); results then carry that caveat.
+
 Task 1 candidates downloaded 2026-11-22. Only the bone marrow one has a prepare script so far
 (table above); the others are download-only commands. Each file goes in its own folder under `datasets/raw/`:
 
@@ -80,8 +84,11 @@ python baselines/scvi_baseline.py \
   --batch-key donor --label-key cell_type --layer counts \
   --out-dir runs/rare_cell_preservation/heart_cell_atlas/scvi
 ```
-To run on Modal GPU instead, see the docstring of `baselines/scvi_modal.py`. Modal runs get
-**no** run record, because the remote machine has no git.
+`--gene-likelihood` (default `auto`: `nb` for integer counts, else `normal`) forces a choice,
+e.g. `--gene-likelihood nb` on a layer kept with `--keep-nonint-counts`.
+
+To run on Modal GPU instead, see the docstring of `baselines/scvi_modal.py`. The run record is
+written on your machine, so Modal runs get one like local runs (`config.json` says `ran_on`).
 
 **PCA + Leiden** (unintegrated control, ~5 min):
 ```
