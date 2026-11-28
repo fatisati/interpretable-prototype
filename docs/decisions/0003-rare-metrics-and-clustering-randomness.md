@@ -1,7 +1,7 @@
 # 0003 — Rare-cell metrics depend on one random clustering: what to report instead
 
-Date: 2026-11-23. Status: **proposed** — open for discussion (Fatemeh, Mahmoud). Nothing in
-the code has changed yet.
+Date: 2026-11-23, revised 2026-11-28 (steps 2 and 5 corrected, steps 6–7 added). Status:
+**proposed**, open for discussion (Fatemeh, Mahmoud). Nothing in the code has changed yet.
 
 ## Context
 
@@ -32,8 +32,11 @@ The split is identical (18,641 of 18,641 cells on the same side). The affinity g
 | Leiden clusters, full run | 248 vs 247 clusters at the **identical** resolution 22.478; ARI **0.77** |
 | Train rare F1 | **0.696** vs **0.846** |
 
-The 0.696 is the same as the original Windows run (0.696 to 3 decimals). **The 2-gene
-difference had almost no effect. The gap comes from the clustering.**
+The 0.696 is the same as the original Windows run (0.696 to 3 decimals). *Corrected
+2026-11-28:* we first read this as "the 2-gene difference has no effect". That was one seed
+landing on the same value by chance. Step 6 shows the gene list does change rare F1, by
+changing how often one rare type wins a cluster vote. The clustering is still where the
+jump happens.
 
 **Step 3 — exchange test** (repro README step 4): the Mac's own embedding and clusters,
 scored by the Windows metric code, reproduce the Mac's metrics exactly (max diff 0). The
@@ -67,14 +70,16 @@ cluster-based one moves.
    (type, donor) pair has a handful of cells inside a ~75-cell cluster, so moving a few
    cells across a boundary flips that pair between ~1 and ~0. With 27 rare pairs, a few
    flips shift the mean by 0.1–0.15. This matches the 0.08–0.15 rerun spread in
-   Mahmoud's review.
+   Mahmoud's review. In heart, most of the jump is one type, Mesothelial (step 6).
 
-**Step 5 — seed test on one machine** (`repro/leiden_seed_test.py`). Same Windows PCA
-embedding, same neighbour graph, same resolution; only Leiden's `random_state` changes.
+**Step 5 — seed test on one machine** (`repro/leiden_seed_test.py`). Same PCA embedding,
+same neighbour graph, same resolution; only Leiden's `random_state` changes. *Corrected
+2026-11-28:* the embedding here is the one built on Windows **with the Mac gene list**
+(step 2), not the official Windows run. Step 6 repeats this with both gene lists.
 Seed 0 reproduces the official clusters exactly (ARI 1.000). Seeds 1–3 agree with seed 0
 at ARI 0.77–0.80, the same as Windows vs Mac (0.77).
 
-| Rare-cell metric | Seed 0 (official) | 1 | 2 | 3 | Range | Mac |
+| Rare-cell metric | Seed 0 | 1 | 2 | 3 | Range | Mac |
 |---|---|---|---|---|---|---|
 | `rare_f1`, train | 0.696 | 0.846 | 0.768 | 0.852 | **0.156** | 0.846 |
 | `rare_f1`, test | 0.781 | 0.859 | 0.824 | 0.859 | 0.078 | 0.850 |
@@ -84,9 +89,48 @@ at ARI 0.77–0.80, the same as Windows vs Mac (0.77).
 | `knn_same_type_global`, train | 0.803 | 0.803 | 0.803 | 0.803 | 0.000 | 0.803 |
 | `knn_same_type_cross`, train | 0.795 | 0.795 | 0.795 | 0.795 | 0.000 | 0.795 |
 
-The Windows–Mac gap is ordinary seed spread. The official run happened to be the lowest
-seed. Caveat: at a fixed resolution, seeds 1–3 gave 201–206 clusters instead of 199; no
-trend with F1 is visible.
+Caveat: at a fixed resolution, seeds 1–3 gave 201–206 clusters instead of 199; no trend
+with F1 is visible.
+
+**Step 6 — 8 seeds, both gene lists, both machines** (Windows: `repro/evidence/windows/leiden_seed_test/`;
+Mac: `repro/evidence/mac-studio/leiden_seed_test/`, PR #7). Train job, 27 rare (type, donor)
+pairs, seeds 0–7.
+
+| Rare-cell metric | Frozen list, Windows | Frozen list, Mac | Mac list, Windows | Mac list, Mac |
+|---|---|---|---|---|
+| `rare_f1` | 0.692–**0.851**, sd 0.055 | 0.692–0.702, sd 0.004 | **0.696**–0.853, sd 0.059 | 0.766–0.851, sd 0.029 |
+| `coverage` | 0.690 (7 seeds), 0.893 (1) | 0.690 (all 8) | 0.690–0.893 | 0.786–0.893 |
+| `agreement_global`, rare cells | 0.802–0.850, sd 0.015 | 0.802–0.841, sd 0.014 | 0.824–0.856, sd 0.011 | 0.827–0.856, sd 0.012 |
+| `cohesion`, rare | sd 0.002 | sd 0.010 | sd 0.009 | sd 0.011 |
+| `knn_same_type_global`, rare | 0.805, all seeds | 0.805 | 0.803 | 0.803 |
+
+- `rare_f1` and `coverage` sit on two levels, ~0.70 and ~0.85. Mostly one event decides
+  which: whether the Mesothelial cells (17 in train, 6 of the 27 rare pairs) are the
+  majority of some cluster. On Windows (frozen list, seed 0) their main cluster holds
+  7 Mesothelial and 8 Endothelial cells, so they lose by one cell. Mesothelial F1 per seed:
+  frozen list on Windows 0 in 7 of 8 seeds, Mac list on Windows 0 in 1 of 8.
+- The gene list shifts the odds of that vote; it does not change the biology. The 4 swapped
+  genes are expressed in 0–1 of the 17 Mesothelial cells, and their 15 nearest neighbours
+  are the same with either list.
+- Neither machine alone shows the full picture. On the Mac the two lists' ranges don't
+  overlap; on Windows they do (frozen list seed 7 = 0.851, Mac list seed 0 = 0.696).
+- Averaging seeds fixes the noise for agreement (sd ~0.015, so 10 seeds give a mean
+  accurate to ~0.005). It does not fix `rare_f1`/`coverage`: their mean only reports how
+  often a coin flip lands one way.
+
+**Step 7 — same embedding, same seed, different machine.** The Mac's committed PCA
+embedding, clustered on Windows at the Mac's resolutions with Leiden seed 0: 204 vs 198
+clusters (train), ARI 0.78. On the same machine the same seed always gives identical
+clusters (ARI 1.000). So "same seed" only reproduces on one machine. Two candidate causes:
+- the neighbour graph: `sc.pp.neighbors` uses an approximate search (pynndescent, already
+  seeded with 0). On Windows only 86% of cells get exactly their true 15 nearest
+  neighbours, and pynndescent is 0.6.0 on Windows vs 0.7.0 on the Mac;
+- Leiden itself: unlikely, since leidenalg 0.12.0 and igraph 1.0.0 are the same on both.
+
+Test in progress: `repro/graph_leiden_check.py`. Windows saved its graph and seed-0
+clusters (`repro/evidence/windows/graph_leiden_check/`); the Mac compares its own graph
+with ours and runs Leiden on ours. If the graph is the cause, the fix is an exact neighbour
+search (no shortcuts, so the same on every machine) in `evaluation/common.py`.
 
 ## Options considered
 
@@ -133,8 +177,11 @@ Status stays **proposed** until Mahmoud agrees.
    reported as mean ± std over the seeds of step 1, at fixed K (same K for every method).
 4. **A method beats another only if the gap exceeds the seed spread.** For trained methods
    (scVI), seeds of the model itself add to this (Phase D of `docs/reproducibility-plan.md`).
-5. **Keep freezing the gene list and split** (plan 4.5). Not the cause here, but it removes
-   one variable for free.
+5. **Keep freezing the gene list and split** (plan 4.5). The gene list shifts the odds of
+   the Mesothelial vote (step 6), so freezing it matters for comparing runs.
+6. **Make clusters reproducible across machines** (step 7): freeze each official run's
+   clusters (`evaluation/frozen_run.py`, PR #7), and, if the graph test confirms the cause,
+   switch to an exact neighbour search. That changes every official cluster once.
 
 ## Open questions for discussion
 
@@ -163,7 +210,9 @@ Times on Windows: stage 2 ~16 s, PCA + metrics ~6 min.
 Windows 11, python 3.13.11
 scanpy 1.12.4   anndata 0.13.2   numpy 2.4.6   scipy 1.18.0   pandas 3.0.5
 scikit-learn 1.9.0   leidenalg 0.12.0   igraph 1.0.0   scvi-tools 1.5.0.post1
+pynndescent 0.6.0   numba 0.67.0   umap-learn 0.5.12
 ```
+Full list: `repro/evidence/windows/pip_freeze.txt`.
 Mac versions: `repro/README.md`, section "Environment on the Mac". Note igraph and
 leidenalg are the **same** versions on both machines, so the cluster difference is not a
 Leiden version difference.
